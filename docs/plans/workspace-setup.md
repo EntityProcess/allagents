@@ -305,25 +305,25 @@ plugin-name/
 | Aspect | dotagents | allagents |
 |--------|-----------|-----------|
 | **Approach** | Symlinks to canonical `.agents/` | Copy files to workspace |
-| **CLI style** | Interactive prompts | Command-line subcommands |
+| **CLI style** | Interactive TUI prompts | Command-line subcommands |
 | **Multi-repo** | No | Yes (workspace.yaml) |
 | **Scope** | Global or project | Workspace-based |
-| **Backup/Undo** | Yes (timestamped) | Not in v1 (future) |
+| **Backup/Undo** | Yes (timestamped) | Not needed (git history) |
 | **Plugin sources** | Local only | Local + GitHub URLs |
-| **Clients** | 8 supported | Configurable via yaml |
+| **Clients** | 8 supported (TUI selection) | 8 supported (yaml config) |
+| **Selective sync** | TUI checkboxes | yaml clients list |
 
 ### Key Differences
 
 1. **File copying vs symlinks**: allagents copies files so workspaces are self-contained and can be committed to git
 2. **Multi-repo support**: allagents manages plugins from multiple repositories via workspace.yaml
 3. **Remote plugins**: allagents can fetch plugins from GitHub URLs and cache them locally
-4. **Non-interactive**: allagents uses standard CLI subcommands instead of interactive prompts
+4. **Non-interactive**: allagents uses standard CLI subcommands instead of interactive TUI
+5. **Git-based history**: No backup/undo system needed - workspaces are git repos with full history
 
 ---
 
 ## Future Enhancements
 
-- **Backup/Undo system**: Timestamped backups before sync (like dotagents)
 - **Frontmatter transformation**: Tool-specific field mapping for metadata
 - **Dry-run mode**: Preview changes before applying
-- **Selective sync**: Sync only specific plugins or clients
