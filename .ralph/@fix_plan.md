@@ -15,20 +15,20 @@
   - [x] AGENTS.md with workspace rules
   - [x] workspace.yaml example
 
-## Phase 2: Core Commands (High Priority)
-- [ ] Implement `allagents workspace init <path>`
-  - [ ] Validate path doesn't exist
-  - [ ] Copy template files
-  - [ ] Convert relative plugin paths to absolute
-  - [ ] Initialize git repository
-  - [ ] Create initial commit
-  - [ ] Add unit tests
-  - [ ] Add BATS integration test
-- [ ] Implement workspace.yaml parser
-  - [ ] YAML parsing with validation
-  - [ ] Zod schema validation
-  - [ ] Error handling with clear messages
-  - [ ] Add unit tests
+## Phase 2: Core Commands (High Priority) - IN PROGRESS
+- [x] Implement `allagents workspace init <path>`
+  - [x] Validate path doesn't exist
+  - [x] Copy template files
+  - [x] Convert relative plugin paths to absolute
+  - [x] Initialize git repository
+  - [x] Create initial commit
+  - [x] Add unit tests (5 tests for parser)
+  - [ ] Add BATS integration test (deferred)
+- [x] Implement workspace.yaml parser
+  - [x] YAML parsing with validation
+  - [x] Zod schema validation
+  - [x] Error handling with clear messages
+  - [x] Add unit tests
 - [ ] Implement plugin path resolution
   - [ ] Detect GitHub URLs vs local paths
   - [ ] Resolve relative to absolute paths
@@ -121,6 +121,13 @@
   - [x] Basic CLI structure with Commander.js
   - [x] 12 unit tests passing (100% pass rate)
   - [x] Build and typecheck working
+- [x] Phase 2: workspace init command
+  - [x] workspace.yaml parser with full validation
+  - [x] Template-based workspace creation
+  - [x] Automatic plugin path conversion (relative → absolute)
+  - [x] Git initialization with commit
+  - [x] 17 unit tests passing (100% pass rate)
+  - [x] End-to-end CLI command working
 
 ## Notes
 - Focus on getting workspace init and sync working first
