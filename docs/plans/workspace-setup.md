@@ -159,13 +159,35 @@ Based on [dotagents](https://github.com/iannuttall/dotagents) research, here are
 | Factory | `.factory/commands/` | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` |
 | Ampcode | N/A | N/A | `AGENTS.md` | No |
 
-### Agent File Precedence
+### Agent File Handling
 
-When copying agent instructions:
+Each client reads its own agent file. When multiple clients are selected, **all** their agent files are created in the workspace:
 
-1. **Claude**: Use `CLAUDE.md` if exists in source, otherwise fall back to `AGENTS.md`
-2. **Gemini**: Use `GEMINI.md` if exists in source, otherwise fall back to `AGENTS.md`
-3. **All others**: Use `AGENTS.md`
+```
+workspace/
+├── CLAUDE.md    ← Claude reads this
+├── GEMINI.md    ← Gemini reads this
+├── AGENTS.md    ← Codex, Copilot, OpenCode, etc. read this
+```
+
+**Source precedence** determines which source file populates each destination:
+
+| Destination | Source (in order of preference) |
+|-------------|--------------------------------|
+| `CLAUDE.md` | `CLAUDE.md` → `AGENTS.md` |
+| `GEMINI.md` | `GEMINI.md` → `AGENTS.md` |
+| `AGENTS.md` | `AGENTS.md` |
+
+This allows multiple clients to work in the same workspace folder, each reading their own agent file.
+
+**Example**: Source plugin has both `CLAUDE.md` and `AGENTS.md`, workspace has `clients: [claude, codex]`:
+
+| Source | Destination | Reason |
+|--------|-------------|--------|
+| `CLAUDE.md` | `CLAUDE.md` | Claude selected, client-specific file exists |
+| `AGENTS.md` | `AGENTS.md` | Codex selected, uses AGENTS.md |
+
+Both files are copied to the workspace.
 
 ### File Extension Transforms
 
@@ -241,10 +263,10 @@ skills/
    d. Copy hooks (if client supports):
       - Source: plugin/hooks/
       - Target: client-specific hooks path
-4. Handle agent file with precedence:
-   - Check for client-specific file (CLAUDE.md, GEMINI.md)
-   - Fall back to AGENTS.md if not found
-   - Append workspace rules section
+4. Handle agent files for each client:
+   - Create client's agent file (CLAUDE.md, GEMINI.md, or AGENTS.md)
+   - Use source precedence: prefer client-specific file, fall back to AGENTS.md
+   - Append workspace rules section to each agent file
 5. Create git commit with sync metadata
 ```
 
@@ -259,7 +281,9 @@ skills/
 | `commands/*.md` | `.claude/commands/*.md` | `.github/prompts/*.prompt.md` | `.codex/prompts/*.md` | `.cursor/commands/*.md` |
 | `skills/<name>/` | `.claude/skills/<name>/` | `.github/skills/<name>/` | `.codex/skills/<name>/` | `.cursor/skills/<name>/` |
 | `hooks/*.md` | `.claude/hooks/*.md` | N/A | N/A | N/A |
-| `AGENTS.md` | `CLAUDE.md` | `AGENTS.md` | `AGENTS.md` | N/A |
+| Agent file | `CLAUDE.md` ¹ | `AGENTS.md` | `AGENTS.md` | N/A |
+
+¹ Source precedence: `CLAUDE.md` → `AGENTS.md`
 
 ### Plugin Directory Structure (Source)
 
