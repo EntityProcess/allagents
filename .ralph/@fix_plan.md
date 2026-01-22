@@ -15,7 +15,7 @@
   - [x] AGENTS.md with workspace rules
   - [x] workspace.yaml example
 
-## Phase 2: Core Commands (High Priority) - IN PROGRESS
+## Phase 2: Core Commands (High Priority) ✅ COMPLETED
 - [x] Implement `allagents workspace init <path>`
   - [x] Validate path doesn't exist
   - [x] Copy template files
@@ -23,16 +23,19 @@
   - [x] Initialize git repository
   - [x] Create initial commit
   - [x] Add unit tests (5 tests for parser)
-  - [ ] Add BATS integration test (deferred)
+  - [ ] Add BATS integration test (deferred to later)
 - [x] Implement workspace.yaml parser
   - [x] YAML parsing with validation
   - [x] Zod schema validation
   - [x] Error handling with clear messages
   - [x] Add unit tests
-- [ ] Implement plugin path resolution
-  - [ ] Detect GitHub URLs vs local paths
-  - [ ] Resolve relative to absolute paths
-  - [ ] Add unit tests
+- [x] Implement plugin path resolution
+  - [x] Detect GitHub URLs vs local paths
+  - [x] Resolve relative to absolute paths
+  - [x] Parse GitHub URLs (owner/repo extraction)
+  - [x] Generate cache paths for remote plugins
+  - [x] Validate plugin sources
+  - [x] Add unit tests (25 comprehensive tests)
 
 ## Phase 3: Plugin Fetching (High Priority)
 - [ ] Implement `allagents plugin fetch <url>`
@@ -121,12 +124,18 @@
   - [x] Basic CLI structure with Commander.js
   - [x] 12 unit tests passing (100% pass rate)
   - [x] Build and typecheck working
-- [x] Phase 2: workspace init command
+- [x] Phase 2: Core Commands
+  - [x] workspace init command fully implemented
   - [x] workspace.yaml parser with full validation
   - [x] Template-based workspace creation
   - [x] Automatic plugin path conversion (relative → absolute)
   - [x] Git initialization with commit
-  - [x] 17 unit tests passing (100% pass rate)
+  - [x] Plugin path resolution utilities
+    - [x] GitHub URL detection and parsing
+    - [x] Path normalization (relative → absolute)
+    - [x] Plugin source validation
+    - [x] Cache path generation
+  - [x] 42 unit tests passing (100% pass rate)
   - [x] End-to-end CLI command working
 
 ## Notes
