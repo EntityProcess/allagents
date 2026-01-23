@@ -1,11 +1,21 @@
-import { mkdir } from 'fs/promises';
+import { mkdir, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
+import { join, resolve } from 'path';
 import { execa } from 'execa';
 import {
   parseGitHubUrl,
   getPluginCachePath,
   validatePluginSource,
 } from '../utils/plugin-path.js';
+
+/**
+ * Information about a cached plugin
+ */
+export interface CachedPlugin {
+  name: string;
+  path: string;
+  lastModified: Date;
+}
 
 /**
  * Result of plugin fetch operation
@@ -156,4 +166,93 @@ export async function fetchPlugin(url: string, options: FetchOptions = {}): Prom
       error: `Unknown error: ${String(error)}`,
     };
   }
+}
+
+/**
+ * Get the cache directory for plugins
+ * @returns Path to plugin cache directory
+ */
+export function getPluginCacheDir(): string {
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
+  return resolve(homeDir, '.allagents', 'plugins', 'marketplaces');
+}
+
+/**
+ * List all cached plugins
+ * @returns Array of cached plugin information
+ */
+export async function listCachedPlugins(): Promise<CachedPlugin[]> {
+  const cacheDir = getPluginCacheDir();
+
+  if (!existsSync(cacheDir)) {
+    return [];
+  }
+
+  const entries = await readdir(cacheDir, { withFileTypes: true });
+  const plugins: CachedPlugin[] = [];
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const pluginPath = join(cacheDir, entry.name);
+      const stats = await stat(pluginPath);
+
+      plugins.push({
+        name: entry.name,
+        path: pluginPath,
+        lastModified: stats.mtime,
+      });
+    }
+  }
+
+  // Sort by name
+  plugins.sort((a, b) => a.name.localeCompare(b.name));
+
+  return plugins;
+}
+
+/**
+ * Result of update operation
+ */
+export interface UpdateResult {
+  name: string;
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Update cached plugins by running git pull
+ * @param name - Optional plugin name to update (updates all if not specified)
+ * @returns Array of update results
+ */
+export async function updateCachedPlugins(name?: string): Promise<UpdateResult[]> {
+  const plugins = await listCachedPlugins();
+  const results: UpdateResult[] = [];
+
+  // Filter by name if specified
+  const toUpdate = name ? plugins.filter((p) => p.name === name) : plugins;
+
+  if (name && toUpdate.length === 0) {
+    return [
+      {
+        name,
+        success: false,
+        error: `Plugin not found in cache: ${name}`,
+      },
+    ];
+  }
+
+  for (const plugin of toUpdate) {
+    try {
+      await execa('git', ['pull'], { cwd: plugin.path });
+      results.push({ name: plugin.name, success: true });
+    } catch (error) {
+      results.push({
+        name: plugin.name,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  return results;
 }
