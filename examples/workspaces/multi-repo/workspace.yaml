@@ -1,0 +1,29 @@
+repositories:
+  - path: ../allagents
+    owner: EntityProcess
+    repo: allagents
+    description: primary project
+
+  - path: ../dotagents
+    owner: iannuttall
+    repo: dotagents
+    description: related project that inspired the primary project
+
+  - path: ../openskills
+    owner: numman-ali
+    repo: openskills
+    description: Universal skills loader for AI coding agents
+
+  - path: ../mcporter
+    owner: steipete
+    repo: mcporter
+    description: related project used for inspiration to copy mcp tokens
+
+plugins:
+  - anthropics/claude-plugins-official/plugins/code-review
+
+clients:
+  - copilot
+  - claude
+  - opencode
+  - codex

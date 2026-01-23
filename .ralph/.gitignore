@@ -1,0 +1,13 @@
+# Ralph execution artifacts - do not commit
+logs/
+archive/
+progress.json
+status.json
+.claude_session_id
+
+# Keep templates and specs
+!PROMPT.md
+!@fix_plan.md
+!@AGENT.md
+!specs/
+.ralph_session_history

@@ -1,0 +1,59 @@
+{
+  "name": "allagents",
+  "version": "0.1.0",
+  "description": "CLI tool for managing multi-repo AI agent workspaces with plugin synchronization",
+  "type": "module",
+  "bin": {
+    "allagents": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build ./src/cli/index.ts --outdir ./dist --target node && cp -r src/templates dist/",
+    "dev": "bun run src/cli/index.ts",
+    "test": "bun test tests/unit/validators tests/unit/utils tests/unit/models && bun test tests/unit/core",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
+    "test:integration": "bats tests/integration/*.bats",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint src",
+    "lint:fix": "biome lint --write src",
+    "format": "biome format --write src",
+    "check": "biome check src",
+    "check:fix": "biome check --write src",
+    "prepare": "bun run build"
+  },
+  "keywords": [
+    "cli",
+    "ai",
+    "agents",
+    "workspace",
+    "plugins",
+    "multi-repo",
+    "claude",
+    "copilot",
+    "codex"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^11.1.0",
+    "execa": "^8.0.1",
+    "gray-matter": "^4.0.3",
+    "js-yaml": "^4.1.0",
+    "simple-git": "^3.22.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.11.5",
+    "@biomejs/biome": "^1.9.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
+  }
+}
