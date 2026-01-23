@@ -1,6 +1,6 @@
-import { readFile, writeFile } from 'fs/promises';
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { load, dump } from 'js-yaml';
 import { validatePluginSource } from '../utils/plugin-path.js';
 import type { WorkspaceConfig } from '../models/workspace-config.js';
@@ -13,7 +13,7 @@ import type { WorkspaceConfig } from '../models/workspace-config.js';
  */
 export async function addPlugin(
   plugin: string,
-  workspacePath: string = process.cwd()
+  workspacePath: string = process.cwd(),
 ): Promise<{ success: boolean; error?: string }> {
   const configPath = join(workspacePath, 'workspace.yaml');
 
@@ -71,7 +71,7 @@ export async function addPlugin(
  */
 export async function removePlugin(
   plugin: string,
-  workspacePath: string = process.cwd()
+  workspacePath: string = process.cwd(),
 ): Promise<{ success: boolean; error?: string }> {
   const configPath = join(workspacePath, 'workspace.yaml');
 

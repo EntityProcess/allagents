@@ -1,8 +1,12 @@
 import { Command } from 'commander';
-import { fetchPlugin, listCachedPlugins, updateCachedPlugins } from '../../core/plugin.js';
+import {
+  fetchPlugin,
+  listCachedPlugins,
+  updateCachedPlugins,
+} from '../../core/plugin.js';
 
 export const pluginCommand = new Command('plugin').description(
-  'Manage remote plugins - fetch, list, and update from GitHub'
+  'Manage remote plugins - fetch, list, and update from GitHub',
 );
 
 pluginCommand
@@ -83,7 +87,9 @@ pluginCommand
   .description('Update cached plugin(s) from remote')
   .action(async (name?: string) => {
     try {
-      console.log(name ? `Updating plugin: ${name}...` : 'Updating all cached plugins...');
+      console.log(
+        name ? `Updating plugin: ${name}...` : 'Updating all cached plugins...',
+      );
       console.log();
 
       const results = await updateCachedPlugins(name);

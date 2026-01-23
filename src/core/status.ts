@@ -1,5 +1,5 @@
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import {
   parsePluginSource,
@@ -35,7 +35,7 @@ export interface WorkspaceStatusResult {
  * @returns Status result with plugin availability
  */
 export async function getWorkspaceStatus(
-  workspacePath: string = process.cwd()
+  workspacePath: string = process.cwd(),
 ): Promise<WorkspaceStatusResult> {
   const configPath = join(workspacePath, 'workspace.yaml');
 

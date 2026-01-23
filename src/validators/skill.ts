@@ -1,8 +1,11 @@
-import { readFile } from 'fs/promises';
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import matter from 'gray-matter';
-import { SkillMetadataSchema, type SkillMetadata } from '../models/skill-metadata.js';
+import {
+  SkillMetadataSchema,
+  type SkillMetadata,
+} from '../models/skill-metadata.js';
 
 /**
  * Result of skill validation
@@ -19,7 +22,9 @@ export interface SkillValidationResult {
  * @param skillDir - Path to skill directory
  * @returns Validation result with metadata if valid
  */
-export async function validateSkill(skillDir: string): Promise<SkillValidationResult> {
+export async function validateSkill(
+  skillDir: string,
+): Promise<SkillValidationResult> {
   const skillMdPath = join(skillDir, 'SKILL.md');
 
   // Check if SKILL.md exists
@@ -49,7 +54,9 @@ export async function validateSkill(skillDir: string): Promise<SkillValidationRe
     const result = SkillMetadataSchema.safeParse(frontmatter);
 
     if (!result.success) {
-      const errors = result.error.errors.map((err) => `${err.path.join('.')}: ${err.message}`);
+      const errors = result.error.errors.map(
+        (err) => `${err.path.join('.')}: ${err.message}`,
+      );
       return {
         valid: false,
         path: skillMdPath,
@@ -73,7 +80,7 @@ export async function validateSkill(skillDir: string): Promise<SkillValidationRe
     return {
       valid: false,
       path: skillMdPath,
-      error: `Unknown error parsing SKILL.md`,
+      error: 'Unknown error parsing SKILL.md',
     };
   }
 }
@@ -83,15 +90,19 @@ export async function validateSkill(skillDir: string): Promise<SkillValidationRe
  * @param skillsDir - Path to skills directory (contains skill subdirectories)
  * @returns Array of validation results
  */
-export async function validateAllSkills(skillsDir: string): Promise<SkillValidationResult[]> {
-  const { readdir } = await import('fs/promises');
+export async function validateAllSkills(
+  skillsDir: string,
+): Promise<SkillValidationResult[]> {
+  const { readdir } = await import('node:fs/promises');
 
   if (!existsSync(skillsDir)) {
     return [];
   }
 
   const entries = await readdir(skillsDir, { withFileTypes: true });
-  const skillDirs = entries.filter((e) => e.isDirectory()).map((e) => join(skillsDir, e.name));
+  const skillDirs = entries
+    .filter((e) => e.isDirectory())
+    .map((e) => join(skillsDir, e.name));
 
   const results: SkillValidationResult[] = [];
 

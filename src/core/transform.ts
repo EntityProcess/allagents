@@ -1,6 +1,6 @@
-import { readFile, writeFile, mkdir, cp, readdir } from 'fs/promises';
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { ClientType } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
@@ -35,7 +35,7 @@ export async function copyCommands(
   pluginPath: string,
   workspacePath: string,
   client: ClientType,
-  options: CopyOptions = {}
+  options: CopyOptions = {},
 ): Promise<CopyResult[]> {
   const { dryRun = false } = options;
   const mapping = CLIENT_MAPPINGS[client];
@@ -105,7 +105,7 @@ export async function copySkills(
   pluginPath: string,
   workspacePath: string,
   client: ClientType,
-  options: CopyOptions = {}
+  options: CopyOptions = {},
 ): Promise<CopyResult[]> {
   const { dryRun = false } = options;
   const mapping = CLIENT_MAPPINGS[client];
@@ -146,12 +146,20 @@ export async function copySkills(
     }
 
     if (dryRun) {
-      return { source: skillSourcePath, destination: skillDestPath, action: 'copied' };
+      return {
+        source: skillSourcePath,
+        destination: skillDestPath,
+        action: 'copied',
+      };
     }
 
     try {
       await cp(skillSourcePath, skillDestPath, { recursive: true });
-      return { source: skillSourcePath, destination: skillDestPath, action: 'copied' };
+      return {
+        source: skillSourcePath,
+        destination: skillDestPath,
+        action: 'copied',
+      };
     } catch (error) {
       return {
         source: skillSourcePath,
@@ -178,7 +186,7 @@ export async function copyHooks(
   pluginPath: string,
   workspacePath: string,
   client: ClientType,
-  options: CopyOptions = {}
+  options: CopyOptions = {},
 ): Promise<CopyResult[]> {
   const { dryRun = false } = options;
   const mapping = CLIENT_MAPPINGS[client];
@@ -225,7 +233,10 @@ export async function copyHooks(
  * @param client - Target client type
  * @returns Path to source agent file, or null if none found
  */
-export function getSourceAgentFile(pluginPath: string, client: ClientType): string | null {
+export function getSourceAgentFile(
+  pluginPath: string,
+  client: ClientType,
+): string | null {
   const mapping = CLIENT_MAPPINGS[client];
 
   // Check for client-specific agent file first
@@ -275,7 +286,7 @@ export async function copyAgentFile(
   pluginPath: string,
   workspacePath: string,
   client: ClientType,
-  options: CopyOptions = {}
+  options: CopyOptions = {},
 ): Promise<CopyResult> {
   const { dryRun = false } = options;
   const mapping = CLIENT_MAPPINGS[client];
@@ -300,7 +311,7 @@ export async function copyAgentFile(
 
     // Append workspace rules if not already present
     if (!content.includes('WORKSPACE-RULES:START')) {
-      content = content.trimEnd() + '\n' + WORKSPACE_RULES;
+      content = `${content.trimEnd()}\n${WORKSPACE_RULES}`;
     }
 
     await writeFile(destPath, content, 'utf-8');
@@ -332,15 +343,16 @@ export async function copyPluginToWorkspace(
   pluginPath: string,
   workspacePath: string,
   client: ClientType,
-  options: CopyOptions = {}
+  options: CopyOptions = {},
 ): Promise<CopyResult[]> {
   // Run copy operations in parallel for better performance
-  const [commandResults, skillResults, hookResults, agentResult] = await Promise.all([
-    copyCommands(pluginPath, workspacePath, client, options),
-    copySkills(pluginPath, workspacePath, client, options),
-    copyHooks(pluginPath, workspacePath, client, options),
-    copyAgentFile(pluginPath, workspacePath, client, options),
-  ]);
+  const [commandResults, skillResults, hookResults, agentResult] =
+    await Promise.all([
+      copyCommands(pluginPath, workspacePath, client, options),
+      copySkills(pluginPath, workspacePath, client, options),
+      copyHooks(pluginPath, workspacePath, client, options),
+      copyAgentFile(pluginPath, workspacePath, client, options),
+    ]);
 
   return [...commandResults, ...skillResults, ...hookResults, agentResult];
 }

@@ -5,7 +5,7 @@ import { getWorkspaceStatus } from '../../core/status.js';
 import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
 
 export const workspaceCommand = new Command('workspace').description(
-  'Manage AI agent workspaces - initialize, sync, and configure plugins'
+  'Manage AI agent workspaces - initialize, sync, and configure plugins',
 );
 
 workspaceCommand
@@ -54,8 +54,12 @@ workspaceCommand
         }
 
         // Count by action
-        const copied = pluginResult.copyResults.filter((r) => r.action === 'copied').length;
-        const failed = pluginResult.copyResults.filter((r) => r.action === 'failed').length;
+        const copied = pluginResult.copyResults.filter(
+          (r) => r.action === 'copied',
+        ).length;
+        const failed = pluginResult.copyResults.filter(
+          (r) => r.action === 'failed',
+        ).length;
 
         if (copied > 0) {
           console.log(`  Copied: ${copied} files`);
@@ -63,15 +67,21 @@ workspaceCommand
         if (failed > 0) {
           console.log(`  Failed: ${failed} files`);
           // Show failure details
-          for (const failedResult of pluginResult.copyResults.filter((r) => r.action === 'failed')) {
-            console.log(`    - ${failedResult.destination}: ${failedResult.error}`);
+          for (const failedResult of pluginResult.copyResults.filter(
+            (r) => r.action === 'failed',
+          )) {
+            console.log(
+              `    - ${failedResult.destination}: ${failedResult.error}`,
+            );
           }
         }
       }
 
       // Print summary
       console.log(`\nSync complete${dryRun ? ' (dry run)' : ''}:`);
-      console.log(`  Total ${dryRun ? 'would copy' : 'copied'}: ${result.totalCopied}`);
+      console.log(
+        `  Total ${dryRun ? 'would copy' : 'copied'}: ${result.totalCopied}`,
+      );
       if (result.totalFailed > 0) {
         console.log(`  Total failed: ${result.totalFailed}`);
       }
@@ -110,9 +120,12 @@ workspaceCommand
       } else {
         for (const plugin of result.plugins) {
           const status = plugin.available ? '✓' : '✗';
-          const typeLabel = plugin.type === 'github'
-            ? (plugin.available ? 'cached' : 'not cached')
-            : 'local';
+          const typeLabel =
+            plugin.type === 'github'
+              ? plugin.available
+                ? 'cached'
+                : 'not cached'
+              : 'local';
           console.log(`  ${status} ${plugin.source} (${typeLabel})`);
         }
       }
@@ -146,7 +159,9 @@ workspaceCommand
       }
 
       console.log(`✓ Added plugin: ${plugin}`);
-      console.log('\nRun "allagents workspace sync" to fetch and sync the plugin.');
+      console.log(
+        '\nRun "allagents workspace sync" to fetch and sync the plugin.',
+      );
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error: ${error.message}`);

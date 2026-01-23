@@ -1,6 +1,9 @@
-import { readFile } from 'fs/promises';
+import { readFile } from 'node:fs/promises';
 import { load } from 'js-yaml';
-import { WorkspaceConfigSchema, type WorkspaceConfig } from '../models/workspace-config.js';
+import {
+  WorkspaceConfigSchema,
+  type WorkspaceConfig,
+} from '../models/workspace-config.js';
 
 /**
  * Parse and validate workspace.yaml file
@@ -8,7 +11,9 @@ import { WorkspaceConfigSchema, type WorkspaceConfig } from '../models/workspace
  * @returns Validated WorkspaceConfig
  * @throws Error if file doesn't exist, is invalid YAML, or fails validation
  */
-export async function parseWorkspaceConfig(path: string): Promise<WorkspaceConfig> {
+export async function parseWorkspaceConfig(
+  path: string,
+): Promise<WorkspaceConfig> {
   try {
     // Read the YAML file
     const content = await readFile(path, 'utf-8');
@@ -24,8 +29,12 @@ export async function parseWorkspaceConfig(path: string): Promise<WorkspaceConfi
     const result = WorkspaceConfigSchema.safeParse(parsed);
 
     if (!result.success) {
-      const errors = result.error.errors.map((err) => `  - ${err.path.join('.')}: ${err.message}`);
-      throw new Error(`workspace.yaml validation failed:\n${errors.join('\n')}`);
+      const errors = result.error.errors.map(
+        (err) => `  - ${err.path.join('.')}: ${err.message}`,
+      );
+      throw new Error(
+        `workspace.yaml validation failed:\n${errors.join('\n')}`,
+      );
     }
 
     return result.data;
@@ -39,7 +48,7 @@ export async function parseWorkspaceConfig(path: string): Promise<WorkspaceConfi
       // Handle file not found
       if ('code' in error && error.code === 'ENOENT') {
         throw new Error(
-          `workspace.yaml not found at ${path}\n  Run 'allagents workspace init <path>' to create a new workspace`
+          `workspace.yaml not found at ${path}\n  Run 'allagents workspace init <path>' to create a new workspace`,
         );
       }
 

@@ -1,8 +1,16 @@
-import { existsSync } from 'fs';
-import { join, resolve } from 'path';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
-import { parsePluginSource, isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
+import type {
+  WorkspaceConfig,
+  ClientType,
+} from '../models/workspace-config.js';
+import {
+  parsePluginSource,
+  isGitHubUrl,
+  parseGitHubUrl,
+} from '../utils/plugin-path.js';
 import { fetchPlugin } from './plugin.js';
 import { copyPluginToWorkspace, type CopyResult } from './transform.js';
 
@@ -47,7 +55,7 @@ export interface SyncOptions {
  */
 export async function syncWorkspace(
   workspacePath: string = process.cwd(),
-  options: SyncOptions = {}
+  options: SyncOptions = {},
 ): Promise<SyncResult> {
   const { force = false, dryRun = false } = options;
   const configPath = join(workspacePath, 'workspace.yaml');
@@ -65,7 +73,7 @@ export async function syncWorkspace(
   }
 
   // Parse workspace config
-  let config;
+  let config: WorkspaceConfig;
   try {
     config = await parseWorkspaceConfig(configPath);
   } catch (error) {
@@ -75,15 +83,21 @@ export async function syncWorkspace(
       totalCopied: 0,
       totalFailed: 0,
       totalSkipped: 0,
-      error: error instanceof Error ? error.message : 'Failed to parse workspace.yaml',
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Failed to parse workspace.yaml',
     };
   }
 
   // Process all plugins in parallel for better performance
   const pluginResults = await Promise.all(
     config.plugins.map((pluginSource) =>
-      syncPlugin(pluginSource, workspacePath, config.clients, { force, dryRun })
-    )
+      syncPlugin(pluginSource, workspacePath, config.clients, {
+        force,
+        dryRun,
+      }),
+    ),
   );
 
   // Count results
@@ -160,7 +174,7 @@ async function syncPlugin(
   pluginSource: string,
   workspacePath: string,
   clients: string[],
-  options: SyncOptions = {}
+  options: SyncOptions = {},
 ): Promise<PluginSyncResult> {
   const { force = false, dryRun = false } = options;
   const copyResults: CopyResult[] = [];
@@ -201,7 +215,12 @@ async function syncPlugin(
 
   // Copy plugin content for each client
   for (const client of clients) {
-    const results = await copyPluginToWorkspace(resolvedPath, workspacePath, client as any, { dryRun });
+    const results = await copyPluginToWorkspace(
+      resolvedPath,
+      workspacePath,
+      client as ClientType,
+      { dryRun },
+    );
     copyResults.push(...results);
   }
 

@@ -11,7 +11,10 @@ const skillNameRegex = /^[a-z0-9-]{1,64}$/;
 export const SkillMetadataSchema = z.object({
   name: z
     .string()
-    .regex(skillNameRegex, 'Skill name must be lowercase, alphanumeric + hyphens, max 64 chars'),
+    .regex(
+      skillNameRegex,
+      'Skill name must be lowercase, alphanumeric + hyphens, max 64 chars',
+    ),
   description: z.string().min(1, 'Description is required'),
   'allowed-tools': z.array(z.string()).optional(),
   model: z.string().optional(),

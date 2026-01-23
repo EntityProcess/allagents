@@ -1,22 +1,21 @@
 import { describe, it, expect } from 'bun:test';
-import { mkdir, rm, writeFile } from 'fs/promises';
-import { join } from 'path';
-import { randomUUID } from 'crypto';
+import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { validateSkill, parseSkillMetadata } from '../../../src/validators/skill.js';
 
 function createTestDir(): string {
-  return `/tmp/allagents-skill-${randomUUID()}`;
+  return mkdtempSync(join(tmpdir(), 'allagents-skill-'));
 }
 
 describe('validateSkill', () => {
   it('should validate valid skill with required fields', async () => {
     const testDir = createTestDir();
-    await mkdir(testDir, { recursive: true });
     try {
       const skillDir = join(testDir, 'my-skill');
-      await mkdir(skillDir, { recursive: true });
+      mkdirSync(skillDir, { recursive: true });
 
-      await writeFile(
+      writeFileSync(
         join(skillDir, 'SKILL.md'),
         `---
 name: my-skill
@@ -34,18 +33,17 @@ Instructions here.
       expect(result.metadata?.name).toBe('my-skill');
       expect(result.metadata?.description).toBe('A test skill');
     } finally {
-      await rm(testDir, { recursive: true, force: true });
+      rmSync(testDir, { recursive: true, force: true });
     }
   });
 
   it('should validate skill with optional fields', async () => {
     const testDir = createTestDir();
-    await mkdir(testDir, { recursive: true });
     try {
       const skillDir = join(testDir, 'advanced-skill');
-      await mkdir(skillDir, { recursive: true });
+      mkdirSync(skillDir, { recursive: true });
 
-      await writeFile(
+      writeFileSync(
         join(skillDir, 'SKILL.md'),
         `---
 name: advanced-skill
@@ -65,33 +63,31 @@ model: claude-3-5-sonnet
       expect(result.metadata?.['allowed-tools']).toEqual(['Read', 'Write']);
       expect(result.metadata?.model).toBe('claude-3-5-sonnet');
     } finally {
-      await rm(testDir, { recursive: true, force: true });
+      rmSync(testDir, { recursive: true, force: true });
     }
   });
 
   it('should reject skill without SKILL.md', async () => {
     const testDir = createTestDir();
-    await mkdir(testDir, { recursive: true });
     try {
       const skillDir = join(testDir, 'no-skill-md');
-      await mkdir(skillDir, { recursive: true });
+      mkdirSync(skillDir, { recursive: true });
 
       const result = await validateSkill(skillDir);
       expect(result.valid).toBe(false);
       expect(result.error).toContain('SKILL.md not found');
     } finally {
-      await rm(testDir, { recursive: true, force: true });
+      rmSync(testDir, { recursive: true, force: true });
     }
   });
 
   it('should reject skill without frontmatter', async () => {
     const testDir = createTestDir();
-    await mkdir(testDir, { recursive: true });
     try {
       const skillDir = join(testDir, 'no-frontmatter');
-      await mkdir(skillDir, { recursive: true });
+      mkdirSync(skillDir, { recursive: true });
 
-      await writeFile(
+      writeFileSync(
         join(skillDir, 'SKILL.md'),
         `# Just a markdown file
 
@@ -103,18 +99,17 @@ No frontmatter here.
       expect(result.valid).toBe(false);
       expect(result.error).toContain('must have YAML frontmatter');
     } finally {
-      await rm(testDir, { recursive: true, force: true });
+      rmSync(testDir, { recursive: true, force: true });
     }
   });
 
   it('should reject skill with invalid name format', async () => {
     const testDir = createTestDir();
-    await mkdir(testDir, { recursive: true });
     try {
       const skillDir = join(testDir, 'invalid-name');
-      await mkdir(skillDir, { recursive: true });
+      mkdirSync(skillDir, { recursive: true });
 
-      await writeFile(
+      writeFileSync(
         join(skillDir, 'SKILL.md'),
         `---
 name: Invalid_Name
@@ -127,18 +122,17 @@ description: Invalid name format
       expect(result.valid).toBe(false);
       expect(result.error).toContain('lowercase');
     } finally {
-      await rm(testDir, { recursive: true, force: true });
+      rmSync(testDir, { recursive: true, force: true });
     }
   });
 
   it('should reject skill without description', async () => {
     const testDir = createTestDir();
-    await mkdir(testDir, { recursive: true });
     try {
       const skillDir = join(testDir, 'no-description');
-      await mkdir(skillDir, { recursive: true });
+      mkdirSync(skillDir, { recursive: true });
 
-      await writeFile(
+      writeFileSync(
         join(skillDir, 'SKILL.md'),
         `---
 name: valid-name
@@ -150,7 +144,7 @@ name: valid-name
       expect(result.valid).toBe(false);
       expect(result.error).toContain('description');
     } finally {
-      await rm(testDir, { recursive: true, force: true });
+      rmSync(testDir, { recursive: true, force: true });
     }
   });
 });

@@ -1,4 +1,6 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
+import * as fs from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import { fetchPlugin } from '../../../src/core/plugin.js';
 
 // Mock execa
@@ -7,13 +9,15 @@ mock.module('execa', () => ({
   execa: execaMock,
 }));
 
-// Mock fs
+// Mock fs - preserve all original functions, only override what we need
 const existsSyncMock = mock(() => false);
 const mkdirMock = mock(() => Promise.resolve());
-mock.module('fs', () => ({
+mock.module('node:fs', () => ({
+  ...fs,
   existsSync: existsSyncMock,
 }));
-mock.module('fs/promises', () => ({
+mock.module('node:fs/promises', () => ({
+  ...fsPromises,
   mkdir: mkdirMock,
 }));
 

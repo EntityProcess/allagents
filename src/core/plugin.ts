@@ -1,6 +1,6 @@
-import { mkdir, readdir, stat } from 'fs/promises';
-import { existsSync } from 'fs';
-import { join, resolve } from 'path';
+import { mkdir, readdir, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 import {
   parseGitHubUrl,
@@ -40,7 +40,10 @@ export interface FetchOptions {
  * @param options - Fetch options (force update)
  * @returns Result of the fetch operation
  */
-export async function fetchPlugin(url: string, options: FetchOptions = {}): Promise<FetchResult> {
+export async function fetchPlugin(
+  url: string,
+  options: FetchOptions = {},
+): Promise<FetchResult> {
   const { force = false } = options;
 
   // Validate plugin source
@@ -61,7 +64,8 @@ export async function fetchPlugin(url: string, options: FetchOptions = {}): Prom
       success: false,
       action: 'skipped',
       cachePath: '',
-      error: 'Invalid GitHub URL format. Expected: https://github.com/owner/repo',
+      error:
+        'Invalid GitHub URL format. Expected: https://github.com/owner/repo',
     };
   }
 
@@ -100,28 +104,30 @@ export async function fetchPlugin(url: string, options: FetchOptions = {}): Prom
         action: 'updated',
         cachePath,
       };
-    } else {
-      // Clone new plugin
-      // Ensure parent directory exists
-      const parentDir = cachePath.split('/').slice(0, -1).join('/');
-      await mkdir(parentDir, { recursive: true });
-
-      // Clone repository
-      await execa('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath]);
-
-      return {
-        success: true,
-        action: 'fetched',
-        cachePath,
-      };
     }
+    // Clone new plugin
+    // Ensure parent directory exists
+    const parentDir = cachePath.split('/').slice(0, -1).join('/');
+    await mkdir(parentDir, { recursive: true });
+
+    // Clone repository
+    await execa('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath]);
+
+    return {
+      success: true,
+      action: 'fetched',
+      cachePath,
+    };
   } catch (error) {
     // Handle specific errors
     if (error instanceof Error) {
       const errorMessage = error.message.toLowerCase();
 
       // Authentication errors
-      if (errorMessage.includes('auth') || errorMessage.includes('authentication')) {
+      if (
+        errorMessage.includes('auth') ||
+        errorMessage.includes('authentication')
+      ) {
         return {
           success: false,
           action: 'skipped',
@@ -141,7 +147,10 @@ export async function fetchPlugin(url: string, options: FetchOptions = {}): Prom
       }
 
       // Network errors
-      if (errorMessage.includes('network') || errorMessage.includes('timeout')) {
+      if (
+        errorMessage.includes('network') ||
+        errorMessage.includes('timeout')
+      ) {
         return {
           success: false,
           action: 'skipped',
@@ -224,7 +233,9 @@ export interface UpdateResult {
  * @param name - Optional plugin name to update (updates all if not specified)
  * @returns Array of update results
  */
-export async function updateCachedPlugins(name?: string): Promise<UpdateResult[]> {
+export async function updateCachedPlugins(
+  name?: string,
+): Promise<UpdateResult[]> {
   const plugins = await listCachedPlugins();
   const results: UpdateResult[] = [];
 

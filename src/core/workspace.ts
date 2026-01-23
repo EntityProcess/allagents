@@ -1,6 +1,6 @@
-import { mkdir, cp } from 'fs/promises';
-import { existsSync } from 'fs';
-import { join, resolve, dirname, relative } from 'path';
+import { mkdir, cp } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join, resolve, dirname, relative } from 'node:path';
 import simpleGit from 'simple-git';
 
 /**
@@ -11,14 +11,14 @@ import simpleGit from 'simple-git';
  */
 export async function initWorkspace(
   targetPath: string,
-  templateName: string = 'default'
+  templateName = 'default',
 ): Promise<void> {
   const absoluteTarget = resolve(targetPath);
 
   // Validate target path doesn't exist
   if (existsSync(absoluteTarget)) {
     throw new Error(
-      `Path already exists: ${absoluteTarget}\n  Choose a different path or remove the existing directory`
+      `Path already exists: ${absoluteTarget}\n  Choose a different path or remove the existing directory`,
     );
   }
 
@@ -37,7 +37,7 @@ export async function initWorkspace(
   // Validate template exists
   if (!existsSync(templatePath)) {
     throw new Error(
-      `Template not found: ${templateName}\n  Available templates: default`
+      `Template not found: ${templateName}\n  Available templates: default`,
     );
   }
 
@@ -58,14 +58,14 @@ Created workspace at: ${absoluteTarget}
 Template: ${templateName}`);
 
     console.log(`✓ Workspace created at: ${absoluteTarget}`);
-    console.log(`✓ Git repository initialized`);
-    console.log(`\nNext steps:`);
+    console.log('✓ Git repository initialized');
+    console.log('\nNext steps:');
     console.log(`  cd ${relative(process.cwd(), absoluteTarget)}`);
-    console.log(`  allagents workspace sync`);
+    console.log('  allagents workspace sync');
   } catch (error) {
     // Clean up on failure
     try {
-      const { rm } = await import('fs/promises');
+      const { rm } = await import('node:fs/promises');
       await rm(absoluteTarget, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors

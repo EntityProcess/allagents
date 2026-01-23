@@ -12,13 +12,16 @@
   "scripts": {
     "build": "bun build ./src/cli/index.ts --outdir ./dist --target node && cp -r src/templates dist/",
     "dev": "bun run src/cli/index.ts",
-    "test": "bun test tests/unit/validators tests/unit/utils && bun test tests/unit/core tests/unit/models",
+    "test": "bun test tests/unit/validators tests/unit/utils tests/unit/models && bun test tests/unit/core",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
     "test:integration": "bats tests/integration/*.bats",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/**/*.ts",
-    "format": "prettier --write \"src/**/*.ts\"",
+    "lint": "biome lint src",
+    "lint:fix": "biome lint --write src",
+    "format": "biome format --write src",
+    "check": "biome check src",
+    "check:fix": "biome check --write src",
     "prepare": "bun run build"
   },
   "keywords": [
@@ -46,10 +49,7 @@
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.5",
-    "@typescript-eslint/eslint-plugin": "^6.19.0",
-    "@typescript-eslint/parser": "^6.19.0",
-    "eslint": "^8.56.0",
-    "prettier": "^3.2.4",
+    "@biomejs/biome": "^1.9.0",
     "typescript": "^5.3.3"
   },
   "engines": {
