@@ -79,17 +79,19 @@ export async function syncWorkspace(
     };
   }
 
-  const pluginResults: PluginSyncResult[] = [];
+  // Process all plugins in parallel for better performance
+  const pluginResults = await Promise.all(
+    config.plugins.map((pluginSource) =>
+      syncPlugin(pluginSource, workspacePath, config.clients, { force, dryRun })
+    )
+  );
+
+  // Count results
   let totalCopied = 0;
   let totalFailed = 0;
   let totalSkipped = 0;
 
-  // Process each plugin
-  for (const pluginSource of config.plugins) {
-    const pluginResult = await syncPlugin(pluginSource, workspacePath, config.clients, { force, dryRun });
-    pluginResults.push(pluginResult);
-
-    // Count results
+  for (const pluginResult of pluginResults) {
     for (const copyResult of pluginResult.copyResults) {
       switch (copyResult.action) {
         case 'copied':

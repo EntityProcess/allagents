@@ -59,7 +59,8 @@ export async function copyCommands(
   const files = await readdir(sourceDir);
   const mdFiles = files.filter((f) => f.endsWith('.md'));
 
-  for (const file of mdFiles) {
+  // Process files in parallel for better performance
+  const copyPromises = mdFiles.map(async (file): Promise<CopyResult> => {
     const sourcePath = join(sourceDir, file);
 
     // Transform extension if needed (e.g., .md → .prompt.md for Copilot)
@@ -71,25 +72,24 @@ export async function copyCommands(
     const destPath = join(destDir, destFileName);
 
     if (dryRun) {
-      results.push({ source: sourcePath, destination: destPath, action: 'copied' });
-      continue;
+      return { source: sourcePath, destination: destPath, action: 'copied' };
     }
 
     try {
       const content = await readFile(sourcePath, 'utf-8');
       await writeFile(destPath, content, 'utf-8');
-      results.push({ source: sourcePath, destination: destPath, action: 'copied' });
+      return { source: sourcePath, destination: destPath, action: 'copied' };
     } catch (error) {
-      results.push({
+      return {
         source: sourcePath,
         destination: destPath,
         action: 'failed',
         error: error instanceof Error ? error.message : 'Unknown error',
-      });
+      };
     }
-  }
+  });
 
-  return results;
+  return Promise.all(copyPromises);
 }
 
 /**
@@ -129,41 +129,40 @@ export async function copySkills(
   const entries = await readdir(sourceDir, { withFileTypes: true });
   const skillDirs = entries.filter((e) => e.isDirectory());
 
-  for (const entry of skillDirs) {
+  // Process skill directories in parallel for better performance
+  const copyPromises = skillDirs.map(async (entry): Promise<CopyResult> => {
     const skillSourcePath = join(sourceDir, entry.name);
     const skillDestPath = join(destDir, entry.name);
 
     // Validate skill before copying
     const validation = await validateSkill(skillSourcePath);
     if (!validation.valid) {
-      results.push({
+      return {
         source: skillSourcePath,
         destination: skillDestPath,
         action: 'failed',
         ...(validation.error && { error: validation.error }),
-      });
-      continue;
+      };
     }
 
     if (dryRun) {
-      results.push({ source: skillSourcePath, destination: skillDestPath, action: 'copied' });
-      continue;
+      return { source: skillSourcePath, destination: skillDestPath, action: 'copied' };
     }
 
     try {
       await cp(skillSourcePath, skillDestPath, { recursive: true });
-      results.push({ source: skillSourcePath, destination: skillDestPath, action: 'copied' });
+      return { source: skillSourcePath, destination: skillDestPath, action: 'copied' };
     } catch (error) {
-      results.push({
+      return {
         source: skillSourcePath,
         destination: skillDestPath,
         action: 'failed',
         error: error instanceof Error ? error.message : 'Unknown error',
-      });
+      };
     }
-  }
+  });
 
-  return results;
+  return Promise.all(copyPromises);
 }
 
 /**
@@ -335,23 +334,13 @@ export async function copyPluginToWorkspace(
   client: ClientType,
   options: CopyOptions = {}
 ): Promise<CopyResult[]> {
-  const results: CopyResult[] = [];
+  // Run copy operations in parallel for better performance
+  const [commandResults, skillResults, hookResults, agentResult] = await Promise.all([
+    copyCommands(pluginPath, workspacePath, client, options),
+    copySkills(pluginPath, workspacePath, client, options),
+    copyHooks(pluginPath, workspacePath, client, options),
+    copyAgentFile(pluginPath, workspacePath, client, options),
+  ]);
 
-  // Copy commands
-  const commandResults = await copyCommands(pluginPath, workspacePath, client, options);
-  results.push(...commandResults);
-
-  // Copy skills
-  const skillResults = await copySkills(pluginPath, workspacePath, client, options);
-  results.push(...skillResults);
-
-  // Copy hooks
-  const hookResults = await copyHooks(pluginPath, workspacePath, client, options);
-  results.push(...hookResults);
-
-  // Copy/create agent file
-  const agentResult = await copyAgentFile(pluginPath, workspacePath, client, options);
-  results.push(agentResult);
-
-  return results;
+  return [...commandResults, ...skillResults, ...hookResults, agentResult];
 }
