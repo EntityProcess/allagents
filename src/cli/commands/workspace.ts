@@ -59,12 +59,18 @@ workspaceCommand
         const copied = pluginResult.copyResults.filter(
           (r) => r.action === 'copied',
         ).length;
+        const generated = pluginResult.copyResults.filter(
+          (r) => r.action === 'generated',
+        ).length;
         const failed = pluginResult.copyResults.filter(
           (r) => r.action === 'failed',
         ).length;
 
         if (copied > 0) {
           console.log(`  Copied: ${copied} files`);
+        }
+        if (generated > 0) {
+          console.log(`  Generated: ${generated} files`);
         }
         if (failed > 0) {
           console.log(`  Failed: ${failed} files`);
@@ -84,6 +90,9 @@ workspaceCommand
       console.log(
         `  Total ${dryRun ? 'would copy' : 'copied'}: ${result.totalCopied}`,
       );
+      if (result.totalGenerated > 0) {
+        console.log(`  Total generated: ${result.totalGenerated}`);
+      }
       if (result.totalFailed > 0) {
         console.log(`  Total failed: ${result.totalFailed}`);
       }

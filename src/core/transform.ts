@@ -11,7 +11,7 @@ import { validateSkill } from '../validators/skill.js';
 export interface CopyResult {
   source: string;
   destination: string;
-  action: 'copied' | 'skipped' | 'failed';
+  action: 'copied' | 'skipped' | 'failed' | 'generated';
   error?: string;
 }
 
@@ -294,20 +294,25 @@ export async function copyAgentFile(
 
   const sourcePath = getSourceAgentFile(pluginPath, client);
 
+  // Skip if plugin has no agent file
+  if (!sourcePath) {
+    return {
+      source: '',
+      destination: destPath,
+      action: 'skipped',
+    };
+  }
+
   if (dryRun) {
     return {
-      source: sourcePath || 'generated',
+      source: sourcePath,
       destination: destPath,
       action: 'copied',
     };
   }
 
   try {
-    let content = '';
-
-    if (sourcePath) {
-      content = await readFile(sourcePath, 'utf-8');
-    }
+    let content = await readFile(sourcePath, 'utf-8');
 
     // Append workspace rules if not already present
     if (!content.includes('WORKSPACE-RULES:START')) {
@@ -317,7 +322,7 @@ export async function copyAgentFile(
     await writeFile(destPath, content, 'utf-8');
 
     return {
-      source: sourcePath || 'generated',
+      source: sourcePath,
       destination: destPath,
       action: 'copied',
     };

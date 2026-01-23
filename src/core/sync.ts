@@ -30,6 +30,7 @@ export interface SyncResult {
   totalCopied: number;
   totalFailed: number;
   totalSkipped: number;
+  totalGenerated: number;
   error?: string;
 }
 
@@ -75,6 +76,7 @@ export async function syncWorkspace(
       totalCopied: 0,
       totalFailed: 0,
       totalSkipped: 0,
+      totalGenerated: 0,
       error: `workspace.yaml not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
     };
   }
@@ -90,6 +92,7 @@ export async function syncWorkspace(
       totalCopied: 0,
       totalFailed: 0,
       totalSkipped: 0,
+      totalGenerated: 0,
       error:
         error instanceof Error
           ? error.message
@@ -111,6 +114,7 @@ export async function syncWorkspace(
   let totalCopied = 0;
   let totalFailed = 0;
   let totalSkipped = 0;
+  let totalGenerated = 0;
 
   for (const pluginResult of pluginResults) {
     for (const copyResult of pluginResult.copyResults) {
@@ -123,6 +127,9 @@ export async function syncWorkspace(
           break;
         case 'skipped':
           totalSkipped++;
+          break;
+        case 'generated':
+          totalGenerated++;
           break;
       }
     }
@@ -171,6 +178,7 @@ Timestamp: ${timestamp}`);
     totalCopied,
     totalFailed,
     totalSkipped,
+    totalGenerated,
   };
 }
 
