@@ -4,7 +4,9 @@ import { syncWorkspace } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
 
-export const workspaceCommand = new Command('workspace').description('Manage workspaces');
+export const workspaceCommand = new Command('workspace').description(
+  'Manage AI agent workspaces - initialize, sync, and configure plugins'
+);
 
 workspaceCommand
   .command('init <path>')

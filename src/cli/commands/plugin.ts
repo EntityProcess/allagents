@@ -1,7 +1,9 @@
 import { Command } from 'commander';
 import { fetchPlugin, listCachedPlugins, updateCachedPlugins } from '../../core/plugin.js';
 
-export const pluginCommand = new Command('plugin').description('Manage plugins');
+export const pluginCommand = new Command('plugin').description(
+  'Manage remote plugins - fetch, list, and update from GitHub'
+);
 
 pluginCommand
   .command('fetch <url>')
