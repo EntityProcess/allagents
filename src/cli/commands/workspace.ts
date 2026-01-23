@@ -39,7 +39,9 @@ workspaceCommand
       console.log('Syncing workspace...\n');
       const result = await syncWorkspace(process.cwd(), { force, dryRun });
 
-      if (!result.success) {
+      // Early exit only for top-level errors (e.g., missing workspace.yaml)
+      // Plugin-level errors are handled in the loop below
+      if (!result.success && result.error) {
         console.error(`Error: ${result.error}`);
         process.exit(1);
       }
@@ -89,7 +91,8 @@ workspaceCommand
         console.log(`  Total skipped: ${result.totalSkipped}`);
       }
 
-      if (result.totalFailed > 0) {
+      // Exit with error if any failures occurred (plugin-level or copy-level)
+      if (!result.success || result.totalFailed > 0) {
         process.exit(1);
       }
     } catch (error) {
