@@ -17,16 +17,18 @@ allagents/
 ├── src/
 │   ├── cli/
 │   │   ├── commands/
-│   │   │   ├── workspace.ts      # workspace subcommands
-│   │   │   └── plugin.ts         # plugin subcommands
+│   │   │   ├── workspace.ts      # workspace subcommands (init, sync, status, plugin)
+│   │   │   └── plugin.ts         # plugin subcommands (marketplace, list, validate)
 │   │   └── index.ts              # CLI entry point
 │   ├── core/
 │   │   ├── workspace.ts          # Workspace operations
-│   │   ├── plugin.ts             # Plugin fetching/caching
+│   │   ├── marketplace.ts        # Marketplace registry operations
+│   │   ├── plugin.ts             # Plugin resolution and listing
 │   │   ├── sync.ts               # Sync logic
 │   │   └── transform.ts          # File transformations
 │   ├── models/
 │   │   ├── workspace-config.ts   # workspace.yaml types
+│   │   ├── marketplace.ts        # Marketplace registry types
 │   │   ├── plugin-config.ts      # plugin.json types
 │   │   └── client-mapping.ts     # Client path mappings
 │   ├── validators/
@@ -34,7 +36,8 @@ allagents/
 │   └── utils/
 │       ├── file.ts               # File operations
 │       ├── git.ts                # Git operations
-│       └── github.ts             # GitHub fetching
+│       ├── github.ts             # GitHub fetching
+│       └── plugin-spec.ts        # Parse plugin@marketplace specs
 │   └── templates/
 │       └── default/
 │           ├── AGENTS.md
@@ -58,7 +61,7 @@ allagents/
 ```typescript
 interface WorkspaceConfig {
   repositories: Repository[];
-  plugins: PluginSource[];
+  plugins: PluginSpec[];      // plugin@marketplace format
   clients: ClientType[];
 }
 
@@ -69,7 +72,11 @@ interface Repository {
   description: string;    // Description
 }
 
-type PluginSource = string;  // Local path or GitHub URL
+// Plugin spec format: "plugin-name@marketplace-name"
+// Examples:
+//   - "code-review@claude-plugins-official"
+//   - "my-plugin@someuser/their-repo" (fully qualified for unknown marketplaces)
+type PluginSpec = string;
 
 type ClientType =
   | 'claude'
@@ -80,6 +87,29 @@ type ClientType =
   | 'gemini'
   | 'factory'
   | 'ampcode';
+```
+
+### MarketplaceRegistry (~/.allagents/marketplaces.json)
+
+```typescript
+interface MarketplaceRegistry {
+  [name: string]: MarketplaceEntry;
+}
+
+interface MarketplaceEntry {
+  source: MarketplaceSource;
+  installLocation: string;    // Absolute path to marketplace
+  lastUpdated: string;        // ISO timestamp
+}
+
+type MarketplaceSource =
+  | { type: 'github'; repo: string }      // e.g., "anthropics/claude-plugins-official"
+  | { type: 'directory'; path: string };  // Local directory path
+
+// Well-known marketplaces (auto-resolve by name)
+const WELL_KNOWN_MARKETPLACES: Record<string, string> = {
+  'claude-plugins-official': 'anthropics/claude-plugins-official',
+};
 ```
 
 ### PluginManifest (plugin.json)
@@ -162,9 +192,11 @@ const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
 
 **Behavior**:
 1. Read workspace.yaml from current directory
-2. For each plugin:
-   - If GitHub URL → fetch to `~/.allagents/plugins/marketplaces/<repo>/`
-   - If local path → resolve to absolute path
+2. For each plugin spec (`plugin@marketplace`):
+   - Parse plugin name and marketplace name
+   - Look up marketplace in `~/.allagents/marketplaces.json`
+   - If marketplace not found → error (user must add it first or use auto-registration via `workspace plugin add`)
+   - Resolve plugin path: `<marketplace-path>/plugins/<plugin-name>/`
 3. For each client in workspace.yaml:
    - Determine target paths from CLIENT_MAPPINGS
    - Copy commands with extension transform
@@ -176,10 +208,11 @@ const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
 **Exit codes**:
 - 0: Success
 - 1: workspace.yaml not found
-- 2: Plugin fetch failed
-- 3: Validation failed
-- 4: File operation failed
-- 5: Git commit failed
+- 2: Marketplace not found
+- 3: Plugin not found in marketplace
+- 4: Validation failed
+- 5: File operation failed
+- 6: Git commit failed
 
 **Flags**:
 - `--force`: Overwrite local changes
@@ -195,48 +228,99 @@ const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
 3. Check file timestamps for local plugins
 4. Display table with plugin name, source, last synced, status
 
-### `allagents workspace add <plugin>`
+### `allagents workspace plugin add <plugin@marketplace>`
 
-**Purpose**: Add plugin to workspace.yaml
+**Purpose**: Add plugin to workspace.yaml with auto-registration
 
 **Behavior**:
-1. Validate plugin source (local path exists or valid GitHub URL)
-2. Add to plugins list in workspace.yaml
-3. Optionally run sync
+1. Parse `plugin@marketplace` format
+2. Check if marketplace is registered in `~/.allagents/marketplaces.json`
+3. If not registered, attempt auto-registration:
+   - Known name (e.g., `claude-plugins-official`) → fetch from well-known GitHub repo
+   - Full spec (e.g., `plugin@owner/repo`) → fetch from GitHub `owner/repo`
+   - Unknown short name → error with helpful message
+4. Verify plugin exists in marketplace: `<marketplace-path>/plugins/<plugin-name>/`
+5. Add to plugins list in workspace.yaml
+6. Optionally run sync
 
-### `allagents workspace remove <plugin>`
+**Exit codes**:
+- 0: Success
+- 1: Invalid plugin spec format
+- 2: Marketplace not found and cannot auto-register
+- 3: Plugin not found in marketplace
+- 4: workspace.yaml not found
+
+### `allagents workspace plugin remove <plugin>`
 
 **Purpose**: Remove plugin from workspace.yaml
 
 **Behavior**:
-1. Remove from plugins list in workspace.yaml
+1. Remove plugin from plugins list in workspace.yaml
 2. Optionally clean up synced files
 
-### `allagents plugin fetch <url>`
+### `allagents plugin marketplace list`
 
-**Purpose**: Fetch remote plugin to cache
-
-**Behavior**:
-1. Validate GitHub URL
-2. Use `gh repo clone` to cache at `~/.allagents/plugins/marketplaces/<repo>/`
-3. Display success/failure message
-
-### `allagents plugin list`
-
-**Purpose**: List cached plugins
+**Purpose**: List registered marketplaces
 
 **Behavior**:
-1. Read `~/.allagents/plugins/marketplaces/` directory
-2. Display table with repo name, path, last updated
+1. Read `~/.allagents/marketplaces.json`
+2. Display table with marketplace name, source type, path, last updated
 
-### `allagents plugin update [name]`
+### `allagents plugin marketplace add <source>`
 
-**Purpose**: Update cached plugins from remote
+**Purpose**: Add marketplace from URL, path, or GitHub repo
 
 **Behavior**:
-1. If name provided: update specific plugin
-2. If no name: update all cached plugins
-3. Use `gh repo sync` or `git pull`
+1. Determine source type:
+   - Local path → register as directory source
+   - GitHub repo (owner/repo) → clone to `~/.allagents/marketplaces/<name>/`
+2. Validate marketplace structure (must contain `plugins/` directory)
+3. Add entry to `~/.allagents/marketplaces.json`
+
+**Exit codes**:
+- 0: Success
+- 1: Invalid source
+- 2: Clone/fetch failed
+- 3: Invalid marketplace structure
+
+### `allagents plugin marketplace remove <name>`
+
+**Purpose**: Remove a registered marketplace
+
+**Behavior**:
+1. Remove entry from `~/.allagents/marketplaces.json`
+2. Optionally delete cloned directory (with confirmation)
+
+### `allagents plugin marketplace update [name]`
+
+**Purpose**: Update marketplace(s) from remote
+
+**Behavior**:
+1. If name provided: update specific marketplace
+2. If no name: update all GitHub-sourced marketplaces
+3. Use `git pull` for GitHub sources
+4. Update `lastUpdated` timestamp in registry
+
+### `allagents plugin list [marketplace]`
+
+**Purpose**: List available plugins from marketplaces
+
+**Behavior**:
+1. If marketplace provided: list plugins from that marketplace
+2. If no marketplace: list plugins from all registered marketplaces
+3. Enumerate `plugins/*/` directories in each marketplace
+4. Display table with plugin name, marketplace, description (from plugin.json)
+
+### `allagents plugin validate <path>`
+
+**Purpose**: Validate plugin or marketplace structure
+
+**Behavior**:
+1. If path contains `plugins/`: validate as marketplace
+2. Otherwise: validate as single plugin
+3. Check required files (plugin.json, SKILL.md in skills)
+4. Validate YAML frontmatter in skills
+5. Report validation errors
 
 ## File Transformation Rules
 
@@ -374,8 +458,10 @@ Template: default
 
 ## Performance Considerations
 
-- Cache remote plugin fetches in `~/.allagents/plugins/marketplaces/`
-- Only fetch if not cached or --force flag used
+- Marketplaces cached at `~/.allagents/marketplaces/<name>/`
+- Registry stored at `~/.allagents/marketplaces.json`
+- Only clone marketplace if not already registered
+- Use `git pull` for updates (incremental)
 - Use parallel operations where possible (file copying)
 - Stream large files instead of loading into memory
 
@@ -384,6 +470,8 @@ Template: default
 ### Unit Tests (Bun test)
 
 - workspace.yaml parsing and validation
+- Plugin spec parsing (`plugin@marketplace` format)
+- Marketplace registry operations
 - Skill YAML frontmatter validation
 - File transformation logic
 - Client mapping lookups
@@ -392,8 +480,10 @@ Template: default
 ### Integration Tests (BATS)
 
 - Full workspace init flow
-- Full workspace sync flow
-- Plugin fetch and cache
+- Full workspace sync flow with `plugin@marketplace` specs
+- Marketplace add/list/remove/update commands
+- Auto-registration of unknown marketplaces
+- Plugin list from marketplaces
 - File transformations end-to-end
 - Git commit creation
 - Error handling scenarios
@@ -425,12 +515,15 @@ Template: default
 
 ## Success Metrics
 
-1. Can create workspace from template
-2. Can sync plugins from local paths
-3. Can fetch and cache remote plugins from GitHub
-4. All 8 clients receive correctly transformed files
-5. Skills are validated before copying
-6. Agent files created with workspace rules appended
-7. Git commits created after each sync
-8. 85%+ test coverage
-9. All integration tests passing
+1. `plugin marketplace add/list/remove/update` manage marketplace registry
+2. `plugin list` shows available plugins from registered marketplaces
+3. `workspace plugin add` supports auto-registration of unknown marketplaces
+4. `workspace plugin add/remove` manage workspace.yaml plugins
+5. Can create workspace from template
+6. Can sync plugins using `plugin@marketplace` format
+7. All 8 clients receive correctly transformed files
+8. Skills are validated before copying
+9. Agent files created with workspace rules appended
+10. Git commits created after each sync
+11. 85%+ test coverage
+12. All integration tests passing

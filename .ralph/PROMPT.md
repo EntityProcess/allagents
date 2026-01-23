@@ -11,12 +11,14 @@ allagents is similar to [dotagents](https://github.com/iannuttall/dotagents) but
 - Non-interactive CLI subcommands instead of TUI
 
 ## Current Objectives
-1. Implement `workspace init` command - create workspace from template
-2. Implement `workspace sync` command - sync plugins to workspace
-3. Implement plugin fetching and caching for GitHub URLs
-4. Support 8 AI clients (Claude, Copilot, Codex, Cursor, OpenCode, Gemini, Factory, Ampcode)
-5. Implement skill validation with YAML frontmatter parsing
-6. Handle file transformations for different clients
+1. **FIX ARCHITECTURE**: Align with `claude plugin` convention
+   - Implement `plugin marketplace` subcommands (list/add/remove/update)
+   - Use `plugin@marketplace` naming convention
+   - Create marketplace registry at `~/.allagents/marketplaces.json`
+2. Update workspace sync to resolve `plugin@marketplace` specs
+3. Support 8 AI clients (Claude, Copilot, Codex, Cursor, OpenCode, Gemini, Factory, Ampcode)
+4. Implement skill validation with YAML frontmatter parsing
+5. Handle file transformations for different clients
 
 ## Key Principles
 - ONE task per loop - focus on the most important thing
@@ -36,18 +38,75 @@ allagents is similar to [dotagents](https://github.com/iannuttall/dotagents) but
 
 ## Technical Requirements
 
-### CLI Structure
+### CLI Structure (Aligned with `claude plugin` convention)
 ```
-allagents workspace init <path>     # Create workspace from current template
-allagents workspace sync            # Sync plugins to workspace (fetch + copy)
-allagents workspace status          # Show sync status of plugins
-allagents workspace add <plugin>    # Add plugin to workspace.yaml
-allagents workspace remove <plugin> # Remove plugin from workspace.yaml
+# Workspace commands
+allagents workspace init <path>              # Create workspace from current template
+allagents workspace sync                     # Sync plugins to workspace (fetch + copy)
+allagents workspace status                   # Show sync status of plugins
+allagents workspace plugin add <plugin>      # Add plugin to workspace.yaml
+allagents workspace plugin remove <plugin>   # Remove plugin from workspace.yaml
 
-allagents plugin fetch <url>        # Fetch remote plugin to cache
-allagents plugin list               # List cached plugins
-allagents plugin update [name]      # Update cached plugin(s) from remote
+# Plugin marketplace commands (matches `claude plugin marketplace`)
+allagents plugin marketplace list            # List registered marketplaces
+allagents plugin marketplace add <source>    # Add marketplace from URL/path/GitHub
+allagents plugin marketplace remove <name>   # Remove a marketplace
+allagents plugin marketplace update [name]   # Update marketplace(s) from remote
+
+# Plugin commands
+allagents plugin list [marketplace]          # List plugins from marketplaces
+allagents plugin validate <path>             # Validate plugin/marketplace structure
 ```
+
+### Architecture (Aligned with Claude Code)
+
+**Reference: Claude's plugin structure**
+```
+~/.claude/plugins/
+├── known_marketplaces.json      # Registered marketplaces
+├── installed_plugins.json       # Installed plugins with versions
+├── marketplaces/                # Cloned marketplace repos
+│   └── <marketplace-name>/
+└── cache/                       # Installed plugin copies
+    └── <marketplace>/<plugin>/<version>/
+```
+
+**Our structure:**
+```
+~/.allagents/
+├── marketplaces.json            # Registered marketplaces
+└── marketplaces/                # Cloned marketplace repos
+    └── <marketplace-name>/
+```
+
+### Key Concepts
+- **Marketplace**: A source repo containing multiple plugins (GitHub or local directory)
+  - GitHub: `anthropics/claude-plugins-official` → cloned to `~/.allagents/marketplaces/claude-plugins-official/`
+  - Local: `/path/to/my-plugins` → registered but not cloned
+- **Plugin**: Identified as `plugin@marketplace` (e.g., `code-review@claude-plugins-official`)
+- **Plugin path**: Plugins live in `plugins/<plugin-name>/` within a marketplace
+
+### workspace.yaml Plugin Format
+```yaml
+plugins:
+  - code-review@claude-plugins-official    # plugin@marketplace syntax
+  - context7@claude-plugins-official
+  - my-skill@local-marketplace
+```
+
+### Plugin Resolution Flow
+1. Parse `plugin@marketplace` (e.g., `code-review@claude-plugins-official`)
+2. Look up marketplace in `~/.allagents/marketplaces.json`
+3. If not found, attempt auto-registration:
+   - Known name (e.g., `claude-plugins-official`) → fetch from well-known GitHub repo
+   - Full spec (`plugin@owner/repo`) → fetch from GitHub `owner/repo`
+   - Unknown short name → error with helpful message
+4. Resolve plugin path: `<marketplace-path>/plugins/<plugin-name>/`
+5. Copy plugin content to workspace
+
+### Well-Known Marketplaces
+These marketplace names auto-resolve to their GitHub repos:
+- `claude-plugins-official` → `anthropics/claude-plugins-official`
 
 ### Client Path Mappings
 | Client | Commands Path | Skills Path | Agent File | Hooks |
@@ -61,9 +120,12 @@ allagents plugin update [name]      # Update cached plugin(s) from remote
 | Factory | `.factory/commands/` | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` |
 | Ampcode | N/A | N/A | `AGENTS.md` | No |
 
-### Plugin Cache Location
-- Remote plugins: `~/.allagents/plugins/marketplaces/<repo-name>/`
-- Fetched via `gh` CLI
+### Marketplace Registry
+- Config file: `~/.allagents/marketplaces.json`
+- GitHub marketplaces cloned to: `~/.allagents/marketplaces/<name>/`
+- Local directory marketplaces: just registered, not cloned
+- Fetched via `gh` CLI for GitHub sources
+- Plugin content at: `<marketplace-path>/plugins/<plugin-name>/`
 
 ### Skill Validation
 Skills must have valid `SKILL.md` with YAML frontmatter:
@@ -73,12 +135,15 @@ Skills must have valid `SKILL.md` with YAML frontmatter:
 - `model`: model identifier string (optional)
 
 ## Success Criteria
-1. `allagents workspace init` creates workspace with correct structure
-2. `allagents workspace sync` fetches remote plugins and copies all content
-3. All 8 clients receive correctly transformed files
-4. Agent files (CLAUDE.md, GEMINI.md, AGENTS.md) created with workspace rules appended
-5. Skills validated before copying
-6. Git commits created after sync with metadata
+1. `allagents plugin marketplace add/list/remove/update` manage marketplace registry
+2. `allagents plugin list` shows plugins from registered marketplaces
+3. `allagents workspace plugin add/remove` manage workspace.yaml with auto-registration
+4. `allagents workspace init` creates workspace with correct structure
+5. `allagents workspace sync` resolves `plugin@marketplace` specs and copies content
+6. All 8 clients receive correctly transformed files
+7. Agent files (CLAUDE.md, GEMINI.md, AGENTS.md) created with workspace rules appended
+8. Skills validated before copying
+9. Git commits created after sync with metadata
 
 ## Current Task
 Follow .ralph/@fix_plan.md and choose the most important item to implement next.
