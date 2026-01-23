@@ -59,7 +59,7 @@ clients:
 
   it('should throw error for missing file', async () => {
     await expect(parseWorkspaceConfig('/nonexistent/workspace.yaml')).rejects.toThrow(
-      'workspace.yaml not found'
+      '.allagents/workspace.yaml not found'
     );
   });
 
@@ -69,7 +69,7 @@ clients:
       const configPath = join(testDir, 'workspace.yaml');
       writeFileSync(configPath, '');
 
-      await expect(parseWorkspaceConfig(configPath)).rejects.toThrow('workspace.yaml is empty');
+      await expect(parseWorkspaceConfig(configPath)).rejects.toThrow('.allagents/workspace.yaml is empty');
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }

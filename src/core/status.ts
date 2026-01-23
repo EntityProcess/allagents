@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import {
   parsePluginSource,
@@ -37,13 +38,13 @@ export interface WorkspaceStatusResult {
 export async function getWorkspaceStatus(
   workspacePath: string = process.cwd(),
 ): Promise<WorkspaceStatusResult> {
-  const configPath = join(workspacePath, 'workspace.yaml');
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
-  // Check if workspace.yaml exists
+  // Check if .allagents/workspace.yaml exists
   if (!existsSync(configPath)) {
     return {
       success: false,
-      error: `workspace.yaml not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
       plugins: [],
       clients: [],
     };

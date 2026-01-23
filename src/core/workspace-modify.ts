@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { load, dump } from 'js-yaml';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { validatePluginSource, isGitHubUrl } from '../utils/plugin-path.js';
 import type { WorkspaceConfig } from '../models/workspace-config.js';
 import {
@@ -23,7 +24,7 @@ export interface ModifyResult {
 }
 
 /**
- * Add a plugin to workspace.yaml
+ * Add a plugin to .allagents/workspace.yaml
  * Supports three formats:
  * 1. plugin@marketplace (e.g., "code-review@claude-plugins-official")
  * 2. GitHub URL (e.g., "https://github.com/owner/repo")
@@ -41,13 +42,13 @@ export async function addPlugin(
   plugin: string,
   workspacePath: string = process.cwd(),
 ): Promise<ModifyResult> {
-  const configPath = join(workspacePath, 'workspace.yaml');
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
-  // Check if workspace.yaml exists
+  // Check if .allagents/workspace.yaml exists
   if (!existsSync(configPath)) {
     return {
       success: false,
-      error: `workspace.yaml not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
     };
   }
 
@@ -85,7 +86,7 @@ export async function addPlugin(
       };
     }
 
-    // Add to workspace.yaml (use the original spec or normalized one with repo name)
+    // Add to .allagents/workspace.yaml (use the original spec or normalized one with repo name)
     return await addPluginToConfig(
       autoRegResult.registeredAs
         ? plugin.replace(/@[^@]+$/, `@${autoRegResult.registeredAs}`)
@@ -185,7 +186,7 @@ async function ensureMarketplaceRegistered(
 }
 
 /**
- * Add plugin to workspace.yaml config file
+ * Add plugin to .allagents/workspace.yaml config file
  */
 async function addPluginToConfig(
   plugin: string,
@@ -201,7 +202,7 @@ async function addPluginToConfig(
     if (config.plugins.includes(plugin)) {
       return {
         success: false,
-        error: `Plugin already exists in workspace.yaml: ${plugin}`,
+        error: `Plugin already exists in .allagents/workspace.yaml: ${plugin}`,
       };
     }
 
@@ -225,7 +226,7 @@ async function addPluginToConfig(
 }
 
 /**
- * Remove a plugin from workspace.yaml
+ * Remove a plugin from .allagents/workspace.yaml
  * @param plugin - Plugin source to remove (exact match or partial match)
  * @param workspacePath - Path to workspace directory (default: cwd)
  * @returns Result with success status
@@ -234,13 +235,13 @@ export async function removePlugin(
   plugin: string,
   workspacePath: string = process.cwd(),
 ): Promise<ModifyResult> {
-  const configPath = join(workspacePath, 'workspace.yaml');
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
-  // Check if workspace.yaml exists
+  // Check if .allagents/workspace.yaml exists
   if (!existsSync(configPath)) {
     return {
       success: false,
-      error: `workspace.yaml not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
     };
   }
 
@@ -262,7 +263,7 @@ export async function removePlugin(
     if (index === -1) {
       return {
         success: false,
-        error: `Plugin not found in workspace.yaml: ${plugin}`,
+        error: `Plugin not found in .allagents/workspace.yaml: ${plugin}`,
       };
     }
 

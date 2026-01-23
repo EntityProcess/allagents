@@ -39,7 +39,7 @@ workspaceCommand
       console.log('Syncing workspace...\n');
       const result = await syncWorkspace(process.cwd(), { force, dryRun });
 
-      // Early exit only for top-level errors (e.g., missing workspace.yaml)
+      // Early exit only for top-level errors (e.g., missing .allagents/workspace.yaml)
       // Plugin-level errors are handled in the loop below
       if (!result.success && result.error) {
         console.error(`Error: ${result.error}`);
@@ -175,13 +175,13 @@ workspaceCommand
 // =============================================================================
 
 const pluginSubcommand = new Command('plugin').description(
-  'Manage plugins in workspace.yaml',
+  'Manage plugins in .allagents/workspace.yaml',
 );
 
 pluginSubcommand
   .command('add <plugin>')
   .description(
-    'Add plugin to workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
+    'Add plugin to .allagents/workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
   )
   .action(async (plugin: string) => {
     try {
@@ -210,7 +210,7 @@ pluginSubcommand
 
 pluginSubcommand
   .command('remove <plugin>')
-  .description('Remove plugin from workspace.yaml')
+  .description('Remove plugin from .allagents/workspace.yaml')
   .action(async (plugin: string) => {
     try {
       const result = await removePlugin(plugin);
