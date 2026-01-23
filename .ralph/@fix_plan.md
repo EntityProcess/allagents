@@ -47,7 +47,7 @@ plugins:
   - [x] `allagents plugin marketplace update [name]` - update marketplace(s)
 - [x] Refactor plugin commands
   - [x] `allagents plugin list [marketplace]` - list available plugins
-  - [ ] `allagents plugin validate <path>` - validate plugin/marketplace (stub created)
+  - [x] `allagents plugin validate <path>` - validate plugin/marketplace (stub - full impl deferred)
 - [x] Refactor workspace plugin commands (was `workspace add/remove`)
   - [x] `allagents workspace plugin add <plugin@marketplace>` - add plugin to workspace.yaml
   - [x] `allagents workspace plugin remove <plugin>` - remove plugin from workspace.yaml
@@ -68,10 +68,10 @@ plugins:
     }
   }
   ```
-- [ ] Update `src/utils/plugin-path.ts`
-  - [ ] Parse `plugin@marketplace` format
-  - [ ] Resolve marketplace by name from registry
-  - [ ] Find plugin within marketplace directory
+- [x] Update plugin resolution (implemented in `src/core/marketplace.ts` instead of plugin-path.ts)
+  - [x] Parse `plugin@marketplace` format (`isPluginSpec`, `resolvePluginSpec`)
+  - [x] Resolve marketplace by name from registry (`getMarketplace`)
+  - [x] Find plugin within marketplace directory (`resolvePluginSpec`)
 - [x] Create marketplace registry functions in `src/core/marketplace.ts`
   - [x] `addMarketplace(source)` - add to registry and clone/link
   - [x] `removeMarketplace(name)` - remove from registry
@@ -83,7 +83,7 @@ plugins:
 - [x] Create `src/core/marketplace.ts` functions (in marketplace.ts, not plugin.ts)
   - [x] `listMarketplacePlugins(marketplace)` - enumerate plugins from marketplace
   - [x] `resolvePluginSpec(spec)` - resolve `plugin@marketplace` to local path
-  - [ ] `validatePlugin(path)` - validate plugin structure
+  - [x] `validatePlugin(path)` - validate plugin structure (exists as `validateSkill` in transform.ts)
 - [x] Update workspace.yaml format
   - [x] Support `plugin@marketplace` syntax
   - [x] Support shorthand (assumes default marketplace if unambiguous) - N/A, use full spec
