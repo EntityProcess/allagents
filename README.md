@@ -153,8 +153,20 @@ clients:
 
 Plugins use the `plugin@marketplace` format:
 
-- `code-review@claude-plugins-official` - Known marketplace (auto-resolves)
-- `my-plugin@owner/repo` - Fully qualified GitHub marketplace
+| Format | Example | Description |
+|--------|---------|-------------|
+| Well-known | `code-review@claude-plugins-official` | Uses known marketplace mapping |
+| owner/repo | `my-plugin@owner/repo` | Auto-registers GitHub repo, looks in `plugins/` |
+| owner/repo/subpath | `my-plugin@owner/repo/extensions` | Looks in custom subdirectory |
+
+The subpath format is useful when plugins aren't in the standard `plugins/` directory:
+
+```yaml
+plugins:
+  - feature-dev@anthropics/claude-plugins-official/plugins  # explicit plugins/ dir
+  - my-addon@someuser/repo/addons                           # custom addons/ dir
+  - tool@org/monorepo/packages/tools                        # nested path
+```
 
 ### Well-Known Marketplaces
 

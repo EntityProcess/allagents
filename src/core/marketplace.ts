@@ -422,33 +422,89 @@ export async function listMarketplacePlugins(
 }
 
 /**
+ * Parse a plugin@marketplace spec into components
+ * Supports:
+ * - plugin@marketplace-name
+ * - plugin@owner/repo
+ * - plugin@owner/repo/subpath
+ *
+ * @param spec - Plugin spec string
+ * @returns Parsed components or null if invalid
+ */
+export function parsePluginSpec(spec: string): {
+  plugin: string;
+  marketplaceName: string;
+  owner?: string;
+  repo?: string;
+  subpath?: string;
+} | null {
+  const atIndex = spec.lastIndexOf('@');
+  if (atIndex === -1 || atIndex === 0 || atIndex === spec.length - 1) {
+    return null;
+  }
+
+  const plugin = spec.slice(0, atIndex);
+  const marketplacePart = spec.slice(atIndex + 1);
+
+  if (!plugin || !marketplacePart) {
+    return null;
+  }
+
+  // Check if it's owner/repo or owner/repo/subpath format
+  if (marketplacePart.includes('/') && !marketplacePart.includes('://')) {
+    const parts = marketplacePart.split('/');
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      const owner = parts[0];
+      const repo = parts[1];
+      const subpath = parts.length > 2 ? parts.slice(2).join('/') : undefined;
+
+      return {
+        plugin,
+        marketplaceName: repo, // Marketplace is registered by repo name
+        owner,
+        repo,
+        subpath,
+      };
+    }
+  }
+
+  // Simple marketplace name (e.g., "claude-plugins-official")
+  return {
+    plugin,
+    marketplaceName: marketplacePart,
+  };
+}
+
+/**
  * Resolve a plugin@marketplace spec to a local path
+ * Supports:
+ * - plugin@marketplace-name (looks in plugins/ subdir)
+ * - plugin@owner/repo (looks in plugins/ subdir)
+ * - plugin@owner/repo/subpath (looks in subpath/ subdir)
+ *
  * @param spec - Plugin spec (e.g., "code-review@claude-plugins-official")
+ * @param options - Resolution options
  * @returns Local path to plugin directory, or null if not found
  */
 export async function resolvePluginSpec(
   spec: string,
+  options: { subpath?: string } = {},
 ): Promise<{ path: string; marketplace: string; plugin: string } | null> {
-  // Parse plugin@marketplace format
-  const atIndex = spec.lastIndexOf('@');
-  if (atIndex === -1) {
+  const parsed = parsePluginSpec(spec);
+  if (!parsed) {
     return null;
   }
 
-  const pluginName = spec.slice(0, atIndex);
-  const marketplaceName = spec.slice(atIndex + 1);
-
-  if (!pluginName || !marketplaceName) {
-    return null;
-  }
-
-  const marketplace = await getMarketplace(marketplaceName);
+  const marketplace = await getMarketplace(parsed.marketplaceName);
   if (!marketplace) {
     return null;
   }
 
-  // Plugin path is: <marketplace>/plugins/<plugin-name>/
-  const pluginPath = join(marketplace.path, 'plugins', pluginName);
+  // Determine the subpath: explicit option > parsed from spec > default 'plugins'
+  const subpath = options.subpath ?? parsed.subpath ?? 'plugins';
+
+  // Plugin path is: <marketplace>/<subpath>/<plugin-name>/
+  const pluginPath = join(marketplace.path, subpath, parsed.plugin);
 
   if (!existsSync(pluginPath)) {
     return null;
@@ -456,8 +512,8 @@ export async function resolvePluginSpec(
 
   return {
     path: pluginPath,
-    marketplace: marketplaceName,
-    plugin: pluginName,
+    marketplace: parsed.marketplaceName,
+    plugin: parsed.plugin,
   };
 }
 

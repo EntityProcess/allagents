@@ -16,6 +16,7 @@ import { copyPluginToWorkspace, type CopyResult } from './transform.js';
 import {
   isPluginSpec,
   resolvePluginSpec,
+  parsePluginSpec,
   getMarketplace,
   addMarketplace,
   getWellKnownMarketplaces,
@@ -278,30 +279,33 @@ async function syncPlugin(
  * Auto-registration rules:
  * 1. Well-known marketplace name → auto-register from known GitHub repo
  * 2. plugin@owner/repo format → auto-register owner/repo as marketplace
- * 3. Unknown short name → error with helpful message
+ * 3. plugin@owner/repo/subpath → auto-register owner/repo, look in subpath/
+ * 4. Unknown short name → error with helpful message
  */
 async function resolvePluginSpecWithAutoRegister(
   spec: string,
   _force = false,
 ): Promise<{ success: boolean; path?: string; error?: string }> {
-  // Parse plugin@marketplace
-  const atIndex = spec.lastIndexOf('@');
-  const pluginName = spec.slice(0, atIndex);
-  const marketplaceName = spec.slice(atIndex + 1);
+  // Parse plugin@marketplace using the new parser
+  const parsed = parsePluginSpec(spec);
 
-  if (!pluginName || !marketplaceName) {
+  if (!parsed) {
     return {
       success: false,
-      error: `Invalid plugin spec format: ${spec}\n  Expected: plugin@marketplace`,
+      error: `Invalid plugin spec format: ${spec}\n  Expected: plugin@marketplace or plugin@owner/repo[/subpath]`,
     };
   }
+
+  const { plugin: pluginName, marketplaceName, owner, repo, subpath } = parsed;
 
   // Check if marketplace is already registered
   let marketplace = await getMarketplace(marketplaceName);
 
   // If not registered, try auto-registration
   if (!marketplace) {
-    const autoRegResult = await autoRegisterMarketplace(marketplaceName);
+    // For owner/repo format, pass the full owner/repo string
+    const sourceToRegister = owner && repo ? `${owner}/${repo}` : marketplaceName;
+    const autoRegResult = await autoRegisterMarketplace(sourceToRegister);
     if (!autoRegResult.success) {
       return {
         success: false,
@@ -318,12 +322,15 @@ async function resolvePluginSpecWithAutoRegister(
     };
   }
 
-  // Now resolve the plugin within the marketplace
-  const resolved = await resolvePluginSpec(spec);
+  // Determine the expected subpath for error messages
+  const expectedSubpath = subpath ?? 'plugins';
+
+  // Now resolve the plugin within the marketplace (pass subpath if specified)
+  const resolved = await resolvePluginSpec(spec, { subpath });
   if (!resolved) {
     return {
       success: false,
-      error: `Plugin '${pluginName}' not found in marketplace '${marketplaceName}'\n  Expected at: ${marketplace.path}/plugins/${pluginName}/`,
+      error: `Plugin '${pluginName}' not found in marketplace '${marketplaceName}'\n  Expected at: ${marketplace.path}/${expectedSubpath}/${pluginName}/`,
     };
   }
 
