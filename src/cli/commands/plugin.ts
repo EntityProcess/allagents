@@ -82,8 +82,8 @@ marketplaceCommand
         process.exit(1);
       }
 
-      console.log(`✓ Marketplace '${result.marketplace!.name}' added`);
-      console.log(`  Path: ${result.marketplace!.path}`);
+      console.log(`✓ Marketplace '${result.marketplace?.name}' added`);
+      console.log(`  Path: ${result.marketplace?.path}`);
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error: ${error.message}`);
@@ -106,7 +106,7 @@ marketplaceCommand
       }
 
       console.log(`✓ Marketplace '${name}' removed from registry`);
-      console.log(`  Note: Files at ${result.marketplace!.path} were not deleted`);
+      console.log(`  Note: Files at ${result.marketplace?.path} were not deleted`);
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error: ${error.message}`);

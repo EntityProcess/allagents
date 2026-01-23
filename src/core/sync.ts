@@ -208,10 +208,10 @@ async function syncPlugin(
         resolved: '',
         success: false,
         copyResults,
-        error: resolved.error,
+        error: resolved.error || 'Unknown error',
       };
     }
-    resolvedPath = resolved.path!;
+    resolvedPath = resolved.path ?? '';
   } else if (isGitHubUrl(pluginSource)) {
     // Fetch remote plugin (with force option)
     const fetchResult = await fetchPlugin(pluginSource, { force });
@@ -274,7 +274,7 @@ async function syncPlugin(
  */
 async function resolvePluginSpecWithAutoRegister(
   spec: string,
-  force: boolean = false,
+  _force = false,
 ): Promise<{ success: boolean; path?: string; error?: string }> {
   // Parse plugin@marketplace
   const atIndex = spec.lastIndexOf('@');
@@ -297,10 +297,10 @@ async function resolvePluginSpecWithAutoRegister(
     if (!autoRegResult.success) {
       return {
         success: false,
-        error: autoRegResult.error,
+        error: autoRegResult.error || 'Unknown error',
       };
     }
-    marketplace = await getMarketplace(autoRegResult.name!);
+    marketplace = await getMarketplace(autoRegResult.name ?? marketplaceName);
   }
 
   if (!marketplace) {
@@ -342,7 +342,7 @@ async function autoRegisterMarketplace(
     console.log(`Auto-registering well-known marketplace: ${name}`);
     const result = await addMarketplace(name);
     if (!result.success) {
-      return { success: false, error: result.error };
+      return { success: false, error: result.error || 'Unknown error' };
     }
     return { success: true, name };
   }
@@ -355,7 +355,7 @@ async function autoRegisterMarketplace(
       const repoName = parts[1];
       const result = await addMarketplace(name, repoName);
       if (!result.success) {
-        return { success: false, error: result.error };
+        return { success: false, error: result.error || 'Unknown error' };
       }
       return { success: true, name: repoName };
     }
@@ -364,10 +364,6 @@ async function autoRegisterMarketplace(
   // Unknown marketplace name - provide helpful error
   return {
     success: false,
-    error: `Marketplace '${name}' not found.\n` +
-      `  Options:\n` +
-      `  1. Use fully qualified name: plugin@owner/repo\n` +
-      `  2. Register first: allagents plugin marketplace add <source>\n` +
-      `  3. Well-known marketplaces: ${Object.keys(wellKnown).join(', ')}`,
+    error: `Marketplace '${name}' not found.\n  Options:\n  1. Use fully qualified name: plugin@owner/repo\n  2. Register first: allagents plugin marketplace add <source>\n  3. Well-known marketplaces: ${Object.keys(wellKnown).join(', ')}`,
   };
 }

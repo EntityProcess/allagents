@@ -103,7 +103,7 @@ export async function saveRegistry(registry: MarketplaceRegistry): Promise<void>
     await mkdir(dir, { recursive: true });
   }
 
-  await writeFile(registryPath, JSON.stringify(registry, null, 2) + '\n');
+  await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
 }
 
 /**
@@ -133,10 +133,11 @@ export function parseMarketplaceSource(source: string): {
     const match = source.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)/);
     if (match) {
       const [, owner, repo] = match;
+      if (!repo) return null;
       return {
         type: 'github',
         location: `${owner}/${repo}`,
-        name: repo!.replace(/\.git$/, ''),
+        name: repo.replace(/\.git$/, ''),
       };
     }
     return null;

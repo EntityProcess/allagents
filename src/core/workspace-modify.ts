@@ -56,7 +56,7 @@ export async function addPlugin(
     if (!autoRegResult.success) {
       return {
         success: false,
-        error: autoRegResult.error,
+        error: autoRegResult.error || 'Unknown error',
       };
     }
 
@@ -72,7 +72,7 @@ export async function addPlugin(
 
       return {
         success: false,
-        error: `Plugin '${pluginName}' not found in marketplace '${marketplaceName}'\n  Expected at: ${marketplace?.path || '~/.allagents/marketplaces/' + marketplaceName}/plugins/${pluginName}/`,
+        error: `Plugin '${pluginName}' not found in marketplace '${marketplaceName}'\n  Expected at: ${marketplace?.path ?? `~/.allagents/marketplaces/${marketplaceName}`}/plugins/${pluginName}/`,
       };
     }
 
@@ -140,7 +140,7 @@ async function ensureMarketplaceRegistered(
     console.log(`Auto-registering well-known marketplace: ${marketplaceName}`);
     const result = await addMarketplace(marketplaceName);
     if (!result.success) {
-      return { success: false, error: result.error };
+      return { success: false, error: result.error || 'Unknown error' };
     }
     return { success: true, registeredAs: marketplaceName };
   }
@@ -153,7 +153,7 @@ async function ensureMarketplaceRegistered(
       const repoName = parts[1];
       const result = await addMarketplace(marketplaceName, repoName);
       if (!result.success) {
-        return { success: false, error: result.error };
+        return { success: false, error: result.error || 'Unknown error' };
       }
       return { success: true, registeredAs: repoName };
     }
@@ -162,12 +162,7 @@ async function ensureMarketplaceRegistered(
   // Unknown marketplace
   return {
     success: false,
-    error:
-      `Marketplace '${marketplaceName}' not found.\n` +
-      `  Options:\n` +
-      `  1. Use fully qualified name: plugin@owner/repo\n` +
-      `  2. Register first: allagents plugin marketplace add <source>\n` +
-      `  3. Well-known marketplaces: ${Object.keys(wellKnown).join(', ')}`,
+    error: `Marketplace '${marketplaceName}' not found.\n  Options:\n  1. Use fully qualified name: plugin@owner/repo\n  2. Register first: allagents plugin marketplace add <source>\n  3. Well-known marketplaces: ${Object.keys(wellKnown).join(', ')}`,
   };
 }
 
@@ -242,7 +237,7 @@ export async function removePlugin(
     // If not found, try partial match (e.g., "code-review" matches "code-review@claude-plugins-official")
     if (index === -1 && isPluginSpec(plugin) === false) {
       index = config.plugins.findIndex(
-        (p) => p.startsWith(plugin + '@') || p === plugin,
+        (p) => p.startsWith(`${plugin}@`) || p === plugin,
       );
     }
 
@@ -254,7 +249,6 @@ export async function removePlugin(
     }
 
     // Remove plugin
-    const removed = config.plugins[index];
     config.plugins.splice(index, 1);
 
     // Write back
