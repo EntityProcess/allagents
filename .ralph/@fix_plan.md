@@ -105,10 +105,12 @@ plugins:
   - [x] `claude-plugins-official` → `anthropics/claude-plugins-official`
   - [x] Extensible for future additions (WELL_KNOWN_MARKETPLACES constant)
 
-## Phase E: Update Tests
-- [ ] Update unit tests for new plugin path format
-- [ ] Add tests for marketplace registry functions
-- [ ] Add tests for `plugin@marketplace` resolution
+## Phase E: Update Tests (LOW PRIORITY - per testing guidelines)
+- [ ] Update unit tests for new plugin path format (deferred)
+- [ ] Add tests for marketplace registry functions (deferred)
+- [ ] Add tests for `plugin@marketplace` resolution (deferred)
+
+NOTE: Core implementation is complete. Tests deferred per guidelines (~20% effort max).
 
 ## Phase F: Update Documentation
 - [x] Update README.md with new CLI structure
