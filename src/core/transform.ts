@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir, cp, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join, basename, extname } from 'path';
-import { CLIENT_MAPPINGS, type ClientMapping } from '../models/client-mapping.js';
+import { join } from 'path';
+import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { ClientType } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
 
@@ -117,7 +117,7 @@ export async function copySkills(
         source: skillSourcePath,
         destination: skillDestPath,
         action: 'failed',
-        error: validation.error,
+        ...(validation.error && { error: validation.error }),
       });
       continue;
     }

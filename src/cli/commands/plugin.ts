@@ -9,7 +9,7 @@ pluginCommand
   .option('-f, --force', 'Force update if plugin is already cached')
   .action(async (url: string, options: { force?: boolean }) => {
     try {
-      const result = await fetchPlugin(url, { force: options.force });
+      const result = await fetchPlugin(url, { force: options.force ?? false });
 
       if (!result.success) {
         console.error(`Error: ${result.error}`);

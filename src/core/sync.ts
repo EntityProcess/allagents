@@ -2,7 +2,7 @@ import { existsSync } from 'fs';
 import { join, resolve } from 'path';
 import simpleGit from 'simple-git';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
-import { parsePluginSource, isGitHubUrl, getPluginCachePath, parseGitHubUrl } from '../utils/plugin-path.js';
+import { parsePluginSource, isGitHubUrl } from '../utils/plugin-path.js';
 import { fetchPlugin } from './plugin.js';
 import { copyPluginToWorkspace, type CopyResult } from './transform.js';
 
@@ -157,7 +157,7 @@ async function syncPlugin(
         resolved: '',
         success: false,
         copyResults,
-        error: fetchResult.error,
+        ...(fetchResult.error && { error: fetchResult.error }),
       };
     }
     resolvedPath = fetchResult.cachePath;

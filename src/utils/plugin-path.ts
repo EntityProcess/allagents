@@ -112,8 +112,8 @@ export function parsePluginSource(
       type: 'github',
       original: source,
       normalized: source,
-      owner: parsed?.owner,
-      repo: parsed?.repo,
+      ...(parsed?.owner && { owner: parsed.owner }),
+      ...(parsed?.repo && { repo: parsed.repo }),
     };
   }
 

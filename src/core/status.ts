@@ -91,8 +91,8 @@ function getPluginStatus(parsed: ParsedPluginSource): PluginStatus {
       type: 'github',
       available,
       path: cachePath,
-      owner: parsed.owner,
-      repo: parsed.repo,
+      ...(parsed.owner && { owner: parsed.owner }),
+      ...(parsed.repo && { repo: parsed.repo }),
     };
   }
 

@@ -30,7 +30,7 @@ export async function addPlugin(
   if (!validation.valid) {
     return {
       success: false,
-      error: validation.error,
+      ...(validation.error && { error: validation.error }),
     };
   }
 

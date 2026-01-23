@@ -50,7 +50,7 @@ export async function fetchPlugin(url: string, options: FetchOptions = {}): Prom
       success: false,
       action: 'skipped',
       cachePath: '',
-      error: validation.error,
+      ...(validation.error && { error: validation.error }),
     };
   }
 
