@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncWorkspace, purgeWorkspace, getPurgePaths } from '../../../src/core/sync.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
 
 describe('sync', () => {
   let testDir: string;
@@ -102,17 +103,18 @@ describe('sync', () => {
   });
 
   describe('syncWorkspace - validation phase', () => {
-    it('should fail if workspace.yaml does not exist', async () => {
+    it('should fail if .allagents/workspace.yaml does not exist', async () => {
       const result = await syncWorkspace(testDir);
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('workspace.yaml not found');
+      expect(result.error).toContain(`${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found`);
     });
 
     it('should fail if plugin does not exist and leave workspace unchanged', async () => {
-      // Setup: Create workspace.yaml with non-existent plugin
+      // Setup: Create .allagents/workspace.yaml with non-existent plugin
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
       await writeFile(
-        join(testDir, 'workspace.yaml'),
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
         `
 repositories: []
 plugins:
@@ -144,9 +146,10 @@ clients:
       await mkdir(join(pluginDir, 'commands'), { recursive: true });
       await writeFile(join(pluginDir, 'commands', 'my-command.md'), '# My Command');
 
-      // Setup: Create workspace.yaml with the plugin
+      // Setup: Create .allagents/workspace.yaml with the plugin
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
       await writeFile(
-        join(testDir, 'workspace.yaml'),
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
         `
 repositories: []
 plugins:
@@ -163,7 +166,7 @@ clients:
 
       // Now remove plugin from workspace.yaml
       await writeFile(
-        join(testDir, 'workspace.yaml'),
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
         `
 repositories: []
 plugins: []
@@ -188,8 +191,9 @@ clients:
       await writeFile(join(plugin2Dir, 'commands', 'cmd2.md'), '# Command 2');
 
       // Setup: workspace with both plugins
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
       await writeFile(
-        join(testDir, 'workspace.yaml'),
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
         `
 repositories: []
 plugins:
@@ -208,7 +212,7 @@ clients:
 
       // Update workspace to only have plugin1
       await writeFile(
-        join(testDir, 'workspace.yaml'),
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
         `
 repositories: []
 plugins:
@@ -233,8 +237,9 @@ clients:
       await mkdir(join(pluginDir, 'commands'), { recursive: true });
       await writeFile(join(pluginDir, 'commands', 'my-command.md'), '# My Command');
 
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
       await writeFile(
-        join(testDir, 'workspace.yaml'),
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
         `
 repositories: []
 plugins:

@@ -87,10 +87,10 @@ allagents workspace sync [options]
 # Show status of workspace and plugins
 allagents workspace status
 
-# Add a plugin to workspace.yaml (auto-registers marketplace if needed)
+# Add a plugin to .allagents/workspace.yaml (auto-registers marketplace if needed)
 allagents workspace plugin add <plugin@marketplace>
 
-# Remove a plugin from workspace.yaml
+# Remove a plugin from .allagents/workspace.yaml
 allagents workspace plugin remove <plugin>
 ```
 
@@ -123,9 +123,9 @@ allagents plugin list [marketplace]
 allagents plugin validate <path>
 ```
 
-## workspace.yaml
+## .allagents/workspace.yaml
 
-The workspace configuration file defines repositories, plugins, and target clients:
+The workspace configuration file lives in `.allagents/workspace.yaml` and defines repositories, plugins, and target clients:
 
 ```yaml
 repositories:

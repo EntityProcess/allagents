@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import simpleGit from 'simple-git';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import type {
@@ -327,9 +328,10 @@ export async function syncWorkspace(
   options: SyncOptions = {},
 ): Promise<SyncResult> {
   const { force = false, dryRun = false } = options;
-  const configPath = join(workspacePath, 'workspace.yaml');
+  const configDir = join(workspacePath, CONFIG_DIR);
+  const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
 
-  // Check workspace.yaml exists
+  // Check .allagents/workspace.yaml exists
   if (!existsSync(configPath)) {
     return {
       success: false,
@@ -338,7 +340,7 @@ export async function syncWorkspace(
       totalFailed: 0,
       totalSkipped: 0,
       totalGenerated: 0,
-      error: `workspace.yaml not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
     };
   }
 
@@ -357,7 +359,7 @@ export async function syncWorkspace(
       error:
         error instanceof Error
           ? error.message
-          : 'Failed to parse workspace.yaml',
+          : `Failed to parse ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
     };
   }
 

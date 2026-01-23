@@ -2,6 +2,7 @@ import { mkdir, cp } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname, relative } from 'node:path';
 import simpleGit from 'simple-git';
+import { CONFIG_DIR } from '../constants.js';
 
 /**
  * Initialize a new workspace from template
