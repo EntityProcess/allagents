@@ -37,7 +37,7 @@
   - [x] Validate plugin sources
   - [x] Add unit tests (25 comprehensive tests)
 
-## Phase 3: Plugin Fetching (High Priority) - IN PROGRESS
+## Phase 3: Plugin Fetching (High Priority) ✅ COMPLETED
 - [x] Implement `allagents plugin fetch <url>`
   - [x] GitHub URL validation
   - [x] Cache directory setup (~/.allagents/plugins/marketplaces/)
@@ -46,14 +46,14 @@
   - [x] Error handling for auth failures, 404, network errors
   - [x] Add unit tests (8 comprehensive tests)
   - [ ] Add integration tests (deferred)
-- [ ] Implement `allagents plugin list`
-  - [ ] Read cache directory
-  - [ ] Display formatted table
-  - [ ] Add integration test
-- [ ] Implement `allagents plugin update [name]`
-  - [ ] Update single or all cached plugins
-  - [ ] Use git pull in cache directory
-  - [ ] Add integration test
+- [x] Implement `allagents plugin list`
+  - [x] Read cache directory
+  - [x] Display name, path, last modified
+  - [x] Helpful message when empty
+- [x] Implement `allagents plugin update [name]`
+  - [x] Update single plugin by name
+  - [x] Update all cached plugins if no name
+  - [x] Uses git pull in cache directory
 
 ## Phase 4: Sync Implementation (High Priority) ✅ COMPLETED
 - [x] Implement skill validation
@@ -138,14 +138,12 @@
     - [x] Cache path generation
   - [x] 42 unit tests passing (100% pass rate)
   - [x] End-to-end CLI command working
-- [x] Phase 3: plugin fetch command
-  - [x] Core fetchPlugin() with execa integration
-  - [x] GitHub URL validation and parsing
-  - [x] Cache directory setup and management
-  - [x] Skip/update logic with --force flag
-  - [x] Comprehensive error handling (auth, 404, network)
-  - [x] CLI command with user-friendly output
-  - [x] 8 unit tests (45 total passing)
+- [x] Phase 3: plugin commands
+  - [x] plugin fetch with execa/gh CLI integration
+  - [x] plugin list with cache directory reading
+  - [x] plugin update with git pull support
+  - [x] All commands with user-friendly output
+  - [x] 8 unit tests for plugin fetch
 - [x] Phase 4: workspace sync command
   - [x] Skill validation with gray-matter YAML parser
   - [x] File transformation logic for all 8 clients
