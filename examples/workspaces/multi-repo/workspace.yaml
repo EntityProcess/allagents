@@ -24,7 +24,6 @@ plugins:
 
 clients:
   - copilot
-  - copilot-cli
   - claude
   - opencode
   - codex
