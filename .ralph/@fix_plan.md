@@ -37,13 +37,15 @@
   - [x] Validate plugin sources
   - [x] Add unit tests (25 comprehensive tests)
 
-## Phase 3: Plugin Fetching (High Priority)
-- [ ] Implement `allagents plugin fetch <url>`
-  - [ ] GitHub URL validation
-  - [ ] Cache directory setup (~/.allagents/plugins/marketplaces/)
-  - [ ] Integration with gh CLI
-  - [ ] Error handling for auth failures
-  - [ ] Add unit and integration tests
+## Phase 3: Plugin Fetching (High Priority) - IN PROGRESS
+- [x] Implement `allagents plugin fetch <url>`
+  - [x] GitHub URL validation
+  - [x] Cache directory setup (~/.allagents/plugins/marketplaces/)
+  - [x] Integration with gh CLI via execa
+  - [x] --force flag for updates
+  - [x] Error handling for auth failures, 404, network errors
+  - [x] Add unit tests (8 comprehensive tests)
+  - [ ] Add integration tests (deferred)
 - [ ] Implement `allagents plugin list`
   - [ ] Read cache directory
   - [ ] Display formatted table
@@ -137,6 +139,14 @@
     - [x] Cache path generation
   - [x] 42 unit tests passing (100% pass rate)
   - [x] End-to-end CLI command working
+- [x] Phase 3: plugin fetch command
+  - [x] Core fetchPlugin() with execa integration
+  - [x] GitHub URL validation and parsing
+  - [x] Cache directory setup and management
+  - [x] Skip/update logic with --force flag
+  - [x] Comprehensive error handling (auth, 404, network)
+  - [x] CLI command with user-friendly output
+  - [x] 8 unit tests (45 total passing)
 
 ## Notes
 - Focus on getting workspace init and sync working first
