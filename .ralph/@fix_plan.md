@@ -111,9 +111,11 @@ plugins:
 - [ ] Add tests for `plugin@marketplace` resolution
 
 ## Phase F: Update Documentation
-- [ ] Update README.md with new CLI structure
-- [ ] Update example workspace.yaml files with new format
-- [ ] Update `.ralph/PROMPT.md` with new architecture
+- [x] Update README.md with new CLI structure
+- [x] Update example workspace.yaml files with new format
+- [x] Update `.ralph/PROMPT.md` with new architecture
+- [x] Update `.ralph/specs/requirements.md` with new architecture
+- [x] Add attribution to dotagents
 
 ---
 
