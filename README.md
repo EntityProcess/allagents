@@ -1,15 +1,45 @@
-# allagents
+# AllAgents
 
-CLI tool for managing multi-repo AI agent workspaces with plugin synchronization.
+CLI tool for managing multi-repo AI agent workspaces with plugin synchronization across multiple AI clients.
 
-## Overview
+## Why AllAgents?
 
-allagents helps you manage AI agent configurations (prompts, skills, hooks) across multiple repositories and AI clients. It:
+**The Problem:** AI coding assistants (Claude, Copilot, Cursor, Codex, etc.) each have their own configuration formats and directory structures. If you want to share skills, commands, or prompts across multiple projects or use multiple AI clients, you need to manually copy and transform files.
 
-- Creates workspace configurations via `workspace.yaml`
-- Fetches plugins from GitHub or local paths
-- Syncs plugin content to target repositories
-- Supports 8 AI clients: Claude, Copilot, Codex, Cursor, OpenCode, Gemini, Factory, Ampcode
+**AllAgents solves this by:**
+
+| Feature | Claude Code Plugins | AllAgents |
+|---------|--------------------|-----------|
+| Scope | Single project | Multi-repo workspace |
+| Client support | Claude only | 8 AI clients |
+| File location | Runtime lookup from cache | Copied to workspace (git-versioned) |
+| Project structure | AI config mixed with code | Separate workspace repo |
+
+### Key Differentiators
+
+1. **Multi-repo workspaces** - One workspace references multiple project repositories. Your AI tooling lives separately from your application code.
+
+2. **Multi-client distribution** - Write plugins once, sync to all clients. AllAgents transforms and copies files to each client's expected paths.
+
+3. **Workspace is a git repo** - Unlike Claude's runtime plugin system, AllAgents copies files into your workspace. Team members get the same AI tooling via git.
+
+4. **Clean separation** - Project repos stay clean. AI configuration lives in the workspace.
+
+```
+┌─────────────────┐
+│   Marketplace   │  (plugin source - GitHub repos)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│    AllAgents    │  (sync & transform)
+│  workspace sync │
+└────────┬────────┘
+         │
+    ┌────┴────┬────────┬─────────┐
+    ▼         ▼        ▼         ▼
+.claude/  .github/  .cursor/  .codex/   (client-specific paths)
+```
 
 ## Installation
 
@@ -28,9 +58,12 @@ bunx allagents
 allagents workspace init my-workspace
 cd my-workspace
 
-# Add plugins
-allagents workspace add https://github.com/owner/my-plugin
-allagents workspace add ../local-plugin
+# Add a marketplace (or let auto-registration handle it)
+allagents plugin marketplace add anthropics/claude-plugins-official
+
+# Add plugins to workspace
+allagents workspace plugin add code-review@claude-plugins-official
+allagents workspace plugin add my-plugin@someuser/their-repo
 
 # Sync plugins to workspace
 allagents workspace sync
@@ -44,33 +77,48 @@ allagents workspace sync
 # Initialize a new workspace from template
 allagents workspace init <path>
 
-# Sync all plugins to workspace (fetch + copy)
+# Sync all plugins to workspace
 allagents workspace sync [options]
-  --force    Force re-fetch of remote plugins
-  --dry-run  Simulate sync without making changes
+  --force    Force overwrite of local changes
+  --dry-run  Preview changes without applying
 
 # Show status of workspace and plugins
 allagents workspace status
 
-# Add a plugin to workspace.yaml
-allagents workspace add <plugin>
+# Add a plugin to workspace.yaml (auto-registers marketplace if needed)
+allagents workspace plugin add <plugin@marketplace>
 
 # Remove a plugin from workspace.yaml
-allagents workspace remove <plugin>
+allagents workspace plugin remove <plugin>
+```
+
+### Plugin Marketplace Commands
+
+```bash
+# List registered marketplaces
+allagents plugin marketplace list
+
+# Add a marketplace from GitHub or local path
+allagents plugin marketplace add <source>
+  # Examples:
+  #   allagents plugin marketplace add anthropics/claude-plugins-official
+  #   allagents plugin marketplace add /path/to/local/marketplace
+
+# Remove a marketplace
+allagents plugin marketplace remove <name>
+
+# Update marketplace(s) from remote
+allagents plugin marketplace update [name]
 ```
 
 ### Plugin Commands
 
 ```bash
-# Fetch a remote plugin to local cache
-allagents plugin fetch <url>
-  --force    Force re-clone even if cached
+# List available plugins from marketplaces
+allagents plugin list [marketplace]
 
-# List all cached plugins
-allagents plugin list
-
-# Update cached plugins from remote
-allagents plugin update [name]
+# Validate a plugin or marketplace structure
+allagents plugin validate <path>
 ```
 
 ## workspace.yaml
@@ -83,17 +131,34 @@ repositories:
     owner: myorg
     repo: my-project
     description: Main project repository
+  - path: ../my-api
+    owner: myorg
+    repo: my-api
+    description: API service
 
 plugins:
-  - https://github.com/owner/plugin-repo  # GitHub URL
-  - ../local-plugins/my-plugin            # Local path
-  - /absolute/path/to/plugin              # Absolute path
+  - code-review@claude-plugins-official     # plugin@marketplace format
+  - context7@claude-plugins-official
+  - my-plugin@someuser/their-repo           # fully qualified for custom marketplaces
 
 clients:
   - claude
   - copilot
   - cursor
 ```
+
+### Plugin Spec Format
+
+Plugins use the `plugin@marketplace` format:
+
+- `code-review@claude-plugins-official` - Known marketplace (auto-resolves)
+- `my-plugin@owner/repo` - Fully qualified GitHub marketplace
+
+### Well-Known Marketplaces
+
+These marketplace names auto-resolve to their GitHub repos:
+
+- `claude-plugins-official` → `anthropics/claude-plugins-official`
 
 ### Supported Clients
 
@@ -108,12 +173,31 @@ clients:
 | factory | `.factory/commands/` | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` |
 | ampcode | N/A | N/A | `AGENTS.md` | No |
 
+## Marketplace Structure
+
+Marketplaces contain multiple plugins:
+
+```
+my-marketplace/
+├── plugins/
+│   ├── code-review/
+│   │   ├── plugin.json
+│   │   ├── commands/
+│   │   └── skills/
+│   └── debugging/
+│       ├── plugin.json
+│       ├── commands/
+│       └── skills/
+└── README.md
+```
+
 ## Plugin Structure
 
-Plugins should follow this directory structure:
+Each plugin follows this structure:
 
 ```
 my-plugin/
+├── plugin.json         # Plugin metadata
 ├── commands/           # Command files (.md)
 │   ├── build.md
 │   └── deploy.md
@@ -144,14 +228,15 @@ model: claude-3-opus    # Optional
 Skill instructions go here...
 ```
 
-## Plugin Cache
+## Storage Locations
 
-Remote plugins are cached at:
 ```
-~/.allagents/plugins/marketplaces/<repo-name>/
+~/.allagents/
+├── marketplaces.json              # Registry of marketplaces
+└── marketplaces/                  # Cloned marketplace repos
+    ├── claude-plugins-official/
+    └── someuser-their-repo/
 ```
-
-Use `allagents plugin list` to see cached plugins and `allagents plugin update` to refresh them.
 
 ## Development
 
