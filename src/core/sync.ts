@@ -13,7 +13,7 @@ import {
   parseGitHubUrl,
 } from '../utils/plugin-path.js';
 import { fetchPlugin } from './plugin.js';
-import { copyPluginToWorkspace, type CopyResult } from './transform.js';
+import { copyPluginToWorkspace, copyWorkspaceFiles, type CopyResult } from './transform.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import {
   isPluginSpec,
@@ -116,6 +116,13 @@ export async function purgeWorkspace(
       purgedPaths.push(mapping.hooksPath);
     }
 
+    // Purge agents directory
+    if (mapping.agentsPath) {
+      const agentsDir = join(workspacePath, mapping.agentsPath);
+      await rm(agentsDir, { recursive: true, force: true });
+      purgedPaths.push(mapping.agentsPath);
+    }
+
     // Purge agent file
     const agentPath = join(workspacePath, mapping.agentFile);
     if (existsSync(agentPath)) {
@@ -158,6 +165,11 @@ export function getPurgePaths(
     // Check hooks directory
     if (mapping.hooksPath && existsSync(join(workspacePath, mapping.hooksPath))) {
       paths.push(mapping.hooksPath);
+    }
+
+    // Check agents directory
+    if (mapping.agentsPath && existsSync(join(workspacePath, mapping.agentsPath))) {
+      paths.push(mapping.agentsPath);
     }
 
     // Check agent file
@@ -356,7 +368,28 @@ export async function syncWorkspace(
     force,
   );
 
-  // Check if any validation failed
+  // Step 1b: Validate workspace.source if defined
+  let validatedWorkspaceSource: ValidatedPlugin | null = null;
+  if (config.workspace?.source) {
+    validatedWorkspaceSource = await validatePlugin(
+      config.workspace.source,
+      workspacePath,
+      force,
+    );
+    if (!validatedWorkspaceSource.success) {
+      return {
+        success: false,
+        pluginResults: [],
+        totalCopied: 0,
+        totalFailed: 1,
+        totalSkipped: 0,
+        totalGenerated: 0,
+        error: `Workspace source validation failed: ${validatedWorkspaceSource.error}`,
+      };
+    }
+  }
+
+  // Check if any plugin validation failed
   const failedValidations = validatedPlugins.filter((v) => !v.success);
   if (failedValidations.length > 0) {
     // Return early - workspace unchanged
@@ -395,7 +428,18 @@ export async function syncWorkspace(
     ),
   );
 
-  // Count results
+  // Step 5: Copy workspace files if configured
+  let workspaceFileResults: CopyResult[] = [];
+  if (config.workspace && validatedWorkspaceSource) {
+    workspaceFileResults = await copyWorkspaceFiles(
+      validatedWorkspaceSource.resolved,
+      workspacePath,
+      config.workspace.files,
+      { dryRun },
+    );
+  }
+
+  // Count results from plugins
   let totalCopied = 0;
   let totalFailed = 0;
   let totalSkipped = 0;
@@ -417,6 +461,21 @@ export async function syncWorkspace(
           totalGenerated++;
           break;
       }
+    }
+  }
+
+  // Count results from workspace files
+  for (const result of workspaceFileResults) {
+    switch (result.action) {
+      case 'copied':
+        totalCopied++;
+        break;
+      case 'failed':
+        totalFailed++;
+        break;
+      case 'skipped':
+        totalSkipped++;
+        break;
     }
   }
 

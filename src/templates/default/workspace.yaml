@@ -1,3 +1,12 @@
+# Workspace root files (optional)
+# workspace:
+#   source: ./path/to/config  # local path, GitHub URL, or plugin@marketplace
+#   files:
+#     - CLAUDE.md
+#     - AGENTS.md
+#     - source: docs/CLAUDE.md  # explicit source/dest mapping
+#       dest: CLAUDE.md
+
 repositories: []
 
 plugins: []

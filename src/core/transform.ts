@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
-import type { ClientType } from '../models/workspace-config.js';
+import type { ClientType, WorkspaceFile } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
 
 /**
@@ -227,117 +227,71 @@ export async function copyHooks(
 }
 
 /**
- * Get the appropriate source agent file for a client
- * Implements source precedence: client-specific file → AGENTS.md
- * @param pluginPath - Path to plugin directory
- * @param client - Target client type
- * @returns Path to source agent file, or null if none found
- */
-export function getSourceAgentFile(
-  pluginPath: string,
-  client: ClientType,
-): string | null {
-  const mapping = CLIENT_MAPPINGS[client];
-
-  // Check for client-specific agent file first
-  const clientAgentFile = join(pluginPath, mapping.agentFile);
-  if (existsSync(clientAgentFile)) {
-    return clientAgentFile;
-  }
-
-  // Fall back to AGENTS.md if specified
-  if (mapping.agentFileFallback) {
-    const fallbackFile = join(pluginPath, mapping.agentFileFallback);
-    if (existsSync(fallbackFile)) {
-      return fallbackFile;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Workspace rules to append to agent files
- */
-const WORKSPACE_RULES = `
-<!-- WORKSPACE-RULES:START -->
-# Workspace Rules
-
-## Rule: Workspace Discovery
-TRIGGER: Any task
-ACTION: Read \`workspace.yaml\` to get repository paths and project domains
-
-## Rule: Correct Repository Paths
-TRIGGER: File operations (read, search, modify)
-ACTION: Use repository paths from \`workspace.yaml\`, not assumptions
-<!-- WORKSPACE-RULES:END -->
-`;
-
-/**
- * Copy and create agent files for a specific client
- * Appends workspace rules to agent files
+ * Copy agents from plugin to workspace for a specific client
+ * Agents are subagent definitions (.md files) that can be spawned via Task tool
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
  * @param options - Copy options (dryRun)
- * @returns Copy result
+ * @returns Array of copy results
  */
-export async function copyAgentFile(
+export async function copyAgents(
   pluginPath: string,
   workspacePath: string,
   client: ClientType,
   options: CopyOptions = {},
-): Promise<CopyResult> {
+): Promise<CopyResult[]> {
   const { dryRun = false } = options;
   const mapping = CLIENT_MAPPINGS[client];
-  const destPath = join(workspacePath, mapping.agentFile);
+  const results: CopyResult[] = [];
 
-  const sourcePath = getSourceAgentFile(pluginPath, client);
-
-  // Skip if plugin has no agent file
-  if (!sourcePath) {
-    return {
-      source: '',
-      destination: destPath,
-      action: 'skipped',
-    };
+  // Skip if client doesn't support agents
+  if (!mapping.agentsPath) {
+    return results;
   }
 
-  if (dryRun) {
-    return {
-      source: sourcePath,
-      destination: destPath,
-      action: 'copied',
-    };
+  const sourceDir = join(pluginPath, 'agents');
+  if (!existsSync(sourceDir)) {
+    return results;
   }
 
-  try {
-    let content = await readFile(sourcePath, 'utf-8');
+  const destDir = join(workspacePath, mapping.agentsPath);
+  if (!dryRun) {
+    await mkdir(destDir, { recursive: true });
+  }
 
-    // Append workspace rules if not already present
-    if (!content.includes('WORKSPACE-RULES:START')) {
-      content = `${content.trimEnd()}\n${WORKSPACE_RULES}`;
+  const files = await readdir(sourceDir);
+  const mdFiles = files.filter((f) => f.endsWith('.md'));
+
+  // Process files in parallel for better performance
+  const copyPromises = mdFiles.map(async (file): Promise<CopyResult> => {
+    const sourcePath = join(sourceDir, file);
+    const destPath = join(destDir, file);
+
+    if (dryRun) {
+      return { source: sourcePath, destination: destPath, action: 'copied' };
     }
 
-    await writeFile(destPath, content, 'utf-8');
+    try {
+      const content = await readFile(sourcePath, 'utf-8');
+      await writeFile(destPath, content, 'utf-8');
+      return { source: sourcePath, destination: destPath, action: 'copied' };
+    } catch (error) {
+      return {
+        source: sourcePath,
+        destination: destPath,
+        action: 'failed',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  });
 
-    return {
-      source: sourcePath,
-      destination: destPath,
-      action: 'copied',
-    };
-  } catch (error) {
-    return {
-      source: sourcePath || 'generated',
-      destination: destPath,
-      action: 'failed',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
+  return Promise.all(copyPromises);
 }
 
 /**
  * Copy all plugin content to workspace for a specific client
+ * Plugins provide: commands, skills, hooks, agents
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
@@ -351,13 +305,83 @@ export async function copyPluginToWorkspace(
   options: CopyOptions = {},
 ): Promise<CopyResult[]> {
   // Run copy operations in parallel for better performance
-  const [commandResults, skillResults, hookResults, agentResult] =
-    await Promise.all([
-      copyCommands(pluginPath, workspacePath, client, options),
-      copySkills(pluginPath, workspacePath, client, options),
-      copyHooks(pluginPath, workspacePath, client, options),
-      copyAgentFile(pluginPath, workspacePath, client, options),
-    ]);
+  const [commandResults, skillResults, hookResults, agentResults] = await Promise.all([
+    copyCommands(pluginPath, workspacePath, client, options),
+    copySkills(pluginPath, workspacePath, client, options),
+    copyHooks(pluginPath, workspacePath, client, options),
+    copyAgents(pluginPath, workspacePath, client, options),
+  ]);
 
-  return [...commandResults, ...skillResults, ...hookResults, agentResult];
+  return [...commandResults, ...skillResults, ...hookResults, ...agentResults];
+}
+
+/**
+ * Normalize workspace file entry to explicit form
+ * @param file - String shorthand or explicit source/dest object
+ * @returns Normalized object with source and dest
+ */
+function normalizeWorkspaceFile(
+  file: WorkspaceFile,
+): { source: string; dest: string } {
+  if (typeof file === 'string') {
+    return { source: file, dest: file };
+  }
+  return {
+    source: file.source,
+    dest: file.dest ?? file.source.split('/').pop()!, // basename
+  };
+}
+
+/**
+ * Copy workspace files from source to workspace root
+ * @param sourcePath - Path to source directory (resolved workspace.source)
+ * @param workspacePath - Path to workspace directory
+ * @param files - Array of workspace file entries
+ * @param options - Copy options (dryRun)
+ * @returns Array of copy results
+ */
+export async function copyWorkspaceFiles(
+  sourcePath: string,
+  workspacePath: string,
+  files: WorkspaceFile[],
+  options: CopyOptions = {},
+): Promise<CopyResult[]> {
+  const { dryRun = false } = options;
+  const results: CopyResult[] = [];
+
+  for (const file of files) {
+    const normalized = normalizeWorkspaceFile(file);
+    const srcPath = join(sourcePath, normalized.source);
+    const destPath = join(workspacePath, normalized.dest);
+
+    if (!existsSync(srcPath)) {
+      results.push({
+        source: srcPath,
+        destination: destPath,
+        action: 'failed',
+        error: `Source file not found: ${srcPath}`,
+      });
+      continue;
+    }
+
+    if (dryRun) {
+      results.push({ source: srcPath, destination: destPath, action: 'copied' });
+      continue;
+    }
+
+    try {
+      const content = await readFile(srcPath, 'utf-8');
+      await writeFile(destPath, content, 'utf-8');
+      results.push({ source: srcPath, destination: destPath, action: 'copied' });
+    } catch (error) {
+      results.push({
+        source: srcPath,
+        destination: destPath,
+        action: 'failed',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  return results;
 }

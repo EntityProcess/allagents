@@ -10,6 +10,7 @@ import {
   addMarketplace,
   getWellKnownMarketplaces,
   resolvePluginSpec,
+  parsePluginSpec,
 } from './marketplace.js';
 
 /**
@@ -52,6 +53,14 @@ export async function addPlugin(
 
   // Handle plugin@marketplace format
   if (isPluginSpec(plugin)) {
+    const parsed = parsePluginSpec(plugin);
+    if (!parsed) {
+      return {
+        success: false,
+        error: `Invalid plugin spec: ${plugin}`,
+      };
+    }
+
     const autoRegResult = await ensureMarketplaceRegistered(plugin);
     if (!autoRegResult.success) {
       return {
@@ -60,23 +69,23 @@ export async function addPlugin(
       };
     }
 
-    // Verify the plugin exists in the marketplace
-    const resolved = await resolvePluginSpec(plugin);
+    // Verify the plugin exists in the marketplace (pass subpath if specified)
+    const resolved = await resolvePluginSpec(plugin, {
+      subpath: parsed.subpath,
+    });
     if (!resolved) {
-      const atIndex = plugin.lastIndexOf('@');
-      const pluginName = plugin.slice(0, atIndex);
-      const marketplaceName = plugin.slice(atIndex + 1);
       const marketplace = await getMarketplace(
-        autoRegResult.registeredAs || marketplaceName,
+        autoRegResult.registeredAs || parsed.marketplaceName,
       );
+      const expectedSubpath = parsed.subpath ?? 'plugins';
 
       return {
         success: false,
-        error: `Plugin '${pluginName}' not found in marketplace '${marketplaceName}'\n  Expected at: ${marketplace?.path ?? `~/.allagents/marketplaces/${marketplaceName}`}/plugins/${pluginName}/`,
+        error: `Plugin '${parsed.plugin}' not found in marketplace '${parsed.marketplaceName}'\n  Expected at: ${marketplace?.path ?? `~/.allagents/marketplaces/${parsed.marketplaceName}`}/${expectedSubpath}/${parsed.plugin}/`,
       };
     }
 
-    // Add to workspace.yaml (use the original spec or the resolved one)
+    // Add to workspace.yaml (use the original spec or normalized one with repo name)
     return await addPluginToConfig(
       autoRegResult.registeredAs
         ? plugin.replace(/@[^@]+$/, `@${autoRegResult.registeredAs}`)
@@ -145,17 +154,26 @@ async function ensureMarketplaceRegistered(
     return { success: true, registeredAs: marketplaceName };
   }
 
-  // owner/repo format
+  // owner/repo or owner/repo/subpath format
   if (marketplaceName.includes('/') && !marketplaceName.includes('://')) {
     const parts = marketplaceName.split('/');
-    if (parts.length === 2 && parts[0] && parts[1]) {
-      console.log(`Auto-registering GitHub marketplace: ${marketplaceName}`);
-      const repoName = parts[1];
-      const result = await addMarketplace(marketplaceName, repoName);
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      const owner = parts[0];
+      const repo = parts[1];
+      const ownerRepo = `${owner}/${repo}`;
+
+      // Check if this marketplace is already registered by repo name
+      const existingByRepo = await getMarketplace(repo);
+      if (existingByRepo) {
+        return { success: true, registeredAs: repo };
+      }
+
+      console.log(`Auto-registering GitHub marketplace: ${ownerRepo}`);
+      const result = await addMarketplace(ownerRepo, repo);
       if (!result.success) {
         return { success: false, error: result.error || 'Unknown error' };
       }
-      return { success: true, registeredAs: repoName };
+      return { success: true, registeredAs: repo };
     }
   }
 

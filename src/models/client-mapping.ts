@@ -7,6 +7,7 @@ export interface ClientMapping {
   commandsPath: string;
   commandsExt: string;
   skillsPath: string;
+  agentsPath?: string;
   agentFile: string;
   agentFileFallback?: string;
   hooksPath?: string;
@@ -20,6 +21,7 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     commandsPath: '.claude/commands/',
     commandsExt: '.md',
     skillsPath: '.claude/skills/',
+    agentsPath: '.claude/agents/',
     agentFile: 'CLAUDE.md',
     agentFileFallback: 'AGENTS.md',
     hooksPath: '.claude/hooks/',
