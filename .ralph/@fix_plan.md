@@ -80,11 +80,11 @@
   - [ ] Add comprehensive integration tests (deferred)
 
 ## Phase 5: Additional Commands (Medium Priority)
-- [ ] Implement `allagents workspace status`
-  - [ ] Check cache status for remote plugins
-  - [ ] Check timestamps for local plugins
-  - [ ] Display formatted table
-  - [ ] Add integration test
+- [x] Implement `allagents workspace status`
+  - [x] Check cache status for remote plugins
+  - [x] Check path existence for local plugins
+  - [x] Display formatted list with status icons
+  - [ ] Add integration test (deferred)
 - [ ] Implement `allagents workspace add <plugin>`
   - [ ] Validate plugin source
   - [ ] Update workspace.yaml

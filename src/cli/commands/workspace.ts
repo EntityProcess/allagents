@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { initWorkspace } from '../../core/workspace.js';
 import { syncWorkspace } from '../../core/sync.js';
+import { getWorkspaceStatus } from '../../core/status.js';
 
 export const workspaceCommand = new Command('workspace').description('Manage workspaces');
 
@@ -82,8 +83,43 @@ workspaceCommand
 workspaceCommand
   .command('status')
   .description('Show sync status of plugins')
-  .action(() => {
-    console.log('TODO: Show workspace status');
+  .action(async () => {
+    try {
+      const result = await getWorkspaceStatus();
+
+      if (!result.success) {
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+
+      // Display plugins
+      console.log(`Plugins (${result.plugins.length}):`);
+      if (result.plugins.length === 0) {
+        console.log('  No plugins configured');
+      } else {
+        for (const plugin of result.plugins) {
+          const status = plugin.available ? '✓' : '✗';
+          const typeLabel = plugin.type === 'github'
+            ? (plugin.available ? 'cached' : 'not cached')
+            : 'local';
+          console.log(`  ${status} ${plugin.source} (${typeLabel})`);
+        }
+      }
+
+      // Display clients
+      console.log(`\nClients (${result.clients.length}):`);
+      if (result.clients.length === 0) {
+        console.log('  No clients configured');
+      } else {
+        console.log(`  ${result.clients.join(', ')}`);
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
   });
 
 workspaceCommand
