@@ -24,10 +24,18 @@ workspaceCommand
 workspaceCommand
   .command('sync')
   .description('Sync plugins to workspace')
-  .action(async () => {
+  .option('-f, --force', 'Force re-fetch of remote plugins even if cached')
+  .option('-n, --dry-run', 'Simulate sync without making changes')
+  .action(async (options: { force?: boolean; dryRun?: boolean }) => {
     try {
+      const force = options.force ?? false;
+      const dryRun = options.dryRun ?? false;
+
+      if (dryRun) {
+        console.log('Dry run mode - no changes will be made\n');
+      }
       console.log('Syncing workspace...\n');
-      const result = await syncWorkspace();
+      const result = await syncWorkspace(process.cwd(), { force, dryRun });
 
       if (!result.success) {
         console.error(`Error: ${result.error}`);
@@ -60,8 +68,8 @@ workspaceCommand
       }
 
       // Print summary
-      console.log(`\nSync complete:`);
-      console.log(`  Total copied: ${result.totalCopied}`);
+      console.log(`\nSync complete${dryRun ? ' (dry run)' : ''}:`);
+      console.log(`  Total ${dryRun ? 'would copy' : 'copied'}: ${result.totalCopied}`);
       if (result.totalFailed > 0) {
         console.log(`  Total failed: ${result.totalFailed}`);
       }

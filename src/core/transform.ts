@@ -16,17 +16,28 @@ export interface CopyResult {
 }
 
 /**
+ * Options for copy operations
+ */
+export interface CopyOptions {
+  /** Simulate copy without making changes */
+  dryRun?: boolean;
+}
+
+/**
  * Copy commands from plugin to workspace for a specific client
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
+ * @param options - Copy options (dryRun)
  * @returns Array of copy results
  */
 export async function copyCommands(
   pluginPath: string,
   workspacePath: string,
-  client: ClientType
+  client: ClientType,
+  options: CopyOptions = {}
 ): Promise<CopyResult[]> {
+  const { dryRun = false } = options;
   const mapping = CLIENT_MAPPINGS[client];
   const results: CopyResult[] = [];
 
@@ -41,7 +52,9 @@ export async function copyCommands(
   }
 
   const destDir = join(workspacePath, mapping.commandsPath);
-  await mkdir(destDir, { recursive: true });
+  if (!dryRun) {
+    await mkdir(destDir, { recursive: true });
+  }
 
   const files = await readdir(sourceDir);
   const mdFiles = files.filter((f) => f.endsWith('.md'));
@@ -56,6 +69,11 @@ export async function copyCommands(
     }
 
     const destPath = join(destDir, destFileName);
+
+    if (dryRun) {
+      results.push({ source: sourcePath, destination: destPath, action: 'copied' });
+      continue;
+    }
 
     try {
       const content = await readFile(sourcePath, 'utf-8');
@@ -80,13 +98,16 @@ export async function copyCommands(
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
+ * @param options - Copy options (dryRun)
  * @returns Array of copy results
  */
 export async function copySkills(
   pluginPath: string,
   workspacePath: string,
-  client: ClientType
+  client: ClientType,
+  options: CopyOptions = {}
 ): Promise<CopyResult[]> {
+  const { dryRun = false } = options;
   const mapping = CLIENT_MAPPINGS[client];
   const results: CopyResult[] = [];
 
@@ -101,7 +122,9 @@ export async function copySkills(
   }
 
   const destDir = join(workspacePath, mapping.skillsPath);
-  await mkdir(destDir, { recursive: true });
+  if (!dryRun) {
+    await mkdir(destDir, { recursive: true });
+  }
 
   const entries = await readdir(sourceDir, { withFileTypes: true });
   const skillDirs = entries.filter((e) => e.isDirectory());
@@ -119,6 +142,11 @@ export async function copySkills(
         action: 'failed',
         ...(validation.error && { error: validation.error }),
       });
+      continue;
+    }
+
+    if (dryRun) {
+      results.push({ source: skillSourcePath, destination: skillDestPath, action: 'copied' });
       continue;
     }
 
@@ -144,13 +172,16 @@ export async function copySkills(
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
+ * @param options - Copy options (dryRun)
  * @returns Array of copy results
  */
 export async function copyHooks(
   pluginPath: string,
   workspacePath: string,
-  client: ClientType
+  client: ClientType,
+  options: CopyOptions = {}
 ): Promise<CopyResult[]> {
+  const { dryRun = false } = options;
   const mapping = CLIENT_MAPPINGS[client];
   const results: CopyResult[] = [];
 
@@ -165,6 +196,12 @@ export async function copyHooks(
   }
 
   const destDir = join(workspacePath, mapping.hooksPath);
+
+  if (dryRun) {
+    results.push({ source: sourceDir, destination: destDir, action: 'copied' });
+    return results;
+  }
+
   await mkdir(destDir, { recursive: true });
 
   try {
@@ -232,17 +269,28 @@ ACTION: Use repository paths from \`workspace.yaml\`, not assumptions
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
+ * @param options - Copy options (dryRun)
  * @returns Copy result
  */
 export async function copyAgentFile(
   pluginPath: string,
   workspacePath: string,
-  client: ClientType
+  client: ClientType,
+  options: CopyOptions = {}
 ): Promise<CopyResult> {
+  const { dryRun = false } = options;
   const mapping = CLIENT_MAPPINGS[client];
   const destPath = join(workspacePath, mapping.agentFile);
 
   const sourcePath = getSourceAgentFile(pluginPath, client);
+
+  if (dryRun) {
+    return {
+      source: sourcePath || 'generated',
+      destination: destPath,
+      action: 'copied',
+    };
+  }
 
   try {
     let content = '';
@@ -278,29 +326,31 @@ export async function copyAgentFile(
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
+ * @param options - Copy options (dryRun)
  * @returns All copy results
  */
 export async function copyPluginToWorkspace(
   pluginPath: string,
   workspacePath: string,
-  client: ClientType
+  client: ClientType,
+  options: CopyOptions = {}
 ): Promise<CopyResult[]> {
   const results: CopyResult[] = [];
 
   // Copy commands
-  const commandResults = await copyCommands(pluginPath, workspacePath, client);
+  const commandResults = await copyCommands(pluginPath, workspacePath, client, options);
   results.push(...commandResults);
 
   // Copy skills
-  const skillResults = await copySkills(pluginPath, workspacePath, client);
+  const skillResults = await copySkills(pluginPath, workspacePath, client, options);
   results.push(...skillResults);
 
   // Copy hooks
-  const hookResults = await copyHooks(pluginPath, workspacePath, client);
+  const hookResults = await copyHooks(pluginPath, workspacePath, client, options);
   results.push(...hookResults);
 
   // Copy/create agent file
-  const agentResult = await copyAgentFile(pluginPath, workspacePath, client);
+  const agentResult = await copyAgentFile(pluginPath, workspacePath, client, options);
   results.push(agentResult);
 
   return results;

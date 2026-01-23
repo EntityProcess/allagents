@@ -95,8 +95,8 @@
   - [ ] Add integration test (deferred)
 
 ## Phase 6: Polish (Medium Priority)
-- [ ] Add --force flag support to workspace sync
-- [ ] Add --dry-run flag support to workspace sync
+- [x] Add --force flag support to workspace sync
+- [x] Add --dry-run flag support to workspace sync
 - [ ] Improve error messages with actionable guidance
 - [ ] Add comprehensive documentation
   - [ ] README with examples

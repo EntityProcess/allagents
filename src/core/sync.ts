@@ -30,11 +30,26 @@ export interface PluginSyncResult {
 }
 
 /**
+ * Options for workspace sync
+ */
+export interface SyncOptions {
+  /** Force re-fetch of remote plugins even if cached */
+  force?: boolean;
+  /** Simulate sync without making changes */
+  dryRun?: boolean;
+}
+
+/**
  * Sync all plugins to workspace for all configured clients
  * @param workspacePath - Path to workspace directory (defaults to current directory)
+ * @param options - Sync options (force, dryRun)
  * @returns Sync result
  */
-export async function syncWorkspace(workspacePath: string = process.cwd()): Promise<SyncResult> {
+export async function syncWorkspace(
+  workspacePath: string = process.cwd(),
+  options: SyncOptions = {}
+): Promise<SyncResult> {
+  const { force = false, dryRun = false } = options;
   const configPath = join(workspacePath, 'workspace.yaml');
 
   // Check workspace.yaml exists
@@ -71,7 +86,7 @@ export async function syncWorkspace(workspacePath: string = process.cwd()): Prom
 
   // Process each plugin
   for (const pluginSource of config.plugins) {
-    const pluginResult = await syncPlugin(pluginSource, workspacePath, config.clients);
+    const pluginResult = await syncPlugin(pluginSource, workspacePath, config.clients, { force, dryRun });
     pluginResults.push(pluginResult);
 
     // Count results
@@ -92,8 +107,8 @@ export async function syncWorkspace(workspacePath: string = process.cwd()): Prom
 
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
 
-  // Create git commit if successful
-  if (!hasFailures) {
+  // Create git commit if successful (skip in dry-run mode)
+  if (!hasFailures && !dryRun) {
     try {
       const git = simpleGit(workspacePath);
       await git.add('.');
@@ -136,21 +151,24 @@ Timestamp: ${timestamp}`);
  * @param pluginSource - Plugin source (local path or GitHub URL)
  * @param workspacePath - Path to workspace directory
  * @param clients - List of clients to sync for
+ * @param options - Sync options
  * @returns Plugin sync result
  */
 async function syncPlugin(
   pluginSource: string,
   workspacePath: string,
-  clients: string[]
+  clients: string[],
+  options: SyncOptions = {}
 ): Promise<PluginSyncResult> {
+  const { force = false, dryRun = false } = options;
   const copyResults: CopyResult[] = [];
 
   // Resolve plugin path
   let resolvedPath: string;
 
   if (isGitHubUrl(pluginSource)) {
-    // Fetch remote plugin
-    const fetchResult = await fetchPlugin(pluginSource);
+    // Fetch remote plugin (with force option)
+    const fetchResult = await fetchPlugin(pluginSource, { force });
     if (!fetchResult.success) {
       return {
         plugin: pluginSource,
@@ -177,7 +195,7 @@ async function syncPlugin(
 
   // Copy plugin content for each client
   for (const client of clients) {
-    const results = await copyPluginToWorkspace(resolvedPath, workspacePath, client as any);
+    const results = await copyPluginToWorkspace(resolvedPath, workspacePath, client as any, { dryRun });
     copyResults.push(...results);
   }
 
