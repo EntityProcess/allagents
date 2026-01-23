@@ -85,15 +85,14 @@
   - [x] Check path existence for local plugins
   - [x] Display formatted list with status icons
   - [ ] Add integration test (deferred)
-- [ ] Implement `allagents workspace add <plugin>`
-  - [ ] Validate plugin source
-  - [ ] Update workspace.yaml
-  - [ ] Optional sync trigger
-  - [ ] Add integration test
-- [ ] Implement `allagents workspace remove <plugin>`
-  - [ ] Remove from workspace.yaml
-  - [ ] Optional cleanup
-  - [ ] Add integration test
+- [x] Implement `allagents workspace add <plugin>`
+  - [x] Validate plugin source
+  - [x] Update workspace.yaml
+  - [x] Helpful message to run sync
+  - [ ] Add integration test (deferred)
+- [x] Implement `allagents workspace remove <plugin>`
+  - [x] Remove from workspace.yaml
+  - [ ] Add integration test (deferred)
 
 ## Phase 6: Polish (Medium Priority)
 - [ ] Add --force flag support to workspace sync

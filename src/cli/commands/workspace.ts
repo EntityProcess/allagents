@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { initWorkspace } from '../../core/workspace.js';
 import { syncWorkspace } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
+import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
 
 export const workspaceCommand = new Command('workspace').description('Manage workspaces');
 
@@ -125,13 +126,44 @@ workspaceCommand
 workspaceCommand
   .command('add <plugin>')
   .description('Add plugin to workspace.yaml')
-  .action((plugin: string) => {
-    console.log(`TODO: Add plugin ${plugin}`);
+  .action(async (plugin: string) => {
+    try {
+      const result = await addPlugin(plugin);
+
+      if (!result.success) {
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+
+      console.log(`✓ Added plugin: ${plugin}`);
+      console.log('\nRun "allagents workspace sync" to fetch and sync the plugin.');
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
   });
 
 workspaceCommand
   .command('remove <plugin>')
   .description('Remove plugin from workspace.yaml')
-  .action((plugin: string) => {
-    console.log(`TODO: Remove plugin ${plugin}`);
+  .action(async (plugin: string) => {
+    try {
+      const result = await removePlugin(plugin);
+
+      if (!result.success) {
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+
+      console.log(`✓ Removed plugin: ${plugin}`);
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
   });
