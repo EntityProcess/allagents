@@ -1,22 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { writeFile, rm, mkdir } from 'fs/promises';
 import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { parseWorkspaceConfig } from '../../../src/utils/workspace-parser.js';
 
-const TEST_DIR = '/tmp/allagents-test-workspace-parser';
-const TEST_CONFIG = join(TEST_DIR, 'workspace.yaml');
-
-beforeEach(async () => {
-  await mkdir(TEST_DIR, { recursive: true });
-});
-
-afterEach(async () => {
-  await rm(TEST_DIR, { recursive: true, force: true });
-});
+function createTestDir(): string {
+  return `/tmp/allagents-parser-${randomUUID()}`;
+}
 
 describe('parseWorkspaceConfig', () => {
   it('should parse valid workspace config', async () => {
-    const validConfig = `
+    const testDir = createTestDir();
+    await mkdir(testDir, { recursive: true });
+    try {
+      const configPath = join(testDir, 'workspace.yaml');
+      const validConfig = `
 repositories:
   - path: ../allagents
     owner: EntityProcess
@@ -29,26 +27,36 @@ plugins:
 clients:
   - claude
 `;
-    await writeFile(TEST_CONFIG, validConfig);
+      await writeFile(configPath, validConfig);
 
-    const result = await parseWorkspaceConfig(TEST_CONFIG);
+      const result = await parseWorkspaceConfig(configPath);
 
-    expect(result.repositories).toHaveLength(1);
-    expect(result.repositories[0]?.path).toBe('../allagents');
-    expect(result.plugins).toHaveLength(1);
-    expect(result.clients).toContain('claude');
+      expect(result.repositories).toHaveLength(1);
+      expect(result.repositories[0]?.path).toBe('../allagents');
+      expect(result.plugins).toHaveLength(1);
+      expect(result.clients).toContain('claude');
+    } finally {
+      await rm(testDir, { recursive: true, force: true });
+    }
   });
 
   it('should reject invalid client type', async () => {
-    const invalidConfig = `
+    const testDir = createTestDir();
+    await mkdir(testDir, { recursive: true });
+    try {
+      const configPath = join(testDir, 'workspace.yaml');
+      const invalidConfig = `
 repositories: []
 plugins: []
 clients:
   - invalid-client
 `;
-    await writeFile(TEST_CONFIG, invalidConfig);
+      await writeFile(configPath, invalidConfig);
 
-    await expect(parseWorkspaceConfig(TEST_CONFIG)).rejects.toThrow('validation failed');
+      await expect(parseWorkspaceConfig(configPath)).rejects.toThrow('validation failed');
+    } finally {
+      await rm(testDir, { recursive: true, force: true });
+    }
   });
 
   it('should throw error for missing file', async () => {
@@ -58,21 +66,35 @@ clients:
   });
 
   it('should throw error for empty file', async () => {
-    await writeFile(TEST_CONFIG, '');
+    const testDir = createTestDir();
+    await mkdir(testDir, { recursive: true });
+    try {
+      const configPath = join(testDir, 'workspace.yaml');
+      await writeFile(configPath, '');
 
-    await expect(parseWorkspaceConfig(TEST_CONFIG)).rejects.toThrow('workspace.yaml is empty');
+      await expect(parseWorkspaceConfig(configPath)).rejects.toThrow('workspace.yaml is empty');
+    } finally {
+      await rm(testDir, { recursive: true, force: true });
+    }
   });
 
   it('should throw error for missing required fields', async () => {
-    const invalidConfig = `
+    const testDir = createTestDir();
+    await mkdir(testDir, { recursive: true });
+    try {
+      const configPath = join(testDir, 'workspace.yaml');
+      const invalidConfig = `
 repositories:
   - path: ../test
     # missing owner, repo, description
 plugins: []
 clients: []
 `;
-    await writeFile(TEST_CONFIG, invalidConfig);
+      await writeFile(configPath, invalidConfig);
 
-    await expect(parseWorkspaceConfig(TEST_CONFIG)).rejects.toThrow('validation failed');
+      await expect(parseWorkspaceConfig(configPath)).rejects.toThrow('validation failed');
+    } finally {
+      await rm(testDir, { recursive: true, force: true });
+    }
   });
 });
