@@ -84,26 +84,26 @@ plugins:
   - [x] `listMarketplacePlugins(marketplace)` - enumerate plugins from marketplace
   - [x] `resolvePluginSpec(spec)` - resolve `plugin@marketplace` to local path
   - [ ] `validatePlugin(path)` - validate plugin structure
-- [ ] Update workspace.yaml format
-  - [ ] Support `plugin@marketplace` syntax
-  - [ ] Support shorthand (assumes default marketplace if unambiguous)
+- [x] Update workspace.yaml format
+  - [x] Support `plugin@marketplace` syntax
+  - [x] Support shorthand (assumes default marketplace if unambiguous) - N/A, use full spec
 
 ## Phase D: Update Workspace Sync & Auto-Registration
-- [ ] Modify `src/core/sync.ts`
-  - [ ] Parse plugin specs as `plugin@marketplace`
-  - [ ] Ensure marketplace is registered/cloned
-  - [ ] Resolve plugin path within marketplace
-  - [ ] Copy plugin content to workspace
-- [ ] Implement auto-registration in `workspace plugin add`
-  - [ ] Accept `plugin@marketplace` format
-  - [ ] If marketplace unknown:
-    - [ ] Known names (e.g., `claude-plugins-official`) → auto-register from well-known GitHub
-    - [ ] Full spec (`plugin@owner/repo`) → auto-register GitHub marketplace
-    - [ ] Otherwise → error with helpful message
-  - [ ] Add marketplace to registry, then add plugin to workspace.yaml
-- [ ] Create well-known marketplaces config
-  - [ ] `claude-plugins-official` → `anthropics/claude-plugins-official`
-  - [ ] Extensible for future additions
+- [x] Modify `src/core/sync.ts`
+  - [x] Parse plugin specs as `plugin@marketplace`
+  - [x] Ensure marketplace is registered/cloned
+  - [x] Resolve plugin path within marketplace
+  - [x] Copy plugin content to workspace
+- [x] Implement auto-registration in workspace sync
+  - [x] Accept `plugin@marketplace` format
+  - [x] If marketplace unknown:
+    - [x] Known names (e.g., `claude-plugins-official`) → auto-register from well-known GitHub
+    - [x] Full spec (`plugin@owner/repo`) → auto-register GitHub marketplace
+    - [x] Otherwise → error with helpful message
+  - [x] Add marketplace to registry, then resolve plugin
+- [x] Create well-known marketplaces config
+  - [x] `claude-plugins-official` → `anthropics/claude-plugins-official`
+  - [x] Extensible for future additions (WELL_KNOWN_MARKETPLACES constant)
 
 ## Phase E: Update Tests
 - [ ] Update unit tests for new plugin path format

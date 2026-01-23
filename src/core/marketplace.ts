@@ -203,37 +203,43 @@ export async function addMarketplace(
     // Clone GitHub repository
     marketplacePath = join(getMarketplacesDir(), name);
 
-    // Check if gh CLI is available
-    try {
-      await execa('gh', ['--version']);
-    } catch {
-      return {
-        success: false,
-        error: 'gh CLI not installed\n  Install: https://cli.github.com',
-      };
-    }
-
-    // Ensure parent directory exists
-    const parentDir = getMarketplacesDir();
-    if (!existsSync(parentDir)) {
-      await mkdir(parentDir, { recursive: true });
-    }
-
-    // Clone repository
-    try {
-      await execa('gh', ['repo', 'clone', parsed.location, marketplacePath]);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
+    // Check if directory already exists (from a previous partial registration)
+    if (existsSync(marketplacePath)) {
+      // Directory exists - just register it without cloning
+      // This handles the case where clone succeeded but registry wasn't updated
+    } else {
+      // Check if gh CLI is available
+      try {
+        await execa('gh', ['--version']);
+      } catch {
         return {
           success: false,
-          error: `Repository not found: ${parsed.location}`,
+          error: 'gh CLI not installed\n  Install: https://cli.github.com',
         };
       }
-      return {
-        success: false,
-        error: `Failed to clone marketplace: ${msg}`,
-      };
+
+      // Ensure parent directory exists
+      const parentDir = getMarketplacesDir();
+      if (!existsSync(parentDir)) {
+        await mkdir(parentDir, { recursive: true });
+      }
+
+      // Clone repository
+      try {
+        await execa('gh', ['repo', 'clone', parsed.location, marketplacePath]);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
+          return {
+            success: false,
+            error: `Repository not found: ${parsed.location}`,
+          };
+        }
+        return {
+          success: false,
+          error: `Failed to clone marketplace: ${msg}`,
+        };
+      }
     }
   } else {
     // Local directory - just verify it exists

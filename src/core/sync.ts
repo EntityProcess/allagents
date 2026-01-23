@@ -13,6 +13,13 @@ import {
 } from '../utils/plugin-path.js';
 import { fetchPlugin } from './plugin.js';
 import { copyPluginToWorkspace, type CopyResult } from './transform.js';
+import {
+  isPluginSpec,
+  resolvePluginSpec,
+  getMarketplace,
+  addMarketplace,
+  getWellKnownMarketplaces,
+} from './marketplace.js';
 
 /**
  * Result of a sync operation
@@ -134,6 +141,11 @@ export async function syncWorkspace(
       if (status.files.length > 0) {
         const timestamp = new Date().toISOString();
         const pluginNames = config.plugins.map((p) => {
+          // Handle plugin@marketplace format
+          if (isPluginSpec(p)) {
+            return p;
+          }
+          // Handle GitHub URLs
           const parsed = parsePluginSource(p);
           if (parsed.type === 'github' && parsed.owner && parsed.repo) {
             return `${parsed.owner}/${parsed.repo}`;
@@ -164,7 +176,12 @@ Timestamp: ${timestamp}`);
 
 /**
  * Sync a single plugin to workspace
- * @param pluginSource - Plugin source (local path or GitHub URL)
+ * Supports three formats:
+ * 1. plugin@marketplace (e.g., "code-review@claude-plugins-official")
+ * 2. GitHub URL (e.g., "https://github.com/owner/repo")
+ * 3. Local path (e.g., "./my-plugin" or "/absolute/path")
+ *
+ * @param pluginSource - Plugin source
  * @param workspacePath - Path to workspace directory
  * @param clients - List of clients to sync for
  * @param options - Sync options
@@ -179,10 +196,23 @@ async function syncPlugin(
   const { force = false, dryRun = false } = options;
   const copyResults: CopyResult[] = [];
 
-  // Resolve plugin path
+  // Resolve plugin path based on format
   let resolvedPath: string;
 
-  if (isGitHubUrl(pluginSource)) {
+  // Check for plugin@marketplace format first
+  if (isPluginSpec(pluginSource)) {
+    const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, force);
+    if (!resolved.success) {
+      return {
+        plugin: pluginSource,
+        resolved: '',
+        success: false,
+        copyResults,
+        error: resolved.error,
+      };
+    }
+    resolvedPath = resolved.path!;
+  } else if (isGitHubUrl(pluginSource)) {
     // Fetch remote plugin (with force option)
     const fetchResult = await fetchPlugin(pluginSource, { force });
     if (!fetchResult.success) {
@@ -231,5 +261,113 @@ async function syncPlugin(
     resolved: resolvedPath,
     success: !hasFailures,
     copyResults,
+  };
+}
+
+/**
+ * Resolve a plugin@marketplace spec with auto-registration support
+ *
+ * Auto-registration rules:
+ * 1. Well-known marketplace name → auto-register from known GitHub repo
+ * 2. plugin@owner/repo format → auto-register owner/repo as marketplace
+ * 3. Unknown short name → error with helpful message
+ */
+async function resolvePluginSpecWithAutoRegister(
+  spec: string,
+  force: boolean = false,
+): Promise<{ success: boolean; path?: string; error?: string }> {
+  // Parse plugin@marketplace
+  const atIndex = spec.lastIndexOf('@');
+  const pluginName = spec.slice(0, atIndex);
+  const marketplaceName = spec.slice(atIndex + 1);
+
+  if (!pluginName || !marketplaceName) {
+    return {
+      success: false,
+      error: `Invalid plugin spec format: ${spec}\n  Expected: plugin@marketplace`,
+    };
+  }
+
+  // Check if marketplace is already registered
+  let marketplace = await getMarketplace(marketplaceName);
+
+  // If not registered, try auto-registration
+  if (!marketplace) {
+    const autoRegResult = await autoRegisterMarketplace(marketplaceName);
+    if (!autoRegResult.success) {
+      return {
+        success: false,
+        error: autoRegResult.error,
+      };
+    }
+    marketplace = await getMarketplace(autoRegResult.name!);
+  }
+
+  if (!marketplace) {
+    return {
+      success: false,
+      error: `Marketplace '${marketplaceName}' not found`,
+    };
+  }
+
+  // Now resolve the plugin within the marketplace
+  const resolved = await resolvePluginSpec(spec);
+  if (!resolved) {
+    return {
+      success: false,
+      error: `Plugin '${pluginName}' not found in marketplace '${marketplaceName}'\n  Expected at: ${marketplace.path}/plugins/${pluginName}/`,
+    };
+  }
+
+  return {
+    success: true,
+    path: resolved.path,
+  };
+}
+
+/**
+ * Auto-register a marketplace by name
+ *
+ * Supports:
+ * 1. Well-known names (e.g., "claude-plugins-official" → anthropics/claude-plugins-official)
+ * 2. owner/repo format (e.g., "obra/superpowers" → github.com/obra/superpowers)
+ */
+async function autoRegisterMarketplace(
+  name: string,
+): Promise<{ success: boolean; name?: string; error?: string }> {
+  const wellKnown = getWellKnownMarketplaces();
+
+  // Check if it's a well-known marketplace name
+  if (wellKnown[name]) {
+    console.log(`Auto-registering well-known marketplace: ${name}`);
+    const result = await addMarketplace(name);
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+    return { success: true, name };
+  }
+
+  // Check if it's an owner/repo format
+  if (name.includes('/') && !name.includes('://')) {
+    const parts = name.split('/');
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      console.log(`Auto-registering GitHub marketplace: ${name}`);
+      const repoName = parts[1];
+      const result = await addMarketplace(name, repoName);
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+      return { success: true, name: repoName };
+    }
+  }
+
+  // Unknown marketplace name - provide helpful error
+  return {
+    success: false,
+    error: `Marketplace '${name}' not found.\n` +
+      `  Options:\n` +
+      `  1. Use fully qualified name: plugin@owner/repo\n` +
+      `  2. Register first: allagents plugin marketplace add <source>\n` +
+      `  3. Well-known marketplaces: ${Object.keys(wellKnown).join(', ')}`,
   };
 }
