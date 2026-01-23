@@ -6,8 +6,11 @@
   "bin": {
     "allagents": "./dist/cli/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "bun build ./src/cli/index.ts --outdir ./dist --target node",
+    "build": "bun build ./src/cli/index.ts --outdir ./dist --target node && cp -r src/templates dist/",
     "dev": "bun run src/cli/index.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",

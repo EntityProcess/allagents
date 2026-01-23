@@ -5,17 +5,15 @@ import simpleGit from 'simple-git';
 import { load, dump } from 'js-yaml';
 import type { WorkspaceConfig } from '../models/workspace-config.js';
 
-const TEMPLATE_DIR = 'templates/workspace-1';
-
 /**
  * Initialize a new workspace from template
  * @param targetPath - Path where workspace should be created
- * @param templateName - Name of template to use (default: workspace-1)
+ * @param templateName - Name of template to use (default: default)
  * @throws Error if path already exists or initialization fails
  */
 export async function initWorkspace(
   targetPath: string,
-  templateName: string = 'workspace-1'
+  templateName: string = 'default'
 ): Promise<void> {
   const absoluteTarget = resolve(targetPath);
 
@@ -26,26 +24,22 @@ export async function initWorkspace(
     );
   }
 
-  // Get template path
-  // In development: src/core/workspace.ts -> ../../templates
-  // In production (bundled): dist/index.js -> ../templates
+  // Get template path relative to this file
+  // In development: src/core/workspace.ts -> ../templates/
+  // In production: dist/index.js -> templates/ (same directory)
   const currentFilePath = new URL(import.meta.url).pathname;
-  let projectRoot: string;
+  const currentFileDir = dirname(currentFilePath);
 
-  if (currentFilePath.includes('/dist/')) {
-    // Bundled: dist/index.js -> go up one level
-    projectRoot = resolve(dirname(currentFilePath), '..');
-  } else {
-    // Development: src/core/workspace.ts -> go up two levels
-    projectRoot = resolve(dirname(currentFilePath), '../..');
-  }
-
-  const templatePath = join(projectRoot, 'templates', templateName);
+  // Bundled files are flat in dist/, source files are in src/core/
+  const isProduction = currentFilePath.includes('/dist/');
+  const templatePath = isProduction
+    ? join(currentFileDir, 'templates', templateName)
+    : join(currentFileDir, '..', 'templates', templateName);
 
   // Validate template exists
   if (!existsSync(templatePath)) {
     throw new Error(
-      `Template not found: ${templateName}\n  Available templates: workspace-1`
+      `Template not found: ${templateName}\n  Available templates: default`
     );
   }
 

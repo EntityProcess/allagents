@@ -35,10 +35,14 @@ allagents/
 │       ├── file.ts               # File operations
 │       ├── git.ts                # Git operations
 │       └── github.ts             # GitHub fetching
-├── templates/
-│   └── workspace-1/
-│       ├── AGENTS.md
-│       └── workspace.yaml
+│   └── templates/
+│       └── default/
+│           ├── AGENTS.md
+│           └── workspace.yaml
+├── examples/
+│   └── workspaces/
+│       └── multi-repo/
+│           └── workspace.yaml
 ├── tests/
 │   ├── unit/
 │   └── integration/              # BATS tests
@@ -141,7 +145,7 @@ const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
 **Behavior**:
 1. Validate path doesn't already exist
 2. Create directory structure
-3. Copy template files from `templates/workspace-1/`
+3. Copy template files from `src/templates/default/`
 4. Convert relative plugin paths to absolute paths in workspace.yaml
 5. Initialize git repository
 6. Create initial commit
@@ -365,7 +369,7 @@ Timestamp: 2026-01-22T10:30:00Z
 init: Create workspace from template
 
 Created workspace at: /path/to/workspace
-Template: workspace-1
+Template: default
 ```
 
 ## Performance Considerations

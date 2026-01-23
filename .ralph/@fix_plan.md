@@ -11,7 +11,7 @@
   - [x] PluginManifest interface (plugin.json)
   - [x] SkillMetadata interface (SKILL.md frontmatter)
   - [x] ClientMapping type and CLIENT_MAPPINGS constant
-- [x] Create workspace template in templates/workspace-1/
+- [x] Create workspace template in src/templates/default/
   - [x] AGENTS.md with workspace rules
   - [x] workspace.yaml example
 
