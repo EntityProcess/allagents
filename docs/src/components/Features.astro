@@ -1,0 +1,69 @@
+---
+interface Feature {
+  title: string;
+  description: string;
+  icon: string;
+}
+
+interface Props {
+  features?: Feature[];
+}
+
+const defaultFeatures: Feature[] = [
+  {
+    title: 'Lightning Fast',
+    description: 'Built for performance with optimized build times and minimal runtime overhead.',
+    icon: '⚡',
+  },
+  {
+    title: 'Type Safe',
+    description: 'Full TypeScript support with strict type checking out of the box.',
+    icon: '🔒',
+  },
+  {
+    title: 'Developer Experience',
+    description: 'Hot module replacement, intuitive APIs, and comprehensive documentation.',
+    icon: '🛠️',
+  },
+  {
+    title: 'Modern Stack',
+    description: 'Built with the latest technologies and best practices in mind.',
+    icon: '🚀',
+  },
+  {
+    title: 'Extensible',
+    description: 'Plugin architecture that allows you to extend functionality as needed.',
+    icon: '🔌',
+  },
+  {
+    title: 'Open Source',
+    description: 'MIT licensed and community driven. Contribute and help shape the future.',
+    icon: '💜',
+  },
+];
+
+const { features = defaultFeatures } = Astro.props;
+---
+
+<section id="features" class="py-20 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-6xl mx-auto">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Features</h2>
+      <p class="text-gray-400 max-w-2xl mx-auto">
+        Everything you need to build modern applications, right out of the box.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {
+        features.map((feature) => (
+          <div class="p-6 rounded-xl bg-gray-900/50 border border-gray-800 hover:border-gray-700 transition-colors">
+            <div class="text-3xl mb-4">{feature.icon}</div>
+            <h3 class="text-lg font-semibold text-white mb-2">{feature.title}</h3>
+            <p class="text-gray-400 text-sm">{feature.description}</p>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
