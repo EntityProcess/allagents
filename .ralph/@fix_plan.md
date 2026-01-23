@@ -48,14 +48,14 @@ plugins:
 - [x] Refactor plugin commands
   - [x] `allagents plugin list [marketplace]` - list available plugins
   - [ ] `allagents plugin validate <path>` - validate plugin/marketplace (stub created)
-- [ ] Refactor workspace plugin commands (was `workspace add/remove`)
-  - [ ] `allagents workspace plugin add <plugin@marketplace>` - add plugin to workspace.yaml
-  - [ ] `allagents workspace plugin remove <plugin>` - remove plugin from workspace.yaml
-- [ ] Remove deprecated commands
+- [x] Refactor workspace plugin commands (was `workspace add/remove`)
+  - [x] `allagents workspace plugin add <plugin@marketplace>` - add plugin to workspace.yaml
+  - [x] `allagents workspace plugin remove <plugin>` - remove plugin from workspace.yaml
+- [x] Remove deprecated commands
   - [x] Remove `plugin fetch` (replaced by `plugin marketplace add`)
   - [x] Remove old `plugin update` (now `plugin marketplace update`)
-  - [ ] Remove `workspace add` (now `workspace plugin add`)
-  - [ ] Remove `workspace remove` (now `workspace plugin remove`)
+  - [x] Remove `workspace add` (now `workspace plugin add`)
+  - [x] Remove `workspace remove` (now `workspace plugin remove`)
 
 ## Phase B: Update Data Model
 - [x] Create `~/.allagents/marketplaces.json` for registry

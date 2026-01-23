@@ -149,9 +149,19 @@ workspaceCommand
     }
   });
 
-workspaceCommand
+// =============================================================================
+// workspace plugin subcommand group
+// =============================================================================
+
+const pluginSubcommand = new Command('plugin').description(
+  'Manage plugins in workspace.yaml',
+);
+
+pluginSubcommand
   .command('add <plugin>')
-  .description('Add plugin to workspace.yaml')
+  .description(
+    'Add plugin to workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
+  )
   .action(async (plugin: string) => {
     try {
       const result = await addPlugin(plugin);
@@ -161,6 +171,9 @@ workspaceCommand
         process.exit(1);
       }
 
+      if (result.autoRegistered) {
+        console.log(`✓ Auto-registered marketplace: ${result.autoRegistered}`);
+      }
       console.log(`✓ Added plugin: ${plugin}`);
       console.log(
         '\nRun "allagents workspace sync" to fetch and sync the plugin.',
@@ -174,7 +187,7 @@ workspaceCommand
     }
   });
 
-workspaceCommand
+pluginSubcommand
   .command('remove <plugin>')
   .description('Remove plugin from workspace.yaml')
   .action(async (plugin: string) => {
@@ -195,3 +208,5 @@ workspaceCommand
       throw error;
     }
   });
+
+workspaceCommand.addCommand(pluginSubcommand);
