@@ -20,7 +20,6 @@ repositories:
     description: related project used for inspiration to copy mcp tokens
 
 plugins:
-  - ../../../.claude/allagents
   - anthropics/claude-plugins-official/plugins/code-review
 
 clients:

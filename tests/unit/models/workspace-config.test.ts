@@ -16,7 +16,7 @@ describe('WorkspaceConfigSchema', () => {
           description: 'primary project',
         },
       ],
-      plugins: ['.claude/allagents'],
+      plugins: ['./plugins/example'],
       clients: ['claude'],
     };
 

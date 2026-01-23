@@ -21,7 +21,7 @@ repositories:
     description: primary project
 
 plugins:
-  - .claude/allagents
+  - ./plugins/example
 
 clients:
   - claude

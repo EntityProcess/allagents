@@ -52,7 +52,7 @@ repositories:
     description: related project used for inspiration to copy mcp tokens
 
 plugins:
-  - .claude/allagents
+  - ./plugins/example
   - https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-review
 
 clients:
