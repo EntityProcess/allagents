@@ -20,8 +20,8 @@ repositories:
     description: related project used for inspiration to copy mcp tokens
 
 plugins:
-  - .claude/allagents
-  - https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-review
+  - ../../../.claude/allagents
+  - anthropics/claude-plugins-official/plugins/code-review
 
 clients:
   - copilot

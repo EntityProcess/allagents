@@ -2,7 +2,7 @@ import { existsSync } from 'fs';
 import { join, resolve } from 'path';
 import simpleGit from 'simple-git';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
-import { parsePluginSource, isGitHubUrl } from '../utils/plugin-path.js';
+import { parsePluginSource, isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
 import { fetchPlugin } from './plugin.js';
 import { copyPluginToWorkspace, type CopyResult } from './transform.js';
 
@@ -180,7 +180,11 @@ async function syncPlugin(
         ...(fetchResult.error && { error: fetchResult.error }),
       };
     }
-    resolvedPath = fetchResult.cachePath;
+    // Handle subpath in GitHub URL (e.g., /tree/main/plugins/name)
+    const parsed = parseGitHubUrl(pluginSource);
+    resolvedPath = parsed?.subpath
+      ? join(fetchResult.cachePath, parsed.subpath)
+      : fetchResult.cachePath;
   } else {
     // Local plugin
     resolvedPath = resolve(workspacePath, pluginSource);

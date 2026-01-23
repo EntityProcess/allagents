@@ -1,11 +1,6 @@
-repositories:
-  - path: ../allagents
-    owner: EntityProcess
-    repo: allagents
-    description: primary project
+repositories: []
 
-plugins:
-  - .claude/allagents
+plugins: []
 
 clients:
   - claude

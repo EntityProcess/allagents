@@ -1,9 +1,7 @@
-import { mkdir, cp, readFile, writeFile } from 'fs/promises';
+import { mkdir, cp } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, resolve, dirname, relative } from 'path';
 import simpleGit from 'simple-git';
-import { load, dump } from 'js-yaml';
-import type { WorkspaceConfig } from '../models/workspace-config.js';
 
 /**
  * Initialize a new workspace from template
@@ -50,9 +48,6 @@ export async function initWorkspace(
     // Copy template files
     await cp(templatePath, absoluteTarget, { recursive: true });
 
-    // Convert relative plugin paths to absolute in workspace.yaml
-    await convertPluginPathsToAbsolute(absoluteTarget);
-
     // Initialize git repository
     const git = simpleGit(absoluteTarget);
     await git.init();
@@ -78,48 +73,6 @@ Template: ${templateName}`);
 
     if (error instanceof Error) {
       throw new Error(`Failed to initialize workspace: ${error.message}`);
-    }
-    throw error;
-  }
-}
-
-/**
- * Convert relative plugin paths to absolute paths in workspace.yaml
- * @param workspacePath - Path to workspace directory
- */
-async function convertPluginPathsToAbsolute(workspacePath: string): Promise<void> {
-  const configPath = join(workspacePath, 'workspace.yaml');
-
-  try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
-
-    // Convert relative plugin paths to absolute
-    config.plugins = config.plugins.map((plugin) => {
-      // Skip GitHub URLs
-      if (plugin.startsWith('http://') || plugin.startsWith('https://')) {
-        return plugin;
-      }
-
-      // Convert relative paths to absolute
-      if (plugin.startsWith('.')) {
-        return resolve(workspacePath, plugin);
-      }
-
-      // Already absolute
-      return plugin;
-    });
-
-    // Write back to file
-    const updatedContent = dump(config, {
-      indent: 2,
-      lineWidth: -1,
-      noRefs: true,
-    });
-    await writeFile(configPath, updatedContent, 'utf-8');
-  } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(`Failed to convert plugin paths: ${error.message}`);
     }
     throw error;
   }

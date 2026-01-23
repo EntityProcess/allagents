@@ -23,11 +23,23 @@ describe('isGitHubUrl', () => {
     expect(isGitHubUrl('gh:owner/repo')).toBe(true);
   });
 
+  it('should detect shorthand owner/repo format', () => {
+    expect(isGitHubUrl('anthropics/claude-plugins-official')).toBe(true);
+    expect(isGitHubUrl('owner/repo')).toBe(true);
+  });
+
+  it('should detect shorthand owner/repo/subpath format', () => {
+    expect(isGitHubUrl('anthropics/claude-plugins-official/plugins/code-review')).toBe(true);
+    expect(isGitHubUrl('owner/repo/deep/nested/path')).toBe(true);
+  });
+
   it('should reject non-GitHub URLs', () => {
     expect(isGitHubUrl('https://gitlab.com/owner/repo')).toBe(false);
     expect(isGitHubUrl('/local/path')).toBe(false);
     expect(isGitHubUrl('./relative/path')).toBe(false);
+    expect(isGitHubUrl('../relative/path')).toBe(false);
     expect(isGitHubUrl('not-a-url')).toBe(false);
+    expect(isGitHubUrl('C:/windows/path')).toBe(false);
   });
 });
 
@@ -56,7 +68,25 @@ describe('parseGitHubUrl', () => {
     const result = parseGitHubUrl(
       'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-review'
     );
+    expect(result).toEqual({
+      owner: 'anthropics',
+      repo: 'claude-plugins-official',
+      subpath: 'plugins/code-review',
+    });
+  });
+
+  it('should parse shorthand owner/repo format', () => {
+    const result = parseGitHubUrl('anthropics/claude-plugins-official');
     expect(result).toEqual({ owner: 'anthropics', repo: 'claude-plugins-official' });
+  });
+
+  it('should parse shorthand owner/repo/subpath format', () => {
+    const result = parseGitHubUrl('anthropics/claude-plugins-official/plugins/code-review');
+    expect(result).toEqual({
+      owner: 'anthropics',
+      repo: 'claude-plugins-official',
+      subpath: 'plugins/code-review',
+    });
   });
 
   it('should return null for invalid URLs', () => {

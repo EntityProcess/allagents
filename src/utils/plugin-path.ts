@@ -17,27 +17,65 @@ export interface ParsedPluginSource {
 }
 
 /**
- * Detect if a plugin source is a GitHub URL
+ * Detect if a plugin source is a GitHub URL or shorthand
+ * Supports:
+ * - https://github.com/owner/repo
+ * - github.com/owner/repo
+ * - gh:owner/repo
+ * - owner/repo (shorthand, must have exactly one slash for repo-only, or more for subpath)
+ * - owner/repo/path/to/plugin (shorthand with subpath)
  * @param source - Plugin source string
- * @returns true if source is a GitHub URL
+ * @returns true if source is a GitHub URL or shorthand
  */
 export function isGitHubUrl(source: string): boolean {
-  const githubPatterns = [
+  // Explicit GitHub patterns
+  const explicitPatterns = [
     /^https?:\/\/github\.com\//,
     /^https?:\/\/www\.github\.com\//,
     /^github\.com\//,
     /^gh:/,
   ];
 
-  return githubPatterns.some((pattern) => pattern.test(source));
+  if (explicitPatterns.some((pattern) => pattern.test(source))) {
+    return true;
+  }
+
+  // Shorthand: owner/repo or owner/repo/subpath
+  // Must not start with . or / (local paths) and must contain at least one /
+  // Also must not look like a Windows path (C:/) or contain backslashes
+  if (
+    !source.startsWith('.') &&
+    !source.startsWith('/') &&
+    !source.includes('\\') &&
+    !/^[a-zA-Z]:/.test(source) &&
+    source.includes('/')
+  ) {
+    // Check if it looks like owner/repo format (alphanumeric, hyphens, underscores)
+    const parts = source.split('/');
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      const validOwnerRepo = /^[a-zA-Z0-9_-]+$/;
+      if (validOwnerRepo.test(parts[0]) && validOwnerRepo.test(parts[1])) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 /**
- * Parse GitHub URL to extract owner and repo
- * @param url - GitHub URL
- * @returns Object with owner and repo, or null if invalid
+ * Parse GitHub URL or shorthand to extract owner, repo, and optional subpath
+ * Supports:
+ * - https://github.com/owner/repo
+ * - https://github.com/owner/repo/tree/branch/path
+ * - github.com/owner/repo
+ * - gh:owner/repo
+ * - owner/repo (shorthand)
+ * - owner/repo/path/to/plugin (shorthand with subpath)
+ * @param url - GitHub URL or shorthand
+ * @returns Object with owner, repo, and optional subpath, or null if invalid
  */
-export function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
+export function parseGitHubUrl(url: string): { owner: string; repo: string; subpath?: string } | null {
   // Normalize URL
   let normalized = url;
 
@@ -51,23 +89,45 @@ export function parseGitHubUrl(url: string): { owner: string; repo: string } | n
     normalized = 'https://' + normalized;
   }
 
-  // Extract owner/repo from URL
-  const patterns = [
-    // https://github.com/owner/repo
-    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/,
-    // https://github.com/owner/repo/tree/main/path
-    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/tree\/[^/]+\/(.+)$/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    if (match) {
-      const owner = match[1];
-      const repo = match[2]?.replace(/\.git$/, '');
-
-      if (owner && repo) {
+  // Handle shorthand: owner/repo or owner/repo/subpath (no protocol, no github.com)
+  if (!normalized.includes('://') && !normalized.startsWith('github.com')) {
+    const parts = normalized.split('/');
+    if (parts.length >= 2) {
+      const owner = parts[0];
+      const repo = parts[1];
+      const validOwnerRepo = /^[a-zA-Z0-9_-]+$/;
+      if (owner && repo && validOwnerRepo.test(owner) && validOwnerRepo.test(repo)) {
+        if (parts.length > 2) {
+          // Has subpath: owner/repo/path/to/plugin
+          const subpath = parts.slice(2).join('/');
+          return { owner, repo, subpath };
+        }
         return { owner, repo };
       }
+    }
+    return null;
+  }
+
+  // Try to extract with subpath first: https://github.com/owner/repo/tree/branch/path
+  const subpathPattern = /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/tree\/[^/]+\/(.+)$/;
+  const subpathMatch = normalized.match(subpathPattern);
+  if (subpathMatch) {
+    const owner = subpathMatch[1];
+    const repo = subpathMatch[2]?.replace(/\.git$/, '');
+    const subpath = subpathMatch[3];
+    if (owner && repo) {
+      return { owner, repo, subpath };
+    }
+  }
+
+  // Try basic format: https://github.com/owner/repo
+  const basicPattern = /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/;
+  const basicMatch = normalized.match(basicPattern);
+  if (basicMatch) {
+    const owner = basicMatch[1];
+    const repo = basicMatch[2]?.replace(/\.git$/, '');
+    if (owner && repo) {
+      return { owner, repo };
     }
   }
 
