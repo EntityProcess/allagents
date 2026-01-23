@@ -46,6 +46,18 @@ workspaceCommand
         process.exit(1);
       }
 
+      // Show purge plan in dry-run mode
+      if (dryRun && result.purgedPaths && result.purgedPaths.length > 0) {
+        console.log('Would purge managed directories:');
+        for (const purgePath of result.purgedPaths) {
+          console.log(`  ${purgePath.client}:`);
+          for (const path of purgePath.paths) {
+            console.log(`    - ${path}`);
+          }
+        }
+        console.log('');
+      }
+
       // Print plugin results
       for (const pluginResult of result.pluginResults) {
         const status = pluginResult.success ? '✓' : '✗';

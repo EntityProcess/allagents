@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
@@ -13,6 +14,7 @@ import {
 } from '../utils/plugin-path.js';
 import { fetchPlugin } from './plugin.js';
 import { copyPluginToWorkspace, type CopyResult } from './transform.js';
+import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import {
   isPluginSpec,
   resolvePluginSpec,
@@ -32,6 +34,8 @@ export interface SyncResult {
   totalFailed: number;
   totalSkipped: number;
   totalGenerated: number;
+  /** Paths that were/would be purged per client */
+  purgedPaths?: PurgePaths[];
   error?: string;
 }
 
@@ -57,7 +61,251 @@ export interface SyncOptions {
 }
 
 /**
+ * Result of validating a plugin (resolving its path without copying)
+ */
+export interface ValidatedPlugin {
+  plugin: string;
+  resolved: string;
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Paths that would be purged for a client
+ */
+export interface PurgePaths {
+  client: ClientType;
+  paths: string[];
+}
+
+/**
+ * Purge all managed directories for configured clients
+ * This removes commands, skills, hooks directories and agent files
+ * @param workspacePath - Path to workspace directory
+ * @param clients - List of clients to purge
+ * @returns List of paths that were purged per client
+ */
+export async function purgeWorkspace(
+  workspacePath: string,
+  clients: ClientType[],
+): Promise<PurgePaths[]> {
+  const result: PurgePaths[] = [];
+
+  for (const client of clients) {
+    const mapping = CLIENT_MAPPINGS[client];
+    const purgedPaths: string[] = [];
+
+    // Purge commands directory
+    if (mapping.commandsPath) {
+      const commandsDir = join(workspacePath, mapping.commandsPath);
+      await rm(commandsDir, { recursive: true, force: true });
+      purgedPaths.push(mapping.commandsPath);
+    }
+
+    // Purge skills directory
+    if (mapping.skillsPath) {
+      const skillsDir = join(workspacePath, mapping.skillsPath);
+      await rm(skillsDir, { recursive: true, force: true });
+      purgedPaths.push(mapping.skillsPath);
+    }
+
+    // Purge hooks directory
+    if (mapping.hooksPath) {
+      const hooksDir = join(workspacePath, mapping.hooksPath);
+      await rm(hooksDir, { recursive: true, force: true });
+      purgedPaths.push(mapping.hooksPath);
+    }
+
+    // Purge agent file
+    const agentPath = join(workspacePath, mapping.agentFile);
+    if (existsSync(agentPath)) {
+      await rm(agentPath);
+      purgedPaths.push(mapping.agentFile);
+    }
+
+    result.push({ client, paths: purgedPaths });
+  }
+
+  return result;
+}
+
+/**
+ * Get paths that would be purged without actually purging
+ * @param workspacePath - Path to workspace directory
+ * @param clients - List of clients to check
+ * @returns List of paths that would be purged per client
+ */
+export function getPurgePaths(
+  workspacePath: string,
+  clients: ClientType[],
+): PurgePaths[] {
+  const result: PurgePaths[] = [];
+
+  for (const client of clients) {
+    const mapping = CLIENT_MAPPINGS[client];
+    const paths: string[] = [];
+
+    // Check commands directory
+    if (mapping.commandsPath && existsSync(join(workspacePath, mapping.commandsPath))) {
+      paths.push(mapping.commandsPath);
+    }
+
+    // Check skills directory
+    if (mapping.skillsPath && existsSync(join(workspacePath, mapping.skillsPath))) {
+      paths.push(mapping.skillsPath);
+    }
+
+    // Check hooks directory
+    if (mapping.hooksPath && existsSync(join(workspacePath, mapping.hooksPath))) {
+      paths.push(mapping.hooksPath);
+    }
+
+    // Check agent file
+    if (existsSync(join(workspacePath, mapping.agentFile))) {
+      paths.push(mapping.agentFile);
+    }
+
+    if (paths.length > 0) {
+      result.push({ client, paths });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Validate a single plugin by resolving its path without copying
+ * @param pluginSource - Plugin source
+ * @param workspacePath - Path to workspace directory
+ * @param force - Force re-fetch of remote plugins
+ * @returns Validation result with resolved path
+ */
+async function validatePlugin(
+  pluginSource: string,
+  workspacePath: string,
+  force: boolean,
+): Promise<ValidatedPlugin> {
+  // Check for plugin@marketplace format first
+  if (isPluginSpec(pluginSource)) {
+    const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, force);
+    if (!resolved.success) {
+      return {
+        plugin: pluginSource,
+        resolved: '',
+        success: false,
+        error: resolved.error || 'Unknown error',
+      };
+    }
+    return {
+      plugin: pluginSource,
+      resolved: resolved.path ?? '',
+      success: true,
+    };
+  }
+
+  if (isGitHubUrl(pluginSource)) {
+    // Fetch remote plugin (with force option)
+    const fetchResult = await fetchPlugin(pluginSource, { force });
+    if (!fetchResult.success) {
+      return {
+        plugin: pluginSource,
+        resolved: '',
+        success: false,
+        error: fetchResult.error,
+      };
+    }
+    // Handle subpath in GitHub URL (e.g., /tree/main/plugins/name)
+    const parsed = parseGitHubUrl(pluginSource);
+    const resolvedPath = parsed?.subpath
+      ? join(fetchResult.cachePath, parsed.subpath)
+      : fetchResult.cachePath;
+    return {
+      plugin: pluginSource,
+      resolved: resolvedPath,
+      success: true,
+    };
+  }
+
+  // Local plugin
+  const resolvedPath = resolve(workspacePath, pluginSource);
+  if (!existsSync(resolvedPath)) {
+    return {
+      plugin: pluginSource,
+      resolved: resolvedPath,
+      success: false,
+      error: `Plugin not found at ${resolvedPath}`,
+    };
+  }
+  return {
+    plugin: pluginSource,
+    resolved: resolvedPath,
+    success: true,
+  };
+}
+
+/**
+ * Validate all plugins before any destructive action
+ * @param plugins - List of plugin sources
+ * @param workspacePath - Path to workspace directory
+ * @param force - Force re-fetch of remote plugins
+ * @returns Array of validation results
+ */
+async function validateAllPlugins(
+  plugins: string[],
+  workspacePath: string,
+  force: boolean,
+): Promise<ValidatedPlugin[]> {
+  return Promise.all(
+    plugins.map((plugin) => validatePlugin(plugin, workspacePath, force)),
+  );
+}
+
+/**
+ * Copy content from a validated plugin to workspace
+ * @param validatedPlugin - Already validated plugin with resolved path
+ * @param workspacePath - Path to workspace directory
+ * @param clients - List of clients to sync for
+ * @param dryRun - Simulate without making changes
+ * @returns Plugin sync result
+ */
+async function copyValidatedPlugin(
+  validatedPlugin: ValidatedPlugin,
+  workspacePath: string,
+  clients: string[],
+  dryRun: boolean,
+): Promise<PluginSyncResult> {
+  const copyResults: CopyResult[] = [];
+
+  // Copy plugin content for each client
+  for (const client of clients) {
+    const results = await copyPluginToWorkspace(
+      validatedPlugin.resolved,
+      workspacePath,
+      client as ClientType,
+      { dryRun },
+    );
+    copyResults.push(...results);
+  }
+
+  const hasFailures = copyResults.some((r) => r.action === 'failed');
+
+  return {
+    plugin: validatedPlugin.plugin,
+    resolved: validatedPlugin.resolved,
+    success: !hasFailures,
+    copyResults,
+  };
+}
+
+/**
  * Sync all plugins to workspace for all configured clients
+ *
+ * Flow:
+ * 1. Validate all plugins (fetch/resolve paths)
+ * 2. If any validation fails, abort without changes
+ * 3. Purge managed directories (declarative sync)
+ * 4. Copy fresh from all validated plugins
+ *
  * @param workspacePath - Path to workspace directory (defaults to current directory)
  * @param options - Sync options (force, dryRun)
  * @returns Sync result
@@ -101,13 +349,49 @@ export async function syncWorkspace(
     };
   }
 
-  // Process all plugins in parallel for better performance
+  // Step 1: Validate all plugins before any destructive action
+  const validatedPlugins = await validateAllPlugins(
+    config.plugins,
+    workspacePath,
+    force,
+  );
+
+  // Check if any validation failed
+  const failedValidations = validatedPlugins.filter((v) => !v.success);
+  if (failedValidations.length > 0) {
+    // Return early - workspace unchanged
+    const errors = failedValidations
+      .map((v) => `  - ${v.plugin}: ${v.error}`)
+      .join('\n');
+    return {
+      success: false,
+      pluginResults: failedValidations.map((v) => ({
+        plugin: v.plugin,
+        resolved: v.resolved,
+        success: false,
+        copyResults: [],
+        error: v.error,
+      })),
+      totalCopied: 0,
+      totalFailed: failedValidations.length,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      error: `Plugin validation failed (workspace unchanged):\n${errors}`,
+    };
+  }
+
+  // Step 2: Get paths that will be purged (for dry-run reporting)
+  const purgedPaths = getPurgePaths(workspacePath, config.clients);
+
+  // Step 3: Purge managed directories (skip in dry-run mode)
+  if (!dryRun) {
+    await purgeWorkspace(workspacePath, config.clients);
+  }
+
+  // Step 4: Copy fresh from all validated plugins
   const pluginResults = await Promise.all(
-    config.plugins.map((pluginSource) =>
-      syncPlugin(pluginSource, workspacePath, config.clients, {
-        force,
-        dryRun,
-      }),
+    validatedPlugins.map((validatedPlugin) =>
+      copyValidatedPlugin(validatedPlugin, workspacePath, config.clients, dryRun),
     ),
   );
 
@@ -180,96 +464,7 @@ Timestamp: ${timestamp}`);
     totalFailed,
     totalSkipped,
     totalGenerated,
-  };
-}
-
-/**
- * Sync a single plugin to workspace
- * Supports three formats:
- * 1. plugin@marketplace (e.g., "code-review@claude-plugins-official")
- * 2. GitHub URL (e.g., "https://github.com/owner/repo")
- * 3. Local path (e.g., "./my-plugin" or "/absolute/path")
- *
- * @param pluginSource - Plugin source
- * @param workspacePath - Path to workspace directory
- * @param clients - List of clients to sync for
- * @param options - Sync options
- * @returns Plugin sync result
- */
-async function syncPlugin(
-  pluginSource: string,
-  workspacePath: string,
-  clients: string[],
-  options: SyncOptions = {},
-): Promise<PluginSyncResult> {
-  const { force = false, dryRun = false } = options;
-  const copyResults: CopyResult[] = [];
-
-  // Resolve plugin path based on format
-  let resolvedPath: string;
-
-  // Check for plugin@marketplace format first
-  if (isPluginSpec(pluginSource)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, force);
-    if (!resolved.success) {
-      return {
-        plugin: pluginSource,
-        resolved: '',
-        success: false,
-        copyResults,
-        error: resolved.error || 'Unknown error',
-      };
-    }
-    resolvedPath = resolved.path ?? '';
-  } else if (isGitHubUrl(pluginSource)) {
-    // Fetch remote plugin (with force option)
-    const fetchResult = await fetchPlugin(pluginSource, { force });
-    if (!fetchResult.success) {
-      return {
-        plugin: pluginSource,
-        resolved: '',
-        success: false,
-        copyResults,
-        ...(fetchResult.error && { error: fetchResult.error }),
-      };
-    }
-    // Handle subpath in GitHub URL (e.g., /tree/main/plugins/name)
-    const parsed = parseGitHubUrl(pluginSource);
-    resolvedPath = parsed?.subpath
-      ? join(fetchResult.cachePath, parsed.subpath)
-      : fetchResult.cachePath;
-  } else {
-    // Local plugin
-    resolvedPath = resolve(workspacePath, pluginSource);
-    if (!existsSync(resolvedPath)) {
-      return {
-        plugin: pluginSource,
-        resolved: resolvedPath,
-        success: false,
-        copyResults,
-        error: `Plugin not found at ${resolvedPath}`,
-      };
-    }
-  }
-
-  // Copy plugin content for each client
-  for (const client of clients) {
-    const results = await copyPluginToWorkspace(
-      resolvedPath,
-      workspacePath,
-      client as ClientType,
-      { dryRun },
-    );
-    copyResults.push(...results);
-  }
-
-  const hasFailures = copyResults.some((r) => r.action === 'failed');
-
-  return {
-    plugin: pluginSource,
-    resolved: resolvedPath,
-    success: !hasFailures,
-    copyResults,
+    purgedPaths,
   };
 }
 
