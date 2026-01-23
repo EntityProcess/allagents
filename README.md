@@ -2,6 +2,8 @@
 
 CLI tool for managing multi-repo AI agent workspaces with plugin synchronization across multiple AI clients.
 
+> **Attribution:** AllAgents is inspired by [dotagents](https://github.com/iannuttall/dotagents) by Ian Nuttall. While rewritten from scratch, we share the vision of unified AI agent configuration management. Thank you Ian for the inspiration!
+
 ## Why AllAgents?
 
 **The Problem:** AI coding assistants (Claude, Copilot, Cursor, Codex, etc.) each have their own configuration formats and directory structures. If you want to share skills, commands, or prompts across multiple projects or use multiple AI clients, you need to manually copy and transform files.
