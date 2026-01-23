@@ -40,25 +40,25 @@ plugins:
 ---
 
 ## Phase A: Refactor CLI Commands to Match Claude Convention
-- [ ] Create `plugin marketplace` subcommand group
-  - [ ] `allagents plugin marketplace list` - list registered marketplaces
-  - [ ] `allagents plugin marketplace add <source>` - add from URL/path/GitHub
-  - [ ] `allagents plugin marketplace remove <name>` - remove a marketplace
-  - [ ] `allagents plugin marketplace update [name]` - update marketplace(s)
-- [ ] Refactor plugin commands
-  - [ ] `allagents plugin list [marketplace]` - list available plugins
-  - [ ] `allagents plugin validate <path>` - validate plugin/marketplace
+- [x] Create `plugin marketplace` subcommand group
+  - [x] `allagents plugin marketplace list` - list registered marketplaces
+  - [x] `allagents plugin marketplace add <source>` - add from URL/path/GitHub
+  - [x] `allagents plugin marketplace remove <name>` - remove a marketplace
+  - [x] `allagents plugin marketplace update [name]` - update marketplace(s)
+- [x] Refactor plugin commands
+  - [x] `allagents plugin list [marketplace]` - list available plugins
+  - [ ] `allagents plugin validate <path>` - validate plugin/marketplace (stub created)
 - [ ] Refactor workspace plugin commands (was `workspace add/remove`)
   - [ ] `allagents workspace plugin add <plugin@marketplace>` - add plugin to workspace.yaml
   - [ ] `allagents workspace plugin remove <plugin>` - remove plugin from workspace.yaml
 - [ ] Remove deprecated commands
-  - [ ] Remove `plugin fetch` (replaced by `plugin marketplace add`)
-  - [ ] Remove old `plugin update` (now `plugin marketplace update`)
+  - [x] Remove `plugin fetch` (replaced by `plugin marketplace add`)
+  - [x] Remove old `plugin update` (now `plugin marketplace update`)
   - [ ] Remove `workspace add` (now `workspace plugin add`)
   - [ ] Remove `workspace remove` (now `workspace plugin remove`)
 
 ## Phase B: Update Data Model
-- [ ] Create `~/.allagents/marketplaces.json` for registry
+- [x] Create `~/.allagents/marketplaces.json` for registry
   ```json
   {
     "claude-plugins-official": {
@@ -72,17 +72,17 @@ plugins:
   - [ ] Parse `plugin@marketplace` format
   - [ ] Resolve marketplace by name from registry
   - [ ] Find plugin within marketplace directory
-- [ ] Create marketplace registry functions in `src/core/marketplace.ts`
-  - [ ] `addMarketplace(source)` - add to registry and clone/link
-  - [ ] `removeMarketplace(name)` - remove from registry
-  - [ ] `listMarketplaces()` - list from registry
-  - [ ] `updateMarketplace(name?)` - git pull or re-sync
-  - [ ] `getMarketplacePath(name)` - get local path
+- [x] Create marketplace registry functions in `src/core/marketplace.ts`
+  - [x] `addMarketplace(source)` - add to registry and clone/link
+  - [x] `removeMarketplace(name)` - remove from registry
+  - [x] `listMarketplaces()` - list from registry
+  - [x] `updateMarketplace(name?)` - git pull or re-sync
+  - [x] `getMarketplacePath(name)` - get local path
 
 ## Phase C: Update Plugin Resolution
-- [ ] Create `src/core/plugin.ts` functions
-  - [ ] `listPlugins(marketplace?)` - enumerate plugins from marketplaces
-  - [ ] `resolvePlugin(spec)` - resolve `plugin@marketplace` to local path
+- [x] Create `src/core/marketplace.ts` functions (in marketplace.ts, not plugin.ts)
+  - [x] `listMarketplacePlugins(marketplace)` - enumerate plugins from marketplace
+  - [x] `resolvePluginSpec(spec)` - resolve `plugin@marketplace` to local path
   - [ ] `validatePlugin(path)` - validate plugin structure
 - [ ] Update workspace.yaml format
   - [ ] Support `plugin@marketplace` syntax
