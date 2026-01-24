@@ -15,7 +15,7 @@ workspaceCommand
   .action(async (path: string | undefined, options: { from?: string }) => {
     try {
       const targetPath = path ?? '.';
-      const result = await initWorkspace(targetPath, { from: options.from });
+      const result = await initWorkspace(targetPath, options.from ? { from: options.from } : {});
 
       // Print sync results if sync was performed
       if (result.syncResult) {

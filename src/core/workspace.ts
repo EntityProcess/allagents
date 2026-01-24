@@ -30,7 +30,7 @@ export interface InitResult {
  * @throws Error if path already exists or initialization fails
  */
 export async function initWorkspace(
-  targetPath: string = '.',
+  targetPath = '.',
   options: InitOptions = {},
 ): Promise<InitResult> {
   const absoluteTarget = resolve(targetPath);

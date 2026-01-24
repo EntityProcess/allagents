@@ -257,11 +257,12 @@ clients:
       const result = await syncWorkspace(testDir, { dryRun: true });
       expect(result.success).toBe(true);
 
-      // Should have purge paths in result
+      // Should have purge paths in result (now shows individual files from state)
       expect(result.purgedPaths).toBeDefined();
       expect(result.purgedPaths!.length).toBeGreaterThan(0);
       expect(result.purgedPaths![0].client).toBe('claude');
-      expect(result.purgedPaths![0].paths).toContain('.claude/commands/');
+      // Non-destructive sync tracks individual files, not directories
+      expect(result.purgedPaths![0].paths).toContain('.claude/commands/my-command.md');
 
       // Files should still exist (dry-run doesn't purge)
       expect(existsSync(join(testDir, '.claude', 'commands', 'my-command.md'))).toBe(true);
@@ -400,6 +401,209 @@ clients:
       const readmeContent = await readFile(join(testDir, 'README.md'), 'utf-8');
       expect(readmeContent).toBe('# README\n');
       expect(readmeContent).not.toContain('WORKSPACE-RULES');
+    });
+  });
+
+  describe('syncWorkspace - non-destructive sync', () => {
+    it('should preserve user files on first sync (no previous state)', async () => {
+      // Setup: User has existing files before first sync
+      await mkdir(join(testDir, '.claude', 'commands'), { recursive: true });
+      await writeFile(join(testDir, '.claude', 'commands', 'user-command.md'), '# User Command');
+
+      // Setup: Create a plugin with a different command
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'plugin-command.md'), '# Plugin Command');
+
+      // Setup: Create workspace config
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // First sync - should overlay without purging user files
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // User file should be preserved
+      expect(existsSync(join(testDir, '.claude', 'commands', 'user-command.md'))).toBe(true);
+      const userContent = await readFile(
+        join(testDir, '.claude', 'commands', 'user-command.md'),
+        'utf-8',
+      );
+      expect(userContent).toBe('# User Command');
+
+      // Plugin file should be copied
+      expect(existsSync(join(testDir, '.claude', 'commands', 'plugin-command.md'))).toBe(true);
+    });
+
+    it('should only remove previously synced files on subsequent sync', async () => {
+      // Setup: Create two plugins
+      const plugin1Dir = join(testDir, 'plugin1');
+      const plugin2Dir = join(testDir, 'plugin2');
+      await mkdir(join(plugin1Dir, 'commands'), { recursive: true });
+      await mkdir(join(plugin2Dir, 'commands'), { recursive: true });
+      await writeFile(join(plugin1Dir, 'commands', 'cmd1.md'), '# Command 1');
+      await writeFile(join(plugin2Dir, 'commands', 'cmd2.md'), '# Command 2');
+
+      // Setup: User has their own command
+      await mkdir(join(testDir, '.claude', 'commands'), { recursive: true });
+      await writeFile(join(testDir, '.claude', 'commands', 'user.md'), '# User');
+
+      // Setup: Create workspace config with both plugins
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./plugin1
+  - ./plugin2
+clients:
+  - claude
+`,
+      );
+
+      // First sync
+      const result1 = await syncWorkspace(testDir);
+      expect(result1.success).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'commands', 'cmd1.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'commands', 'cmd2.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'commands', 'user.md'))).toBe(true);
+
+      // Now remove plugin2 from config
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./plugin1
+clients:
+  - claude
+`,
+      );
+
+      // Second sync - should remove cmd2.md but keep user.md
+      const result2 = await syncWorkspace(testDir);
+      expect(result2.success).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'commands', 'cmd1.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'commands', 'cmd2.md'))).toBe(false);
+      expect(existsSync(join(testDir, '.claude', 'commands', 'user.md'))).toBe(true);
+    });
+
+    it('should preserve user files added after initial sync', async () => {
+      // Setup: Create a plugin
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'plugin.md'), '# Plugin');
+
+      // Setup: Create workspace config
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // First sync
+      const result1 = await syncWorkspace(testDir);
+      expect(result1.success).toBe(true);
+
+      // User adds a file AFTER initial sync
+      await writeFile(join(testDir, '.claude', 'commands', 'user-added.md'), '# User Added');
+
+      // Second sync - user file should be preserved
+      const result2 = await syncWorkspace(testDir);
+      expect(result2.success).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'commands', 'user-added.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'commands', 'plugin.md'))).toBe(true);
+    });
+
+    it('should create state file after sync', async () => {
+      // Setup: Create a plugin
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'cmd.md'), '# Command');
+
+      // Setup: Create workspace config
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // Sync
+      await syncWorkspace(testDir);
+
+      // State file should exist
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      expect(existsSync(statePath)).toBe(true);
+
+      // State should contain synced files
+      const stateContent = await readFile(statePath, 'utf-8');
+      const state = JSON.parse(stateContent);
+      expect(state.version).toBe(1);
+      expect(state.files.claude).toContain('.claude/commands/cmd.md');
+    });
+  });
+
+  describe('syncWorkspace - WORKSPACE-RULES idempotency', () => {
+    it('should have exactly one WORKSPACE-RULES section after multiple syncs', async () => {
+      // Setup: Create workspace source with CLAUDE.md
+      const sourceDir = join(testDir, 'workspace-source');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'CLAUDE.md'), '# My Project\n');
+
+      // Setup: Create workspace config
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+workspace:
+  source: ./workspace-source
+  files:
+    - CLAUDE.md
+repositories: []
+plugins: []
+clients:
+  - claude
+`,
+      );
+
+      // First sync
+      await syncWorkspace(testDir);
+
+      // Second sync
+      await syncWorkspace(testDir);
+
+      // Third sync
+      await syncWorkspace(testDir);
+
+      // Check CLAUDE.md has exactly ONE WORKSPACE-RULES section
+      const content = await readFile(join(testDir, 'CLAUDE.md'), 'utf-8');
+      const startCount = (content.match(/<!-- WORKSPACE-RULES:START -->/g) || []).length;
+      const endCount = (content.match(/<!-- WORKSPACE-RULES:END -->/g) || []).length;
+
+      expect(startCount).toBe(1);
+      expect(endCount).toBe(1);
     });
   });
 });
