@@ -13,6 +13,22 @@ allagents workspace plugin add <plugin@marketplace>
 allagents workspace plugin remove <plugin>
 ```
 
+### workspace sync
+
+Syncs plugins to the workspace using non-destructive sync:
+
+| Flag | Description |
+|------|-------------|
+| `--force`, `-f` | Force re-fetch of remote plugins even if cached |
+| `--dry-run` | Preview changes without applying them |
+
+**Non-destructive behavior:**
+- First sync overlays files without deleting existing user files
+- Subsequent syncs only remove files previously synced by AllAgents
+- User files (not from plugins) are never deleted
+
+Sync state is tracked in `.allagents/sync-state.json`.
+
 ## Plugin Commands
 
 ```bash

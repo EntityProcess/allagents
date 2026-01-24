@@ -79,10 +79,15 @@ allagents workspace sync
 # Initialize a new workspace from template
 allagents workspace init <path>
 
-# Sync all plugins to workspace
+# Sync all plugins to workspace (non-destructive)
 allagents workspace sync [options]
-  --force    Force overwrite of local changes
+  --force    Force re-fetch of remote plugins even if cached
   --dry-run  Preview changes without applying
+
+# Non-destructive sync: your files are safe
+# - First sync overlays without deleting existing files
+# - Subsequent syncs only remove files AllAgents previously synced
+# - Tracked in .allagents/sync-state.json
 
 # Show status of workspace and plugins
 allagents workspace status

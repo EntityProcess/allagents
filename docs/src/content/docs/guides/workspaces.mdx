@@ -27,3 +27,28 @@ clients:
   - copilot
   - cursor
 ```
+
+## Syncing Plugins
+
+```bash
+allagents workspace sync
+```
+
+### Non-Destructive Sync
+
+AllAgents uses **non-destructive sync** to protect your files:
+
+- **First sync**: Overlays plugin files without deleting existing files
+- **Subsequent syncs**: Only removes files that AllAgents previously synced
+
+This means your personal commands, skills, or customizations in `.claude/commands/` etc. are never deleted - only files that came from plugins are managed.
+
+AllAgents tracks synced files in `.allagents/sync-state.json`. This file is automatically created and updated on each sync.
+
+### Dry Run
+
+Preview what would happen without making changes:
+
+```bash
+allagents workspace sync --dry-run
+```
