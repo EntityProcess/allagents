@@ -1,76 +1,166 @@
-import { mkdir, cp } from 'node:fs/promises';
+import { mkdir, cp, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname, relative } from 'node:path';
 import simpleGit from 'simple-git';
+import { syncWorkspace, type SyncResult } from './sync.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+
+/**
+ * Options for workspace initialization
+ */
+export interface InitOptions {
+  /** Path to existing workspace.yaml or directory containing one to copy from */
+  from?: string;
+}
+
+/**
+ * Result of workspace initialization
+ */
+export interface InitResult {
+  /** Path where workspace was created */
+  path: string;
+  /** Result of plugin sync (if plugins were configured) */
+  syncResult?: SyncResult;
+}
 
 /**
  * Initialize a new workspace from template
- * @param targetPath - Path where workspace should be created
- * @param templateName - Name of template to use (default: default)
+ * @param targetPath - Path where workspace should be created (default: current directory)
+ * @param options - Initialization options
  * @throws Error if path already exists or initialization fails
  */
 export async function initWorkspace(
-  targetPath: string,
-  templateName = 'default',
-): Promise<void> {
+  targetPath: string = '.',
+  options: InitOptions = {},
+): Promise<InitResult> {
   const absoluteTarget = resolve(targetPath);
+  const configDir = join(absoluteTarget, CONFIG_DIR);
+  const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
 
-  // Validate target path doesn't exist
-  if (existsSync(absoluteTarget)) {
+  // Check if workspace already exists (has .allagents/workspace.yaml)
+  if (existsSync(configPath)) {
     throw new Error(
-      `Path already exists: ${absoluteTarget}\n  Choose a different path or remove the existing directory`,
+      `Workspace already exists: ${absoluteTarget}\n  Found existing ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
     );
   }
 
-  // Get template path relative to this file
-  // In development: src/core/workspace.ts -> ../templates/
-  // In production: dist/index.js -> templates/ (same directory)
+  // Get template path for default template
   const currentFilePath = new URL(import.meta.url).pathname;
   const currentFileDir = dirname(currentFilePath);
-
-  // Bundled files are flat in dist/, source files are in src/core/
   const isProduction = currentFilePath.includes('/dist/');
-  const templatePath = isProduction
-    ? join(currentFileDir, 'templates', templateName)
-    : join(currentFileDir, '..', 'templates', templateName);
-
-  // Validate template exists
-  if (!existsSync(templatePath)) {
-    throw new Error(
-      `Template not found: ${templateName}\n  Available templates: default`,
-    );
-  }
+  const defaultTemplatePath = isProduction
+    ? join(currentFileDir, 'templates', 'default')
+    : join(currentFileDir, '..', 'templates', 'default');
 
   try {
-    // Create target directory
+    // Create target directory if it doesn't exist
     await mkdir(absoluteTarget, { recursive: true });
 
-    // Copy template files
-    await cp(templatePath, absoluteTarget, { recursive: true });
+    // Create .allagents directory
+    await mkdir(configDir, { recursive: true });
 
-    // Initialize git repository
-    const git = simpleGit(absoluteTarget);
-    await git.init();
-    await git.add('.');
-    await git.commit(`init: Create workspace from template
+    // Determine workspace.yaml source
+    let workspaceYamlContent: string;
 
-Created workspace at: ${absoluteTarget}
-Template: ${templateName}`);
+    if (options.from) {
+      // Copy workspace.yaml from --from path
+      const fromPath = resolve(options.from);
 
-    console.log(`✓ Workspace created at: ${absoluteTarget}`);
-    console.log('✓ Git repository initialized');
-    console.log('\nNext steps:');
-    console.log(`  cd ${relative(process.cwd(), absoluteTarget)}`);
-    console.log('  allagents workspace sync');
-  } catch (error) {
-    // Clean up on failure
-    try {
-      const { rm } = await import('node:fs/promises');
-      await rm(absoluteTarget, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
+      if (!existsSync(fromPath)) {
+        throw new Error(`Template not found: ${fromPath}`);
+      }
+
+      // Check if --from is a file or directory
+      const { stat } = await import('node:fs/promises');
+      const fromStat = await stat(fromPath);
+
+      let sourceYamlPath: string;
+      if (fromStat.isDirectory()) {
+        // Look for workspace.yaml in .allagents/ subdirectory first, then root
+        const nestedPath = join(fromPath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+        const rootPath = join(fromPath, WORKSPACE_CONFIG_FILE);
+
+        if (existsSync(nestedPath)) {
+          sourceYamlPath = nestedPath;
+        } else if (existsSync(rootPath)) {
+          sourceYamlPath = rootPath;
+        } else {
+          throw new Error(
+            `No workspace.yaml found in: ${fromPath}\n  Expected at: ${nestedPath} or ${rootPath}`,
+          );
+        }
+      } else {
+        // --from points directly to a yaml file
+        sourceYamlPath = fromPath;
+      }
+
+      workspaceYamlContent = await readFile(sourceYamlPath, 'utf-8');
+      console.log(`✓ Using workspace.yaml from: ${sourceYamlPath}`);
+    } else {
+      // Use default template's workspace.yaml
+      const defaultYamlPath = join(defaultTemplatePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+      if (!existsSync(defaultYamlPath)) {
+        throw new Error(`Default template not found at: ${defaultTemplatePath}`);
+      }
+      workspaceYamlContent = await readFile(defaultYamlPath, 'utf-8');
     }
 
+    // Write workspace.yaml
+    await writeFile(configPath, workspaceYamlContent, 'utf-8');
+
+    // Copy AGENTS.md from default template if it exists and target doesn't have one
+    const defaultAgentsPath = join(defaultTemplatePath, 'AGENTS.md');
+    const targetAgentsPath = join(absoluteTarget, 'AGENTS.md');
+    if (existsSync(defaultAgentsPath) && !existsSync(targetAgentsPath)) {
+      await cp(defaultAgentsPath, targetAgentsPath);
+    }
+
+    // Initialize git repository if not already a git repo
+    const git = simpleGit(absoluteTarget);
+    const isGitRepo = existsSync(join(absoluteTarget, '.git'));
+
+    if (!isGitRepo) {
+      await git.init();
+      console.log('✓ Git repository initialized');
+    }
+
+    // Stage and commit workspace files
+    await git.add('.');
+    const status = await git.status();
+    if (status.files.length > 0) {
+      await git.commit(`init: Create workspace${options.from ? ` from ${options.from}` : ''}
+
+Created workspace at: ${absoluteTarget}`);
+      console.log('✓ Initial commit created');
+    }
+
+    console.log(`✓ Workspace created at: ${absoluteTarget}`);
+
+    // Auto-sync plugins
+    console.log('\nSyncing plugins...');
+    const syncResult = await syncWorkspace(absoluteTarget);
+
+    if (!syncResult.success && syncResult.error) {
+      // Don't fail init if sync fails (e.g., no plugins configured)
+      // Just report it
+      if (!syncResult.error.includes('Plugin validation failed')) {
+        console.log(`  Note: ${syncResult.error}`);
+      } else {
+        console.error(`  Sync error: ${syncResult.error}`);
+      }
+    }
+
+    // Show next steps
+    if (targetPath !== '.') {
+      console.log('\nNext steps:');
+      console.log(`  cd ${relative(process.cwd(), absoluteTarget)}`);
+    }
+
+    return {
+      path: absoluteTarget,
+      syncResult,
+    };
+  } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to initialize workspace: ${error.message}`);
     }

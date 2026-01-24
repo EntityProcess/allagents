@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtemp, rm, mkdir, writeFile, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readdir, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncWorkspace, purgeWorkspace, getPurgePaths } from '../../../src/core/sync.js';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, WORKSPACE_RULES } from '../../../src/constants.js';
 
 describe('sync', () => {
   let testDir: string;
@@ -265,6 +265,141 @@ clients:
 
       // Files should still exist (dry-run doesn't purge)
       expect(existsSync(join(testDir, '.claude', 'commands', 'my-command.md'))).toBe(true);
+    });
+  });
+
+  describe('syncWorkspace - workspace files with WORKSPACE-RULES injection', () => {
+    it('should append WORKSPACE-RULES to AGENTS.md when both CLAUDE.md and AGENTS.md are copied', async () => {
+      // Setup: Create a workspace source with both agent files
+      const sourceDir = join(testDir, 'workspace-source');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'CLAUDE.md'), '# Claude Agent\n');
+      await writeFile(join(sourceDir, 'AGENTS.md'), '# Agents\n');
+
+      // Setup: Create .allagents/workspace.yaml
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+workspace:
+  source: ./workspace-source
+  files:
+    - CLAUDE.md
+    - AGENTS.md
+repositories: []
+plugins: []
+clients:
+  - claude
+`,
+      );
+
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // CLAUDE.md should NOT have WORKSPACE-RULES
+      const claudeContent = await readFile(join(testDir, 'CLAUDE.md'), 'utf-8');
+      expect(claudeContent).not.toContain('WORKSPACE-RULES');
+
+      // AGENTS.md should have WORKSPACE-RULES appended
+      const agentsContent = await readFile(join(testDir, 'AGENTS.md'), 'utf-8');
+      expect(agentsContent).toContain('# Agents');
+      expect(agentsContent).toContain('<!-- WORKSPACE-RULES:START -->');
+      expect(agentsContent).toContain('<!-- WORKSPACE-RULES:END -->');
+    });
+
+    it('should append WORKSPACE-RULES to CLAUDE.md when only CLAUDE.md is copied', async () => {
+      // Setup: Create a workspace source with only CLAUDE.md
+      const sourceDir = join(testDir, 'workspace-source');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'CLAUDE.md'), '# Claude Agent\n');
+
+      // Setup: Create .allagents/workspace.yaml
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+workspace:
+  source: ./workspace-source
+  files:
+    - CLAUDE.md
+repositories: []
+plugins: []
+clients:
+  - claude
+`,
+      );
+
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // CLAUDE.md should have WORKSPACE-RULES appended
+      const claudeContent = await readFile(join(testDir, 'CLAUDE.md'), 'utf-8');
+      expect(claudeContent).toContain('# Claude Agent');
+      expect(claudeContent).toContain('<!-- WORKSPACE-RULES:START -->');
+      expect(claudeContent).toContain('<!-- WORKSPACE-RULES:END -->');
+    });
+
+    it('should append WORKSPACE-RULES to AGENTS.md when only AGENTS.md is copied', async () => {
+      // Setup: Create a workspace source with only AGENTS.md
+      const sourceDir = join(testDir, 'workspace-source');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'AGENTS.md'), '# Agents\n');
+
+      // Setup: Create .allagents/workspace.yaml
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+workspace:
+  source: ./workspace-source
+  files:
+    - AGENTS.md
+repositories: []
+plugins: []
+clients:
+  - claude
+`,
+      );
+
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // AGENTS.md should have WORKSPACE-RULES appended
+      const agentsContent = await readFile(join(testDir, 'AGENTS.md'), 'utf-8');
+      expect(agentsContent).toContain('# Agents');
+      expect(agentsContent).toContain('<!-- WORKSPACE-RULES:START -->');
+      expect(agentsContent).toContain('<!-- WORKSPACE-RULES:END -->');
+    });
+
+    it('should not append WORKSPACE-RULES when no agent files are copied', async () => {
+      // Setup: Create a workspace source with a non-agent file
+      const sourceDir = join(testDir, 'workspace-source');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'README.md'), '# README\n');
+
+      // Setup: Create .allagents/workspace.yaml
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+workspace:
+  source: ./workspace-source
+  files:
+    - README.md
+repositories: []
+plugins: []
+clients:
+  - claude
+`,
+      );
+
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // README.md should NOT have WORKSPACE-RULES
+      const readmeContent = await readFile(join(testDir, 'README.md'), 'utf-8');
+      expect(readmeContent).toBe('# README\n');
+      expect(readmeContent).not.toContain('WORKSPACE-RULES');
     });
   });
 });
