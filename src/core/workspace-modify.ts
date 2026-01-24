@@ -71,9 +71,10 @@ export async function addPlugin(
     }
 
     // Verify the plugin exists in the marketplace (pass subpath if specified)
-    const resolved = await resolvePluginSpec(plugin, {
-      subpath: parsed.subpath,
-    });
+    const resolved = await resolvePluginSpec(
+      plugin,
+      parsed.subpath ? { subpath: parsed.subpath } : {},
+    );
     if (!resolved) {
       const marketplace = await getMarketplace(
         autoRegResult.registeredAs || parsed.marketplaceName,

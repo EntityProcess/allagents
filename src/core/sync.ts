@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import simpleGit from 'simple-git';
@@ -224,7 +224,7 @@ async function validatePlugin(
         plugin: pluginSource,
         resolved: '',
         success: false,
-        error: fetchResult.error,
+        ...(fetchResult.error && { error: fetchResult.error }),
       };
     }
     // Handle subpath in GitHub URL (e.g., /tree/main/plugins/name)
@@ -405,7 +405,7 @@ export async function syncWorkspace(
         resolved: v.resolved,
         success: false,
         copyResults: [],
-        error: v.error,
+        ...(v.error && { error: v.error }),
       })),
       totalCopied: 0,
       totalFailed: failedValidations.length,
@@ -582,7 +582,7 @@ async function resolvePluginSpecWithAutoRegister(
   const expectedSubpath = subpath ?? 'plugins';
 
   // Now resolve the plugin within the marketplace (pass subpath if specified)
-  const resolved = await resolvePluginSpec(spec, { subpath });
+  const resolved = await resolvePluginSpec(spec, subpath ? { subpath } : {});
   if (!resolved) {
     return {
       success: false,

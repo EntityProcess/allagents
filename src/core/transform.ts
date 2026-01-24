@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { ClientType, WorkspaceFile } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
@@ -316,27 +317,13 @@ export async function copyPluginToWorkspace(
 }
 
 /**
- * Normalize workspace file entry to explicit form
- * @param file - String shorthand or explicit source/dest object
- * @returns Normalized object with source and dest
- */
-function normalizeWorkspaceFile(
-  file: WorkspaceFile,
-): { source: string; dest: string } {
-  if (typeof file === 'string') {
-    return { source: file, dest: file };
-  }
-  return {
-    source: file.source,
-    dest: file.dest ?? file.source.split('/').pop()!, // basename
-  };
-}
-
-/**
  * Copy workspace files from source to workspace root
+ * Supports glob patterns with gitignore-style negation for string entries.
+ * Object entries ({source, dest}) are copied directly without pattern expansion.
+ *
  * @param sourcePath - Path to source directory (resolved workspace.source)
  * @param workspacePath - Path to workspace directory
- * @param files - Array of workspace file entries
+ * @param files - Array of workspace file entries (strings support globs, objects are literal)
  * @param options - Copy options (dryRun)
  * @returns Array of copy results
  */
@@ -349,10 +336,66 @@ export async function copyWorkspaceFiles(
   const { dryRun = false } = options;
   const results: CopyResult[] = [];
 
+  // Separate string patterns from object entries
+  const stringPatterns: string[] = [];
+  const objectEntries: Array<{ source: string; dest: string | undefined }> = [];
+
   for (const file of files) {
-    const normalized = normalizeWorkspaceFile(file);
-    const srcPath = join(sourcePath, normalized.source);
-    const destPath = join(workspacePath, normalized.dest);
+    if (typeof file === 'string') {
+      stringPatterns.push(file);
+    } else {
+      objectEntries.push({ source: file.source, dest: file.dest });
+    }
+  }
+
+  // Process string patterns through glob resolution
+  if (stringPatterns.length > 0) {
+    const resolvedFiles = await resolveGlobPatterns(sourcePath, stringPatterns);
+    for (const resolved of resolvedFiles) {
+      const destPath = join(workspacePath, resolved.relativePath);
+
+      if (!existsSync(resolved.sourcePath)) {
+        // Only report error for literal (non-glob) patterns
+        const wasLiteral = stringPatterns.some(
+          (p) => !isGlobPattern(p) && !p.startsWith('!') && p === resolved.relativePath,
+        );
+        if (wasLiteral) {
+          results.push({
+            source: resolved.sourcePath,
+            destination: destPath,
+            action: 'failed',
+            error: `Source file not found: ${resolved.sourcePath}`,
+          });
+        }
+        continue;
+      }
+
+      if (dryRun) {
+        results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
+        continue;
+      }
+
+      try {
+        await mkdir(dirname(destPath), { recursive: true });
+        const content = await readFile(resolved.sourcePath, 'utf-8');
+        await writeFile(destPath, content, 'utf-8');
+        results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
+      } catch (error) {
+        results.push({
+          source: resolved.sourcePath,
+          destination: destPath,
+          action: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+  }
+
+  // Process object entries directly (no pattern support)
+  for (const entry of objectEntries) {
+    const srcPath = join(sourcePath, entry.source);
+    const basename = entry.source.split('/').pop() || entry.source;
+    const destPath = join(workspacePath, entry.dest ?? basename);
 
     if (!existsSync(srcPath)) {
       results.push({
@@ -370,6 +413,7 @@ export async function copyWorkspaceFiles(
     }
 
     try {
+      await mkdir(dirname(destPath), { recursive: true });
       const content = await readFile(srcPath, 'utf-8');
       await writeFile(destPath, content, 'utf-8');
       results.push({ source: srcPath, destination: destPath, action: 'copied' });
