@@ -565,6 +565,97 @@ clients:
     });
   });
 
+  describe('syncWorkspace - skill directory tracking', () => {
+    it('should track skill directories with trailing slash in state', async () => {
+      // Setup: Create a plugin with a skill
+      const pluginDir = join(testDir, 'my-plugin');
+      const skillDir = join(pluginDir, 'skills', 'my-skill');
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, 'SKILL.md'),
+        `---
+name: my-skill
+description: A test skill
+---
+
+# My Skill`,
+      );
+
+      // Setup: Create workspace config
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // Sync
+      await syncWorkspace(testDir);
+
+      // Skill directory should exist
+      expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+
+      // State should track skill directory with trailing /
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      const stateContent = await readFile(statePath, 'utf-8');
+      const state = JSON.parse(stateContent);
+      expect(state.files.claude).toContain('.claude/skills/my-skill/');
+    });
+
+    it('should purge skill directory when plugin is removed', async () => {
+      // Setup: Create a plugin with a skill
+      const pluginDir = join(testDir, 'my-plugin');
+      const skillDir = join(pluginDir, 'skills', 'my-skill');
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, 'SKILL.md'),
+        `---
+name: my-skill
+description: A test skill
+---
+
+# My Skill`,
+      );
+
+      // Setup: Create workspace config
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // First sync
+      await syncWorkspace(testDir);
+      expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill'))).toBe(true);
+
+      // Remove plugin from config
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins: []
+clients:
+  - claude
+`,
+      );
+
+      // Second sync - skill directory should be purged
+      await syncWorkspace(testDir);
+      expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill'))).toBe(false);
+    });
+  });
+
   describe('syncWorkspace - WORKSPACE-RULES idempotency', () => {
     it('should have exactly one WORKSPACE-RULES section after multiple syncs', async () => {
       // Setup: Create workspace source with CLAUDE.md

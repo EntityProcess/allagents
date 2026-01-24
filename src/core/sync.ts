@@ -306,16 +306,15 @@ export function collectSyncedPaths(
       const mapping = CLIENT_MAPPINGS[client];
 
       // Check if this is a skill directory (copy results for skills point to the dir)
-      const isSkillDir =
-        mapping.skillsPath &&
-        (relativePath === mapping.skillsPath.replace(/\/$/, '') ||
-          relativePath.startsWith(mapping.skillsPath));
-
-      // Track skill directories with trailing /
-      if (isSkillDir && !relativePath.includes('/')) {
-        // This is the skill directory itself
-        result[client]?.push(`${relativePath}/`);
-        break;
+      // e.g., relativePath = '.claude/skills/my-skill', skillsPath = '.claude/skills/'
+      if (mapping.skillsPath && relativePath.startsWith(mapping.skillsPath)) {
+        const skillName = relativePath.slice(mapping.skillsPath.length);
+        // If skillName has no '/', this is a skill directory (not a file inside)
+        if (!skillName.includes('/')) {
+          // Track skill directory with trailing / for efficient rm -rf
+          result[client]?.push(`${relativePath}/`);
+          break;
+        }
       }
 
       // Check if file belongs to this client's paths
