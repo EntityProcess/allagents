@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { rm, unlink, rmdir } from 'node:fs/promises';
+import { join, resolve, dirname, relative } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import simpleGit from 'simple-git';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
@@ -24,6 +24,12 @@ import {
   addMarketplace,
   getWellKnownMarketplaces,
 } from './marketplace.js';
+import {
+  loadSyncState,
+  saveSyncState,
+  getPreviouslySyncedFiles,
+} from './sync-state.js';
+import type { SyncState } from '../models/sync-state.js';
 
 /**
  * Result of a sync operation
@@ -180,6 +186,150 @@ export function getPurgePaths(
 
     if (paths.length > 0) {
       result.push({ client, paths });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Selectively purge only files that were previously synced
+ * Non-destructive: preserves user-created files
+ * @param workspacePath - Path to workspace directory
+ * @param state - Previous sync state (if null, skips purge entirely)
+ * @param clients - List of clients to purge files for
+ * @returns List of paths that were purged per client
+ */
+export async function selectivePurgeWorkspace(
+  workspacePath: string,
+  state: SyncState | null,
+  clients: ClientType[],
+): Promise<PurgePaths[]> {
+  // First sync - no state, skip purge entirely (safe overlay)
+  if (!state) {
+    return [];
+  }
+
+  const result: PurgePaths[] = [];
+
+  for (const client of clients) {
+    const previousFiles = getPreviouslySyncedFiles(state, client);
+    const purgedPaths: string[] = [];
+
+    // Delete each previously synced file
+    for (const filePath of previousFiles) {
+      const fullPath = join(workspacePath, filePath);
+
+      if (!existsSync(fullPath)) {
+        continue;
+      }
+
+      try {
+        // Check if it's a directory (skill directories end with /)
+        if (filePath.endsWith('/')) {
+          await rm(fullPath, { recursive: true, force: true });
+        } else {
+          await unlink(fullPath);
+        }
+        purgedPaths.push(filePath);
+
+        // Clean up empty parent directories
+        await cleanupEmptyParents(workspacePath, filePath);
+      } catch {
+        // Best effort - continue with other files
+      }
+    }
+
+    if (purgedPaths.length > 0) {
+      result.push({ client, paths: purgedPaths });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Clean up empty parent directories after file deletion
+ * Stops at workspace root
+ */
+async function cleanupEmptyParents(workspacePath: string, filePath: string): Promise<void> {
+  let parentPath = dirname(filePath);
+
+  while (parentPath && parentPath !== '.' && parentPath !== '/') {
+    const fullParentPath = join(workspacePath, parentPath);
+
+    if (!existsSync(fullParentPath)) {
+      parentPath = dirname(parentPath);
+      continue;
+    }
+
+    try {
+      // rmdir only works on empty directories - will throw if not empty
+      await rmdir(fullParentPath);
+      parentPath = dirname(parentPath);
+    } catch {
+      // Directory not empty or other error - stop climbing
+      break;
+    }
+  }
+}
+
+/**
+ * Collect synced file paths from copy results, grouped by client
+ * @param copyResults - Array of copy results from plugins
+ * @param workspacePath - Path to workspace directory
+ * @param clients - List of clients to track
+ * @returns Per-client file lists
+ */
+export function collectSyncedPaths(
+  copyResults: CopyResult[],
+  workspacePath: string,
+  clients: ClientType[],
+): Partial<Record<ClientType, string[]>> {
+  const result: Partial<Record<ClientType, string[]>> = {};
+
+  // Initialize arrays for each client
+  for (const client of clients) {
+    result[client] = [];
+  }
+
+  for (const copyResult of copyResults) {
+    if (copyResult.action !== 'copied' && copyResult.action !== 'generated') {
+      continue;
+    }
+
+    // Get relative path from workspace
+    const relativePath = relative(workspacePath, copyResult.destination);
+
+    // Determine which client this file belongs to
+    for (const client of clients) {
+      const mapping = CLIENT_MAPPINGS[client];
+
+      // Check if this is a skill directory (copy results for skills point to the dir)
+      const isSkillDir =
+        mapping.skillsPath &&
+        (relativePath === mapping.skillsPath.replace(/\/$/, '') ||
+          relativePath.startsWith(mapping.skillsPath));
+
+      // Track skill directories with trailing /
+      if (isSkillDir && !relativePath.includes('/')) {
+        // This is the skill directory itself
+        result[client]!.push(relativePath + '/');
+        break;
+      }
+
+      // Check if file belongs to this client's paths
+      if (
+        (mapping.commandsPath && relativePath.startsWith(mapping.commandsPath)) ||
+        (mapping.skillsPath && relativePath.startsWith(mapping.skillsPath)) ||
+        (mapping.hooksPath && relativePath.startsWith(mapping.hooksPath)) ||
+        (mapping.agentsPath && relativePath.startsWith(mapping.agentsPath)) ||
+        relativePath === mapping.agentFile ||
+        (mapping.agentFileFallback && relativePath === mapping.agentFileFallback)
+      ) {
+        result[client]!.push(relativePath);
+        break;
+      }
     }
   }
 
@@ -415,12 +565,23 @@ export async function syncWorkspace(
     };
   }
 
-  // Step 2: Get paths that will be purged (for dry-run reporting)
-  const purgedPaths = getPurgePaths(workspacePath, config.clients);
+  // Step 2: Load previous sync state for selective purge
+  const previousState = await loadSyncState(workspacePath);
 
-  // Step 3: Purge managed directories (skip in dry-run mode)
+  // Step 2b: Get paths that will be purged (for dry-run reporting)
+  // In non-destructive mode, only show files from state (or nothing on first sync)
+  const purgedPaths = previousState
+    ? config.clients
+        .map((client) => ({
+          client,
+          paths: getPreviouslySyncedFiles(previousState, client),
+        }))
+        .filter((p) => p.paths.length > 0)
+    : [];
+
+  // Step 3: Selective purge - only remove files we previously synced (skip in dry-run mode)
   if (!dryRun) {
-    await purgeWorkspace(workspacePath, config.clients);
+    await selectivePurgeWorkspace(workspacePath, previousState, config.clients);
   }
 
   // Step 4: Copy fresh from all validated plugins
@@ -482,6 +643,19 @@ export async function syncWorkspace(
   }
 
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
+
+  // Step 6: Save sync state with all copied files (skip in dry-run mode)
+  if (!hasFailures && !dryRun) {
+    // Collect all copy results
+    const allCopyResults: CopyResult[] = [
+      ...pluginResults.flatMap((r) => r.copyResults),
+      ...workspaceFileResults,
+    ];
+
+    // Group by client and save state
+    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, config.clients);
+    await saveSyncState(workspacePath, syncedFiles);
+  }
 
   // Create git commit if successful (skip in dry-run mode)
   if (!hasFailures && !dryRun) {

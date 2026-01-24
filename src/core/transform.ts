@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, cp, readdir, appendFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
@@ -6,6 +6,31 @@ import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { ClientType, WorkspaceFile } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
 import { WORKSPACE_RULES } from '../constants.js';
+
+/**
+ * Inject WORKSPACE-RULES into a file idempotently
+ * If markers exist, replaces content between markers
+ * If no markers, appends with markers
+ * @param filePath - Path to the agent file (CLAUDE.md or AGENTS.md)
+ */
+export async function injectWorkspaceRules(filePath: string): Promise<void> {
+  const content = await readFile(filePath, 'utf-8');
+  const startMarker = '<!-- WORKSPACE-RULES:START -->';
+  const endMarker = '<!-- WORKSPACE-RULES:END -->';
+
+  const startIndex = content.indexOf(startMarker);
+  const endIndex = content.indexOf(endMarker);
+
+  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+    // Markers exist - replace content between them (including markers)
+    const before = content.substring(0, startIndex);
+    const after = content.substring(endIndex + endMarker.length);
+    await writeFile(filePath, before + WORKSPACE_RULES.trim() + after, 'utf-8');
+  } else {
+    // No markers - append
+    await writeFile(filePath, content + WORKSPACE_RULES, 'utf-8');
+  }
+}
 
 /**
  * Result of a file copy operation
@@ -450,9 +475,9 @@ export async function copyWorkspaceFiles(
     }
   }
 
-  // Append WORKSPACE-RULES to the appropriate agent file
+  // Inject WORKSPACE-RULES into the appropriate agent file (idempotent)
   if (copiedAgentFiles.length > 0 && !dryRun) {
-    // If both files exist, append to AGENTS.md; otherwise append to whichever one exists
+    // If both files exist, inject into AGENTS.md; otherwise inject into whichever one exists
     const targetFile = copiedAgentFiles.includes('AGENTS.md')
       ? 'AGENTS.md'
       : copiedAgentFiles[0];
@@ -460,13 +485,13 @@ export async function copyWorkspaceFiles(
     const targetPath = join(workspacePath, targetFile);
 
     try {
-      await appendFile(targetPath, WORKSPACE_RULES, 'utf-8');
+      await injectWorkspaceRules(targetPath);
     } catch (error) {
       results.push({
         source: 'WORKSPACE-RULES',
         destination: targetPath,
         action: 'failed',
-        error: error instanceof Error ? error.message : 'Failed to append WORKSPACE-RULES',
+        error: error instanceof Error ? error.message : 'Failed to inject WORKSPACE-RULES',
       });
     }
   }

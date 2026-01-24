@@ -4,6 +4,11 @@
 export const CONFIG_DIR = '.allagents';
 
 /**
+ * Sync state filename (tracks which files were synced)
+ */
+export const SYNC_STATE_FILE = 'sync-state.json';
+
+/**
  * Workspace config filename
  */
 export const WORKSPACE_CONFIG_FILE = 'workspace.yaml';
