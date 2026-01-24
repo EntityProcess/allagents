@@ -10,6 +10,7 @@ repos:
         name: Typecheck
         entry: bun run typecheck
         language: system
+        types: [ts, tsx]
         stages: [pre-push]
       - id: test
         name: Test
