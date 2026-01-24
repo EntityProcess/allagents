@@ -1,0 +1,36 @@
+---
+title: Configuration
+description: Configuration file reference.
+---
+
+## workspace.yaml
+
+```yaml
+repositories:
+  - path: ../my-project
+    owner: myorg
+    repo: my-project
+    description: Main project repository
+
+plugins:
+  - code-review@claude-plugins-official
+
+clients:
+  - claude
+  - copilot
+  - cursor
+
+files:
+  - source: ./shared/AGENTS.md
+    destination: AGENTS.md
+```
+
+## plugin.json
+
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "Plugin description"
+}
+```

@@ -1,0 +1,30 @@
+---
+interface Props {
+  siteName?: string;
+  githubUrl?: string;
+}
+
+const { siteName = 'YourProject', githubUrl = '#' } = Astro.props;
+const currentYear = new Date().getFullYear();
+---
+
+<footer class="py-12 px-4 sm:px-6 lg:px-8 border-t border-gray-800">
+  <div class="max-w-6xl mx-auto">
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="text-gray-400 text-sm">
+        &copy; {currentYear} {siteName}. All rights reserved.
+      </div>
+      <div class="flex items-center gap-6">
+        <a href={githubUrl} target="_blank" rel="noopener noreferrer" class="text-gray-400 hover:text-white transition-colors text-sm">
+          GitHub
+        </a>
+        <a href="#" class="text-gray-400 hover:text-white transition-colors text-sm">
+          Documentation
+        </a>
+        <a href="#" class="text-gray-400 hover:text-white transition-colors text-sm">
+          License
+        </a>
+      </div>
+    </div>
+  </div>
+</footer>

@@ -1,0 +1,25 @@
+---
+title: Plugins
+description: Understanding the plugin system.
+---
+
+Plugins are packages of AI tooling that can be shared across projects and clients.
+
+## Plugin Structure
+
+```
+my-plugin/
+├── plugin.json
+├── commands/
+├── skills/
+└── AGENTS.md
+```
+
+## Plugin Spec Format
+
+Plugins use the `plugin@marketplace` format:
+
+| Format | Example |
+|--------|---------|
+| Well-known | `code-review@claude-plugins-official` |
+| owner/repo | `my-plugin@owner/repo` |

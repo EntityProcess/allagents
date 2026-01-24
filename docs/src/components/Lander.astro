@@ -1,0 +1,270 @@
+---
+import type { Props } from '@astrojs/starlight/props';
+
+const { data } = Astro.props;
+---
+
+<div class="lander">
+  <section class="hero">
+    <div class="hero-content">
+      <h1 class="hero-title">AllAgents</h1>
+      <p class="hero-tagline">
+        CLI tool for managing AI coding assistant plugins across multiple clients.
+        Write plugins once, sync to Claude, Copilot, Cursor, and more.
+      </p>
+      <div class="hero-actions">
+        <a href="/getting-started/introduction/" class="button primary">Get Started</a>
+        <a href="https://github.com/EntityProcess/allagents" class="button secondary" target="_blank" rel="noopener">
+          <svg class="icon" viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+          </svg>
+          GitHub
+        </a>
+      </div>
+      
+      <div class="install-command">
+        <code>npm install -g allagents</code>
+        <button class="copy-button" data-copy="npm install -g allagents" title="Copy to clipboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🔌</div>
+        <h3>Multi-Client Support</h3>
+        <p>Write plugins once, deploy to Claude, GitHub Copilot, Cursor, Codex, and more.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📦</div>
+        <h3>Plugin Marketplace</h3>
+        <p>Share and discover plugins from community marketplaces on GitHub.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🗂️</div>
+        <h3>Multi-Repo Workspaces</h3>
+        <p>Manage AI tooling across multiple repositories from a single workspace.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔄</div>
+        <h3>Declarative Sync</h3>
+        <p>Define plugins in YAML, sync changes automatically across all clients.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🛠️</div>
+        <h3>Skills & Commands</h3>
+        <p>Package reusable skills and commands for your AI coding assistants.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📝</div>
+        <h3>Git-Friendly</h3>
+        <p>Workspace configs are plain files - version control and share with your team.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="clients">
+    <h2>Supported Clients</h2>
+    <div class="client-list">
+      <span class="client-badge">Claude Code</span>
+      <span class="client-badge">GitHub Copilot</span>
+      <span class="client-badge">Cursor</span>
+      <span class="client-badge">Codex</span>
+      <span class="client-badge">OpenCode</span>
+      <span class="client-badge">Gemini CLI</span>
+      <span class="client-badge">Factory</span>
+      <span class="client-badge">Amp Code</span>
+    </div>
+  </section>
+</div>
+
+<script>
+  document.querySelectorAll('.copy-button').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const text = button.getAttribute('data-copy');
+      if (text) {
+        await navigator.clipboard.writeText(text);
+        button.classList.add('copied');
+        setTimeout(() => button.classList.remove('copied'), 2000);
+      }
+    });
+  });
+</script>
+
+<style>
+  .lander {
+    --accent-color: #6366f1;
+    --accent-color-light: #818cf8;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+
+  .hero {
+    text-align: center;
+    padding: 4rem 0 3rem;
+  }
+
+  .hero-title {
+    font-size: clamp(2.5rem, 8vw, 4rem);
+    font-weight: 800;
+    margin: 0 0 1rem;
+    background: linear-gradient(135deg, var(--accent-color), var(--accent-color-light));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-tagline {
+    font-size: 1.25rem;
+    color: var(--sl-color-gray-2);
+    max-width: 600px;
+    margin: 0 auto 2rem;
+    line-height: 1.6;
+  }
+
+  .hero-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 2rem;
+  }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.2s;
+  }
+
+  .button.primary {
+    background: var(--accent-color);
+    color: white;
+  }
+
+  .button.primary:hover {
+    background: var(--accent-color-light);
+  }
+
+  .button.secondary {
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-white);
+    border: 1px solid var(--sl-color-gray-5);
+  }
+
+  .button.secondary:hover {
+    background: var(--sl-color-gray-5);
+  }
+
+  .install-command {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--sl-color-gray-6);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    font-family: var(--sl-font-mono);
+    font-size: 0.95rem;
+  }
+
+  .install-command code {
+    background: none;
+    padding: 0;
+  }
+
+  .copy-button {
+    background: none;
+    border: none;
+    color: var(--sl-color-gray-3);
+    cursor: pointer;
+    padding: 0.25rem;
+    display: flex;
+    transition: color 0.2s;
+  }
+
+  .copy-button:hover {
+    color: var(--sl-color-white);
+  }
+
+  .copy-button.copied {
+    color: #22c55e;
+  }
+
+  .features {
+    padding: 3rem 0;
+  }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .feature-card {
+    background: var(--sl-color-gray-6);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    transition: border-color 0.2s;
+  }
+
+  .feature-card:hover {
+    border-color: var(--accent-color);
+  }
+
+  .feature-icon {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .feature-card h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+  }
+
+  .feature-card p {
+    color: var(--sl-color-gray-2);
+    font-size: 0.95rem;
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .clients {
+    padding: 3rem 0;
+    text-align: center;
+  }
+
+  .clients h2 {
+    font-size: 1.5rem;
+    margin: 0 0 1.5rem;
+  }
+
+  .client-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: center;
+  }
+
+  .client-badge {
+    background: var(--sl-color-gray-6);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 2rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+</style>
