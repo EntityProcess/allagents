@@ -1,0 +1,29 @@
+---
+title: Workspaces
+description: Understanding and configuring AllAgents workspaces.
+---
+
+A workspace is a directory that contains your AI tooling configuration.
+
+## Creating a Workspace
+
+```bash
+allagents workspace init my-workspace
+```
+
+## workspace.yaml
+
+```yaml
+repositories:
+  - path: ../my-project
+    owner: myorg
+    repo: my-project
+
+plugins:
+  - code-review@claude-plugins-official
+
+clients:
+  - claude
+  - copilot
+  - cursor
+```

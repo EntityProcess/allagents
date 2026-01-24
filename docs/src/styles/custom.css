@@ -1,0 +1,27 @@
+:root {
+  --sl-color-accent: 99, 102, 241;
+  --sl-color-accent-low: 30, 27, 75;
+  --sl-color-accent-high: 199, 210, 254;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent: 79, 70, 229;
+  --sl-color-accent-low: 224, 231, 255;
+  --sl-color-accent-high: 49, 46, 129;
+}
+
+.expressive-code {
+  margin: 1.5rem 0;
+}
+
+html:has(.lander) .sidebar {
+  display: none;
+}
+
+html:has(.lander) main {
+  margin-inline-start: 0;
+}
+
+html:has(.lander) .content-panel {
+  max-width: none;
+}

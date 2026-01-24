@@ -1,18 +1,19 @@
 {
-  "name": "landing-page",
+  "name": "allagents-docs",
   "type": "module",
   "version": "0.0.1",
   "scripts": {
     "dev": "astro dev",
+    "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/mdx": "^4.3.13",
     "@astrojs/sitemap": "^3.7.0",
+    "@astrojs/starlight": "^0.37.4",
     "@tailwindcss/vite": "^4.1.18",
-    "astro": "^5.16.15",
+    "astro": "^5.1.0",
     "tailwindcss": "^4.1.18"
   }
 }
