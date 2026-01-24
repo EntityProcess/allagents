@@ -9,11 +9,34 @@ export const workspaceCommand = new Command('workspace').description(
 );
 
 workspaceCommand
-  .command('init <path>')
-  .description('Create new workspace from template')
-  .action(async (path: string) => {
+  .command('init [path]')
+  .description('Create new workspace and sync plugins')
+  .option('--from <template>', 'Copy workspace.yaml from existing template/workspace')
+  .action(async (path: string | undefined, options: { from?: string }) => {
     try {
-      await initWorkspace(path);
+      const targetPath = path ?? '.';
+      const result = await initWorkspace(targetPath, { from: options.from });
+
+      // Print sync results if sync was performed
+      if (result.syncResult) {
+        const syncResult = result.syncResult;
+
+        if (syncResult.pluginResults.length > 0) {
+          console.log('\nPlugin sync results:');
+          for (const pluginResult of syncResult.pluginResults) {
+            const status = pluginResult.success ? '✓' : '✗';
+            console.log(`  ${status} ${pluginResult.plugin}`);
+            if (pluginResult.error) {
+              console.log(`    Error: ${pluginResult.error}`);
+            }
+          }
+        }
+
+        console.log(`\nSync complete: ${syncResult.totalCopied} files copied`);
+        if (syncResult.totalFailed > 0) {
+          console.log(`  Failed: ${syncResult.totalFailed}`);
+        }
+      }
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error: ${error.message}`);
