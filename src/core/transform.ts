@@ -394,7 +394,8 @@ export async function copyWorkspaceFiles(
   // Process object entries directly (no pattern support)
   for (const entry of objectEntries) {
     const srcPath = join(sourcePath, entry.source);
-    const destPath = join(workspacePath, entry.dest ?? entry.source.split('/').pop()!);
+    const basename = entry.source.split('/').pop() || entry.source;
+    const destPath = join(workspacePath, entry.dest ?? basename);
 
     if (!existsSync(srcPath)) {
       results.push({

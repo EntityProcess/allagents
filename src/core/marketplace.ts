@@ -463,7 +463,7 @@ export function parsePluginSpec(spec: string): {
         marketplaceName: repo, // Marketplace is registered by repo name
         owner,
         repo,
-        subpath,
+        ...(subpath && { subpath }),
       };
     }
   }
