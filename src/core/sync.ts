@@ -314,7 +314,7 @@ export function collectSyncedPaths(
       // Track skill directories with trailing /
       if (isSkillDir && !relativePath.includes('/')) {
         // This is the skill directory itself
-        result[client]!.push(relativePath + '/');
+        result[client]?.push(`${relativePath}/`);
         break;
       }
 
@@ -327,7 +327,7 @@ export function collectSyncedPaths(
         relativePath === mapping.agentFile ||
         (mapping.agentFileFallback && relativePath === mapping.agentFileFallback)
       ) {
-        result[client]!.push(relativePath);
+        result[client]?.push(relativePath);
         break;
       }
     }

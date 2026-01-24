@@ -476,11 +476,12 @@ export async function copyWorkspaceFiles(
   }
 
   // Inject WORKSPACE-RULES into the appropriate agent file (idempotent)
-  if (copiedAgentFiles.length > 0 && !dryRun) {
+  const firstAgentFile = copiedAgentFiles[0];
+  if (firstAgentFile && !dryRun) {
     // If both files exist, inject into AGENTS.md; otherwise inject into whichever one exists
     const targetFile = copiedAgentFiles.includes('AGENTS.md')
       ? 'AGENTS.md'
-      : copiedAgentFiles[0];
+      : firstAgentFile;
 
     const targetPath = join(workspacePath, targetFile);
 
