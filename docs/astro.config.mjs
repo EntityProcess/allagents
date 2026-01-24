@@ -8,7 +8,7 @@ import sitemap from '@astrojs/sitemap';
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://your-domain.com', // Update with your custom domain
+  site: 'https://allagents.dev',
   vite: {
     plugins: [tailwindcss()]
   },
