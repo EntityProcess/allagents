@@ -1,15 +1,19 @@
-<!-- WORKSPACE-RULES:START -->
-# Workspace Rules
+# Multi-Repo Workspace
 
-## Rule: Workspace Discovery
-TRIGGER: Any task
-ACTION: Read `.allagents/workspace.yaml` to get repository paths and project domains
+## Development
 
-## Rule: Correct Repository Paths
-TRIGGER: File operations (read, search, modify)
-ACTION: Use repository paths from `.allagents/workspace.yaml`, not assumptions
+To run tests:
+```bash
+bun run test
+```
 
-## Rule: Cross-Repository Context
-TRIGGER: Tasks involving multiple repositories
-ACTION: Check all repository paths in .allagents/workspace.yaml before making changes
-<!-- WORKSPACE-RULES:END -->
+To build:
+```bash
+bun run build
+```
+
+## Code Style
+
+- Use TypeScript for all new code
+- Follow existing patterns in the codebase
+- Add tests for new functionality

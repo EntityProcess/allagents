@@ -1,10 +1,11 @@
-import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, cp, readdir, appendFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { ClientType, WorkspaceFile } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
+import { WORKSPACE_RULES } from '../constants.js';
 
 /**
  * Result of a file copy operation
@@ -340,6 +341,9 @@ export async function copyWorkspaceFiles(
   const stringPatterns: string[] = [];
   const objectEntries: Array<{ source: string; dest: string | undefined }> = [];
 
+  // Track which agent files were copied for WORKSPACE-RULES injection
+  const copiedAgentFiles: string[] = [];
+
   for (const file of files) {
     if (typeof file === 'string') {
       stringPatterns.push(file);
@@ -372,6 +376,10 @@ export async function copyWorkspaceFiles(
 
       if (dryRun) {
         results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
+        // Track agent files even in dry-run for accurate reporting
+        if (resolved.relativePath === 'CLAUDE.md' || resolved.relativePath === 'AGENTS.md') {
+          copiedAgentFiles.push(resolved.relativePath);
+        }
         continue;
       }
 
@@ -380,6 +388,11 @@ export async function copyWorkspaceFiles(
         const content = await readFile(resolved.sourcePath, 'utf-8');
         await writeFile(destPath, content, 'utf-8');
         results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
+
+        // Track if this is an agent file
+        if (resolved.relativePath === 'CLAUDE.md' || resolved.relativePath === 'AGENTS.md') {
+          copiedAgentFiles.push(resolved.relativePath);
+        }
       } catch (error) {
         results.push({
           source: resolved.sourcePath,
@@ -395,7 +408,8 @@ export async function copyWorkspaceFiles(
   for (const entry of objectEntries) {
     const srcPath = join(sourcePath, entry.source);
     const basename = entry.source.split('/').pop() || entry.source;
-    const destPath = join(workspacePath, entry.dest ?? basename);
+    const destFilename = entry.dest ?? basename;
+    const destPath = join(workspacePath, destFilename);
 
     if (!existsSync(srcPath)) {
       results.push({
@@ -409,6 +423,10 @@ export async function copyWorkspaceFiles(
 
     if (dryRun) {
       results.push({ source: srcPath, destination: destPath, action: 'copied' });
+      // Track agent files even in dry-run for accurate reporting
+      if (destFilename === 'CLAUDE.md' || destFilename === 'AGENTS.md') {
+        copiedAgentFiles.push(destFilename);
+      }
       continue;
     }
 
@@ -417,12 +435,38 @@ export async function copyWorkspaceFiles(
       const content = await readFile(srcPath, 'utf-8');
       await writeFile(destPath, content, 'utf-8');
       results.push({ source: srcPath, destination: destPath, action: 'copied' });
+
+      // Track if this is an agent file
+      if (destFilename === 'CLAUDE.md' || destFilename === 'AGENTS.md') {
+        copiedAgentFiles.push(destFilename);
+      }
     } catch (error) {
       results.push({
         source: srcPath,
         destination: destPath,
         action: 'failed',
         error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  // Append WORKSPACE-RULES to the appropriate agent file
+  if (copiedAgentFiles.length > 0 && !dryRun) {
+    // If both files exist, append to AGENTS.md; otherwise append to whichever one exists
+    const targetFile = copiedAgentFiles.includes('AGENTS.md')
+      ? 'AGENTS.md'
+      : copiedAgentFiles[0];
+
+    const targetPath = join(workspacePath, targetFile);
+
+    try {
+      await appendFile(targetPath, WORKSPACE_RULES, 'utf-8');
+    } catch (error) {
+      results.push({
+        source: 'WORKSPACE-RULES',
+        destination: targetPath,
+        action: 'failed',
+        error: error instanceof Error ? error.message : 'Failed to append WORKSPACE-RULES',
       });
     }
   }
