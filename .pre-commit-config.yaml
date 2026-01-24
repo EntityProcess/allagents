@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: lint
+        name: Lint
+        entry: bun run lint
+        language: system
+        stages: [pre-push]
+      - id: typecheck
+        name: Typecheck
+        entry: bun run typecheck
+        language: system
+        stages: [pre-push]
+      - id: test
+        name: Test
+        entry: bun run test
+        language: system
+        stages: [pre-push]

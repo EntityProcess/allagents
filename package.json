@@ -49,10 +49,11 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@j178/prek": "^0.3.0",
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.5",
-    "@biomejs/biome": "^1.9.0",
     "typescript": "^5.3.3"
   },
   "engines": {
