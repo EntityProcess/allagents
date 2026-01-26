@@ -296,8 +296,8 @@ export function collectSyncedPaths(
       continue;
     }
 
-    // Get relative path from workspace
-    const relativePath = relative(workspacePath, copyResult.destination);
+    // Get relative path from workspace (normalize to forward slashes for cross-platform consistency)
+    const relativePath = relative(workspacePath, copyResult.destination).replace(/\\/g, '/');
 
     // Determine which client this file belongs to
     for (const client of clients) {

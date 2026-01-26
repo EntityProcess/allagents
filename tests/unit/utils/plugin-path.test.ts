@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test';
+import { join, resolve, sep } from 'node:path';
 import {
   isGitHubUrl,
   parseGitHubUrl,
@@ -108,19 +109,21 @@ describe('normalizePluginPath', () => {
   });
 
   it('should convert relative paths to absolute', () => {
-    const result = normalizePluginPath('./relative/path', '/base/dir');
-    expect(result).toBe('/base/dir/relative/path');
+    const baseDir = resolve('/base/dir');
+    const result = normalizePluginPath('./relative/path', baseDir);
+    expect(result).toBe(join(baseDir, 'relative', 'path'));
   });
 
   it('should handle parent directory references', () => {
-    const result = normalizePluginPath('../parent/path', '/base/dir');
-    expect(result).toBe('/base/parent/path');
+    const baseDir = resolve('/base/dir');
+    const result = normalizePluginPath('../parent/path', baseDir);
+    expect(result).toBe(resolve(baseDir, '..', 'parent', 'path'));
   });
 
   it('should use current directory as default base', () => {
     const result = normalizePluginPath('./test');
-    expect(result).toContain('/test');
-    expect(result.startsWith('/')).toBe(true);
+    expect(result).toContain(`${sep}test`);
+    expect(result).toMatch(/^([A-Z]:\\|\/)/); // Windows drive or Unix root
   });
 });
 
@@ -142,9 +145,10 @@ describe('parsePluginSource', () => {
   });
 
   it('should parse local relative paths', () => {
-    const result = parsePluginSource('./relative/path', '/base');
+    const baseDir = resolve('/base');
+    const result = parsePluginSource('./relative/path', baseDir);
     expect(result.type).toBe('local');
-    expect(result.normalized).toBe('/base/relative/path');
+    expect(result.normalized).toBe(join(baseDir, 'relative', 'path'));
     expect(result.original).toBe('./relative/path');
   });
 });
@@ -152,7 +156,8 @@ describe('parsePluginSource', () => {
 describe('getPluginCachePath', () => {
   it('should generate cache path with owner and repo', () => {
     const result = getPluginCachePath('EntityProcess', 'allagents');
-    expect(result).toContain('.allagents/plugins/marketplaces/EntityProcess-allagents');
+    const expectedPath = join('.allagents', 'plugins', 'marketplaces', 'EntityProcess-allagents');
+    expect(result).toContain(expectedPath);
   });
 
   it('should use home directory', () => {
