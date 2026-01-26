@@ -1,16 +1,16 @@
 {
   "name": "allagents",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "CLI tool for managing multi-repo AI agent workspaces with plugin synchronization",
   "type": "module",
   "bin": {
-    "allagents": "./dist/cli/index.js"
+    "allagents": "./dist/index.js"
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "bun build ./src/cli/index.ts --outdir ./dist --target node && cp -r src/templates dist/",
+    "build": "bun build ./src/cli/index.ts --outdir ./dist --target node && shx cp -r src/templates dist/",
     "docs:install": "bun install --cwd docs",
     "docs:build": "bun run --cwd docs build",
     "dev": "bun run src/cli/index.ts",
@@ -24,7 +24,7 @@
     "format": "biome format --write src",
     "check": "biome check src",
     "check:fix": "biome check --write src",
-    "prepare": "bun run build"
+    "prepare": "bun run build && prek install -t pre-push"
   },
   "keywords": [
     "cli",
