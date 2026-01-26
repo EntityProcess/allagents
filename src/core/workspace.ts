@@ -1,6 +1,7 @@
 import { mkdir, cp, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, resolve, dirname, relative } from 'node:path';
+import { join, resolve, dirname, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { syncWorkspace, type SyncResult } from './sync.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 
@@ -44,9 +45,9 @@ export async function initWorkspace(
   }
 
   // Get template path for default template
-  const currentFilePath = new URL(import.meta.url).pathname;
+  const currentFilePath = fileURLToPath(import.meta.url);
   const currentFileDir = dirname(currentFilePath);
-  const isProduction = currentFilePath.includes('/dist/');
+  const isProduction = currentFilePath.includes(`${sep}dist${sep}`);
   const defaultTemplatePath = isProduction
     ? join(currentFileDir, 'templates', 'default')
     : join(currentFileDir, '..', 'templates', 'default');
