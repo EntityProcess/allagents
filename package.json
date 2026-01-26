@@ -24,7 +24,7 @@
     "format": "biome format --write src",
     "check": "biome check src",
     "check:fix": "biome check --write src",
-    "prepare": "bun run build && prek install -t pre-push"
+    "prepare": "bun run build && bunx prek install -t pre-push"
   },
   "keywords": [
     "cli",
