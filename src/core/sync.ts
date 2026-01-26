@@ -2,14 +2,12 @@ import { existsSync } from 'node:fs';
 import { rm, unlink, rmdir } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
-import simpleGit from 'simple-git';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import type {
   WorkspaceConfig,
   ClientType,
 } from '../models/workspace-config.js';
 import {
-  parsePluginSource,
   isGitHubUrl,
   parseGitHubUrl,
 } from '../utils/plugin-path.js';
@@ -654,41 +652,6 @@ export async function syncWorkspace(
     // Group by client and save state
     const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, config.clients);
     await saveSyncState(workspacePath, syncedFiles);
-  }
-
-  // Create git commit if successful (skip in dry-run mode)
-  if (!hasFailures && !dryRun) {
-    try {
-      const git = simpleGit(workspacePath);
-      await git.add('.');
-
-      // Check if there are changes to commit
-      const status = await git.status();
-      if (status.files.length > 0) {
-        const timestamp = new Date().toISOString();
-        const pluginNames = config.plugins.map((p) => {
-          // Handle plugin@marketplace format
-          if (isPluginSpec(p)) {
-            return p;
-          }
-          // Handle GitHub URLs
-          const parsed = parsePluginSource(p);
-          if (parsed.type === 'github' && parsed.owner && parsed.repo) {
-            return `${parsed.owner}/${parsed.repo}`;
-          }
-          return p;
-        });
-
-        await git.commit(`sync: Update workspace from plugins
-
-Synced plugins:
-${pluginNames.map((p) => `- ${p}`).join('\n')}
-
-Timestamp: ${timestamp}`);
-      }
-    } catch {
-      // Git commit is optional, don't fail sync
-    }
   }
 
   return {

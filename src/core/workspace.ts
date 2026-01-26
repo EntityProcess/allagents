@@ -1,7 +1,6 @@
 import { mkdir, cp, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname, relative } from 'node:path';
-import simpleGit from 'simple-git';
 import { syncWorkspace, type SyncResult } from './sync.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 
@@ -113,25 +112,6 @@ export async function initWorkspace(
     const targetAgentsPath = join(absoluteTarget, 'AGENTS.md');
     if (existsSync(defaultAgentsPath) && !existsSync(targetAgentsPath)) {
       await cp(defaultAgentsPath, targetAgentsPath);
-    }
-
-    // Initialize git repository if not already a git repo
-    const git = simpleGit(absoluteTarget);
-    const isGitRepo = existsSync(join(absoluteTarget, '.git'));
-
-    if (!isGitRepo) {
-      await git.init();
-      console.log('✓ Git repository initialized');
-    }
-
-    // Stage and commit workspace files
-    await git.add('.');
-    const status = await git.status();
-    if (status.files.length > 0) {
-      await git.commit(`init: Create workspace${options.from ? ` from ${options.from}` : ''}
-
-Created workspace at: ${absoluteTarget}`);
-      console.log('✓ Initial commit created');
     }
 
     console.log(`✓ Workspace created at: ${absoluteTarget}`);
