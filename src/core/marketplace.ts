@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { execa } from 'execa';
 
 /**
@@ -146,7 +146,7 @@ export function parseMarketplaceSource(source: string): {
   // Local path (absolute or relative starting with . or /)
   if (source.startsWith('/') || source.startsWith('.')) {
     const absPath = resolve(source);
-    const name = absPath.split('/').pop() || 'local';
+    const name = basename(absPath) || 'local';
     return {
       type: 'local',
       location: absPath,

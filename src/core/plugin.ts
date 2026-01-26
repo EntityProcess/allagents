@@ -1,6 +1,6 @@
 import { mkdir, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import {
   parseGitHubUrl,
@@ -107,7 +107,7 @@ export async function fetchPlugin(
     }
     // Clone new plugin
     // Ensure parent directory exists
-    const parentDir = cachePath.split('/').slice(0, -1).join('/');
+    const parentDir = dirname(cachePath);
     await mkdir(parentDir, { recursive: true });
 
     // Clone repository
