@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, mock, spyOn, beforeEach, afterEach } from 'bun:test';
 import { join, resolve, sep } from 'node:path';
 import {
   isGitHubUrl,
@@ -7,7 +7,9 @@ import {
   parsePluginSource,
   getPluginCachePath,
   validatePluginSource,
+  verifyGitHubUrlExists,
 } from '../../../src/utils/plugin-path.js';
+import * as execa from 'execa';
 
 describe('isGitHubUrl', () => {
   it('should detect standard GitHub HTTPS URLs', () => {
@@ -32,6 +34,11 @@ describe('isGitHubUrl', () => {
   it('should detect shorthand owner/repo/subpath format', () => {
     expect(isGitHubUrl('anthropics/claude-plugins-official/plugins/code-review')).toBe(true);
     expect(isGitHubUrl('owner/repo/deep/nested/path')).toBe(true);
+  });
+
+  it('should detect repo names with dots', () => {
+    expect(isGitHubUrl('WiseTechGlobal/WTG.AI.Prompts')).toBe(true);
+    expect(isGitHubUrl('WiseTechGlobal/WTG.AI.Prompts/plugins/cargowise')).toBe(true);
   });
 
   it('should reject non-GitHub URLs', () => {
@@ -87,6 +94,20 @@ describe('parseGitHubUrl', () => {
       owner: 'anthropics',
       repo: 'claude-plugins-official',
       subpath: 'plugins/code-review',
+    });
+  });
+
+  it('should parse repo names with dots', () => {
+    const result = parseGitHubUrl('WiseTechGlobal/WTG.AI.Prompts');
+    expect(result).toEqual({ owner: 'WiseTechGlobal', repo: 'WTG.AI.Prompts' });
+  });
+
+  it('should parse repo names with dots and subpath', () => {
+    const result = parseGitHubUrl('WiseTechGlobal/WTG.AI.Prompts/plugins/cargowise');
+    expect(result).toEqual({
+      owner: 'WiseTechGlobal',
+      repo: 'WTG.AI.Prompts',
+      subpath: 'plugins/cargowise',
     });
   });
 
@@ -194,5 +215,82 @@ describe('validatePluginSource', () => {
     const result = validatePluginSource('gh:invalid');
     expect(result.valid).toBe(false);
     expect(result.error).toContain('Invalid GitHub URL');
+  });
+});
+
+describe('verifyGitHubUrlExists', () => {
+  let execaSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    execaSpy = spyOn(execa, 'execa');
+  });
+
+  afterEach(() => {
+    execaSpy.mockRestore();
+  });
+
+  it('should return exists=true for valid repo', async () => {
+    execaSpy.mockResolvedValue({ stdout: '', stderr: '' } as never);
+
+    const result = await verifyGitHubUrlExists('owner/repo');
+    expect(result.exists).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('should return exists=true for valid repo with subpath', async () => {
+    execaSpy.mockResolvedValue({ stdout: '', stderr: '' } as never);
+
+    const result = await verifyGitHubUrlExists('owner/repo/plugins/myplugin');
+    expect(result.exists).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('should return error for invalid URL format', async () => {
+    const result = await verifyGitHubUrlExists('invalid');
+    expect(result.exists).toBe(false);
+    expect(result.error).toContain('Invalid GitHub URL format');
+  });
+
+  it('should return error when gh CLI is not installed', async () => {
+    execaSpy.mockRejectedValue(new Error('Command not found: gh') as never);
+
+    const result = await verifyGitHubUrlExists('owner/repo');
+    expect(result.exists).toBe(false);
+    expect(result.error).toContain('gh CLI not installed');
+  });
+
+  it('should return error when repository not found', async () => {
+    // First call (gh --version) succeeds
+    execaSpy.mockResolvedValueOnce({ stdout: '', stderr: '' } as never);
+    // Second call (gh repo view) fails with 404
+    execaSpy.mockRejectedValueOnce(new Error('HTTP 404: Not Found') as never);
+
+    const result = await verifyGitHubUrlExists('owner/nonexistent-repo');
+    expect(result.exists).toBe(false);
+    expect(result.error).toContain('Repository not found');
+  });
+
+  it('should return error when path not found in repo', async () => {
+    // gh --version succeeds
+    execaSpy.mockResolvedValueOnce({ stdout: '', stderr: '' } as never);
+    // gh repo view succeeds
+    execaSpy.mockResolvedValueOnce({ stdout: '{}', stderr: '' } as never);
+    // gh api for contents fails with 404
+    execaSpy.mockRejectedValueOnce(new Error('HTTP 404: Not Found') as never);
+
+    const result = await verifyGitHubUrlExists('owner/repo/nonexistent/path');
+    expect(result.exists).toBe(false);
+    expect(result.error).toContain('Path not found in repository');
+  });
+
+  it('should return error when authentication required', async () => {
+    // gh --version succeeds
+    execaSpy.mockResolvedValueOnce({ stdout: '', stderr: '' } as never);
+    // gh repo view fails with auth error
+    execaSpy.mockRejectedValueOnce(new Error('authentication required') as never);
+
+    const result = await verifyGitHubUrlExists('owner/private-repo');
+    expect(result.exists).toBe(false);
+    expect(result.error).toContain('GitHub authentication required');
   });
 });

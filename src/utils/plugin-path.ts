@@ -1,4 +1,5 @@
 import { resolve, isAbsolute } from 'node:path';
+import { execa } from 'execa';
 
 /**
  * Plugin source types
@@ -50,10 +51,11 @@ export function isGitHubUrl(source: string): boolean {
     !/^[a-zA-Z]:/.test(source) &&
     source.includes('/')
   ) {
-    // Check if it looks like owner/repo format (alphanumeric, hyphens, underscores)
+    // Check if it looks like owner/repo format (alphanumeric, hyphens, underscores, dots)
+    // GitHub allows dots in repo names (e.g., WTG.AI.Prompts)
     const parts = source.split('/');
     if (parts.length >= 2 && parts[0] && parts[1]) {
-      const validOwnerRepo = /^[a-zA-Z0-9_-]+$/;
+      const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
       if (validOwnerRepo.test(parts[0]) && validOwnerRepo.test(parts[1])) {
         return true;
       }
@@ -97,7 +99,8 @@ export function parseGitHubUrl(
     if (parts.length >= 2) {
       const owner = parts[0];
       const repo = parts[1];
-      const validOwnerRepo = /^[a-zA-Z0-9_-]+$/;
+      // Allow dots in repo names (e.g., WTG.AI.Prompts)
+      const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
       if (
         owner &&
         repo &&
@@ -239,4 +242,102 @@ export function validatePluginSource(source: string): {
   }
 
   return { valid: true };
+}
+
+/**
+ * Result of GitHub URL verification
+ */
+export interface VerifyGitHubResult {
+  exists: boolean;
+  error?: string;
+}
+
+/**
+ * Verify that a GitHub URL exists (repo and optional subpath)
+ * Uses gh CLI to check repository and path existence
+ * @param source - GitHub URL or shorthand
+ * @returns Verification result
+ */
+export async function verifyGitHubUrlExists(
+  source: string,
+): Promise<VerifyGitHubResult> {
+  const parsed = parseGitHubUrl(source);
+  if (!parsed) {
+    return {
+      exists: false,
+      error: 'Invalid GitHub URL format. Expected: https://github.com/owner/repo',
+    };
+  }
+
+  const { owner, repo, subpath } = parsed;
+
+  // Check if gh CLI is available
+  try {
+    await execa('gh', ['--version']);
+  } catch {
+    return {
+      exists: false,
+      error: 'gh CLI not installed. Install from: https://cli.github.com',
+    };
+  }
+
+  // Check if repository exists
+  try {
+    await execa('gh', ['repo', 'view', `${owner}/${repo}`, '--json', 'name']);
+  } catch (error) {
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase();
+      if (
+        errorMessage.includes('not found') ||
+        errorMessage.includes('404') ||
+        errorMessage.includes('could not resolve to a repository')
+      ) {
+        return {
+          exists: false,
+          error: `Repository not found: ${owner}/${repo}`,
+        };
+      }
+      if (
+        errorMessage.includes('auth') ||
+        errorMessage.includes('authentication')
+      ) {
+        return {
+          exists: false,
+          error: 'GitHub authentication required. Run: gh auth login',
+        };
+      }
+    }
+    return {
+      exists: false,
+      error: `Failed to verify repository: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  // If subpath specified, verify it exists in the repo
+  if (subpath) {
+    try {
+      // Use gh api to check if the path exists in the default branch
+      await execa('gh', [
+        'api',
+        `repos/${owner}/${repo}/contents/${subpath}`,
+        '--silent',
+      ]);
+    } catch (error) {
+      if (error instanceof Error) {
+        const errorMessage = error.message.toLowerCase();
+        if (errorMessage.includes('not found') || errorMessage.includes('404')) {
+          return {
+            exists: false,
+            error: `Path not found in repository: ${owner}/${repo}/${subpath}`,
+          };
+        }
+      }
+      return {
+        exists: false,
+        error: `Failed to verify path: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
+  return { exists: true };
 }

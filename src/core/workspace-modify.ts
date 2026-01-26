@@ -3,7 +3,11 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { load, dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
-import { validatePluginSource, isGitHubUrl } from '../utils/plugin-path.js';
+import {
+  validatePluginSource,
+  isGitHubUrl,
+  verifyGitHubUrlExists,
+} from '../utils/plugin-path.js';
 import type { WorkspaceConfig } from '../models/workspace-config.js';
 import {
   isPluginSpec,
@@ -105,6 +109,15 @@ export async function addPlugin(
       return {
         success: false,
         error: validation.error || 'Invalid GitHub URL',
+      };
+    }
+
+    // Verify the GitHub URL actually exists
+    const verifyResult = await verifyGitHubUrlExists(plugin);
+    if (!verifyResult.exists) {
+      return {
+        success: false,
+        error: verifyResult.error || `GitHub URL not found: ${plugin}`,
       };
     }
   } else {
