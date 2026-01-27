@@ -90,8 +90,11 @@ export async function initWorkspace(
               // Remove workspace.yaml from the base path if present
               const baseDir = basePath.replace(/\/?\.allagents\/workspace\.yaml$/, '')
                                        .replace(/\/?workspace\.yaml$/, '');
-              const sourcePath = baseDir ? `${baseDir}/${source}` : source;
-              workspace.source = `https://github.com/${parsedUrl.owner}/${parsedUrl.repo}/tree/main/${sourcePath}`;
+              // If source is "." (current directory), just use baseDir, otherwise join them
+              const sourcePath = source === '.' ? baseDir : (baseDir ? `${baseDir}/${source}` : source);
+              // Use the branch from the parsed URL, or default to main if not specified
+              const branch = parsedUrl.branch || 'main';
+              workspace.source = `https://github.com/${parsedUrl.owner}/${parsedUrl.repo}/tree/${branch}/${sourcePath}`;
               workspaceYamlContent = dump(parsed, { lineWidth: -1 });
             }
           }
