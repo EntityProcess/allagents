@@ -188,4 +188,113 @@ describe('copyWorkspaceFiles with glob patterns', () => {
       expect(results[0].error).toContain('Source file not found');
     });
   });
+
+  describe('file-level source sync', () => {
+    it('should handle object entry with dest only (no explicit source)', async () => {
+      // When dest is provided without source, the dest is used as path relative to sourcePath
+      const results = await copyWorkspaceFiles(sourceDir, destDir, [
+        { dest: 'README.md' },
+      ]);
+
+      expect(results.length).toBe(1);
+      expect(results[0].action).toBe('copied');
+      expect(existsSync(join(destDir, 'README.md'))).toBe(true);
+    });
+
+    it('should error when no sourcePath and no explicit source on object entry', async () => {
+      const results = await copyWorkspaceFiles(undefined, destDir, [
+        { dest: 'README.md' },
+      ]);
+
+      expect(results.length).toBe(1);
+      expect(results[0].action).toBe('failed');
+      expect(results[0].error).toContain('no workspace.source configured');
+    });
+
+    it('should error when no sourcePath and string pattern is used', async () => {
+      const results = await copyWorkspaceFiles(undefined, destDir, ['README.md']);
+
+      expect(results.length).toBe(1);
+      expect(results[0].action).toBe('failed');
+      expect(results[0].error).toContain('no workspace.source configured');
+    });
+
+    it('should handle object entry with neither source nor dest', async () => {
+      const results = await copyWorkspaceFiles(sourceDir, destDir, [
+        {},
+      ] as any); // Force invalid entry
+
+      expect(results.length).toBe(1);
+      expect(results[0].action).toBe('failed');
+      expect(results[0].error).toContain('at least source or dest');
+    });
+
+    it('should use githubCache to resolve GitHub file sources', async () => {
+      // Create a mock GitHub cache directory
+      const mockCacheDir = await mkdtemp(join(tmpdir(), 'allagents-github-cache-'));
+      await mkdir(join(mockCacheDir, 'plugins', 'test'), { recursive: true });
+      await writeFile(join(mockCacheDir, 'plugins', 'test', 'AGENTS.md'), '# Test Agents');
+
+      const githubCache = new Map<string, string>();
+      githubCache.set('owner/repo', mockCacheDir);
+
+      const results = await copyWorkspaceFiles(sourceDir, destDir, [
+        { dest: 'AGENTS.md', source: 'owner/repo/plugins/test/AGENTS.md' },
+      ], { githubCache });
+
+      expect(results.length).toBe(1);
+      expect(results[0].action).toBe('copied');
+      expect(existsSync(join(destDir, 'AGENTS.md'))).toBe(true);
+
+      const content = await readFile(join(destDir, 'AGENTS.md'), 'utf-8');
+      expect(content).toContain('# Test Agents');
+
+      // Cleanup
+      await rm(mockCacheDir, { recursive: true, force: true });
+    });
+
+    it('should error when GitHub source is not in cache', async () => {
+      const results = await copyWorkspaceFiles(sourceDir, destDir, [
+        { dest: 'AGENTS.md', source: 'owner/repo/plugins/test/AGENTS.md' },
+      ], { githubCache: new Map() });
+
+      expect(results.length).toBe(1);
+      expect(results[0].action).toBe('failed');
+      expect(results[0].error).toContain('GitHub cache not found');
+    });
+
+    it('should inject WORKSPACE-RULES into AGENTS.md from GitHub source', async () => {
+      // Create a mock GitHub cache directory
+      const mockCacheDir = await mkdtemp(join(tmpdir(), 'allagents-github-cache-'));
+      await mkdir(join(mockCacheDir, 'plugins', 'test'), { recursive: true });
+      await writeFile(join(mockCacheDir, 'plugins', 'test', 'AGENTS.md'), '# Test Agents\n\nSome content.');
+
+      const githubCache = new Map<string, string>();
+      githubCache.set('owner/repo', mockCacheDir);
+
+      const results = await copyWorkspaceFiles(sourceDir, destDir, [
+        { dest: 'AGENTS.md', source: 'owner/repo/plugins/test/AGENTS.md' },
+      ], { githubCache });
+
+      expect(results.length).toBe(1);
+      expect(results[0].action).toBe('copied');
+
+      const content = await readFile(join(destDir, 'AGENTS.md'), 'utf-8');
+      expect(content).toContain('WORKSPACE-RULES');
+
+      // Cleanup
+      await rm(mockCacheDir, { recursive: true, force: true });
+    });
+
+    it('should treat paths with only 2 segments as local paths, not GitHub', async () => {
+      // config/settings.json should be treated as local, not as GitHub owner/repo
+      const results = await copyWorkspaceFiles(sourceDir, destDir, [
+        { source: 'config/settings.json', dest: 'settings.json' },
+      ]);
+
+      expect(results.length).toBe(1);
+      expect(results[0].action).toBe('copied');
+      expect(existsSync(join(destDir, 'settings.json'))).toBe(true);
+    });
+  });
 });

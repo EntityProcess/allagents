@@ -6,6 +6,7 @@ import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { ClientType, WorkspaceFile } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
 import { WORKSPACE_RULES } from '../constants.js';
+import { parseFileSource } from '../utils/plugin-path.js';
 
 /**
  * Agent instruction files that receive WORKSPACE-RULES injection
@@ -67,6 +68,17 @@ export interface CopyResult {
 export interface CopyOptions {
   /** Simulate copy without making changes */
   dryRun?: boolean;
+}
+
+/**
+ * Options for workspace file copy operations
+ */
+export interface WorkspaceCopyOptions extends CopyOptions {
+  /**
+   * Map of GitHub repo keys (owner/repo) to their cache paths.
+   * Required for resolving GitHub file sources.
+   */
+  githubCache?: Map<string, string>;
 }
 
 /**
@@ -356,28 +368,140 @@ export async function copyPluginToWorkspace(
 }
 
 /**
+ * Check if a source string is an explicit GitHub reference
+ *
+ * More conservative than isGitHubUrl - only returns true for explicit GitHub formats:
+ * - https://github.com/...
+ * - github.com/...
+ * - gh:owner/repo/...
+ * - owner/repo/path/to/file (must have at least 3 path segments for file sources)
+ *
+ * This prevents ambiguous paths like "config/settings.json" from being treated as GitHub URLs.
+ */
+function isExplicitGitHubSource(source: string): boolean {
+  // Explicit URL patterns
+  if (
+    source.startsWith('https://github.com/') ||
+    source.startsWith('http://github.com/') ||
+    source.startsWith('github.com/') ||
+    source.startsWith('gh:')
+  ) {
+    return true;
+  }
+
+  // For shorthand format (owner/repo/path), require at least 3 segments
+  // This ensures paths like "config/settings.json" are treated as local
+  if (!source.startsWith('.') && !source.startsWith('/') && source.includes('/')) {
+    const parts = source.split('/');
+    // Need owner, repo, AND at least one path segment for file sources
+    if (parts.length >= 3) {
+      const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
+      if (parts[0] && parts[1] && validOwnerRepo.test(parts[0]) && validOwnerRepo.test(parts[1])) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Resolve a file source to an absolute path
+ *
+ * For local paths:
+ * - Absolute paths are used as-is
+ * - Relative paths are resolved relative to defaultSourcePath
+ *
+ * For GitHub paths:
+ * - Resolved from the githubCache using owner/repo as key
+ *
+ * @param source - The source string (local path or GitHub URL)
+ * @param defaultSourcePath - Default source directory for resolving relative local paths
+ * @param githubCache - Map of owner/repo to cache paths for GitHub sources
+ * @returns Resolved absolute path or null if cannot resolve
+ */
+function resolveFileSourcePath(
+  source: string,
+  defaultSourcePath: string | undefined,
+  githubCache: Map<string, string> | undefined,
+): { path: string; error?: string } | null {
+  // First, check if this is an explicit GitHub source
+  // This prevents paths like "config/settings.json" from being treated as GitHub URLs
+  if (!isExplicitGitHubSource(source)) {
+    // Treat as local path
+    if (source.startsWith('/')) {
+      // Absolute path
+      return { path: source };
+    }
+    if (source.startsWith('../')) {
+      // Relative path going "up" - resolve from workspace root (cwd)
+      return { path: join(process.cwd(), source) };
+    }
+    // Relative path within source - resolve from defaultSourcePath
+    if (defaultSourcePath) {
+      return { path: join(defaultSourcePath, source) };
+    }
+    // No defaultSourcePath - resolve from cwd
+    return { path: join(process.cwd(), source) };
+  }
+
+  // Parse as GitHub source
+  const parsed = parseFileSource(source);
+
+  // GitHub source - need to resolve from cache
+  if (parsed.type === 'github' && parsed.owner && parsed.repo && parsed.filePath) {
+    const cacheKey = `${parsed.owner}/${parsed.repo}`;
+    const cachePath = githubCache?.get(cacheKey);
+
+    if (!cachePath) {
+      return {
+        path: '',
+        error: `GitHub cache not found for ${cacheKey}. Ensure the repo is fetched.`,
+      };
+    }
+
+    return { path: join(cachePath, parsed.filePath) };
+  }
+
+  // GitHub source without file path - invalid for file sources
+  if (parsed.type === 'github') {
+    return {
+      path: '',
+      error: `Invalid GitHub file source: ${source}. Must include path to file (e.g., owner/repo/path/to/file.md)`,
+    };
+  }
+
+  return null;
+}
+
+/**
  * Copy workspace files from source to workspace root
  * Supports glob patterns with gitignore-style negation for string entries.
  * Object entries ({source, dest}) are copied directly without pattern expansion.
  *
- * @param sourcePath - Path to source directory (resolved workspace.source)
+ * File source resolution:
+ * - String entries: resolved relative to sourcePath (supports globs)
+ * - Object entries with explicit source: resolved directly (local path or GitHub URL)
+ * - Object entries without source: dest is used as path relative to sourcePath
+ *
+ * @param sourcePath - Path to source directory (resolved workspace.source), can be undefined if all files have explicit source
  * @param workspacePath - Path to workspace directory
  * @param files - Array of workspace file entries (strings support globs, objects are literal)
- * @param options - Copy options (dryRun)
+ * @param options - Copy options (dryRun, githubCache)
  * @returns Array of copy results
  */
 export async function copyWorkspaceFiles(
-  sourcePath: string,
+  sourcePath: string | undefined,
   workspacePath: string,
   files: WorkspaceFile[],
-  options: CopyOptions = {},
+  options: WorkspaceCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false } = options;
+  const { dryRun = false, githubCache } = options;
   const results: CopyResult[] = [];
 
   // Separate string patterns from object entries
   const stringPatterns: string[] = [];
-  const objectEntries: Array<{ source: string; dest: string | undefined }> = [];
+  const objectEntries: Array<{ source?: string; dest: string }> = [];
 
   // Track which agent files were copied for WORKSPACE-RULES injection
   const copiedAgentFiles: string[] = [];
@@ -386,68 +510,133 @@ export async function copyWorkspaceFiles(
     if (typeof file === 'string') {
       stringPatterns.push(file);
     } else {
-      objectEntries.push({ source: file.source, dest: file.dest });
+      // Compute dest from source basename if not provided
+      let dest = file.dest;
+      if (!dest && file.source) {
+        // Extract basename from source (handles both local paths and GitHub paths)
+        const parts = file.source.split('/');
+        dest = parts[parts.length - 1] || file.source;
+      }
+      if (!dest) {
+        // Neither source nor dest provided - this is invalid
+        results.push({
+          source: 'unknown',
+          destination: join(workspacePath, 'unknown'),
+          action: 'failed',
+          error: 'File entry must have at least source or dest specified',
+        });
+        continue;
+      }
+      objectEntries.push(file.source ? { source: file.source, dest } : { dest });
     }
   }
 
-  // Process string patterns through glob resolution
+  // Process string patterns through glob resolution (requires sourcePath)
   if (stringPatterns.length > 0) {
-    const resolvedFiles = await resolveGlobPatterns(sourcePath, stringPatterns);
-    for (const resolved of resolvedFiles) {
-      const destPath = join(workspacePath, resolved.relativePath);
+    if (!sourcePath) {
+      // String patterns require a source path
+      for (const pattern of stringPatterns) {
+        if (!isGlobPattern(pattern) && !pattern.startsWith('!')) {
+          results.push({
+            source: pattern,
+            destination: join(workspacePath, pattern),
+            action: 'failed',
+            error: `Cannot resolve file '${pattern}' - no workspace.source configured and no explicit source provided`,
+          });
+        }
+      }
+    } else {
+      const resolvedFiles = await resolveGlobPatterns(sourcePath, stringPatterns);
+      for (const resolved of resolvedFiles) {
+        const destPath = join(workspacePath, resolved.relativePath);
 
-      if (!existsSync(resolved.sourcePath)) {
-        // Only report error for literal (non-glob) patterns
-        const wasLiteral = stringPatterns.some(
-          (p) => !isGlobPattern(p) && !p.startsWith('!') && p === resolved.relativePath,
-        );
-        if (wasLiteral) {
+        if (!existsSync(resolved.sourcePath)) {
+          // Only report error for literal (non-glob) patterns
+          const wasLiteral = stringPatterns.some(
+            (p) => !isGlobPattern(p) && !p.startsWith('!') && p === resolved.relativePath,
+          );
+          if (wasLiteral) {
+            results.push({
+              source: resolved.sourcePath,
+              destination: destPath,
+              action: 'failed',
+              error: `Source file not found: ${resolved.sourcePath}`,
+            });
+          }
+          continue;
+        }
+
+        if (dryRun) {
+          results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
+          // Track agent files even in dry-run for accurate reporting
+          if ((AGENT_FILES as readonly string[]).includes(resolved.relativePath)) {
+            copiedAgentFiles.push(resolved.relativePath);
+          }
+          continue;
+        }
+
+        try {
+          await mkdir(dirname(destPath), { recursive: true });
+          const content = await readFile(resolved.sourcePath, 'utf-8');
+          await writeFile(destPath, content, 'utf-8');
+          results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
+
+          // Track if this is an agent file
+          if ((AGENT_FILES as readonly string[]).includes(resolved.relativePath)) {
+            copiedAgentFiles.push(resolved.relativePath);
+          }
+        } catch (error) {
           results.push({
             source: resolved.sourcePath,
             destination: destPath,
             action: 'failed',
-            error: `Source file not found: ${resolved.sourcePath}`,
+            error: error instanceof Error ? error.message : 'Unknown error',
           });
         }
-        continue;
-      }
-
-      if (dryRun) {
-        results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
-        // Track agent files even in dry-run for accurate reporting
-        if ((AGENT_FILES as readonly string[]).includes(resolved.relativePath)) {
-          copiedAgentFiles.push(resolved.relativePath);
-        }
-        continue;
-      }
-
-      try {
-        await mkdir(dirname(destPath), { recursive: true });
-        const content = await readFile(resolved.sourcePath, 'utf-8');
-        await writeFile(destPath, content, 'utf-8');
-        results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
-
-        // Track if this is an agent file
-        if ((AGENT_FILES as readonly string[]).includes(resolved.relativePath)) {
-          copiedAgentFiles.push(resolved.relativePath);
-        }
-      } catch (error) {
-        results.push({
-          source: resolved.sourcePath,
-          destination: destPath,
-          action: 'failed',
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
       }
     }
   }
 
   // Process object entries directly (no pattern support)
   for (const entry of objectEntries) {
-    const srcPath = join(sourcePath, entry.source);
-    const basename = entry.source.split('/').pop() || entry.source;
-    const destFilename = entry.dest ?? basename;
-    const destPath = join(workspacePath, destFilename);
+    const destPath = join(workspacePath, entry.dest);
+    let srcPath: string;
+
+    if (entry.source) {
+      // Has explicit source - resolve it (can be local or GitHub)
+      const resolved = resolveFileSourcePath(entry.source, sourcePath, githubCache);
+      if (!resolved) {
+        results.push({
+          source: entry.source,
+          destination: destPath,
+          action: 'failed',
+          error: `Failed to resolve source: ${entry.source}`,
+        });
+        continue;
+      }
+      if (resolved.error) {
+        results.push({
+          source: entry.source,
+          destination: destPath,
+          action: 'failed',
+          error: resolved.error,
+        });
+        continue;
+      }
+      srcPath = resolved.path;
+    } else {
+      // No explicit source - use dest as path relative to sourcePath
+      if (!sourcePath) {
+        results.push({
+          source: entry.dest,
+          destination: destPath,
+          action: 'failed',
+          error: `Cannot resolve file '${entry.dest}' - no workspace.source configured and no explicit source provided`,
+        });
+        continue;
+      }
+      srcPath = join(sourcePath, entry.dest);
+    }
 
     if (!existsSync(srcPath)) {
       results.push({
@@ -462,8 +651,8 @@ export async function copyWorkspaceFiles(
     if (dryRun) {
       results.push({ source: srcPath, destination: destPath, action: 'copied' });
       // Track agent files even in dry-run for accurate reporting
-      if ((AGENT_FILES as readonly string[]).includes(destFilename)) {
-        copiedAgentFiles.push(destFilename);
+      if ((AGENT_FILES as readonly string[]).includes(entry.dest)) {
+        copiedAgentFiles.push(entry.dest);
       }
       continue;
     }
@@ -475,8 +664,8 @@ export async function copyWorkspaceFiles(
       results.push({ source: srcPath, destination: destPath, action: 'copied' });
 
       // Track if this is an agent file
-      if ((AGENT_FILES as readonly string[]).includes(destFilename)) {
-        copiedAgentFiles.push(destFilename);
+      if ((AGENT_FILES as readonly string[]).includes(entry.dest)) {
+        copiedAgentFiles.push(entry.dest);
       }
     } catch (error) {
       results.push({

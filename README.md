@@ -130,9 +130,21 @@ allagents plugin validate <path>
 
 ## .allagents/workspace.yaml
 
-The workspace configuration file lives in `.allagents/workspace.yaml` and defines repositories, plugins, and target clients:
+The workspace configuration file lives in `.allagents/workspace.yaml` and defines repositories, plugins, workspace files, and target clients:
 
 ```yaml
+# Workspace file sync (optional) - copy files from a shared source
+workspace:
+  source: ../shared-config              # Default base for relative paths
+  files:
+    - AGENTS.md                         # String shorthand: same source and dest
+    - source: docs/guide.md             # Object form: explicit source
+      dest: GUIDE.md                    # Optional dest (defaults to basename)
+    - dest: CUSTOM.md                   # File-level source override
+      source: ../other-config/CUSTOM.md
+    - dest: AGENTS.md                   # GitHub source
+      source: owner/repo/path/AGENTS.md
+
 repositories:
   - path: ../my-project
     owner: myorg
@@ -153,6 +165,25 @@ clients:
   - copilot
   - cursor
 ```
+
+### Workspace File Sync
+
+The `workspace:` section enables syncing files from external sources to your workspace root. This is useful for sharing agent configurations (AGENTS.md, CLAUDE.md) across multiple projects.
+
+**Key behaviors:**
+- **Source of truth is remote** - Local copies are overwritten on every sync
+- **Deleted files are restored** - If you delete AGENTS.md locally, sync restores it
+- **WORKSPACE-RULES injection** - AGENTS.md and CLAUDE.md automatically get workspace discovery rules injected
+
+**Source resolution:**
+| Format | Example | Resolves to |
+|--------|---------|-------------|
+| String shorthand | `AGENTS.md` | `{workspace.source}/AGENTS.md` |
+| Relative source | `source: docs/guide.md` | `{workspace.source}/docs/guide.md` |
+| File-level override | `source: ../other/file.md` | `../other/file.md` (relative to workspace) |
+| GitHub source | `source: owner/repo/path/file.md` | Fetched from GitHub cache |
+
+**GitHub sources** are fetched fresh on every sync (always pulls latest).
 
 ### Plugin Spec Format
 
