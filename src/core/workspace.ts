@@ -1,10 +1,12 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, resolve, dirname, relative, sep } from 'node:path';
+import { join, resolve, dirname, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { load, dump } from 'js-yaml';
 import { syncWorkspace, type SyncResult } from './sync.js';
 import { ensureWorkspaceRules } from './transform.js';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
+import { isGitHubUrl } from '../utils/plugin-path.js';
 
 /**
  * Options for workspace initialization
@@ -60,8 +62,9 @@ export async function initWorkspace(
     // Create .allagents directory
     await mkdir(configDir, { recursive: true });
 
-    // Determine workspace.yaml source
+    // Determine workspace.yaml source and track source directory for relative path resolution
     let workspaceYamlContent: string;
+    let sourceDir: string | undefined;
 
     if (options.from) {
       // Copy workspace.yaml from --from path
@@ -83,8 +86,10 @@ export async function initWorkspace(
 
         if (existsSync(nestedPath)) {
           sourceYamlPath = nestedPath;
+          sourceDir = fromPath; // Source dir is the directory containing .allagents/
         } else if (existsSync(rootPath)) {
           sourceYamlPath = rootPath;
+          sourceDir = fromPath; // Source dir is where workspace.yaml lives
         } else {
           throw new Error(
             `No workspace.yaml found in: ${fromPath}\n  Expected at: ${nestedPath} or ${rootPath}`,
@@ -93,9 +98,33 @@ export async function initWorkspace(
       } else {
         // --from points directly to a yaml file
         sourceYamlPath = fromPath;
+        // Source dir depends on whether yaml is inside .allagents/ or at workspace root
+        const parentDir = dirname(fromPath);
+        if (parentDir.endsWith(CONFIG_DIR)) {
+          // yaml is in .allagents/, source dir is the workspace root (parent of .allagents/)
+          sourceDir = dirname(parentDir);
+        } else {
+          // yaml is at workspace root, source dir is that directory
+          sourceDir = parentDir;
+        }
       }
 
       workspaceYamlContent = await readFile(sourceYamlPath, 'utf-8');
+
+      // Rewrite relative workspace.source to absolute path so sync works after init
+      if (sourceDir) {
+        const parsed = load(workspaceYamlContent) as Record<string, unknown>;
+        const workspace = parsed?.workspace as { source?: string } | undefined;
+        if (workspace?.source) {
+          const source = workspace.source;
+          // Convert relative local paths to absolute (skip URLs and already-absolute paths)
+          if (!isGitHubUrl(source) && !isAbsolute(source)) {
+            workspace.source = resolve(sourceDir, source);
+            workspaceYamlContent = dump(parsed, { lineWidth: -1 });
+          }
+        }
+      }
+
       console.log(`✓ Using workspace.yaml from: ${sourceYamlPath}`);
     } else {
       // Use default template's workspace.yaml
@@ -109,15 +138,37 @@ export async function initWorkspace(
     // Write workspace.yaml
     await writeFile(configPath, workspaceYamlContent, 'utf-8');
 
-    // Ensure AGENTS.md has WORKSPACE-RULES (creates if needed, idempotent)
-    const targetAgentsPath = join(absoluteTarget, 'AGENTS.md');
-    await ensureWorkspaceRules(targetAgentsPath);
+    // Auto-copy agent files (AGENTS.md, CLAUDE.md) from source if they exist
+    const copiedAgentFiles: string[] = [];
+    const effectiveSourceDir = sourceDir ?? defaultTemplatePath;
+
+    for (const agentFile of AGENT_FILES) {
+      const sourcePath = join(effectiveSourceDir, agentFile);
+      if (existsSync(sourcePath)) {
+        const content = await readFile(sourcePath, 'utf-8');
+        await writeFile(join(absoluteTarget, agentFile), content, 'utf-8');
+        copiedAgentFiles.push(agentFile);
+      }
+    }
+
+    // Inject WORKSPACE-RULES into all copied agent files
+    // If no agent files were copied, create AGENTS.md with just rules
+    if (copiedAgentFiles.length === 0) {
+      await ensureWorkspaceRules(join(absoluteTarget, 'AGENTS.md'));
+    } else {
+      for (const agentFile of copiedAgentFiles) {
+        await ensureWorkspaceRules(join(absoluteTarget, agentFile));
+      }
+    }
 
     console.log(`✓ Workspace created at: ${absoluteTarget}`);
 
     // Auto-sync plugins
+    // Pass sourceDir so relative paths in workspace.source resolve correctly
     console.log('\nSyncing plugins...');
-    const syncResult = await syncWorkspace(absoluteTarget);
+    const syncResult = await syncWorkspace(absoluteTarget, {
+      workspaceSourceBase: sourceDir,
+    });
 
     if (!syncResult.success && syncResult.error) {
       // Don't fail init if sync fails (e.g., no plugins configured)
