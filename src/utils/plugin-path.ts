@@ -248,19 +248,37 @@ export function parsePluginSource(
 }
 
 /**
+ * Sanitize a branch name for use in filesystem paths
+ * Replaces slashes and other problematic characters with underscores
+ * @param branch - Branch name to sanitize
+ * @returns Sanitized branch name safe for use in paths
+ */
+function sanitizeBranchForPath(branch: string): string {
+  // Replace forward slashes, backslashes, colons, and other problematic chars
+  return branch.replace(/[/\\:*?"<>|]/g, '_');
+}
+
+/**
  * Get cache directory path for a GitHub plugin
  * @param owner - Repository owner
  * @param repo - Repository name
+ * @param branch - Optional branch name (if specified, creates branch-specific cache)
  * @returns Cache directory path
  */
-export function getPluginCachePath(owner: string, repo: string): string {
+export function getPluginCachePath(owner: string, repo: string, branch?: string): string {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
+  const basePath = `${owner}-${repo}`;
+
+  // If branch is specified, create a branch-specific cache path
+  // This allows concurrent use of different branches from the same repo
+  const cacheName = branch ? `${basePath}@${sanitizeBranchForPath(branch)}` : basePath;
+
   return resolve(
     homeDir,
     '.allagents',
     'plugins',
     'marketplaces',
-    `${owner}-${repo}`,
+    cacheName,
   );
 }
 

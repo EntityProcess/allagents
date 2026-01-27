@@ -583,8 +583,14 @@ async function validatePlugin(
   }
 
   if (isGitHubUrl(pluginSource)) {
-    // Fetch remote plugin (with force option)
-    const fetchResult = await fetchPlugin(pluginSource, { force });
+    // Parse URL to extract branch and subpath
+    const parsed = parseGitHubUrl(pluginSource);
+
+    // Fetch remote plugin (with force option and branch if specified)
+    const fetchResult = await fetchPlugin(pluginSource, {
+      force,
+      ...(parsed?.branch && { branch: parsed.branch }),
+    });
     if (!fetchResult.success) {
       return {
         plugin: pluginSource,
@@ -594,7 +600,6 @@ async function validatePlugin(
       };
     }
     // Handle subpath in GitHub URL (e.g., /tree/main/plugins/name)
-    const parsed = parseGitHubUrl(pluginSource);
     const resolvedPath = parsed?.subpath
       ? join(fetchResult.cachePath, parsed.subpath)
       : fetchResult.cachePath;

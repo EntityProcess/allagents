@@ -57,7 +57,7 @@ export interface FetchWorkspaceResult {
  * @param branch - Optional branch name (defaults to default branch if not specified)
  * @returns File content or null if not found
  */
-async function fetchFileFromGitHub(
+export async function fetchFileFromGitHub(
   owner: string,
   repo: string,
   path: string,

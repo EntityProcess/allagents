@@ -32,6 +32,8 @@ export interface FetchResult {
  */
 export interface FetchOptions {
   force?: boolean;
+  /** Branch to checkout after fetching (defaults to default branch) */
+  branch?: string;
 }
 
 /**
@@ -44,7 +46,7 @@ export async function fetchPlugin(
   url: string,
   options: FetchOptions = {},
 ): Promise<FetchResult> {
-  const { force = false } = options;
+  const { force = false, branch } = options;
 
   // Validate plugin source
   const validation = validatePluginSource(url);
@@ -70,7 +72,8 @@ export async function fetchPlugin(
   }
 
   const { owner, repo } = parsed;
-  const cachePath = getPluginCachePath(owner, repo);
+  // Use branch-specific cache path if branch is specified
+  const cachePath = getPluginCachePath(owner, repo, branch);
 
   // Check if gh CLI is available
   try {
@@ -97,8 +100,9 @@ export async function fetchPlugin(
 
   try {
     if (isCached && force) {
-      // Update existing cache
+      // Update existing cache - pull latest changes
       await execa('git', ['pull'], { cwd: cachePath });
+
       return {
         success: true,
         action: 'updated',
@@ -110,8 +114,12 @@ export async function fetchPlugin(
     const parentDir = dirname(cachePath);
     await mkdir(parentDir, { recursive: true });
 
-    // Clone repository
-    await execa('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath]);
+    // Clone repository with specific branch if provided
+    if (branch) {
+      await execa('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath, '--', '--branch', branch]);
+    } else {
+      await execa('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath]);
+    }
 
     return {
       success: true,
