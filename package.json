@@ -1,6 +1,6 @@
 {
   "name": "allagents",
-  "version": "0.2.0"
+  "version": "0.2.0",
   "description": "CLI tool for managing multi-repo AI agent workspaces with plugin synchronization",
   "type": "module",
   "bin": {
@@ -24,7 +24,7 @@
     "format": "biome format --write src",
     "check": "biome check src",
     "check:fix": "biome check --write src",
-    "prepare": "bun run build && bunx prek install -t pre-push"
+    "prepare": "bun run build && (test -d .git && bunx prek install -t pre-push || true)"
   },
   "keywords": [
     "cli",
