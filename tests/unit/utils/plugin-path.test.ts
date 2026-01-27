@@ -79,6 +79,7 @@ describe('parseGitHubUrl', () => {
     expect(result).toEqual({
       owner: 'anthropics',
       repo: 'claude-plugins-official',
+      branch: 'main',
       subpath: 'plugins/code-review',
     });
   });
@@ -108,6 +109,29 @@ describe('parseGitHubUrl', () => {
       owner: 'WiseTechGlobal',
       repo: 'WTG.AI.Prompts',
       subpath: 'plugins/cargowise',
+    });
+  });
+
+  it('should parse URLs with tree/branch but no subpath', () => {
+    const result = parseGitHubUrl(
+      'https://github.com/anthropics/python-sdk/tree/develop'
+    );
+    expect(result).toEqual({
+      owner: 'anthropics',
+      repo: 'python-sdk',
+      branch: 'develop',
+    });
+  });
+
+  it('should parse URLs with tree/branch and subpath', () => {
+    const result = parseGitHubUrl(
+      'https://github.com/anthropics/python-sdk/tree/develop/examples/tools'
+    );
+    expect(result).toEqual({
+      owner: 'anthropics',
+      repo: 'python-sdk',
+      branch: 'develop',
+      subpath: 'examples/tools',
     });
   });
 
