@@ -16,19 +16,28 @@ export interface FetchWorkspaceResult {
  * @param owner - Repository owner
  * @param repo - Repository name
  * @param path - File path within the repository
+ * @param branch - Optional branch name (defaults to default branch if not specified)
  * @returns File content or null if not found
  */
 async function fetchFileFromGitHub(
   owner: string,
   repo: string,
   path: string,
+  branch?: string,
 ): Promise<string | null> {
   try {
     // Use gh api to fetch file contents
     // The API returns base64 encoded content
+    let endpoint = `repos/${owner}/${repo}/contents/${path}`;
+
+    // Add ref parameter as query string to specify branch if provided
+    if (branch) {
+      endpoint += `?ref=${encodeURIComponent(branch)}`;
+    }
+
     const result = await execa('gh', [
       'api',
-      `repos/${owner}/${repo}/contents/${path}`,
+      endpoint,
       '--jq',
       '.content',
     ]);
@@ -67,7 +76,7 @@ export async function fetchWorkspaceFromGitHub(
     };
   }
 
-  const { owner, repo, subpath } = parsed;
+  const { owner, repo, branch, subpath } = parsed;
 
   // Check if gh CLI is available
   try {
@@ -128,7 +137,7 @@ export async function fetchWorkspaceFromGitHub(
       ];
 
   for (const path of pathsToTry) {
-    const content = await fetchFileFromGitHub(owner, repo, path);
+    const content = await fetchFileFromGitHub(owner, repo, path, branch);
     if (content) {
       return {
         success: true,
@@ -139,6 +148,6 @@ export async function fetchWorkspaceFromGitHub(
 
   return {
     success: false,
-    error: `No workspace.yaml found in: ${owner}/${repo}${subpath ? `/${subpath}` : ''}\n  Expected at: ${pathsToTry.join(' or ')}`,
+    error: `No workspace.yaml found in: ${owner}/${repo}${branch ? `@${branch}` : ''}${subpath ? `/${subpath}` : ''}\n  Expected at: ${pathsToTry.join(' or ')}`,
   };
 }

@@ -79,6 +79,7 @@ describe('parseGitHubUrl', () => {
     expect(result).toEqual({
       owner: 'anthropics',
       repo: 'claude-plugins-official',
+      branch: 'main',
       subpath: 'plugins/code-review',
     });
   });
@@ -107,6 +108,29 @@ describe('parseGitHubUrl', () => {
     expect(result).toEqual({
       owner: 'WiseTechGlobal',
       repo: 'WTG.AI.Prompts',
+      subpath: 'plugins/cargowise',
+    });
+  });
+
+  it('should parse URLs with tree/branch but no subpath', () => {
+    const result = parseGitHubUrl(
+      'https://github.com/WiseTechGlobal/WTG.AI.Prompts/tree/develop'
+    );
+    expect(result).toEqual({
+      owner: 'WiseTechGlobal',
+      repo: 'WTG.AI.Prompts',
+      branch: 'develop',
+    });
+  });
+
+  it('should parse URLs with tree/branch and subpath', () => {
+    const result = parseGitHubUrl(
+      'https://github.com/WiseTechGlobal/WTG.AI.Prompts/tree/develop/plugins/cargowise'
+    );
+    expect(result).toEqual({
+      owner: 'WiseTechGlobal',
+      repo: 'WTG.AI.Prompts',
+      branch: 'develop',
       subpath: 'plugins/cargowise',
     });
   });

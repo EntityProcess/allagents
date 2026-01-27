@@ -66,7 +66,7 @@ export function isGitHubUrl(source: string): boolean {
 }
 
 /**
- * Parse GitHub URL or shorthand to extract owner, repo, and optional subpath
+ * Parse GitHub URL or shorthand to extract owner, repo, optional branch, and optional subpath
  * Supports:
  * - https://github.com/owner/repo
  * - https://github.com/owner/repo/tree/branch/path
@@ -75,11 +75,11 @@ export function isGitHubUrl(source: string): boolean {
  * - owner/repo (shorthand)
  * - owner/repo/path/to/plugin (shorthand with subpath)
  * @param url - GitHub URL or shorthand
- * @returns Object with owner, repo, and optional subpath, or null if invalid
+ * @returns Object with owner, repo, and optional branch/subpath, or null if invalid
  */
 export function parseGitHubUrl(
   url: string,
-): { owner: string; repo: string; subpath?: string } | null {
+): { owner: string; repo: string; branch?: string; subpath?: string } | null {
   // Normalize URL
   let normalized = url;
 
@@ -120,14 +120,28 @@ export function parseGitHubUrl(
 
   // Try to extract with subpath first: https://github.com/owner/repo/tree/branch/path
   const subpathPattern =
-    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/tree\/[^/]+\/(.+)$/;
+    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/tree\/([^/]+)\/(.+)$/;
   const subpathMatch = normalized.match(subpathPattern);
   if (subpathMatch) {
     const owner = subpathMatch[1];
     const repo = subpathMatch[2]?.replace(/\.git$/, '');
-    const subpath = subpathMatch[3];
-    if (owner && repo && subpath) {
-      return { owner, repo, subpath };
+    const branch = subpathMatch[3];
+    const subpath = subpathMatch[4];
+    if (owner && repo && branch && subpath) {
+      return { owner, repo, branch, subpath };
+    }
+  }
+
+  // Try format with branch but no subpath: https://github.com/owner/repo/tree/branch
+  const branchPattern =
+    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/tree\/([^/]+)$/;
+  const branchMatch = normalized.match(branchPattern);
+  if (branchMatch) {
+    const owner = branchMatch[1];
+    const repo = branchMatch[2]?.replace(/\.git$/, '');
+    const branch = branchMatch[3];
+    if (owner && repo && branch) {
+      return { owner, repo, branch };
     }
   }
 
@@ -256,6 +270,8 @@ export interface ParsedFileSource {
   owner?: string;
   /** GitHub repository name (if GitHub source) */
   repo?: string;
+  /** GitHub branch name (if GitHub source with branch specified) */
+  branch?: string;
   /** Path to the file within the repository (if GitHub source) */
   filePath?: string;
 }
@@ -286,6 +302,7 @@ export function parseFileSource(
         normalized: source,
         owner: parsed.owner,
         repo: parsed.repo,
+        ...(parsed.branch && { branch: parsed.branch }),
         ...(parsed.subpath && { filePath: parsed.subpath }),
       };
     }
