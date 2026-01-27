@@ -127,7 +127,7 @@ describe('sync-state', () => {
         lastSync: '2024-01-01T00:00:00.000Z',
         files: {
           claude: ['.claude/commands/cmd1.md', '.claude/commands/cmd2.md'],
-          copilot: ['.github/prompts/cmd1.prompt.md'],
+          copilot: ['.github/skills/my-skill/'],
         },
       };
 
@@ -136,7 +136,7 @@ describe('sync-state', () => {
         '.claude/commands/cmd2.md',
       ]);
       expect(getPreviouslySyncedFiles(state, 'copilot')).toEqual([
-        '.github/prompts/cmd1.prompt.md',
+        '.github/skills/my-skill/',
       ]);
     });
   });
