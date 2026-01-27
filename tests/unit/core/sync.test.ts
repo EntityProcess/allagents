@@ -270,7 +270,7 @@ clients:
   });
 
   describe('syncWorkspace - workspace files with WORKSPACE-RULES injection', () => {
-    it('should append WORKSPACE-RULES to AGENTS.md when both CLAUDE.md and AGENTS.md are copied', async () => {
+    it('should append WORKSPACE-RULES to both CLAUDE.md and AGENTS.md when both are copied', async () => {
       // Setup: Create a workspace source with both agent files
       const sourceDir = join(testDir, 'workspace-source');
       await mkdir(sourceDir, { recursive: true });
@@ -297,9 +297,11 @@ clients:
       const result = await syncWorkspace(testDir);
       expect(result.success).toBe(true);
 
-      // CLAUDE.md should NOT have WORKSPACE-RULES
+      // CLAUDE.md should have WORKSPACE-RULES appended
       const claudeContent = await readFile(join(testDir, 'CLAUDE.md'), 'utf-8');
-      expect(claudeContent).not.toContain('WORKSPACE-RULES');
+      expect(claudeContent).toContain('# Claude Agent');
+      expect(claudeContent).toContain('<!-- WORKSPACE-RULES:START -->');
+      expect(claudeContent).toContain('<!-- WORKSPACE-RULES:END -->');
 
       // AGENTS.md should have WORKSPACE-RULES appended
       const agentsContent = await readFile(join(testDir, 'AGENTS.md'), 'utf-8');
