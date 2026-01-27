@@ -1,8 +1,9 @@
-import { mkdir, cp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { syncWorkspace, type SyncResult } from './sync.js';
+import { ensureWorkspaceRules } from './transform.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 
 /**
@@ -108,12 +109,9 @@ export async function initWorkspace(
     // Write workspace.yaml
     await writeFile(configPath, workspaceYamlContent, 'utf-8');
 
-    // Copy AGENTS.md from default template if it exists and target doesn't have one
-    const defaultAgentsPath = join(defaultTemplatePath, 'AGENTS.md');
+    // Ensure AGENTS.md has WORKSPACE-RULES (creates if needed, idempotent)
     const targetAgentsPath = join(absoluteTarget, 'AGENTS.md');
-    if (existsSync(defaultAgentsPath) && !existsSync(targetAgentsPath)) {
-      await cp(defaultAgentsPath, targetAgentsPath);
-    }
+    await ensureWorkspaceRules(targetAgentsPath);
 
     console.log(`✓ Workspace created at: ${absoluteTarget}`);
 
