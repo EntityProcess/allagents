@@ -52,6 +52,7 @@ export interface CopyOptions {
 
 /**
  * Copy commands from plugin to workspace for a specific client
+ * Commands are a Claude-specific feature (only claude client supports them)
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
@@ -68,7 +69,7 @@ export async function copyCommands(
   const mapping = CLIENT_MAPPINGS[client];
   const results: CopyResult[] = [];
 
-  // Skip if client doesn't support commands
+  // Skip if client doesn't support commands (only Claude has commandsPath)
   if (!mapping.commandsPath) {
     return results;
   }
@@ -89,14 +90,7 @@ export async function copyCommands(
   // Process files in parallel for better performance
   const copyPromises = mdFiles.map(async (file): Promise<CopyResult> => {
     const sourcePath = join(sourceDir, file);
-
-    // Transform extension if needed (e.g., .md → .prompt.md for Copilot)
-    let destFileName = file;
-    if (mapping.commandsExt === '.prompt.md' && !file.endsWith('.prompt.md')) {
-      destFileName = file.replace(/\.md$/, '.prompt.md');
-    }
-
-    const destPath = join(destDir, destFileName);
+    const destPath = join(destDir, file);
 
     if (dryRun) {
       return { source: sourcePath, destination: destPath, action: 'copied' };

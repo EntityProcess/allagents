@@ -6,7 +6,7 @@ CLI tool for managing multi-repo AI agent workspaces with plugin synchronization
 
 ## Why AllAgents?
 
-**The Problem:** AI coding assistants (Claude, Copilot, Cursor, Codex, etc.) each have their own configuration formats and directory structures. If you want to share skills, commands, or prompts across multiple projects or use multiple AI clients, you need to manually copy and transform files.
+**The Problem:** AI coding assistants (Claude, Copilot, Cursor, Codex, etc.) each have their own configuration formats and directory structures. If you want to share skills across multiple projects or use multiple AI clients, you need to manually copy and transform files.
 
 **AllAgents solves this by:**
 
@@ -181,16 +181,18 @@ These marketplace names auto-resolve to their GitHub repos:
 
 ### Supported Clients
 
-| Client | Commands | Skills | Agent File | Hooks |
-|--------|----------|--------|------------|-------|
-| claude | `.claude/commands/` | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` |
-| copilot | `.github/prompts/*.prompt.md` | `.github/skills/` | `AGENTS.md` | No |
-| codex | `.codex/prompts/` | `.codex/skills/` | `AGENTS.md` | No |
-| cursor | `.cursor/commands/` | `.cursor/skills/` | No | No |
-| opencode | `.opencode/commands/` | `.opencode/skills/` | `AGENTS.md` | No |
-| gemini | `.gemini/commands/` | `.gemini/skills/` | `GEMINI.md` | No |
-| factory | `.factory/commands/` | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` |
-| ampcode | N/A | N/A | `AGENTS.md` | No |
+| Client | Skills | Agent File | Hooks | Commands |
+|--------|--------|------------|-------|----------|
+| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
+| copilot | `.github/skills/` | `AGENTS.md` | No | No |
+| codex | `.codex/skills/` | `AGENTS.md` | No | No |
+| cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
+| opencode | `.opencode/skills/` | `AGENTS.md` | No | No |
+| gemini | `.gemini/skills/` | `GEMINI.md` | No | No |
+| factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
+| ampcode | No | `AGENTS.md` | No | No |
+
+> **Note:** Commands are a Claude-specific feature. Skills are the cross-client way to share reusable prompts.
 
 ## Marketplace Structure
 
@@ -201,11 +203,9 @@ my-marketplace/
 ├── plugins/
 │   ├── code-review/
 │   │   ├── plugin.json
-│   │   ├── commands/
 │   │   └── skills/
 │   └── debugging/
 │       ├── plugin.json
-│       ├── commands/
 │       └── skills/
 └── README.md
 ```
@@ -217,13 +217,13 @@ Each plugin follows this structure:
 ```
 my-plugin/
 ├── plugin.json         # Plugin metadata
-├── commands/           # Command files (.md)
-│   ├── build.md
-│   └── deploy.md
-├── skills/             # Skill directories with SKILL.md
+├── skills/             # Skill directories with SKILL.md (all clients)
 │   └── debugging/
 │       └── SKILL.md
-├── hooks/              # Hook files (for Claude/Factory)
+├── commands/           # Command files (.md) - Claude only
+│   ├── build.md
+│   └── deploy.md
+├── hooks/              # Hook files (Claude/Factory only)
 │   └── pre-commit.md
 └── AGENTS.md           # Agent configuration (optional)
 ```

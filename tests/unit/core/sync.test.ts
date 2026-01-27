@@ -62,7 +62,7 @@ describe('sync', () => {
     it('should purge multiple clients', async () => {
       // Setup: Create directories for multiple clients
       await mkdir(join(testDir, '.claude', 'commands'), { recursive: true });
-      await mkdir(join(testDir, '.github', 'prompts'), { recursive: true });
+      await mkdir(join(testDir, '.github', 'skills'), { recursive: true });
       await writeFile(join(testDir, 'CLAUDE.md'), '# Claude');
       await writeFile(join(testDir, 'AGENTS.md'), '# Agents');
 
@@ -71,7 +71,7 @@ describe('sync', () => {
 
       // Verify both are purged
       expect(existsSync(join(testDir, '.claude', 'commands'))).toBe(false);
-      expect(existsSync(join(testDir, '.github', 'prompts'))).toBe(false);
+      expect(existsSync(join(testDir, '.github', 'skills'))).toBe(false);
       expect(existsSync(join(testDir, 'CLAUDE.md'))).toBe(false);
       expect(existsSync(join(testDir, 'AGENTS.md'))).toBe(false);
 
