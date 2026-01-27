@@ -5,19 +5,50 @@ description: Understanding and configuring AllAgents workspaces.
 
 A workspace is a directory that contains your AI tooling configuration.
 
+## Directory Structure
+
+```
+my-workspace/
+├── .allagents/
+│   ├── workspace.yaml    # Workspace configuration
+│   └── sync-state.json   # Tracks synced files (auto-generated)
+├── .claude/
+│   └── commands/         # Claude-specific commands (from plugins)
+├── AGENTS.md             # Agent instructions (auto-copied from template)
+└── CLAUDE.md             # Claude-specific instructions (optional)
+```
+
+### Agent Files
+
+AllAgents automatically copies `AGENTS.md` and `CLAUDE.md` from your template source:
+
+- **AGENTS.md** - Universal agent instructions (works with multiple clients)
+- **CLAUDE.md** - Claude-specific instructions
+
+Both files receive `WORKSPACE-RULES` injection, which tells AI agents to read `workspace.yaml` for repository paths.
+
 ## Creating a Workspace
 
 ```bash
+# Create from default template
 allagents workspace init my-workspace
+
+# Create from existing template
+allagents workspace init my-workspace --from ./path/to/template
 ```
 
 ## workspace.yaml
 
 ```yaml
+workspace:
+  source: "."           # Source for agent files (local path or GitHub URL)
+  files: []             # Additional files to copy (AGENTS.md/CLAUDE.md are auto-included)
+
 repositories:
   - path: ../my-project
     owner: myorg
     repo: my-project
+    description: My main project
 
 plugins:
   - code-review@claude-plugins-official
@@ -27,6 +58,25 @@ clients:
   - copilot
   - cursor
 ```
+
+### Workspace Source
+
+The `workspace.source` field specifies where to copy agent files from:
+
+```yaml
+# Local path (converted to absolute during init)
+workspace:
+  source: "."
+  files: []
+
+# GitHub repository
+workspace:
+  source: "myorg/my-templates/workspaces/default"
+  files:
+    - config/settings.json   # Additional files beyond AGENTS.md/CLAUDE.md
+```
+
+When using `--from` during init, relative paths are automatically converted to absolute paths so that `workspace sync` can pull updates from the original source.
 
 ## Syncing Plugins
 
