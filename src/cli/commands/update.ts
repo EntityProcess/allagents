@@ -1,5 +1,8 @@
 import { Command } from 'commander';
 import { execa } from 'execa';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Detect package manager from a script path
@@ -23,14 +26,12 @@ function detectPackageManager(): 'bun' | 'npm' {
 /**
  * Get current installed version from package.json
  */
-async function getCurrentVersion(): Promise<string> {
-  // Import package.json to get version
-  // Using dynamic import to handle ESM
+function getCurrentVersion(): string {
   try {
-    const { createRequire } = await import('node:module');
-    const require = createRequire(import.meta.url);
-    const pkg = require('../../../package.json');
-    return pkg.version;
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const packageJsonPath = join(__dirname, '..', 'package.json');
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+    return packageJson.version;
   } catch {
     return 'unknown';
   }
@@ -58,7 +59,7 @@ export const updateCommand = new Command('update')
         packageManager = detectPackageManager();
       }
 
-      const currentVersion = await getCurrentVersion();
+      const currentVersion = getCurrentVersion();
       console.log(`Current version: ${currentVersion}`);
       console.log(`Updating allagents using ${packageManager}...\n`);
 
