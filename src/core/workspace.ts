@@ -181,7 +181,7 @@ export async function initWorkspace(
     // Pass sourceDir so relative paths in workspace.source resolve correctly
     console.log('\nSyncing plugins...');
     const syncResult = await syncWorkspace(absoluteTarget, {
-      workspaceSourceBase: sourceDir,
+      ...(sourceDir && { workspaceSourceBase: sourceDir }),
     });
 
     if (!syncResult.success && syncResult.error) {

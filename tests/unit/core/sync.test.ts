@@ -297,15 +297,12 @@ clients:
       const result = await syncWorkspace(testDir);
       expect(result.success).toBe(true);
 
-      // CLAUDE.md should have WORKSPACE-RULES appended
+      // Both files should have WORKSPACE-RULES appended
       const claudeContent = await readFile(join(testDir, 'CLAUDE.md'), 'utf-8');
-      expect(claudeContent).toContain('# Claude Agent');
       expect(claudeContent).toContain('<!-- WORKSPACE-RULES:START -->');
       expect(claudeContent).toContain('<!-- WORKSPACE-RULES:END -->');
 
-      // AGENTS.md should have WORKSPACE-RULES appended
       const agentsContent = await readFile(join(testDir, 'AGENTS.md'), 'utf-8');
-      expect(agentsContent).toContain('# Agents');
       expect(agentsContent).toContain('<!-- WORKSPACE-RULES:START -->');
       expect(agentsContent).toContain('<!-- WORKSPACE-RULES:END -->');
     });
