@@ -30,10 +30,9 @@ async function resolveBranchAndSubpath(
         '--silent',
       ]);
       // If successful, this is a valid ref
-      return { branch, subpath: subpath || undefined };
+      return { branch, ...(subpath && { subpath }) };
     } catch {
       // This ref doesn't exist, try the next split point
-      continue;
     }
   }
 
@@ -117,7 +116,7 @@ export async function fetchWorkspaceFromGitHub(
     };
   }
 
-  let { owner, repo, branch, subpath } = parsed;
+  const { owner, repo, branch, subpath } = parsed;
 
   // Check if gh CLI is available
   try {
