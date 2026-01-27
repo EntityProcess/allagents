@@ -8,6 +8,11 @@ import { validateSkill } from '../validators/skill.js';
 import { WORKSPACE_RULES } from '../constants.js';
 
 /**
+ * Agent instruction files that receive WORKSPACE-RULES injection
+ */
+const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'] as const;
+
+/**
  * Ensure WORKSPACE-RULES exist in a file (creates file if needed)
  * - If file doesn't exist: creates it with just the rules
  * - If file exists without markers: appends rules
@@ -410,7 +415,7 @@ export async function copyWorkspaceFiles(
       if (dryRun) {
         results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
         // Track agent files even in dry-run for accurate reporting
-        if (resolved.relativePath === 'CLAUDE.md' || resolved.relativePath === 'AGENTS.md') {
+        if ((AGENT_FILES as readonly string[]).includes(resolved.relativePath)) {
           copiedAgentFiles.push(resolved.relativePath);
         }
         continue;
@@ -423,7 +428,7 @@ export async function copyWorkspaceFiles(
         results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
 
         // Track if this is an agent file
-        if (resolved.relativePath === 'CLAUDE.md' || resolved.relativePath === 'AGENTS.md') {
+        if ((AGENT_FILES as readonly string[]).includes(resolved.relativePath)) {
           copiedAgentFiles.push(resolved.relativePath);
         }
       } catch (error) {
@@ -457,7 +462,7 @@ export async function copyWorkspaceFiles(
     if (dryRun) {
       results.push({ source: srcPath, destination: destPath, action: 'copied' });
       // Track agent files even in dry-run for accurate reporting
-      if (destFilename === 'CLAUDE.md' || destFilename === 'AGENTS.md') {
+      if ((AGENT_FILES as readonly string[]).includes(destFilename)) {
         copiedAgentFiles.push(destFilename);
       }
       continue;
@@ -470,7 +475,7 @@ export async function copyWorkspaceFiles(
       results.push({ source: srcPath, destination: destPath, action: 'copied' });
 
       // Track if this is an agent file
-      if (destFilename === 'CLAUDE.md' || destFilename === 'AGENTS.md') {
+      if ((AGENT_FILES as readonly string[]).includes(destFilename)) {
         copiedAgentFiles.push(destFilename);
       }
     } catch (error) {
@@ -483,25 +488,20 @@ export async function copyWorkspaceFiles(
     }
   }
 
-  // Inject WORKSPACE-RULES into the appropriate agent file (idempotent)
-  const firstAgentFile = copiedAgentFiles[0];
-  if (firstAgentFile && !dryRun) {
-    // If both files exist, inject into AGENTS.md; otherwise inject into whichever one exists
-    const targetFile = copiedAgentFiles.includes('AGENTS.md')
-      ? 'AGENTS.md'
-      : firstAgentFile;
-
-    const targetPath = join(workspacePath, targetFile);
-
-    try {
-      await injectWorkspaceRules(targetPath);
-    } catch (error) {
-      results.push({
-        source: 'WORKSPACE-RULES',
-        destination: targetPath,
-        action: 'failed',
-        error: error instanceof Error ? error.message : 'Failed to inject WORKSPACE-RULES',
-      });
+  // Inject WORKSPACE-RULES into all copied agent files (idempotent)
+  if (!dryRun) {
+    for (const agentFile of copiedAgentFiles) {
+      const targetPath = join(workspacePath, agentFile);
+      try {
+        await injectWorkspaceRules(targetPath);
+      } catch (error) {
+        results.push({
+          source: 'WORKSPACE-RULES',
+          destination: targetPath,
+          action: 'failed',
+          error: error instanceof Error ? error.message : 'Failed to inject WORKSPACE-RULES',
+        });
+      }
     }
   }
 

@@ -19,6 +19,12 @@ export const WORKSPACE_CONFIG_FILE = 'workspace.yaml';
 export const WORKSPACE_CONFIG_PATH = `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`;
 
 /**
+ * Agent instruction files that are auto-copied from templates
+ * AGENTS.md is preferred for WORKSPACE-RULES injection, CLAUDE.md is fallback
+ */
+export const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'] as const;
+
+/**
  * Static WORKSPACE-RULES content to append to agent files (CLAUDE.md/AGENTS.md)
  * These rules tell AI to read workspace.yaml for actual repo info
  */

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
-import { rm, unlink, rmdir } from 'node:fs/promises';
+import { rm, unlink, rmdir, copyFile } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import type {
   WorkspaceConfig,
@@ -63,6 +63,12 @@ export interface SyncOptions {
   force?: boolean;
   /** Simulate sync without making changes */
   dryRun?: boolean;
+  /**
+   * Base path for resolving relative workspace.source paths.
+   * Used during init to resolve paths relative to the --from source directory
+   * instead of the target workspace. If not provided, defaults to workspacePath.
+   */
+  workspaceSourceBase?: string;
 }
 
 /**
@@ -474,7 +480,7 @@ export async function syncWorkspace(
   workspacePath: string = process.cwd(),
   options: SyncOptions = {},
 ): Promise<SyncResult> {
-  const { force = false, dryRun = false } = options;
+  const { force = false, dryRun = false, workspaceSourceBase } = options;
   const configDir = join(workspacePath, CONFIG_DIR);
   const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
 
@@ -518,11 +524,14 @@ export async function syncWorkspace(
   );
 
   // Step 1b: Validate workspace.source if defined
+  // Use workspaceSourceBase if provided (during init with --from) to resolve
+  // relative paths correctly relative to the source directory
   let validatedWorkspaceSource: ValidatedPlugin | null = null;
   if (config.workspace?.source) {
+    const sourceBasePath = workspaceSourceBase ?? workspacePath;
     validatedWorkspaceSource = await validatePlugin(
       config.workspace.source,
-      workspacePath,
+      sourceBasePath,
       force,
     );
     if (!validatedWorkspaceSource.success) {
@@ -589,14 +598,38 @@ export async function syncWorkspace(
   );
 
   // Step 5: Copy workspace files if configured
+  // Auto-include agent files (AGENTS.md, CLAUDE.md) that exist in source
   let workspaceFileResults: CopyResult[] = [];
   if (config.workspace && validatedWorkspaceSource) {
+    const sourcePath = validatedWorkspaceSource.resolved;
+    const filesToCopy = [...config.workspace.files];
+
+    // Auto-include agent files if they exist and aren't already listed
+    for (const agentFile of AGENT_FILES) {
+      const agentPath = join(sourcePath, agentFile);
+      if (existsSync(agentPath) && !filesToCopy.includes(agentFile)) {
+        filesToCopy.push(agentFile);
+      }
+    }
+
     workspaceFileResults = await copyWorkspaceFiles(
-      validatedWorkspaceSource.resolved,
+      sourcePath,
       workspacePath,
-      config.workspace.files,
+      filesToCopy,
       { dryRun },
     );
+
+    // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
+    if (!dryRun && config.clients.includes('claude')) {
+      const claudePath = join(workspacePath, 'CLAUDE.md');
+      const agentsPath = join(workspacePath, 'AGENTS.md');
+      const claudeExistsInSource = existsSync(join(sourcePath, 'CLAUDE.md'));
+
+      // Only copy if CLAUDE.md wasn't in source and AGENTS.md exists
+      if (!claudeExistsInSource && existsSync(agentsPath) && !existsSync(claudePath)) {
+        await copyFile(agentsPath, claudePath);
+      }
+    }
   }
 
   // Count results from plugins

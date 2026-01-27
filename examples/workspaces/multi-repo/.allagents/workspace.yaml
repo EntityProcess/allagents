@@ -1,3 +1,7 @@
+workspace:
+  source: "."
+  files: []  # AGENTS.md and CLAUDE.md are auto-copied if they exist
+
 repositories:
   - path: ../allagents
     owner: EntityProcess
