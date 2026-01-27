@@ -6,12 +6,27 @@ description: Complete reference for AllAgents CLI commands.
 ## Workspace Commands
 
 ```bash
-allagents workspace init <path>
+allagents workspace init <path> [--from <source>]
 allagents workspace sync [--force] [--dry-run]
 allagents workspace status
 allagents workspace plugin add <plugin@marketplace>
 allagents workspace plugin remove <plugin>
 ```
+
+### workspace init
+
+Initialize a new workspace from a template:
+
+| Flag | Description |
+|------|-------------|
+| `--from <source>` | Copy workspace.yaml from local path or GitHub URL |
+
+**Source formats:**
+- Local path: `./path/to/template` or `/absolute/path`
+- GitHub URL: `https://github.com/owner/repo/tree/branch/path`
+- GitHub shorthand: `owner/repo/path` or `owner/repo`
+
+When using a GitHub source, AllAgents fetches `workspace.yaml` from `.allagents/workspace.yaml` or `workspace.yaml` in the target path.
 
 ### workspace sync
 

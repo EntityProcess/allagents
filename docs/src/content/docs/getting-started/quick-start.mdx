@@ -12,6 +12,20 @@ allagents workspace init my-workspace
 cd my-workspace
 ```
 
+### Or Start from a Remote Template
+
+Initialize directly from any GitHub repository - no cloning required:
+
+```bash
+# From a GitHub URL
+allagents workspace init my-workspace --from https://github.com/myorg/templates/tree/main/nodejs
+
+# Or using shorthand
+allagents workspace init my-workspace --from myorg/templates/nodejs
+```
+
+This fetches the workspace configuration directly from GitHub and sets up your workspace instantly.
+
 ## Add Plugins
 
 ```bash
