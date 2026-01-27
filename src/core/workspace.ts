@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, symlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -155,10 +155,24 @@ export async function initWorkspace(
     // If no agent files were copied, create AGENTS.md with just rules
     if (copiedAgentFiles.length === 0) {
       await ensureWorkspaceRules(join(absoluteTarget, 'AGENTS.md'));
+      copiedAgentFiles.push('AGENTS.md');
     } else {
       for (const agentFile of copiedAgentFiles) {
         await ensureWorkspaceRules(join(absoluteTarget, agentFile));
       }
+    }
+
+    // If claude is a client and CLAUDE.md doesn't exist, create symlink to AGENTS.md
+    const parsed = load(workspaceYamlContent) as Record<string, unknown>;
+    const clients = (parsed?.clients as string[]) ?? [];
+    if (
+      clients.includes('claude') &&
+      !copiedAgentFiles.includes('CLAUDE.md') &&
+      copiedAgentFiles.includes('AGENTS.md')
+    ) {
+      const claudePath = join(absoluteTarget, 'CLAUDE.md');
+      // Use 'file' type for cross-platform compatibility (works on Windows)
+      await symlink('AGENTS.md', claudePath, 'file');
     }
 
     console.log(`✓ Workspace created at: ${absoluteTarget}`);

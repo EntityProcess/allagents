@@ -27,6 +27,16 @@ AllAgents automatically copies `AGENTS.md` and `CLAUDE.md` from your template so
 
 Both files receive `WORKSPACE-RULES` injection, which tells AI agents to read `workspace.yaml` for repository paths.
 
+#### CLAUDE.md Symlink
+
+If your template only has `AGENTS.md` and `claude` is in your clients list, AllAgents automatically creates a symlink:
+
+```
+CLAUDE.md -> AGENTS.md
+```
+
+This ensures Claude always has its instruction file without duplicating content.
+
 ## Creating a Workspace
 
 ```bash

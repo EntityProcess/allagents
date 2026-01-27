@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { rm, unlink, rmdir } from 'node:fs/promises';
+import { rm, unlink, rmdir, symlink, lstat } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
@@ -618,6 +618,35 @@ export async function syncWorkspace(
       filesToCopy,
       { dryRun },
     );
+
+    // If claude is a client and CLAUDE.md doesn't exist, create symlink to AGENTS.md
+    if (!dryRun && config.clients.includes('claude')) {
+      const claudePath = join(workspacePath, 'CLAUDE.md');
+      const agentsPath = join(workspacePath, 'AGENTS.md');
+      const claudeExistsInSource = existsSync(join(sourcePath, 'CLAUDE.md'));
+
+      // Only create symlink if CLAUDE.md wasn't in source and AGENTS.md exists
+      if (!claudeExistsInSource && existsSync(agentsPath)) {
+        // Check if CLAUDE.md already exists (as file or symlink)
+        if (!existsSync(claudePath)) {
+          // Use 'file' type for cross-platform compatibility (works on Windows)
+          await symlink('AGENTS.md', claudePath, 'file');
+        } else {
+          // Check if it's already a symlink - if not, don't overwrite
+          try {
+            const stat = await lstat(claudePath);
+            if (stat.isSymbolicLink()) {
+              // Already a symlink, recreate to ensure it points to AGENTS.md
+              await unlink(claudePath);
+              await symlink('AGENTS.md', claudePath, 'file');
+            }
+            // If it's a regular file, leave it alone
+          } catch {
+            // Ignore errors
+          }
+        }
+      }
+    }
   }
 
   // Count results from plugins
