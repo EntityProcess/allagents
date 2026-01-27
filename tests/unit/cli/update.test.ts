@@ -1,15 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-
-/**
- * Test the package manager detection logic
- * This is extracted from the update command for testability
- */
-function detectPackageManagerFromPath(scriptPath: string): 'bun' | 'npm' {
-  if (scriptPath.includes('.bun')) {
-    return 'bun';
-  }
-  return 'npm';
-}
+import { detectPackageManagerFromPath } from '../../../src/cli/commands/update.js';
 
 describe('update command', () => {
   describe('detectPackageManagerFromPath', () => {

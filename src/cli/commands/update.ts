@@ -2,15 +2,22 @@ import { Command } from 'commander';
 import { execa } from 'execa';
 
 /**
- * Detect if allagents was installed via bun by checking the script path
+ * Detect package manager from a script path
+ * Exported for testing
  */
-function detectPackageManager(): 'bun' | 'npm' {
-  const scriptPath = process.argv[1] ?? '';
+export function detectPackageManagerFromPath(scriptPath: string): 'bun' | 'npm' {
   // Check for .bun in path (works on both Windows and Linux/macOS)
   if (scriptPath.includes('.bun')) {
     return 'bun';
   }
   return 'npm';
+}
+
+/**
+ * Detect if allagents was installed via bun by checking the script path
+ */
+function detectPackageManager(): 'bun' | 'npm' {
+  return detectPackageManagerFromPath(process.argv[1] ?? '');
 }
 
 /**
@@ -67,7 +74,15 @@ export const updateCommand = new Command('update')
       });
 
       if (result.exitCode === 0) {
-        console.log('\nUpdate complete.');
+        // Get the new version by spawning allagents --version
+        try {
+          const versionResult = await execa('allagents', ['--version']);
+          const newVersion = versionResult.stdout.trim();
+          console.log(`\nUpdate complete: ${currentVersion} → ${newVersion}`);
+        } catch {
+          // Fallback if we can't get new version
+          console.log('\nUpdate complete.');
+        }
       }
     } catch (error) {
       if (error instanceof Error) {
