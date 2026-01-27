@@ -7,7 +7,7 @@ import { syncWorkspace, type SyncResult } from './sync.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
 import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
-import { fetchWorkspaceFromGitHub } from './github-fetch.js';
+import { fetchWorkspaceFromGitHub, fetchFileFromGitHub } from './github-fetch.js';
 
 /**
  * Options for workspace initialization
@@ -175,14 +175,36 @@ export async function initWorkspace(
 
     // Auto-copy agent files (AGENTS.md, CLAUDE.md) from source if they exist
     const copiedAgentFiles: string[] = [];
-    const effectiveSourceDir = sourceDir ?? defaultTemplatePath;
 
-    for (const agentFile of AGENT_FILES) {
-      const sourcePath = join(effectiveSourceDir, agentFile);
-      if (existsSync(sourcePath)) {
-        const content = await readFile(sourcePath, 'utf-8');
-        await writeFile(join(absoluteTarget, agentFile), content, 'utf-8');
-        copiedAgentFiles.push(agentFile);
+    if (options.from && isGitHubUrl(options.from)) {
+      // Fetch agent files from GitHub
+      const parsedUrl = parseGitHubUrl(options.from);
+      if (parsedUrl) {
+        const basePath = parsedUrl.subpath || '';
+        for (const agentFile of AGENT_FILES) {
+          const filePath = basePath ? `${basePath}/${agentFile}` : agentFile;
+          const content = await fetchFileFromGitHub(
+            parsedUrl.owner,
+            parsedUrl.repo,
+            filePath,
+            parsedUrl.branch,
+          );
+          if (content) {
+            await writeFile(join(absoluteTarget, agentFile), content, 'utf-8');
+            copiedAgentFiles.push(agentFile);
+          }
+        }
+      }
+    } else {
+      // Copy agent files from local source
+      const effectiveSourceDir = sourceDir ?? defaultTemplatePath;
+      for (const agentFile of AGENT_FILES) {
+        const sourcePath = join(effectiveSourceDir, agentFile);
+        if (existsSync(sourcePath)) {
+          const content = await readFile(sourcePath, 'utf-8');
+          await writeFile(join(absoluteTarget, agentFile), content, 'utf-8');
+          copiedAgentFiles.push(agentFile);
+        }
       }
     }
 
