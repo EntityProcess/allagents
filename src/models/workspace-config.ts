@@ -14,12 +14,25 @@ export type Repository = z.infer<typeof RepositorySchema>;
 
 /**
  * Workspace file entry - can be string shorthand or explicit source/dest mapping
+ *
+ * String shorthand: "CLAUDE.md" (source and dest are the same, resolved from workspace.source)
+ * Object form:
+ *   - source: optional, can be local path, GitHub URL, or shorthand (owner/repo/path)
+ *   - dest: optional, defaults to basename of source
+ *
+ * Valid combinations:
+ * 1. { source: "path/file.md" } → dest defaults to "file.md"
+ * 2. { source: "path/file.md", dest: "renamed.md" } → explicit mapping
+ * 3. { dest: "file.md", source: "owner/repo/path/file.md" } → GitHub source
+ * 4. { dest: "file.md" } → uses dest as source path relative to workspace.source
+ *
+ * At least one of source or dest must be provided.
  */
 export const WorkspaceFileSchema = z.union([
   z.string(), // shorthand: "CLAUDE.md" (source and dest are the same)
   z.object({
-    source: z.string(),
-    dest: z.string().optional(), // defaults to basename of source
+    source: z.string().optional(), // local path, GitHub URL, or shorthand
+    dest: z.string().optional(), // destination filename in workspace root (defaults to basename of source)
   }),
 ]);
 
@@ -27,9 +40,14 @@ export type WorkspaceFile = z.infer<typeof WorkspaceFileSchema>;
 
 /**
  * Workspace configuration for copying files to workspace root
+ *
+ * source: optional default base for resolving file entries without explicit source
+ * files: array of file entries to sync
+ *
+ * If workspace.source is not provided, all file entries must have explicit source.
  */
 export const WorkspaceSchema = z.object({
-  source: z.string(), // local path, GitHub URL, or plugin@marketplace
+  source: z.string().optional(), // optional default base for file resolution
   files: z.array(WorkspaceFileSchema),
 });
 

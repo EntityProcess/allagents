@@ -6,10 +6,12 @@ import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import type {
   WorkspaceConfig,
   ClientType,
+  WorkspaceFile,
 } from '../models/workspace-config.js';
 import {
   isGitHubUrl,
   parseGitHubUrl,
+  parseFileSource,
 } from '../utils/plugin-path.js';
 import { fetchPlugin } from './plugin.js';
 import { copyPluginToWorkspace, copyWorkspaceFiles, type CopyResult } from './transform.js';
@@ -276,6 +278,217 @@ async function cleanupEmptyParents(workspacePath: string, filePath: string): Pro
       break;
     }
   }
+}
+
+/**
+ * Collected GitHub repository info for file sources
+ */
+interface GitHubRepoInfo {
+  owner: string;
+  repo: string;
+  key: string; // "owner/repo" for deduplication
+}
+
+/**
+ * Collect unique GitHub repositories from workspace file sources
+ * @param files - Array of workspace file entries
+ * @returns Array of unique GitHub repo info
+ */
+/**
+ * Check if a source string is an explicit GitHub reference (for repo collection)
+ * More conservative than isGitHubUrl - requires 3+ segments for shorthand format
+ */
+function isExplicitGitHubSourceForCollection(source: string): boolean {
+  if (
+    source.startsWith('https://github.com/') ||
+    source.startsWith('http://github.com/') ||
+    source.startsWith('github.com/') ||
+    source.startsWith('gh:')
+  ) {
+    return true;
+  }
+
+  // For shorthand format, require at least 3 segments (owner/repo/path)
+  if (!source.startsWith('.') && !source.startsWith('/') && source.includes('/')) {
+    const parts = source.split('/');
+    if (parts.length >= 3) {
+      const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
+      if (parts[0] && parts[1] && validOwnerRepo.test(parts[0]) && validOwnerRepo.test(parts[1])) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function collectGitHubReposFromFiles(files: WorkspaceFile[]): GitHubRepoInfo[] {
+  const repos = new Map<string, GitHubRepoInfo>();
+
+  for (const file of files) {
+    // Only object entries can have explicit GitHub sources
+    if (typeof file === 'string') {
+      continue;
+    }
+
+    // Check if the file has an explicit source that's a GitHub URL
+    // Use conservative check to avoid treating local paths like "config/file.json" as GitHub
+    if (file.source && isExplicitGitHubSourceForCollection(file.source)) {
+      const parsed = parseFileSource(file.source);
+      if (parsed.type === 'github' && parsed.owner && parsed.repo) {
+        const key = `${parsed.owner}/${parsed.repo}`;
+        if (!repos.has(key)) {
+          repos.set(key, {
+            owner: parsed.owner,
+            repo: parsed.repo,
+            key,
+          });
+        }
+      }
+    }
+  }
+
+  return Array.from(repos.values());
+}
+
+/**
+ * Fetch GitHub repositories for file sources and build cache map
+ * @param repos - Array of GitHub repo info to fetch
+ * @param force - Force re-fetch even if cached
+ * @returns Map from "owner/repo" to cache path, and any errors
+ */
+async function fetchFileSourceRepos(
+  repos: GitHubRepoInfo[],
+  _force: boolean,
+): Promise<{ cache: Map<string, string>; errors: string[] }> {
+  const cache = new Map<string, string>();
+  const errors: string[] = [];
+
+  for (const repo of repos) {
+    // File sources should always pull to ensure freshness
+    // Use force=true to always update, regardless of the global force flag
+    const result = await fetchPlugin(`${repo.owner}/${repo.repo}`, { force: true });
+
+    if (result.success) {
+      cache.set(repo.key, result.cachePath);
+    } else {
+      errors.push(`Failed to fetch ${repo.key}: ${result.error || 'Unknown error'}`);
+    }
+  }
+
+  return { cache, errors };
+}
+
+/**
+ * Check if a source string is an explicit GitHub reference (for validation)
+ * Matches the logic in transform.ts isExplicitGitHubSource
+ */
+function isExplicitGitHubSourceForValidation(source: string): boolean {
+  if (
+    source.startsWith('https://github.com/') ||
+    source.startsWith('http://github.com/') ||
+    source.startsWith('github.com/') ||
+    source.startsWith('gh:')
+  ) {
+    return true;
+  }
+
+  // For shorthand format, require at least 3 segments (owner/repo/path)
+  if (!source.startsWith('.') && !source.startsWith('/') && source.includes('/')) {
+    const parts = source.split('/');
+    if (parts.length >= 3) {
+      const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
+      if (parts[0] && parts[1] && validOwnerRepo.test(parts[0]) && validOwnerRepo.test(parts[1])) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Validate that file sources exist (for GitHub sources, check path in cache)
+ * @param files - Array of workspace file entries
+ * @param defaultSourcePath - Default source path for files without explicit source
+ * @param githubCache - Map of owner/repo to cache paths
+ * @returns Array of validation errors
+ */
+function validateFileSources(
+  files: WorkspaceFile[],
+  defaultSourcePath: string | undefined,
+  githubCache: Map<string, string>,
+): string[] {
+  const errors: string[] = [];
+
+  for (const file of files) {
+    if (typeof file === 'string') {
+      // String entries are resolved relative to defaultSourcePath
+      if (!defaultSourcePath) {
+        errors.push(`Cannot resolve file '${file}' - no workspace.source configured`);
+        continue;
+      }
+      const fullPath = join(defaultSourcePath, file);
+      if (!existsSync(fullPath)) {
+        errors.push(`File source not found: ${fullPath}`);
+      }
+      continue;
+    }
+
+    // Object entry
+    if (file.source) {
+      // Has explicit source - check if it's GitHub or local
+      if (isExplicitGitHubSourceForValidation(file.source)) {
+        // GitHub source - validate path exists in cache
+        const parsed = parseFileSource(file.source);
+        if (!parsed.owner || !parsed.repo || !parsed.filePath) {
+          errors.push(`Invalid GitHub file source: ${file.source}. Must include path to file.`);
+          continue;
+        }
+        const cacheKey = `${parsed.owner}/${parsed.repo}`;
+        const cachePath = githubCache.get(cacheKey);
+        if (!cachePath) {
+          errors.push(`GitHub cache not found for ${cacheKey}`);
+          continue;
+        }
+        const fullPath = join(cachePath, parsed.filePath);
+        if (!existsSync(fullPath)) {
+          errors.push(`Path not found in repository: ${cacheKey}/${parsed.filePath}`);
+        }
+      } else {
+        // Local path with explicit source
+        let fullPath: string;
+        if (file.source.startsWith('/')) {
+          // Absolute path
+          fullPath = file.source;
+        } else if (file.source.startsWith('../')) {
+          // Relative path going "up" - resolve from workspace root (cwd)
+          fullPath = resolve(file.source);
+        } else if (defaultSourcePath) {
+          // Relative path within source - resolve from defaultSourcePath
+          fullPath = join(defaultSourcePath, file.source);
+        } else {
+          // No defaultSourcePath - resolve from cwd
+          fullPath = resolve(file.source);
+        }
+        if (!existsSync(fullPath)) {
+          errors.push(`File source not found: ${fullPath}`);
+        }
+      }
+    } else {
+      // No explicit source - resolve relative to defaultSourcePath
+      if (!defaultSourcePath) {
+        errors.push(`Cannot resolve file '${file.dest}' - no workspace.source configured and no explicit source provided`);
+        continue;
+      }
+      const fullPath = join(defaultSourcePath, file.dest ?? '');
+      if (!existsSync(fullPath)) {
+        errors.push(`File source not found: ${fullPath}`);
+      }
+    }
+  }
+
+  return errors;
 }
 
 /**
@@ -598,29 +811,66 @@ export async function syncWorkspace(
   );
 
   // Step 5: Copy workspace files if configured
-  // Auto-include agent files (AGENTS.md, CLAUDE.md) that exist in source
+  // Supports both workspace.source (default base) and file-level sources
   let workspaceFileResults: CopyResult[] = [];
-  if (config.workspace && validatedWorkspaceSource) {
-    const sourcePath = validatedWorkspaceSource.resolved;
+  if (config.workspace) {
+    const sourcePath = validatedWorkspaceSource?.resolved;
     const filesToCopy = [...config.workspace.files];
 
-    // Auto-include agent files if they exist and aren't already listed
-    for (const agentFile of AGENT_FILES) {
-      const agentPath = join(sourcePath, agentFile);
-      if (existsSync(agentPath) && !filesToCopy.includes(agentFile)) {
-        filesToCopy.push(agentFile);
+    // Auto-include agent files if they exist in source and aren't already listed
+    if (sourcePath) {
+      for (const agentFile of AGENT_FILES) {
+        const agentPath = join(sourcePath, agentFile);
+        if (existsSync(agentPath) && !filesToCopy.includes(agentFile)) {
+          filesToCopy.push(agentFile);
+        }
       }
     }
 
+    // Step 5a: Collect and fetch GitHub repos from file sources
+    const fileSourceRepos = collectGitHubReposFromFiles(filesToCopy);
+    let githubCache = new Map<string, string>();
+
+    if (fileSourceRepos.length > 0) {
+      const { cache, errors } = await fetchFileSourceRepos(fileSourceRepos, force);
+      if (errors.length > 0) {
+        return {
+          success: false,
+          pluginResults,
+          totalCopied: 0,
+          totalFailed: errors.length,
+          totalSkipped: 0,
+          totalGenerated: 0,
+          error: `File source fetch failed (workspace unchanged):\n${errors.map((e) => `  - ${e}`).join('\n')}`,
+        };
+      }
+      githubCache = cache;
+    }
+
+    // Step 5b: Validate all file sources exist before copying
+    const fileValidationErrors = validateFileSources(filesToCopy, sourcePath, githubCache);
+    if (fileValidationErrors.length > 0) {
+      return {
+        success: false,
+        pluginResults,
+        totalCopied: 0,
+        totalFailed: fileValidationErrors.length,
+        totalSkipped: 0,
+        totalGenerated: 0,
+        error: `File source validation failed (workspace unchanged):\n${fileValidationErrors.map((e) => `  - ${e}`).join('\n')}`,
+      };
+    }
+
+    // Step 5c: Copy workspace files with GitHub cache
     workspaceFileResults = await copyWorkspaceFiles(
       sourcePath,
       workspacePath,
       filesToCopy,
-      { dryRun },
+      { dryRun, githubCache },
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
-    if (!dryRun && config.clients.includes('claude')) {
+    if (!dryRun && config.clients.includes('claude') && sourcePath) {
       const claudePath = join(workspacePath, 'CLAUDE.md');
       const agentsPath = join(workspacePath, 'AGENTS.md');
       const claudeExistsInSource = existsSync(join(sourcePath, 'CLAUDE.md'));

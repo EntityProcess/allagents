@@ -5,7 +5,21 @@ description: Configuration file reference.
 
 ## workspace.yaml
 
+The workspace configuration file defines repositories, plugins, workspace file sync, and target clients.
+
 ```yaml
+# Workspace file sync (optional)
+workspace:
+  source: ../shared-config              # Default base for relative file paths
+  files:
+    - AGENTS.md                         # String shorthand: same source and dest
+    - source: docs/guide.md             # Object form with explicit source
+      dest: GUIDE.md                    # Optional dest (defaults to basename)
+    - dest: CUSTOM.md                   # File-level source override
+      source: ../other-config/CUSTOM.md
+    - dest: AGENTS.md                   # GitHub source
+      source: owner/repo/path/AGENTS.md
+
 repositories:
   - path: ../my-project
     owner: myorg
@@ -19,11 +33,38 @@ clients:
   - claude
   - copilot
   - cursor
-
-files:
-  - source: ./shared/AGENTS.md
-    destination: AGENTS.md
 ```
+
+### Workspace File Sync
+
+The `workspace` section enables syncing files from external sources to your workspace root.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `source` | No | Default base directory for resolving relative file paths |
+| `files` | Yes | Array of files to sync |
+
+**File entry formats:**
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| String | `AGENTS.md` | Source and dest are the same, resolved from `workspace.source` |
+| Object with source | `{source: "path/file.md"}` | Dest defaults to basename |
+| Object with dest | `{dest: "file.md", source: "..."}` | Explicit source and dest |
+
+**Source resolution priority:**
+1. Explicit `source` on file entry → used directly
+2. No `source` → resolved relative to `workspace.source`
+3. No `workspace.source` and no explicit `source` → validation error
+
+**GitHub sources:**
+- Format: `owner/repo/path/to/file.md`
+- Fetched fresh on every sync (always pulls latest)
+
+**Behaviors:**
+- Source is the single source of truth; local copies are overwritten
+- Deleted local files are restored on next sync
+- AGENTS.md and CLAUDE.md automatically receive WORKSPACE-RULES injection
 
 ## plugin.json
 

@@ -245,6 +245,66 @@ export function validatePluginSource(source: string): {
 }
 
 /**
+ * Parsed file source information
+ */
+export interface ParsedFileSource {
+  type: PluginSourceType;
+  original: string;
+  /** For local: absolute path. For GitHub: the original source string */
+  normalized: string;
+  /** GitHub repository owner (if GitHub source) */
+  owner?: string;
+  /** GitHub repository name (if GitHub source) */
+  repo?: string;
+  /** Path to the file within the repository (if GitHub source) */
+  filePath?: string;
+}
+
+/**
+ * Parse a file source string into structured information
+ *
+ * Supports:
+ * - Local paths: ./relative, /absolute, ../parent
+ * - GitHub URLs: https://github.com/owner/repo/tree/branch/path/to/file.md
+ * - GitHub shorthand: owner/repo/path/to/file.md
+ * - gh: prefix: gh:owner/repo/path/to/file.md
+ *
+ * @param source - File source string
+ * @param baseDir - Base directory for resolving relative local paths
+ * @returns Parsed file source information
+ */
+export function parseFileSource(
+  source: string,
+  baseDir: string = process.cwd(),
+): ParsedFileSource {
+  if (isGitHubUrl(source)) {
+    const parsed = parseGitHubUrl(source);
+    if (parsed) {
+      return {
+        type: 'github',
+        original: source,
+        normalized: source,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        ...(parsed.subpath && { filePath: parsed.subpath }),
+      };
+    }
+    // Invalid GitHub URL format, treat as local
+    return {
+      type: 'local',
+      original: source,
+      normalized: normalizePluginPath(source, baseDir),
+    };
+  }
+
+  return {
+    type: 'local',
+    original: source,
+    normalized: normalizePluginPath(source, baseDir),
+  };
+}
+
+/**
  * Result of GitHub URL verification
  */
 export interface VerifyGitHubResult {

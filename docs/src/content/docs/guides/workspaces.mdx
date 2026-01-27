@@ -63,20 +63,49 @@ clients:
 
 ### Workspace Source
 
-The `workspace.source` field specifies where to copy agent files from:
+The `workspace.source` field specifies the default base directory for resolving file paths:
 
 ```yaml
 # Local path (converted to absolute during init)
 workspace:
-  source: "."
-  files: []
+  source: "../shared-config"
+  files:
+    - AGENTS.md                    # Resolved from ../shared-config/AGENTS.md
 
-# GitHub repository
+# GitHub repository as default source
 workspace:
   source: "myorg/my-templates/workspaces/default"
   files:
-    - config/settings.json   # Additional files beyond AGENTS.md/CLAUDE.md
+    - config/settings.json
 ```
+
+### File-Level Sources
+
+Individual files can override the default `workspace.source` with their own source:
+
+```yaml
+workspace:
+  source: "../shared-config"       # Default base
+  files:
+    - AGENTS.md                    # Uses default: ../shared-config/AGENTS.md
+    - dest: CUSTOM.md              # File-level override
+      source: ../other-config/CUSTOM.md
+    - dest: REMOTE.md              # GitHub source
+      source: owner/repo/path/to/file.md
+```
+
+**Source resolution priority:**
+1. Explicit `source` on file entry → used directly
+2. No `source` on file → resolved relative to `workspace.source`
+3. No `workspace.source` and no explicit `source` → validation error
+
+**GitHub file sources** are fetched fresh on every sync to ensure you always have the latest version.
+
+### File Sync Behavior
+
+- **Source is truth**: Local copies are overwritten on every sync
+- **Deleted files restored**: If you delete AGENTS.md locally, sync restores it
+- **WORKSPACE-RULES injection**: AGENTS.md and CLAUDE.md automatically get workspace discovery rules
 
 When using `--from` during init, relative paths are automatically converted to absolute paths so that `workspace sync` can pull updates from the original source.
 

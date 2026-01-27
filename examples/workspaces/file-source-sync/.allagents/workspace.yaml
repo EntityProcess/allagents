@@ -1,0 +1,37 @@
+# Example: File-level source sync
+#
+# This example demonstrates syncing workspace files from multiple sources:
+# - Default source directory (workspace.source)
+# - File-level source overrides (local paths)
+# - GitHub sources (fetched fresh on every sync)
+
+workspace:
+  source: ./shared-config           # Default base for files without explicit source
+  files:
+    # String shorthand - resolved from workspace.source
+    - AGENTS.md
+
+    # Object with source relative to workspace.source
+    - source: config/settings.json
+      dest: settings.json
+
+    # File-level source override (sibling directory)
+    # Paths starting with ../ are resolved from workspace root, not workspace.source
+    - dest: TEAM-RULES.md
+      source: ../team-config/rules.md
+
+    # GitHub source (always fetched fresh)
+    # - dest: CONTRIB.md
+    #   source: anthropics/claude-plugins-official/CONTRIBUTING.md
+
+repositories:
+  - path: ../my-project
+    owner: myorg
+    repo: my-project
+    description: Example project
+
+plugins: []
+
+clients:
+  - claude
+  - copilot
