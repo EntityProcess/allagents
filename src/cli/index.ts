@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import { workspaceCommand } from './commands/workspace.js';
 import { pluginCommand } from './commands/plugin.js';
+import { updateCommand } from './commands/update.js';
 
 const program = new Command();
 
@@ -16,5 +17,6 @@ program
 // Add commands
 program.addCommand(workspaceCommand);
 program.addCommand(pluginCommand);
+program.addCommand(updateCommand);
 
 program.parse();
