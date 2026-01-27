@@ -1,0 +1,144 @@
+import { execa } from 'execa';
+import { parseGitHubUrl } from '../utils/plugin-path.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+
+/**
+ * Result of fetching workspace from GitHub
+ */
+export interface FetchWorkspaceResult {
+  success: boolean;
+  content?: string;
+  error?: string;
+}
+
+/**
+ * Fetch a single file from GitHub using the gh CLI
+ * @param owner - Repository owner
+ * @param repo - Repository name
+ * @param path - File path within the repository
+ * @returns File content or null if not found
+ */
+async function fetchFileFromGitHub(
+  owner: string,
+  repo: string,
+  path: string,
+): Promise<string | null> {
+  try {
+    // Use gh api to fetch file contents
+    // The API returns base64 encoded content
+    const result = await execa('gh', [
+      'api',
+      `repos/${owner}/${repo}/contents/${path}`,
+      '--jq',
+      '.content',
+    ]);
+
+    if (result.stdout) {
+      // Decode base64 content
+      const content = Buffer.from(result.stdout, 'base64').toString('utf-8');
+      return content;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch workspace.yaml from a GitHub URL
+ *
+ * Supports:
+ * - https://github.com/owner/repo (looks for .allagents/workspace.yaml or workspace.yaml)
+ * - https://github.com/owner/repo/tree/branch/path (looks in path/.allagents/workspace.yaml or path/workspace.yaml)
+ * - owner/repo (shorthand)
+ * - owner/repo/path/to/workspace (shorthand with subpath)
+ *
+ * @param url - GitHub URL or shorthand
+ * @returns Result with workspace.yaml content or error
+ */
+export async function fetchWorkspaceFromGitHub(
+  url: string,
+): Promise<FetchWorkspaceResult> {
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) {
+    return {
+      success: false,
+      error: 'Invalid GitHub URL format. Expected: https://github.com/owner/repo',
+    };
+  }
+
+  const { owner, repo, subpath } = parsed;
+
+  // Check if gh CLI is available
+  try {
+    await execa('gh', ['--version']);
+  } catch {
+    return {
+      success: false,
+      error: 'gh CLI not installed. Install from: https://cli.github.com',
+    };
+  }
+
+  // Check if repository exists
+  try {
+    await execa('gh', ['repo', 'view', `${owner}/${repo}`, '--json', 'name']);
+  } catch (error) {
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase();
+      if (
+        errorMessage.includes('not found') ||
+        errorMessage.includes('404') ||
+        errorMessage.includes('could not resolve to a repository')
+      ) {
+        return {
+          success: false,
+          error: `Repository not found: ${owner}/${repo}`,
+        };
+      }
+      if (
+        errorMessage.includes('auth') ||
+        errorMessage.includes('authentication')
+      ) {
+        return {
+          success: false,
+          error: 'GitHub authentication required. Run: gh auth login',
+        };
+      }
+    }
+    return {
+      success: false,
+      error: `Failed to access repository: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  // Determine the base path to look for workspace.yaml
+  const basePath = subpath || '';
+
+  // Try to find workspace.yaml in order of preference:
+  // 1. {basePath}/.allagents/workspace.yaml
+  // 2. {basePath}/workspace.yaml
+  const pathsToTry = basePath
+    ? [
+        `${basePath}/${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
+        `${basePath}/${WORKSPACE_CONFIG_FILE}`,
+      ]
+    : [
+        `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
+        WORKSPACE_CONFIG_FILE,
+      ];
+
+  for (const path of pathsToTry) {
+    const content = await fetchFileFromGitHub(owner, repo, path);
+    if (content) {
+      return {
+        success: true,
+        content,
+      };
+    }
+  }
+
+  return {
+    success: false,
+    error: `No workspace.yaml found in: ${owner}/${repo}${subpath ? `/${subpath}` : ''}\n  Expected at: ${pathsToTry.join(' or ')}`,
+  };
+}

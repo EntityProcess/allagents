@@ -35,9 +35,26 @@ If your template only has `AGENTS.md` and `claude` is in your clients list, AllA
 # Create from default template
 allagents workspace init my-workspace
 
-# Create from existing template
+# Create from local template
 allagents workspace init my-workspace --from ./path/to/template
+
+# Create from remote GitHub template
+allagents workspace init my-workspace --from https://github.com/myorg/templates/tree/main/nodejs
+allagents workspace init my-workspace --from myorg/templates/nodejs  # shorthand
 ```
+
+### Remote Templates
+
+You can initialize a workspace directly from any GitHub repository containing a `workspace.yaml` file. AllAgents will:
+
+1. Fetch the `workspace.yaml` from `.allagents/workspace.yaml` or `workspace.yaml` in the target path
+2. Convert relative `workspace.source` paths to GitHub URLs so sync works
+3. Copy any `AGENTS.md` and `CLAUDE.md` files from the template source
+
+Supported formats:
+- Full URL: `https://github.com/owner/repo/tree/branch/path`
+- GitHub shorthand: `owner/repo/path`
+- Simple repo: `owner/repo` (looks for workspace.yaml in root)
 
 ## workspace.yaml
 

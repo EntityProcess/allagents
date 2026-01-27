@@ -6,7 +6,8 @@ import { load, dump } from 'js-yaml';
 import { syncWorkspace, type SyncResult } from './sync.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
-import { isGitHubUrl } from '../utils/plugin-path.js';
+import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
+import { fetchWorkspaceFromGitHub } from './github-fetch.js';
 
 /**
  * Options for workspace initialization
@@ -67,65 +68,96 @@ export async function initWorkspace(
     let sourceDir: string | undefined;
 
     if (options.from) {
-      // Copy workspace.yaml from --from path
-      const fromPath = resolve(options.from);
-
-      if (!existsSync(fromPath)) {
-        throw new Error(`Template not found: ${fromPath}`);
-      }
-
-      // Check if --from is a file or directory
-      const { stat } = await import('node:fs/promises');
-      const fromStat = await stat(fromPath);
-
-      let sourceYamlPath: string;
-      if (fromStat.isDirectory()) {
-        // Look for workspace.yaml in .allagents/ subdirectory first, then root
-        const nestedPath = join(fromPath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
-        const rootPath = join(fromPath, WORKSPACE_CONFIG_FILE);
-
-        if (existsSync(nestedPath)) {
-          sourceYamlPath = nestedPath;
-          sourceDir = fromPath; // Source dir is the directory containing .allagents/
-        } else if (existsSync(rootPath)) {
-          sourceYamlPath = rootPath;
-          sourceDir = fromPath; // Source dir is where workspace.yaml lives
-        } else {
-          throw new Error(
-            `No workspace.yaml found in: ${fromPath}\n  Expected at: ${nestedPath} or ${rootPath}`,
-          );
+      // Check if --from is a GitHub URL
+      if (isGitHubUrl(options.from)) {
+        const fetchResult = await fetchWorkspaceFromGitHub(options.from);
+        if (!fetchResult.success || !fetchResult.content) {
+          throw new Error(fetchResult.error || 'Failed to fetch workspace from GitHub');
         }
-      } else {
-        // --from points directly to a yaml file
-        sourceYamlPath = fromPath;
-        // Source dir depends on whether yaml is inside .allagents/ or at workspace root
-        const parentDir = dirname(fromPath);
-        if (parentDir.endsWith(CONFIG_DIR)) {
-          // yaml is in .allagents/, source dir is the workspace root (parent of .allagents/)
-          sourceDir = dirname(parentDir);
-        } else {
-          // yaml is at workspace root, source dir is that directory
-          sourceDir = parentDir;
-        }
-      }
-
-      workspaceYamlContent = await readFile(sourceYamlPath, 'utf-8');
-
-      // Rewrite relative workspace.source to absolute path so sync works after init
-      if (sourceDir) {
+        workspaceYamlContent = fetchResult.content;
+        // For GitHub sources, keep workspace.source as-is (it's already a URL or relative to the repo)
+        // We need to rewrite relative workspace.source to the full GitHub URL
         const parsed = load(workspaceYamlContent) as Record<string, unknown>;
         const workspace = parsed?.workspace as { source?: string } | undefined;
         if (workspace?.source) {
           const source = workspace.source;
-          // Convert relative local paths to absolute (skip URLs and already-absolute paths)
+          // If workspace.source is a relative path, convert to GitHub URL
           if (!isGitHubUrl(source) && !isAbsolute(source)) {
-            workspace.source = resolve(sourceDir, source);
-            workspaceYamlContent = dump(parsed, { lineWidth: -1 });
+            // Build GitHub URL from the --from location plus the relative source
+            const parsedUrl = parseGitHubUrl(options.from);
+            if (parsedUrl) {
+              const basePath = parsedUrl.subpath || '';
+              // Remove workspace.yaml from the base path if present
+              const baseDir = basePath.replace(/\/?\.allagents\/workspace\.yaml$/, '')
+                                       .replace(/\/?workspace\.yaml$/, '');
+              const sourcePath = baseDir ? `${baseDir}/${source}` : source;
+              workspace.source = `https://github.com/${parsedUrl.owner}/${parsedUrl.repo}/tree/main/${sourcePath}`;
+              workspaceYamlContent = dump(parsed, { lineWidth: -1 });
+            }
           }
         }
-      }
+        console.log(`✓ Using workspace.yaml from: ${options.from}`);
+      } else {
+        // Copy workspace.yaml from local --from path
+        const fromPath = resolve(options.from);
 
-      console.log(`✓ Using workspace.yaml from: ${sourceYamlPath}`);
+        if (!existsSync(fromPath)) {
+          throw new Error(`Template not found: ${fromPath}`);
+        }
+
+        // Check if --from is a file or directory
+        const { stat } = await import('node:fs/promises');
+        const fromStat = await stat(fromPath);
+
+        let sourceYamlPath: string;
+        if (fromStat.isDirectory()) {
+          // Look for workspace.yaml in .allagents/ subdirectory first, then root
+          const nestedPath = join(fromPath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+          const rootPath = join(fromPath, WORKSPACE_CONFIG_FILE);
+
+          if (existsSync(nestedPath)) {
+            sourceYamlPath = nestedPath;
+            sourceDir = fromPath; // Source dir is the directory containing .allagents/
+          } else if (existsSync(rootPath)) {
+            sourceYamlPath = rootPath;
+            sourceDir = fromPath; // Source dir is where workspace.yaml lives
+          } else {
+            throw new Error(
+              `No workspace.yaml found in: ${fromPath}\n  Expected at: ${nestedPath} or ${rootPath}`,
+            );
+          }
+        } else {
+          // --from points directly to a yaml file
+          sourceYamlPath = fromPath;
+          // Source dir depends on whether yaml is inside .allagents/ or at workspace root
+          const parentDir = dirname(fromPath);
+          if (parentDir.endsWith(CONFIG_DIR)) {
+            // yaml is in .allagents/, source dir is the workspace root (parent of .allagents/)
+            sourceDir = dirname(parentDir);
+          } else {
+            // yaml is at workspace root, source dir is that directory
+            sourceDir = parentDir;
+          }
+        }
+
+        workspaceYamlContent = await readFile(sourceYamlPath, 'utf-8');
+
+        // Rewrite relative workspace.source to absolute path so sync works after init
+        if (sourceDir) {
+          const parsed = load(workspaceYamlContent) as Record<string, unknown>;
+          const workspace = parsed?.workspace as { source?: string } | undefined;
+          if (workspace?.source) {
+            const source = workspace.source;
+            // Convert relative local paths to absolute (skip URLs and already-absolute paths)
+            if (!isGitHubUrl(source) && !isAbsolute(source)) {
+              workspace.source = resolve(sourceDir, source);
+              workspaceYamlContent = dump(parsed, { lineWidth: -1 });
+            }
+          }
+        }
+
+        console.log(`✓ Using workspace.yaml from: ${sourceYamlPath}`);
+      }
     } else {
       // Use default template's workspace.yaml
       const defaultYamlPath = join(defaultTemplatePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);

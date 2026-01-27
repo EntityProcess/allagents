@@ -60,6 +60,9 @@ bunx allagents
 allagents workspace init my-workspace
 cd my-workspace
 
+# Or initialize from a remote GitHub template
+allagents workspace init my-workspace --from owner/repo/path/to/template
+
 # Add a marketplace (or let auto-registration handle it)
 allagents plugin marketplace add anthropics/claude-plugins-official
 
@@ -71,6 +74,23 @@ allagents workspace plugin add my-plugin@someuser/their-repo
 allagents workspace sync
 ```
 
+### Initialize from Remote Template
+
+Start a new workspace instantly from any GitHub repository containing a `workspace.yaml`:
+
+```bash
+# From GitHub URL
+allagents workspace init ~/my-project --from https://github.com/myorg/templates/tree/main/nodejs
+
+# From shorthand
+allagents workspace init ~/my-project --from myorg/templates/nodejs
+
+# From repo root (looks for .allagents/workspace.yaml or workspace.yaml)
+allagents workspace init ~/my-project --from myorg/templates
+```
+
+This fetches the workspace configuration directly from GitHub - no cloning required.
+
 ## Commands
 
 ### Workspace Commands
@@ -78,6 +98,7 @@ allagents workspace sync
 ```bash
 # Initialize a new workspace from template
 allagents workspace init <path>
+allagents workspace init <path> --from <source>  # From local path or GitHub URL
 
 # Sync all plugins to workspace (non-destructive)
 allagents workspace sync [options]
