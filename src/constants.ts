@@ -24,8 +24,6 @@ export const WORKSPACE_CONFIG_PATH = `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`;
  */
 export const WORKSPACE_RULES = `
 <!-- WORKSPACE-RULES:START -->
-# Workspace Rules
-
 ## Rule: Workspace Discovery
 TRIGGER: Any task
 ACTION: Read \`.allagents/workspace.yaml\` to get repository paths and project domains

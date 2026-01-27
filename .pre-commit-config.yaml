@@ -5,15 +5,17 @@ repos:
         name: Lint
         entry: bun run lint
         language: system
+        pass_filenames: false
         stages: [pre-push]
       - id: typecheck
         name: Typecheck
         entry: bun run typecheck
         language: system
-        types: [ts, tsx]
+        pass_filenames: false
         stages: [pre-push]
       - id: test
         name: Test
         entry: bun run test
         language: system
+        pass_filenames: false
         stages: [pre-push]

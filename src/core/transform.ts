@@ -8,16 +8,25 @@ import { validateSkill } from '../validators/skill.js';
 import { WORKSPACE_RULES } from '../constants.js';
 
 /**
- * Inject WORKSPACE-RULES into a file idempotently
- * If markers exist, replaces content between markers
- * If no markers, appends with markers
+ * Ensure WORKSPACE-RULES exist in a file (creates file if needed)
+ * - If file doesn't exist: creates it with just the rules
+ * - If file exists without markers: appends rules
+ * - If file exists with markers: replaces content between markers (idempotent)
  * @param filePath - Path to the agent file (CLAUDE.md or AGENTS.md)
+ * @param rules - Optional custom rules content (defaults to WORKSPACE_RULES constant)
  */
-export async function injectWorkspaceRules(filePath: string): Promise<void> {
-  const content = await readFile(filePath, 'utf-8');
+export async function ensureWorkspaceRules(filePath: string, rules?: string): Promise<void> {
+  const rulesContent = rules ?? WORKSPACE_RULES;
   const startMarker = '<!-- WORKSPACE-RULES:START -->';
   const endMarker = '<!-- WORKSPACE-RULES:END -->';
 
+  if (!existsSync(filePath)) {
+    // Create new file with just the rules
+    await writeFile(filePath, `${rulesContent.trim()}\n`, 'utf-8');
+    return;
+  }
+
+  const content = await readFile(filePath, 'utf-8');
   const startIndex = content.indexOf(startMarker);
   const endIndex = content.indexOf(endMarker);
 
@@ -25,12 +34,17 @@ export async function injectWorkspaceRules(filePath: string): Promise<void> {
     // Markers exist - replace content between them (including markers)
     const before = content.substring(0, startIndex);
     const after = content.substring(endIndex + endMarker.length);
-    await writeFile(filePath, before + WORKSPACE_RULES.trim() + after, 'utf-8');
+    await writeFile(filePath, before + rulesContent.trim() + after, 'utf-8');
   } else {
     // No markers - append
-    await writeFile(filePath, content + WORKSPACE_RULES, 'utf-8');
+    await writeFile(filePath, content + rulesContent, 'utf-8');
   }
 }
+
+/**
+ * @deprecated Use ensureWorkspaceRules instead
+ */
+export const injectWorkspaceRules = ensureWorkspaceRules;
 
 /**
  * Result of a file copy operation
