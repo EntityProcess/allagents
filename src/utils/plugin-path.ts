@@ -118,30 +118,64 @@ export function parseGitHubUrl(
     return null;
   }
 
-  // Try to extract with subpath first: https://github.com/owner/repo/tree/branch/path
-  const subpathPattern =
-    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/tree\/([^/]+)\/(.+)$/;
-  const subpathMatch = normalized.match(subpathPattern);
-  if (subpathMatch) {
-    const owner = subpathMatch[1];
-    const repo = subpathMatch[2]?.replace(/\.git$/, '');
-    const branch = subpathMatch[3];
-    const subpath = subpathMatch[4];
-    if (owner && repo && branch && subpath) {
-      return { owner, repo, branch, subpath };
-    }
-  }
+  // Try to extract with /tree/: https://github.com/owner/repo/tree/branch/path or /tree/branch
+  const treeMatch = normalized.match(
+    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/tree\/(.+)$/,
+  );
+  if (treeMatch) {
+    const owner = treeMatch[1];
+    const repo = treeMatch[2]?.replace(/\.git$/, '');
+    const afterTree = treeMatch[3];
 
-  // Try format with branch but no subpath: https://github.com/owner/repo/tree/branch
-  const branchPattern =
-    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/tree\/([^/]+)$/;
-  const branchMatch = normalized.match(branchPattern);
-  if (branchMatch) {
-    const owner = branchMatch[1];
-    const repo = branchMatch[2]?.replace(/\.git$/, '');
-    const branch = branchMatch[3];
-    if (owner && repo && branch) {
-      return { owner, repo, branch };
+    if (owner && repo && afterTree) {
+      // afterTree is everything after /tree/, e.g., "feat/my-feature/path" or "main"
+      const parts = afterTree.split('/');
+
+      // Handle single part (just branch, no subpath)
+      if (parts.length === 1) {
+        // parts always has at least 1 element from split()
+        const branch = parts[0];
+        return branch ? { owner, repo, branch } : { owner, repo };
+      }
+
+      // For multiple parts, determine where branch ends and subpath begins
+      // when the branch name contains slashes (e.g., feat/my-feature)
+      //
+      // Strategy: Look for common directory names that indicate subpath start
+      // Heuristic: if we see a directory like "plugins", "src", etc., that's
+      // likely where the branch ends and subpath begins
+      const commonPathDirs = new Set([
+        'plugins',
+        'src',
+        'docs',
+        'examples',
+        'lib',
+        'test',
+        'tests',
+        'spec',
+        'scripts',
+        'config',
+        '.allagents',
+        'dist',
+        'build',
+      ]);
+
+      // Try to find where the subpath likely begins
+      for (let i = 1; i < parts.length; i++) {
+        const part = parts[i];
+        if (part && commonPathDirs.has(part)) {
+          // Found a common directory, assume everything from here is the subpath
+          const branch = parts.slice(0, i).join('/');
+          const subpath = parts.slice(i).join('/');
+          return { owner, repo, branch, subpath };
+        }
+      }
+
+      // No common path directory found, fall back to simple branch/subpath split
+      // (maintain backward compatibility with simple branches like "main", "develop")
+      const branch = parts[0];
+      const subpath = parts.slice(1).join('/');
+      return branch ? { owner, repo, branch, subpath } : { owner, repo };
     }
   }
 
