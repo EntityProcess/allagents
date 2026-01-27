@@ -3,6 +3,45 @@ import { parseGitHubUrl } from '../utils/plugin-path.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 
 /**
+ * Resolve branch/subpath combination by checking which refs exist
+ * Handles branch names with slashes by trying different split points
+ * @param owner - Repository owner
+ * @param repo - Repository name
+ * @param pathAfterTree - Full path after /tree/ (e.g., "feat/my-feature/plugins/cargowise")
+ * @returns Object with resolved branch and subpath, or null if no valid branch found
+ */
+async function resolveBranchAndSubpath(
+  owner: string,
+  repo: string,
+  pathAfterTree: string,
+): Promise<{ branch: string; subpath?: string } | null> {
+  const parts = pathAfterTree.split('/');
+
+  // Try each possible split point, starting from the longest branch name
+  for (let i = parts.length - 1; i >= 1; i--) {
+    const branch = parts.slice(0, i).join('/');
+    const subpath = parts.slice(i).join('/');
+
+    // Check if this branch ref exists
+    try {
+      await execa('gh', [
+        'api',
+        `repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`,
+        '--silent',
+      ]);
+      // If successful, this is a valid ref
+      return { branch, subpath: subpath || undefined };
+    } catch {
+      // This ref doesn't exist, try the next split point
+      continue;
+    }
+  }
+
+  // No valid branch found
+  return null;
+}
+
+/**
  * Result of fetching workspace from GitHub
  */
 export interface FetchWorkspaceResult {
@@ -62,6 +101,8 @@ async function fetchFileFromGitHub(
  * - owner/repo (shorthand)
  * - owner/repo/path/to/workspace (shorthand with subpath)
  *
+ * Intelligently resolves branch names with slashes by checking which refs exist.
+ *
  * @param url - GitHub URL or shorthand
  * @returns Result with workspace.yaml content or error
  */
@@ -76,7 +117,7 @@ export async function fetchWorkspaceFromGitHub(
     };
   }
 
-  const { owner, repo, branch, subpath } = parsed;
+  let { owner, repo, branch, subpath } = parsed;
 
   // Check if gh CLI is available
   try {
@@ -143,6 +184,45 @@ export async function fetchWorkspaceFromGitHub(
         success: true,
         content,
       };
+    }
+  }
+
+  // If we have both branch and subpath and the simple approach failed,
+  // try to intelligently resolve in case the branch name has slashes
+  // (e.g., feat/my-feature was parsed as branch:feat, subpath:my-feature/...)
+  if (branch && subpath && !branch.includes('/')) {
+    const resolved = await resolveBranchAndSubpath(
+      owner,
+      repo,
+      `${branch}/${subpath}`,
+    );
+    if (resolved && resolved.branch !== branch) {
+      // Found a different branch, try fetching with the new split
+      const newBasePath = resolved.subpath || '';
+      const newPathsToTry = newBasePath
+        ? [
+            `${newBasePath}/${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
+            `${newBasePath}/${WORKSPACE_CONFIG_FILE}`,
+          ]
+        : [
+            `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
+            WORKSPACE_CONFIG_FILE,
+          ];
+
+      for (const path of newPathsToTry) {
+        const content = await fetchFileFromGitHub(
+          owner,
+          repo,
+          path,
+          resolved.branch,
+        );
+        if (content) {
+          return {
+            success: true,
+            content,
+          };
+        }
+      }
     }
   }
 
