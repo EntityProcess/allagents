@@ -15,6 +15,36 @@ my-plugin/
 └── AGENTS.md
 ```
 
+## Duplicate Skill Handling
+
+When multiple plugins define skills with the same folder name, AllAgents automatically resolves naming conflicts:
+
+| Conflict Type | Resolution | Example |
+|---------------|------------|---------|
+| Same skill folder, different plugins | `{plugin}_{skill}` | `plugin-a_coding-standards` |
+| Same skill folder AND plugin name | `{org}_{plugin}_{skill}` (GitHub) | `acme_my-plugin_coding-standards` |
+| Same skill folder AND plugin name | `{hash}_{plugin}_{skill}` (local) | `a1b2c3_my-plugin_coding-standards` |
+
+Skills with unique folder names keep their original names unchanged.
+
+**Example:**
+
+```yaml
+# workspace.yaml
+plugins:
+  - ./plugin-a    # has skills/coding-standards/
+  - ./plugin-b    # has skills/coding-standards/
+  - ./plugin-c    # has skills/testing/
+```
+
+After sync:
+```
+.claude/skills/
+├── plugin-a_coding-standards/   # renamed (conflict)
+├── plugin-b_coding-standards/   # renamed (conflict)
+└── testing/                     # unchanged (unique)
+```
+
 ## Plugin Spec Format
 
 Plugins use the `plugin@marketplace` format:

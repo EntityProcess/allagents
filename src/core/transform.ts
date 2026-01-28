@@ -71,6 +71,19 @@ export interface CopyOptions {
 }
 
 /**
+ * Options for skill copy operations
+ */
+export interface SkillCopyOptions extends CopyOptions {
+  /**
+   * Map of skill folder name to resolved name.
+   * When provided, skills will be copied using the resolved name instead of folder name.
+   * Key format: "folderName" (just the skill folder name)
+   * Value: resolved name to use for the destination
+   */
+  skillNameMap?: Map<string, string>;
+}
+
+/**
  * Options for workspace file copy operations
  */
 export interface WorkspaceCopyOptions extends CopyOptions {
@@ -150,16 +163,16 @@ export async function copyCommands(
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
- * @param options - Copy options (dryRun)
+ * @param options - Copy options (dryRun, skillNameMap)
  * @returns Array of copy results
  */
 export async function copySkills(
   pluginPath: string,
   workspacePath: string,
   client: ClientType,
-  options: CopyOptions = {},
+  options: SkillCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false } = options;
+  const { dryRun = false, skillNameMap } = options;
   const mapping = CLIENT_MAPPINGS[client];
   const results: CopyResult[] = [];
 
@@ -184,7 +197,9 @@ export async function copySkills(
   // Process skill directories in parallel for better performance
   const copyPromises = skillDirs.map(async (entry): Promise<CopyResult> => {
     const skillSourcePath = join(sourceDir, entry.name);
-    const skillDestPath = join(destDir, entry.name);
+    // Use resolved name from skillNameMap if available, otherwise use folder name
+    const resolvedName = skillNameMap?.get(entry.name) ?? entry.name;
+    const skillDestPath = join(destDir, resolvedName);
 
     // Validate skill before copying
     const validation = await validateSkill(skillSourcePath);
@@ -223,6 +238,48 @@ export async function copySkills(
   });
 
   return Promise.all(copyPromises);
+}
+
+/**
+ * Information about a skill collected from a plugin
+ */
+export interface CollectedSkill {
+  /** Skill folder name */
+  folderName: string;
+  /** Path to the skill directory */
+  skillPath: string;
+  /** Plugin path this skill belongs to */
+  pluginPath: string;
+  /** Plugin source (original reference, e.g., GitHub URL or local path) */
+  pluginSource: string;
+}
+
+/**
+ * Collect skill information from a plugin without copying
+ * Used for the first pass of two-pass name resolution
+ * @param pluginPath - Resolved path to plugin directory
+ * @param pluginSource - Original plugin source reference
+ * @returns Array of collected skill information
+ */
+export async function collectPluginSkills(
+  pluginPath: string,
+  pluginSource: string,
+): Promise<CollectedSkill[]> {
+  const skillsDir = join(pluginPath, 'skills');
+
+  if (!existsSync(skillsDir)) {
+    return [];
+  }
+
+  const entries = await readdir(skillsDir, { withFileTypes: true });
+  const skillDirs = entries.filter((e) => e.isDirectory());
+
+  return skillDirs.map((entry) => ({
+    folderName: entry.name,
+    skillPath: join(skillsDir, entry.name),
+    pluginPath,
+    pluginSource,
+  }));
 }
 
 /**
@@ -342,26 +399,39 @@ export async function copyAgents(
 }
 
 /**
+ * Options for copying a plugin to workspace
+ */
+export interface PluginCopyOptions extends CopyOptions {
+  /**
+   * Map of skill folder name to resolved name for this specific plugin.
+   * When provided, skills will be copied using the resolved name instead of folder name.
+   */
+  skillNameMap?: Map<string, string>;
+}
+
+/**
  * Copy all plugin content to workspace for a specific client
  * Plugins provide: commands, skills, hooks, agents
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
- * @param options - Copy options (dryRun)
+ * @param options - Copy options (dryRun, skillNameMap)
  * @returns All copy results
  */
 export async function copyPluginToWorkspace(
   pluginPath: string,
   workspacePath: string,
   client: ClientType,
-  options: CopyOptions = {},
+  options: PluginCopyOptions = {},
 ): Promise<CopyResult[]> {
+  const { skillNameMap, ...baseOptions } = options;
+
   // Run copy operations in parallel for better performance
   const [commandResults, skillResults, hookResults, agentResults] = await Promise.all([
-    copyCommands(pluginPath, workspacePath, client, options),
-    copySkills(pluginPath, workspacePath, client, options),
-    copyHooks(pluginPath, workspacePath, client, options),
-    copyAgents(pluginPath, workspacePath, client, options),
+    copyCommands(pluginPath, workspacePath, client, baseOptions),
+    copySkills(pluginPath, workspacePath, client, { ...baseOptions, ...(skillNameMap && { skillNameMap }) }),
+    copyHooks(pluginPath, workspacePath, client, baseOptions),
+    copyAgents(pluginPath, workspacePath, client, baseOptions),
   ]);
 
   return [...commandResults, ...skillResults, ...hookResults, ...agentResults];

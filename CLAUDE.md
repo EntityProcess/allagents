@@ -4,7 +4,7 @@ A CLI tool for managing AI coding assistant plugins across multiple clients (Cla
 
 ## Plans
 
-Design documents and implementation plans are stored in `.claude/plans/`.
+Design documents and implementation plans are stored in `.claude/plans/`. These are temporary working documents - once implementation is complete, delete the plan and update official docs with any user-facing behavior.
 
 ## Git Workflow
 

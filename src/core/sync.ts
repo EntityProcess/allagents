@@ -13,9 +13,19 @@ import {
   parseGitHubUrl,
   parseFileSource,
 } from '../utils/plugin-path.js';
-import { fetchPlugin } from './plugin.js';
-import { copyPluginToWorkspace, copyWorkspaceFiles, type CopyResult } from './transform.js';
+import { fetchPlugin, getPluginName } from './plugin.js';
+import {
+  copyPluginToWorkspace,
+  copyWorkspaceFiles,
+  collectPluginSkills,
+  type CopyResult,
+} from './transform.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
+import {
+  resolveSkillNames,
+  getSkillKey,
+  type SkillEntry,
+} from '../utils/skill-name-resolver.js';
 import {
   isPluginSpec,
   resolvePluginSpec,
@@ -658,6 +668,7 @@ async function validateAllPlugins(
  * @param workspacePath - Path to workspace directory
  * @param clients - List of clients to sync for
  * @param dryRun - Simulate without making changes
+ * @param skillNameMap - Optional map of skill folder names to resolved names
  * @returns Plugin sync result
  */
 async function copyValidatedPlugin(
@@ -665,6 +676,7 @@ async function copyValidatedPlugin(
   workspacePath: string,
   clients: string[],
   dryRun: boolean,
+  skillNameMap?: Map<string, string>,
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
 
@@ -674,7 +686,7 @@ async function copyValidatedPlugin(
       validatedPlugin.resolved,
       workspacePath,
       client as ClientType,
-      { dryRun },
+      { dryRun, ...(skillNameMap && { skillNameMap }) },
     );
     copyResults.push(...results);
   }
@@ -687,6 +699,88 @@ async function copyValidatedPlugin(
     success: !hasFailures,
     copyResults,
   };
+}
+
+/**
+ * Collected skill information with plugin context for name resolution
+ */
+interface CollectedSkillEntry {
+  /** Skill folder name */
+  folderName: string;
+  /** Plugin name (from plugin.json or directory name) */
+  pluginName: string;
+  /** Plugin source reference */
+  pluginSource: string;
+  /** Resolved plugin path */
+  pluginPath: string;
+}
+
+/**
+ * Collect all skills from all validated plugins
+ * This is the first pass of two-pass name resolution
+ * @param validatedPlugins - Array of validated plugins with resolved paths
+ * @returns Array of collected skill entries
+ */
+async function collectAllSkills(
+  validatedPlugins: ValidatedPlugin[],
+): Promise<CollectedSkillEntry[]> {
+  const allSkills: CollectedSkillEntry[] = [];
+
+  for (const plugin of validatedPlugins) {
+    const pluginName = await getPluginName(plugin.resolved);
+    const skills = await collectPluginSkills(plugin.resolved, plugin.plugin);
+
+    for (const skill of skills) {
+      allSkills.push({
+        folderName: skill.folderName,
+        pluginName,
+        pluginSource: plugin.plugin,
+        pluginPath: plugin.resolved,
+      });
+    }
+  }
+
+  return allSkills;
+}
+
+/**
+ * Build skill name maps for each plugin based on resolved names
+ * @param allSkills - Collected skills from all plugins
+ * @returns Map from plugin path to skill name map (folder name -> resolved name)
+ */
+function buildPluginSkillNameMaps(
+  allSkills: CollectedSkillEntry[],
+): Map<string, Map<string, string>> {
+  // Convert to SkillEntry format for resolver
+  const skillEntries: SkillEntry[] = allSkills.map((skill) => ({
+    folderName: skill.folderName,
+    pluginName: skill.pluginName,
+    pluginSource: skill.pluginSource,
+  }));
+
+  // Resolve names using the skill name resolver
+  const resolution = resolveSkillNames(skillEntries);
+
+  // Build per-plugin maps
+  const pluginMaps = new Map<string, Map<string, string>>();
+
+  for (let i = 0; i < allSkills.length; i++) {
+    const skill = allSkills[i];
+    const entry = skillEntries[i];
+    if (!skill || !entry) continue;
+    const resolvedName = resolution.nameMap.get(getSkillKey(entry));
+
+    if (resolvedName) {
+      let pluginMap = pluginMaps.get(skill.pluginPath);
+      if (!pluginMap) {
+        pluginMap = new Map<string, string>();
+        pluginMaps.set(skill.pluginPath, pluginMap);
+      }
+      pluginMap.set(skill.folderName, resolvedName);
+    }
+  }
+
+  return pluginMaps;
 }
 
 /**
@@ -816,11 +910,26 @@ export async function syncWorkspace(
     await selectivePurgeWorkspace(workspacePath, previousState, config.clients);
   }
 
+  // Step 3b: Two-pass skill name resolution
+  // Pass 1: Collect all skills from all plugins
+  const allSkills = await collectAllSkills(validatedPlugins);
+
+  // Build per-plugin skill name maps (handles conflicts automatically)
+  const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
+
   // Step 4: Copy fresh from all validated plugins
+  // Pass 2: Copy skills using resolved names
   const pluginResults = await Promise.all(
-    validatedPlugins.map((validatedPlugin) =>
-      copyValidatedPlugin(validatedPlugin, workspacePath, config.clients, dryRun),
-    ),
+    validatedPlugins.map((validatedPlugin) => {
+      const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
+      return copyValidatedPlugin(
+        validatedPlugin,
+        workspacePath,
+        config.clients,
+        dryRun,
+        skillNameMap,
+      );
+    }),
   );
 
   // Step 5: Copy workspace files if configured
