@@ -132,6 +132,12 @@ When using `--from` during init, relative paths are automatically converted to a
 allagents workspace sync
 ```
 
+By default, sync pulls the latest version of remote plugins from GitHub. Use `--offline` to skip fetching and use cached versions:
+
+```bash
+allagents workspace sync --offline
+```
+
 ### Non-Destructive Sync
 
 AllAgents uses **non-destructive sync** to protect your files:

@@ -32,7 +32,8 @@ export interface FetchResult {
  * Options for fetchPlugin
  */
 export interface FetchOptions {
-  force?: boolean;
+  /** Skip fetching from remote and use cached version if available */
+  offline?: boolean;
   /** Branch to checkout after fetching (defaults to default branch) */
   branch?: string;
 }
@@ -58,7 +59,7 @@ export async function fetchPlugin(
   options: FetchOptions = {},
   deps: FetchDeps = {},
 ): Promise<FetchResult> {
-  const { force = false, branch } = options;
+  const { offline = false, branch } = options;
   const {
     execa: execaFn = execa,
     existsSync: existsSyncFn = existsSync,
@@ -107,7 +108,8 @@ export async function fetchPlugin(
   // Check if plugin is already cached
   const isCached = existsSyncFn(cachePath);
 
-  if (isCached && !force) {
+  if (isCached && offline) {
+    // Offline mode: use cached version without fetching
     return {
       success: true,
       action: 'skipped',
@@ -116,8 +118,8 @@ export async function fetchPlugin(
   }
 
   try {
-    if (isCached && force) {
-      // Update existing cache - pull latest changes
+    if (isCached) {
+      // Default: pull latest changes
       await execaFn('git', ['pull'], { cwd: cachePath });
 
       return {

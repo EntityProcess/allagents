@@ -71,8 +71,8 @@ export interface PluginSyncResult {
  * Options for workspace sync
  */
 export interface SyncOptions {
-  /** Force re-fetch of remote plugins even if cached */
-  force?: boolean;
+  /** Skip fetching from remote and use cached version if available */
+  offline?: boolean;
   /** Simulate sync without making changes */
   dryRun?: boolean;
   /**
@@ -372,20 +372,17 @@ function collectGitHubReposFromFiles(files: WorkspaceFile[]): GitHubRepoInfo[] {
 /**
  * Fetch GitHub repositories for file sources and build cache map
  * @param repos - Array of GitHub repo info to fetch
- * @param force - Force re-fetch even if cached
  * @returns Map from "owner/repo" to cache path, and any errors
  */
 async function fetchFileSourceRepos(
   repos: GitHubRepoInfo[],
-  _force: boolean,
 ): Promise<{ cache: Map<string, string>; errors: string[] }> {
   const cache = new Map<string, string>();
   const errors: string[] = [];
 
   for (const repo of repos) {
-    // File sources should always pull to ensure freshness
-    // Use force=true to always update, regardless of the global force flag
-    const result = await fetchPlugin(`${repo.owner}/${repo.repo}`, { force: true });
+    // File sources always pull latest (default behavior)
+    const result = await fetchPlugin(`${repo.owner}/${repo.repo}`);
 
     if (result.success) {
       cache.set(repo.key, result.cachePath);
@@ -574,17 +571,17 @@ export function collectSyncedPaths(
  * Validate a single plugin by resolving its path without copying
  * @param pluginSource - Plugin source
  * @param workspacePath - Path to workspace directory
- * @param force - Force re-fetch of remote plugins
+ * @param offline - Skip fetching from remote and use cached version
  * @returns Validation result with resolved path
  */
 async function validatePlugin(
   pluginSource: string,
   workspacePath: string,
-  force: boolean,
+  offline: boolean,
 ): Promise<ValidatedPlugin> {
   // Check for plugin@marketplace format first
   if (isPluginSpec(pluginSource)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, force);
+    const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, offline);
     if (!resolved.success) {
       return {
         plugin: pluginSource,
@@ -604,9 +601,9 @@ async function validatePlugin(
     // Parse URL to extract branch and subpath
     const parsed = parseGitHubUrl(pluginSource);
 
-    // Fetch remote plugin (with force option and branch if specified)
+    // Fetch remote plugin (with offline option and branch if specified)
     const fetchResult = await fetchPlugin(pluginSource, {
-      force,
+      offline,
       ...(parsed?.branch && { branch: parsed.branch }),
     });
     if (!fetchResult.success) {
@@ -649,16 +646,16 @@ async function validatePlugin(
  * Validate all plugins before any destructive action
  * @param plugins - List of plugin sources
  * @param workspacePath - Path to workspace directory
- * @param force - Force re-fetch of remote plugins
+ * @param offline - Skip fetching from remote and use cached version
  * @returns Array of validation results
  */
 async function validateAllPlugins(
   plugins: string[],
   workspacePath: string,
-  force: boolean,
+  offline: boolean,
 ): Promise<ValidatedPlugin[]> {
   return Promise.all(
-    plugins.map((plugin) => validatePlugin(plugin, workspacePath, force)),
+    plugins.map((plugin) => validatePlugin(plugin, workspacePath, offline)),
   );
 }
 
@@ -793,14 +790,14 @@ function buildPluginSkillNameMaps(
  * 4. Copy fresh from all validated plugins
  *
  * @param workspacePath - Path to workspace directory (defaults to current directory)
- * @param options - Sync options (force, dryRun)
+ * @param options - Sync options (offline, dryRun)
  * @returns Sync result
  */
 export async function syncWorkspace(
   workspacePath: string = process.cwd(),
   options: SyncOptions = {},
 ): Promise<SyncResult> {
-  const { force = false, dryRun = false, workspaceSourceBase } = options;
+  const { offline = false, dryRun = false, workspaceSourceBase } = options;
   const configDir = join(workspacePath, CONFIG_DIR);
   const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
 
@@ -840,7 +837,7 @@ export async function syncWorkspace(
   const validatedPlugins = await validateAllPlugins(
     config.plugins,
     workspacePath,
-    force,
+    offline,
   );
 
   // Step 1b: Validate workspace.source if defined
@@ -852,7 +849,7 @@ export async function syncWorkspace(
     validatedWorkspaceSource = await validatePlugin(
       config.workspace.source,
       sourceBasePath,
-      force,
+      offline,
     );
     if (!validatedWorkspaceSource.success) {
       return {
@@ -954,7 +951,7 @@ export async function syncWorkspace(
     let githubCache = new Map<string, string>();
 
     if (fileSourceRepos.length > 0) {
-      const { cache, errors } = await fetchFileSourceRepos(fileSourceRepos, force);
+      const { cache, errors } = await fetchFileSourceRepos(fileSourceRepos);
       if (errors.length > 0) {
         return {
           success: false,
@@ -1083,7 +1080,7 @@ export async function syncWorkspace(
  */
 async function resolvePluginSpecWithAutoRegister(
   spec: string,
-  _force = false,
+  _offline = false,
 ): Promise<{ success: boolean; path?: string; error?: string }> {
   // Parse plugin@marketplace using the new parser
   const parsed = parsePluginSpec(spec);

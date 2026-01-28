@@ -34,11 +34,20 @@ describe('fetchPlugin', () => {
     expect(result.error).toContain('gh CLI not installed');
   });
 
-  it('should skip if plugin is already cached and force is false', async () => {
+  it('should update cached plugin by default (pull latest)', async () => {
     existsSyncMock.mockReturnValueOnce(true);
     execaMock.mockResolvedValue({ stdout: 'gh version' });
 
     const result = await fetchPlugin('https://github.com/owner/repo', {}, deps);
+    expect(result.success).toBe(true);
+    expect(result.action).toBe('updated');
+  });
+
+  it('should skip fetching when offline is true and plugin is cached', async () => {
+    existsSyncMock.mockReturnValueOnce(true);
+    execaMock.mockResolvedValue({ stdout: 'gh version' });
+
+    const result = await fetchPlugin('https://github.com/owner/repo', { offline: true }, deps);
     expect(result.success).toBe(true);
     expect(result.action).toBe('skipped');
   });
@@ -51,15 +60,6 @@ describe('fetchPlugin', () => {
     expect(result.success).toBe(true);
     expect(result.action).toBe('fetched');
     expect(result.cachePath).toContain('owner-repo');
-  });
-
-  it('should update cached plugin when force is true', async () => {
-    existsSyncMock.mockReturnValueOnce(true);
-    execaMock.mockResolvedValue({ stdout: 'gh version' });
-
-    const result = await fetchPlugin('https://github.com/owner/repo', { force: true }, deps);
-    expect(result.success).toBe(true);
-    expect(result.action).toBe('updated');
   });
 
   it('should handle authentication errors', async () => {
