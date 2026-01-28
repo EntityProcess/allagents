@@ -699,4 +699,201 @@ clients:
       expect(endCount).toBe(1);
     });
   });
+
+  describe('syncWorkspace - client removal cleanup', () => {
+    it('should purge files when client is removed from workspace.yaml', async () => {
+      // Setup: Create a plugin with a skill (skills work for both claude and copilot)
+      const pluginDir = join(testDir, 'my-plugin');
+      const skillDir = join(pluginDir, 'skills', 'my-skill');
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, 'SKILL.md'),
+        `---
+name: my-skill
+description: A test skill
+---
+
+# My Skill`,
+      );
+
+      // Setup: Create workspace config with both claude and copilot clients
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+  - copilot
+`,
+      );
+
+      // First sync - should copy to both clients
+      const result1 = await syncWorkspace(testDir);
+      expect(result1.success).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.github', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+
+      // Verify state has both clients
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      const state1 = JSON.parse(await readFile(statePath, 'utf-8'));
+      expect(state1.files.claude).toBeDefined();
+      expect(state1.files.copilot).toBeDefined();
+
+      // Remove copilot from workspace config
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // Second sync - should purge copilot files
+      const result2 = await syncWorkspace(testDir);
+      expect(result2.success).toBe(true);
+
+      // Claude files should still exist
+      expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+
+      // Copilot files should be purged
+      expect(existsSync(join(testDir, '.github', 'skills', 'my-skill'))).toBe(false);
+
+      // State should only have claude now
+      const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
+      expect(state2.files.claude).toBeDefined();
+      expect(state2.files.copilot).toBeUndefined();
+    });
+  });
+
+  describe('syncWorkspace - state persistence', () => {
+    it('should not save state when validation fails (workspace unchanged)', async () => {
+      // Setup: First sync with a valid plugin
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'cmd.md'), '# Command');
+
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // First sync - should succeed and create state
+      const result1 = await syncWorkspace(testDir);
+      expect(result1.success).toBe(true);
+
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      const state1 = JSON.parse(await readFile(statePath, 'utf-8'));
+      const lastSync1 = state1.lastSync;
+
+      // Now change config to reference a non-existent plugin
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./nonexistent-plugin
+clients:
+  - claude
+`,
+      );
+
+      // Second sync - validation fails, workspace unchanged
+      const result2 = await syncWorkspace(testDir);
+      expect(result2.success).toBe(false);
+      expect(result2.error).toContain('workspace unchanged');
+
+      // State should NOT be updated (lastSync should be the same)
+      const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
+      expect(state2.lastSync).toBe(lastSync1);
+
+      // Files should still exist (no purge happened)
+      expect(existsSync(join(testDir, '.claude', 'commands', 'cmd.md'))).toBe(true);
+    });
+
+    it('should always save state after successful sync', async () => {
+      // Setup: Create a plugin
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'cmd.md'), '# Command');
+
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // First sync
+      await syncWorkspace(testDir);
+
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      const state1 = JSON.parse(await readFile(statePath, 'utf-8'));
+
+      // Second sync (no changes, but should still update state)
+      await syncWorkspace(testDir);
+
+      const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
+
+      // lastSync should be updated (different from first sync)
+      expect(state2.lastSync).not.toBe(state1.lastSync);
+    });
+
+    it('should handle empty file arrays in previous state gracefully', async () => {
+      // Setup: Create a plugin
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'cmd.md'), '# Command');
+
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // First sync
+      await syncWorkspace(testDir);
+
+      // Manually create a state with an empty array for a client
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      const state = JSON.parse(await readFile(statePath, 'utf-8'));
+      state.files.copilot = []; // Empty array for a client not in current config
+      await writeFile(statePath, JSON.stringify(state, null, 2));
+
+      // Second sync should handle empty array gracefully
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // Claude files should still exist
+      expect(existsSync(join(testDir, '.claude', 'commands', 'cmd.md'))).toBe(true);
+
+      // State should be updated and copilot should be gone (not in current clients)
+      const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
+      expect(state2.files.claude).toBeDefined();
+      expect(state2.files.copilot).toBeUndefined();
+    });
+  });
 });
