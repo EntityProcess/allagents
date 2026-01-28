@@ -1,12 +1,13 @@
-import { mkdir, readdir, stat } from 'node:fs/promises';
+import { mkdir, readdir, stat, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import {
   parseGitHubUrl,
   getPluginCachePath,
   validatePluginSource,
 } from '../utils/plugin-path.js';
+import { PluginManifestSchema } from '../models/plugin-config.js';
 
 /**
  * Information about a cached plugin
@@ -290,4 +291,30 @@ export async function updateCachedPlugins(
   }
 
   return results;
+}
+
+/**
+ * Get the plugin name from plugin.json or fallback to directory name
+ * @param pluginPath - Resolved path to the plugin directory
+ * @returns The plugin name
+ */
+export async function getPluginName(pluginPath: string): Promise<string> {
+  const manifestPath = join(pluginPath, 'plugin.json');
+
+  if (existsSync(manifestPath)) {
+    try {
+      const content = await readFile(manifestPath, 'utf-8');
+      const manifest = JSON.parse(content);
+      const result = PluginManifestSchema.safeParse(manifest);
+
+      if (result.success && result.data.name) {
+        return result.data.name;
+      }
+    } catch {
+      // Fall through to directory name fallback
+    }
+  }
+
+  // Fallback to directory name
+  return basename(pluginPath);
 }
