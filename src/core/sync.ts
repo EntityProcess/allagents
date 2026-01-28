@@ -218,7 +218,14 @@ export async function selectivePurgeWorkspace(
 
   const result: PurgePaths[] = [];
 
-  for (const client of clients) {
+  // Get all clients that have files in the previous state
+  const previousClients = Object.keys(state.files) as ClientType[];
+
+  // Include both current clients AND clients that were removed from config
+  // (removed clients need their files purged too)
+  const clientsToProcess = [...new Set([...clients, ...previousClients])];
+
+  for (const client of clientsToProcess) {
     const previousFiles = getPreviouslySyncedFiles(state, client);
     const purgedPaths: string[] = [];
 

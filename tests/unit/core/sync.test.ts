@@ -699,4 +699,75 @@ clients:
       expect(endCount).toBe(1);
     });
   });
+
+  describe('syncWorkspace - client removal cleanup', () => {
+    it('should purge files when client is removed from workspace.yaml', async () => {
+      // Setup: Create a plugin with a skill (skills work for both claude and copilot)
+      const pluginDir = join(testDir, 'my-plugin');
+      const skillDir = join(pluginDir, 'skills', 'my-skill');
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, 'SKILL.md'),
+        `---
+name: my-skill
+description: A test skill
+---
+
+# My Skill`,
+      );
+
+      // Setup: Create workspace config with both claude and copilot clients
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+  - copilot
+`,
+      );
+
+      // First sync - should copy to both clients
+      const result1 = await syncWorkspace(testDir);
+      expect(result1.success).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.github', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+
+      // Verify state has both clients
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      const state1 = JSON.parse(await readFile(statePath, 'utf-8'));
+      expect(state1.files.claude).toBeDefined();
+      expect(state1.files.copilot).toBeDefined();
+
+      // Remove copilot from workspace config
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // Second sync - should purge copilot files
+      const result2 = await syncWorkspace(testDir);
+      expect(result2.success).toBe(true);
+
+      // Claude files should still exist
+      expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+
+      // Copilot files should be purged
+      expect(existsSync(join(testDir, '.github', 'skills', 'my-skill'))).toBe(false);
+
+      // State should only have claude now
+      const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
+      expect(state2.files.claude).toBeDefined();
+      expect(state2.files.copilot).toBeUndefined();
+    });
+  });
 });
