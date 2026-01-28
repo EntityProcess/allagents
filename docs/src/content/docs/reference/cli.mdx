@@ -7,7 +7,7 @@ description: Complete reference for AllAgents CLI commands.
 
 ```bash
 allagents workspace init <path> [--from <source>]
-allagents workspace sync [--force] [--dry-run]
+allagents workspace sync [--offline] [--dry-run]
 allagents workspace status
 allagents workspace plugin add <plugin@marketplace>
 allagents workspace plugin remove <plugin>
@@ -30,11 +30,11 @@ When using a GitHub source, AllAgents fetches `workspace.yaml` from `.allagents/
 
 ### workspace sync
 
-Syncs plugins to the workspace using non-destructive sync:
+Syncs plugins to the workspace using non-destructive sync. By default, remote plugins are updated to their latest version.
 
 | Flag | Description |
 |------|-------------|
-| `--force`, `-f` | Force re-fetch of remote plugins even if cached |
+| `--offline` | Use cached plugins without fetching latest from remote |
 | `--dry-run` | Preview changes without applying them |
 
 **Non-destructive behavior:**

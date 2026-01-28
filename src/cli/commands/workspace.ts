@@ -49,18 +49,18 @@ workspaceCommand
 workspaceCommand
   .command('sync')
   .description('Sync plugins to workspace')
-  .option('-f, --force', 'Force re-fetch of remote plugins even if cached')
+  .option('--offline', 'Use cached plugins without fetching latest from remote')
   .option('-n, --dry-run', 'Simulate sync without making changes')
-  .action(async (options: { force?: boolean; dryRun?: boolean }) => {
+  .action(async (options: { offline?: boolean; dryRun?: boolean }) => {
     try {
-      const force = options.force ?? false;
+      const offline = options.offline ?? false;
       const dryRun = options.dryRun ?? false;
 
       if (dryRun) {
         console.log('Dry run mode - no changes will be made\n');
       }
       console.log('Syncing workspace...\n');
-      const result = await syncWorkspace(process.cwd(), { force, dryRun });
+      const result = await syncWorkspace(process.cwd(), { offline, dryRun });
 
       // Early exit only for top-level errors (e.g., missing .allagents/workspace.yaml)
       // Plugin-level errors are handled in the loop below
