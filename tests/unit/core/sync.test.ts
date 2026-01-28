@@ -770,4 +770,95 @@ clients:
       expect(state2.files.copilot).toBeUndefined();
     });
   });
+
+  describe('syncWorkspace - state persistence', () => {
+    it('should not save state when validation fails (workspace unchanged)', async () => {
+      // Setup: First sync with a valid plugin
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'cmd.md'), '# Command');
+
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // First sync - should succeed and create state
+      const result1 = await syncWorkspace(testDir);
+      expect(result1.success).toBe(true);
+
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      const state1 = JSON.parse(await readFile(statePath, 'utf-8'));
+      const lastSync1 = state1.lastSync;
+
+      // Now change config to reference a non-existent plugin
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./nonexistent-plugin
+clients:
+  - claude
+`,
+      );
+
+      // Second sync - validation fails, workspace unchanged
+      const result2 = await syncWorkspace(testDir);
+      expect(result2.success).toBe(false);
+      expect(result2.error).toContain('workspace unchanged');
+
+      // State should NOT be updated (lastSync should be the same)
+      const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
+      expect(state2.lastSync).toBe(lastSync1);
+
+      // Files should still exist (no purge happened)
+      expect(existsSync(join(testDir, '.claude', 'commands', 'cmd.md'))).toBe(true);
+    });
+
+    it('should always save state after successful sync', async () => {
+      // Setup: Create a plugin
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'cmd.md'), '# Command');
+
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      // First sync
+      await syncWorkspace(testDir);
+
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      const state1 = JSON.parse(await readFile(statePath, 'utf-8'));
+
+      // Wait a bit to ensure timestamp changes
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Second sync (no changes, but should still update state)
+      await syncWorkspace(testDir);
+
+      const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
+
+      // lastSync should be updated
+      expect(new Date(state2.lastSync).getTime()).toBeGreaterThan(
+        new Date(state1.lastSync).getTime(),
+      );
+    });
+  });
 });

@@ -937,7 +937,9 @@ export async function syncWorkspace(
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
 
   // Step 6: Save sync state with all copied files (skip in dry-run mode)
-  if (!hasFailures && !dryRun) {
+  // Always save state after sync (even with partial failures) so state reflects disk reality.
+  // The purge has already happened, so we need to track what was actually copied.
+  if (!dryRun) {
     // Collect all copy results
     const allCopyResults: CopyResult[] = [
       ...pluginResults.flatMap((r) => r.copyResults),
