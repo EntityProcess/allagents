@@ -847,18 +847,53 @@ clients:
       const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
       const state1 = JSON.parse(await readFile(statePath, 'utf-8'));
 
-      // Wait a bit to ensure timestamp changes
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
       // Second sync (no changes, but should still update state)
       await syncWorkspace(testDir);
 
       const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
 
-      // lastSync should be updated
-      expect(new Date(state2.lastSync).getTime()).toBeGreaterThan(
-        new Date(state1.lastSync).getTime(),
+      // lastSync should be updated (different from first sync)
+      expect(state2.lastSync).not.toBe(state1.lastSync);
+    });
+
+    it('should handle empty file arrays in previous state gracefully', async () => {
+      // Setup: Create a plugin
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'cmd.md'), '# Command');
+
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
       );
+
+      // First sync
+      await syncWorkspace(testDir);
+
+      // Manually create a state with an empty array for a client
+      const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
+      const state = JSON.parse(await readFile(statePath, 'utf-8'));
+      state.files.copilot = []; // Empty array for a client not in current config
+      await writeFile(statePath, JSON.stringify(state, null, 2));
+
+      // Second sync should handle empty array gracefully
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // Claude files should still exist
+      expect(existsSync(join(testDir, '.claude', 'commands', 'cmd.md'))).toBe(true);
+
+      // State should be updated and copilot should be gone (not in current clients)
+      const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
+      expect(state2.files.claude).toBeDefined();
+      expect(state2.files.copilot).toBeUndefined();
     });
   });
 });

@@ -221,8 +221,9 @@ export async function selectivePurgeWorkspace(
   // Get all clients that have files in the previous state
   const previousClients = Object.keys(state.files) as ClientType[];
 
-  // Include both current clients AND clients that were removed from config
-  // (removed clients need their files purged too)
+  // Include both current clients AND clients that were removed from config.
+  // Removed clients must be purged to avoid orphaned files on disk when a user
+  // removes a client from workspace.yaml (e.g., removes 'copilot' from clients list).
   const clientsToProcess = [...new Set([...clients, ...previousClients])];
 
   for (const client of clientsToProcess) {
