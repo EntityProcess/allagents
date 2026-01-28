@@ -2,6 +2,10 @@
 
 A CLI tool for managing AI coding assistant plugins across multiple clients (Claude Code, GitHub Copilot, Cursor, etc.).
 
+## Plans
+
+Design documents and implementation plans are stored in `.claude/plans/`.
+
 ## Git Workflow
 
 ### Commit Convention

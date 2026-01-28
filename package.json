@@ -24,7 +24,8 @@
     "format": "biome format --write src",
     "check": "biome check src",
     "check:fix": "biome check --write src",
-    "prepare": "bun run build && (test -d .git && bunx prek install -t pre-push || true)"
+    "prepare": "bun run build && (test -d .git && bunx prek install -t pre-push || true)",
+    "release": "bun run scripts/release.ts"
   },
   "keywords": [
     "cli",
