@@ -686,7 +686,7 @@ async function copyValidatedPlugin(
       validatedPlugin.resolved,
       workspacePath,
       client as ClientType,
-      { dryRun, skillNameMap },
+      { dryRun, ...(skillNameMap && { skillNameMap }) },
     );
     copyResults.push(...results);
   }
@@ -765,8 +765,9 @@ function buildPluginSkillNameMaps(
   const pluginMaps = new Map<string, Map<string, string>>();
 
   for (let i = 0; i < allSkills.length; i++) {
-    const skill = allSkills[i]!;
-    const entry = skillEntries[i]!;
+    const skill = allSkills[i];
+    const entry = skillEntries[i];
+    if (!skill || !entry) continue;
     const resolvedName = resolution.nameMap.get(getSkillKey(entry));
 
     if (resolvedName) {

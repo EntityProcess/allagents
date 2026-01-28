@@ -429,7 +429,7 @@ export async function copyPluginToWorkspace(
   // Run copy operations in parallel for better performance
   const [commandResults, skillResults, hookResults, agentResults] = await Promise.all([
     copyCommands(pluginPath, workspacePath, client, baseOptions),
-    copySkills(pluginPath, workspacePath, client, { ...baseOptions, skillNameMap }),
+    copySkills(pluginPath, workspacePath, client, { ...baseOptions, ...(skillNameMap && { skillNameMap }) }),
     copyHooks(pluginPath, workspacePath, client, baseOptions),
     copyAgents(pluginPath, workspacePath, client, baseOptions),
   ]);

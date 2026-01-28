@@ -52,7 +52,7 @@ export function extractOrgFromSource(source: string): string | null {
   const urlMatch = trimmedSource.match(
     /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)(?:\/|$)/
   );
-  if (urlMatch && urlMatch[1]) {
+  if (urlMatch?.[1]) {
     return validateOrg(urlMatch[1]);
   }
 
