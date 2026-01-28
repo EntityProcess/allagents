@@ -1,25 +1,17 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import * as fs from 'node:fs';
-import * as fsPromises from 'node:fs/promises';
-import { fetchPlugin } from '../../../src/core/plugin.js';
+import { fetchPlugin, type FetchDeps } from '../../../src/core/plugin.js';
 
-// Mock execa
+// Create mock functions for dependency injection
 const execaMock = mock(() => Promise.resolve({ stdout: '', stderr: '' }));
-mock.module('execa', () => ({
-  execa: execaMock,
-}));
-
-// Mock fs - preserve all original functions, only override what we need
 const existsSyncMock = mock(() => false);
 const mkdirMock = mock(() => Promise.resolve());
-mock.module('node:fs', () => ({
-  ...fs,
-  existsSync: existsSyncMock,
-}));
-mock.module('node:fs/promises', () => ({
-  ...fsPromises,
-  mkdir: mkdirMock,
-}));
+
+// Dependencies object passed to fetchPlugin
+const deps: FetchDeps = {
+  execa: execaMock as unknown as FetchDeps['execa'],
+  existsSync: existsSyncMock as unknown as FetchDeps['existsSync'],
+  mkdir: mkdirMock as unknown as FetchDeps['mkdir'],
+};
 
 beforeEach(() => {
   execaMock.mockClear();
@@ -29,7 +21,7 @@ beforeEach(() => {
 
 describe('fetchPlugin', () => {
   it('should validate GitHub URL', async () => {
-    const result = await fetchPlugin('not-a-github-url');
+    const result = await fetchPlugin('not-a-github-url', {}, deps);
     expect(result.success).toBe(false);
     expect(result.error).toContain('Invalid GitHub URL');
   });
@@ -37,7 +29,7 @@ describe('fetchPlugin', () => {
   it('should check for gh CLI availability', async () => {
     execaMock.mockRejectedValueOnce(new Error('gh not found'));
 
-    const result = await fetchPlugin('https://github.com/owner/repo');
+    const result = await fetchPlugin('https://github.com/owner/repo', {}, deps);
     expect(result.success).toBe(false);
     expect(result.error).toContain('gh CLI not installed');
   });
@@ -46,7 +38,7 @@ describe('fetchPlugin', () => {
     existsSyncMock.mockReturnValueOnce(true);
     execaMock.mockResolvedValue({ stdout: 'gh version' });
 
-    const result = await fetchPlugin('https://github.com/owner/repo');
+    const result = await fetchPlugin('https://github.com/owner/repo', {}, deps);
     expect(result.success).toBe(true);
     expect(result.action).toBe('skipped');
   });
@@ -55,7 +47,7 @@ describe('fetchPlugin', () => {
     existsSyncMock.mockReturnValueOnce(false);
     execaMock.mockResolvedValue({ stdout: 'gh version' });
 
-    const result = await fetchPlugin('https://github.com/owner/repo');
+    const result = await fetchPlugin('https://github.com/owner/repo', {}, deps);
     expect(result.success).toBe(true);
     expect(result.action).toBe('fetched');
     expect(result.cachePath).toContain('owner-repo');
@@ -65,7 +57,7 @@ describe('fetchPlugin', () => {
     existsSyncMock.mockReturnValueOnce(true);
     execaMock.mockResolvedValue({ stdout: 'gh version' });
 
-    const result = await fetchPlugin('https://github.com/owner/repo', { force: true });
+    const result = await fetchPlugin('https://github.com/owner/repo', { force: true }, deps);
     expect(result.success).toBe(true);
     expect(result.action).toBe('updated');
   });
@@ -76,7 +68,7 @@ describe('fetchPlugin', () => {
       .mockResolvedValueOnce({ stdout: 'gh version' })
       .mockRejectedValueOnce(new Error('authentication required'));
 
-    const result = await fetchPlugin('https://github.com/owner/repo');
+    const result = await fetchPlugin('https://github.com/owner/repo', {}, deps);
     expect(result.success).toBe(false);
     expect(result.error).toContain('authentication required');
   });
@@ -87,7 +79,7 @@ describe('fetchPlugin', () => {
       .mockResolvedValueOnce({ stdout: 'gh version' })
       .mockRejectedValueOnce(new Error('404 not found'));
 
-    const result = await fetchPlugin('https://github.com/owner/repo');
+    const result = await fetchPlugin('https://github.com/owner/repo', {}, deps);
     expect(result.success).toBe(false);
     expect(result.error).toContain('not found');
   });
@@ -104,7 +96,7 @@ describe('fetchPlugin', () => {
       existsSyncMock.mockReturnValueOnce(true);
       execaMock.mockResolvedValue({ stdout: 'gh version' });
 
-      const result = await fetchPlugin(url);
+      const result = await fetchPlugin(url, {}, deps);
       expect(result.success).toBe(true);
     }
   });

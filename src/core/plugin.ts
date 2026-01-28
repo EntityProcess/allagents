@@ -37,16 +37,32 @@ export interface FetchOptions {
 }
 
 /**
+ * Dependencies for fetchPlugin (for testing)
+ */
+export interface FetchDeps {
+  execa?: typeof execa;
+  existsSync?: typeof existsSync;
+  mkdir?: typeof mkdir;
+}
+
+/**
  * Fetch a plugin from GitHub to local cache
  * @param url - GitHub URL of the plugin
  * @param options - Fetch options (force update)
+ * @param deps - Optional dependencies for testing
  * @returns Result of the fetch operation
  */
 export async function fetchPlugin(
   url: string,
   options: FetchOptions = {},
+  deps: FetchDeps = {},
 ): Promise<FetchResult> {
   const { force = false, branch } = options;
+  const {
+    execa: execaFn = execa,
+    existsSync: existsSyncFn = existsSync,
+    mkdir: mkdirFn = mkdir,
+  } = deps;
 
   // Validate plugin source
   const validation = validatePluginSource(url);
@@ -77,7 +93,7 @@ export async function fetchPlugin(
 
   // Check if gh CLI is available
   try {
-    await execa('gh', ['--version']);
+    await execaFn('gh', ['--version']);
   } catch {
     return {
       success: false,
@@ -88,7 +104,7 @@ export async function fetchPlugin(
   }
 
   // Check if plugin is already cached
-  const isCached = existsSync(cachePath);
+  const isCached = existsSyncFn(cachePath);
 
   if (isCached && !force) {
     return {
@@ -101,7 +117,7 @@ export async function fetchPlugin(
   try {
     if (isCached && force) {
       // Update existing cache - pull latest changes
-      await execa('git', ['pull'], { cwd: cachePath });
+      await execaFn('git', ['pull'], { cwd: cachePath });
 
       return {
         success: true,
@@ -112,13 +128,13 @@ export async function fetchPlugin(
     // Clone new plugin
     // Ensure parent directory exists
     const parentDir = dirname(cachePath);
-    await mkdir(parentDir, { recursive: true });
+    await mkdirFn(parentDir, { recursive: true });
 
     // Clone repository with specific branch if provided
     if (branch) {
-      await execa('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath, '--', '--branch', branch]);
+      await execaFn('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath, '--', '--branch', branch]);
     } else {
-      await execa('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath]);
+      await execaFn('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath]);
     }
 
     return {
