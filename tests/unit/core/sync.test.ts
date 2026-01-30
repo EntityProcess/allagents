@@ -898,6 +898,21 @@ clients:
   });
 
   describe('syncWorkspace - client filtering', () => {
+    it('should fail when specified client is not in workspace config', async () => {
+      const configDir = join(testDir, '.allagents');
+      await mkdir(configDir, { recursive: true });
+      await writeFile(
+        join(configDir, 'workspace.yaml'),
+        `repositories: []\nplugins: []\nclients:\n  - claude\n`,
+      );
+
+      const result = await syncWorkspace(testDir, { clients: ['opencode'] });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('opencode');
+      expect(result.error).toContain('not configured');
+    });
+
     it('should sync only the specified client when clients option is provided', async () => {
       // Setup plugin with a skill (skills require a subdirectory with SKILL.md)
       const pluginDir = join(testDir, 'my-plugin');

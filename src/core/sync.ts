@@ -840,6 +840,24 @@ export async function syncWorkspace(
     ? config.clients.filter((c) => options.clients!.includes(c))
     : config.clients;
 
+  // Validate requested clients are in config
+  if (options.clients) {
+    const invalidClients = options.clients.filter(
+      (c) => !config.clients.includes(c as ClientType),
+    );
+    if (invalidClients.length > 0) {
+      return {
+        success: false,
+        pluginResults: [],
+        totalCopied: 0,
+        totalFailed: 0,
+        totalSkipped: 0,
+        totalGenerated: 0,
+        error: `Client(s) not configured in workspace.yaml: ${invalidClients.join(', ')}\n  Configured clients: ${config.clients.join(', ')}`,
+      };
+    }
+  }
+
   // Step 1: Validate all plugins before any destructive action
   const validatedPlugins = await validateAllPlugins(
     config.plugins,
