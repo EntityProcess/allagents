@@ -24,29 +24,29 @@ describe('SkillMetadataSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should reject skill with uppercase name', () => {
-    const invalidSkill = {
+  it('should accept skill with uppercase name (display label)', () => {
+    const validSkill = {
       name: 'MySkill',
-      description: 'Invalid name',
+      description: 'Display name with uppercase',
     };
 
-    const result = SkillMetadataSchema.safeParse(invalidSkill);
-    expect(result.success).toBe(false);
+    const result = SkillMetadataSchema.safeParse(validSkill);
+    expect(result.success).toBe(true);
   });
 
-  it('should reject skill with invalid characters in name', () => {
-    const invalidSkill = {
-      name: 'my_skill',
-      description: 'Invalid name with underscore',
+  it('should accept skill with spaces and mixed case (display label)', () => {
+    const validSkill = {
+      name: 'Writing Hookify Rules',
+      description: 'Display name with spaces',
     };
 
-    const result = SkillMetadataSchema.safeParse(invalidSkill);
-    expect(result.success).toBe(false);
+    const result = SkillMetadataSchema.safeParse(validSkill);
+    expect(result.success).toBe(true);
   });
 
-  it('should reject skill with name longer than 64 characters', () => {
+  it('should reject skill with name longer than 128 characters', () => {
     const invalidSkill = {
-      name: 'a'.repeat(65),
+      name: 'a'.repeat(129),
       description: 'Name too long',
     };
 

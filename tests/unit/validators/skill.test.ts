@@ -103,24 +103,23 @@ No frontmatter here.
     }
   });
 
-  it('should reject skill with invalid name format', async () => {
+  it('should accept skill with display name containing mixed case and underscores', async () => {
     const testDir = createTestDir();
     try {
-      const skillDir = join(testDir, 'invalid-name');
+      const skillDir = join(testDir, 'valid-display-name');
       mkdirSync(skillDir, { recursive: true });
 
       writeFileSync(
         join(skillDir, 'SKILL.md'),
         `---
-name: Invalid_Name
-description: Invalid name format
+name: Writing Hookify Rules
+description: Display name with spaces and uppercase
 ---
 `
       );
 
       const result = await validateSkill(skillDir);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('lowercase');
+      expect(result.valid).toBe(true);
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }
