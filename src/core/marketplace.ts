@@ -432,19 +432,27 @@ export async function getMarketplacePluginsFromManifest(
 }
 
 /**
- * List plugins available in a marketplace
+ * List plugins available in a marketplace.
+ * Prefers .claude-plugin/marketplace.json when available,
+ * falls back to scanning the plugins/ directory.
  */
 export async function listMarketplacePlugins(
   name: string,
-): Promise<Array<{ name: string; path: string }>> {
+): Promise<MarketplacePluginInfo[]> {
   const marketplace = await getMarketplace(name);
   if (!marketplace) {
     return [];
   }
 
+  // Try manifest first
+  const manifestPlugins = await getMarketplacePluginsFromManifest(marketplace.path);
+  if (manifestPlugins.length > 0) {
+    return manifestPlugins;
+  }
+
+  // Fall back to directory scanning
   const pluginsDir = join(marketplace.path, 'plugins');
   if (!existsSync(pluginsDir)) {
-    // Marketplace might not have plugins subdirectory (it IS the plugin)
     return [];
   }
 
