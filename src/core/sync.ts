@@ -81,6 +81,8 @@ export interface SyncOptions {
    * instead of the target workspace. If not provided, defaults to workspacePath.
    */
   workspaceSourceBase?: string;
+  /** Override which clients to sync. If provided, only these clients are synced instead of all configured clients. */
+  clients?: string[];
 }
 
 /**
@@ -220,6 +222,7 @@ export async function selectivePurgeWorkspace(
   workspacePath: string,
   state: SyncState | null,
   clients: ClientType[],
+  options?: { partialSync?: boolean },
 ): Promise<PurgePaths[]> {
   // First sync - no state, skip purge entirely (safe overlay)
   if (!state) {
@@ -234,7 +237,11 @@ export async function selectivePurgeWorkspace(
   // Include both current clients AND clients that were removed from config.
   // Removed clients must be purged to avoid orphaned files on disk when a user
   // removes a client from workspace.yaml (e.g., removes 'copilot' from clients list).
-  const clientsToProcess = [...new Set([...clients, ...previousClients])];
+  // However, during partial sync (--client flag), only purge the targeted clients
+  // to avoid removing files for clients that aren't being synced.
+  const clientsToProcess = options?.partialSync
+    ? clients
+    : [...new Set([...clients, ...previousClients])];
 
   for (const client of clientsToProcess) {
     const previousFiles = getPreviouslySyncedFiles(state, client);
@@ -833,6 +840,29 @@ export async function syncWorkspace(
     };
   }
 
+  // Filter clients if override provided
+  const clients = options.clients
+    ? config.clients.filter((c) => options.clients?.includes(c))
+    : config.clients;
+
+  // Validate requested clients are in config
+  if (options.clients) {
+    const invalidClients = options.clients.filter(
+      (c) => !config.clients.includes(c as ClientType),
+    );
+    if (invalidClients.length > 0) {
+      return {
+        success: false,
+        pluginResults: [],
+        totalCopied: 0,
+        totalFailed: 0,
+        totalSkipped: 0,
+        totalGenerated: 0,
+        error: `Client(s) not configured in workspace.yaml: ${invalidClients.join(', ')}\n  Configured clients: ${config.clients.join(', ')}`,
+      };
+    }
+  }
+
   // Step 1: Validate all plugins before any destructive action
   const validatedPlugins = await validateAllPlugins(
     config.plugins,
@@ -894,7 +924,7 @@ export async function syncWorkspace(
   // Step 2b: Get paths that will be purged (for dry-run reporting)
   // In non-destructive mode, only show files from state (or nothing on first sync)
   const purgedPaths = previousState
-    ? config.clients
+    ? clients
         .map((client) => ({
           client,
           paths: getPreviouslySyncedFiles(previousState, client),
@@ -904,7 +934,9 @@ export async function syncWorkspace(
 
   // Step 3: Selective purge - only remove files we previously synced (skip in dry-run mode)
   if (!dryRun) {
-    await selectivePurgeWorkspace(workspacePath, previousState, config.clients);
+    await selectivePurgeWorkspace(workspacePath, previousState, clients, {
+      partialSync: !!options.clients,
+    });
   }
 
   // Step 3b: Two-pass skill name resolution
@@ -922,7 +954,7 @@ export async function syncWorkspace(
       return copyValidatedPlugin(
         validatedPlugin,
         workspacePath,
-        config.clients,
+        clients,
         dryRun,
         skillNameMap,
       );
@@ -989,7 +1021,7 @@ export async function syncWorkspace(
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
-    if (!dryRun && config.clients.includes('claude') && sourcePath) {
+    if (!dryRun && clients.includes('claude') && sourcePath) {
       const claudePath = join(workspacePath, 'CLAUDE.md');
       const agentsPath = join(workspacePath, 'AGENTS.md');
       const claudeExistsInSource = existsSync(join(sourcePath, 'CLAUDE.md'));
@@ -1054,7 +1086,17 @@ export async function syncWorkspace(
     ];
 
     // Group by client and save state
-    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, config.clients);
+    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, clients);
+
+    // When syncing a subset of clients, merge with existing state for non-targeted clients
+    if (options.clients && previousState) {
+      for (const [client, files] of Object.entries(previousState.files)) {
+        if (!clients.includes(client as ClientType)) {
+          syncedFiles[client as ClientType] = files;
+        }
+      }
+    }
+
     await saveSyncState(workspacePath, syncedFiles);
   }
 

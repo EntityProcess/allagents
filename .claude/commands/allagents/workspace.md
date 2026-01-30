@@ -13,15 +13,16 @@ Help the user manage their allagents workspace by running CLI commands and editi
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `init` | `allagents workspace init <path>` | Create new workspace from template |
-| `sync` | `allagents workspace sync [--force] [--dry-run]` | Sync plugins to all repositories |
+| `sync` | `allagents workspace sync [--offline] [--dry-run] [--client <client>]` | Sync plugins to all repositories |
 | `status` | `allagents workspace status` | Show plugin and client status |
 | `add` | `allagents workspace add <plugin>` | Add a plugin (local path or GitHub URL) |
 | `remove` | `allagents workspace remove <plugin>` | Remove a plugin from workspace |
 
 ## Sync Options
 
-- `--force, -f` - Force re-fetch of remote plugins even if cached
+- `--offline` - Use cached plugins without fetching latest from remote
 - `--dry-run, -n` - Preview changes without making them
+- `-c, --client <client>` - Sync only the specified client (e.g., opencode, claude)
 
 ## What to Do
 
@@ -56,5 +57,6 @@ clients:
 ## Tips
 
 - Run `--dry-run` first to preview sync changes before applying
-- Use `--force` to re-fetch cached GitHub plugins
+- Use `--offline` to skip fetching and use cached plugins
+- Use `--client <client>` to sync only a specific client
 - Always run `status` after configuration changes to verify resolution

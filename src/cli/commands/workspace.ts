@@ -51,7 +51,8 @@ workspaceCommand
   .description('Sync plugins to workspace')
   .option('--offline', 'Use cached plugins without fetching latest from remote')
   .option('-n, --dry-run', 'Simulate sync without making changes')
-  .action(async (options: { offline?: boolean; dryRun?: boolean }) => {
+  .option('-c, --client <client>', 'Sync only the specified client (e.g., opencode, claude)')
+  .action(async (options: { offline?: boolean; dryRun?: boolean; client?: string }) => {
     try {
       const offline = options.offline ?? false;
       const dryRun = options.dryRun ?? false;
@@ -59,8 +60,15 @@ workspaceCommand
       if (dryRun) {
         console.log('Dry run mode - no changes will be made\n');
       }
+      if (options.client) {
+        console.log(`Syncing client: ${options.client}\n`);
+      }
       console.log('Syncing workspace...\n');
-      const result = await syncWorkspace(process.cwd(), { offline, dryRun });
+      const result = await syncWorkspace(process.cwd(), {
+        offline,
+        dryRun,
+        ...(options.client && { clients: [options.client] }),
+      });
 
       // Early exit only for top-level errors (e.g., missing .allagents/workspace.yaml)
       // Plugin-level errors are handled in the loop below

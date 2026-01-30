@@ -7,7 +7,7 @@ description: Complete reference for AllAgents CLI commands.
 
 ```bash
 allagents workspace init <path> [--from <source>]
-allagents workspace sync [--offline] [--dry-run]
+allagents workspace sync [--offline] [--dry-run] [--client <client>]
 allagents workspace status
 allagents workspace plugin add <plugin@marketplace>
 allagents workspace plugin remove <plugin>
@@ -36,6 +36,7 @@ Syncs plugins to the workspace using non-destructive sync. By default, remote pl
 |------|-------------|
 | `--offline` | Use cached plugins without fetching latest from remote |
 | `--dry-run` | Preview changes without applying them |
+| `-c, --client <client>` | Sync only the specified client (e.g., `opencode`, `claude`) |
 
 **Non-destructive behavior:**
 - First sync overlays files without deleting existing user files
