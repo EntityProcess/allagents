@@ -8,6 +8,65 @@ export const workspaceCommand = new Command('workspace').description(
   'Manage AI agent workspaces - initialize, sync, and configure plugins',
 );
 
+/**
+ * Run sync and print results. Returns true if sync succeeded.
+ */
+async function runSyncAndPrint(): Promise<boolean> {
+  console.log('\nSyncing workspace...\n');
+  const result = await syncWorkspace();
+
+  if (!result.success && result.error) {
+    console.error(`Sync error: ${result.error}`);
+    return false;
+  }
+
+  for (const pluginResult of result.pluginResults) {
+    const status = pluginResult.success ? '✓' : '✗';
+    console.log(`${status} Plugin: ${pluginResult.plugin}`);
+
+    if (pluginResult.error) {
+      console.log(`  Error: ${pluginResult.error}`);
+    }
+
+    const copied = pluginResult.copyResults.filter(
+      (r) => r.action === 'copied',
+    ).length;
+    const generated = pluginResult.copyResults.filter(
+      (r) => r.action === 'generated',
+    ).length;
+    const failed = pluginResult.copyResults.filter(
+      (r) => r.action === 'failed',
+    ).length;
+
+    if (copied > 0) console.log(`  Copied: ${copied} files`);
+    if (generated > 0) console.log(`  Generated: ${generated} files`);
+    if (failed > 0) {
+      console.log(`  Failed: ${failed} files`);
+      for (const failedResult of pluginResult.copyResults.filter(
+        (r) => r.action === 'failed',
+      )) {
+        console.log(
+          `    - ${failedResult.destination}: ${failedResult.error}`,
+        );
+      }
+    }
+  }
+
+  console.log(`\nSync complete:`);
+  console.log(`  Total copied: ${result.totalCopied}`);
+  if (result.totalGenerated > 0) {
+    console.log(`  Total generated: ${result.totalGenerated}`);
+  }
+  if (result.totalFailed > 0) {
+    console.log(`  Total failed: ${result.totalFailed}`);
+  }
+  if (result.totalSkipped > 0) {
+    console.log(`  Total skipped: ${result.totalSkipped}`);
+  }
+
+  return result.success && result.totalFailed === 0;
+}
+
 workspaceCommand
   .command('init [path]')
   .description('Create new workspace and sync plugins')
@@ -167,12 +226,14 @@ workspaceCommand
       } else {
         for (const plugin of result.plugins) {
           const status = plugin.available ? '✓' : '✗';
-          const typeLabel =
-            plugin.type === 'github'
-              ? plugin.available
-                ? 'cached'
-                : 'not cached'
-              : 'local';
+          let typeLabel: string;
+          if (plugin.type === 'marketplace') {
+            typeLabel = plugin.available ? 'marketplace' : 'not synced';
+          } else if (plugin.type === 'github') {
+            typeLabel = plugin.available ? 'cached' : 'not cached';
+          } else {
+            typeLabel = 'local';
+          }
           console.log(`  ${status} ${plugin.source} (${typeLabel})`);
         }
       }
@@ -219,9 +280,11 @@ pluginSubcommand
         console.log(`✓ Auto-registered marketplace: ${result.autoRegistered}`);
       }
       console.log(`✓ Added plugin: ${plugin}`);
-      console.log(
-        '\nRun "allagents workspace sync" to fetch and sync the plugin.',
-      );
+
+      const syncOk = await runSyncAndPrint();
+      if (!syncOk) {
+        process.exit(1);
+      }
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error: ${error.message}`);
@@ -244,6 +307,11 @@ pluginSubcommand
       }
 
       console.log(`✓ Removed plugin: ${plugin}`);
+
+      const syncOk = await runSyncAndPrint();
+      if (!syncOk) {
+        process.exit(1);
+      }
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error: ${error.message}`);

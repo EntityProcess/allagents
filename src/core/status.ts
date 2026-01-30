@@ -7,13 +7,19 @@ import {
   getPluginCachePath,
   type ParsedPluginSource,
 } from '../utils/plugin-path.js';
+import {
+  isPluginSpec,
+  resolvePluginSpec,
+  parsePluginSpec,
+  getMarketplace,
+} from './marketplace.js';
 
 /**
  * Status of a single plugin
  */
 export interface PluginStatus {
   source: string;
-  type: 'local' | 'github';
+  type: 'local' | 'github' | 'marketplace';
   available: boolean;
   path: string;
   owner?: string;
@@ -55,9 +61,14 @@ export async function getWorkspaceStatus(
     const plugins: PluginStatus[] = [];
 
     for (const pluginSource of config.plugins) {
-      const parsed = parsePluginSource(pluginSource, workspacePath);
-      const status = getPluginStatus(parsed);
-      plugins.push(status);
+      if (isPluginSpec(pluginSource)) {
+        const status = await getMarketplacePluginStatus(pluginSource);
+        plugins.push(status);
+      } else {
+        const parsed = parsePluginSource(pluginSource, workspacePath);
+        const status = getPluginStatus(parsed);
+        plugins.push(status);
+      }
     }
 
     return {
@@ -105,5 +116,42 @@ function getPluginStatus(parsed: ParsedPluginSource): PluginStatus {
     type: 'local',
     available,
     path: parsed.normalized,
+  };
+}
+
+/**
+ * Get status of a plugin@marketplace spec
+ */
+async function getMarketplacePluginStatus(spec: string): Promise<PluginStatus> {
+  const parsed = parsePluginSpec(spec);
+
+  if (!parsed) {
+    return {
+      source: spec,
+      type: 'marketplace',
+      available: false,
+      path: '',
+    };
+  }
+
+  // Check if the marketplace is registered
+  const marketplace = await getMarketplace(parsed.marketplaceName);
+  if (!marketplace) {
+    return {
+      source: spec,
+      type: 'marketplace',
+      available: false,
+      path: '',
+    };
+  }
+
+  // Try to resolve the plugin within the marketplace
+  const resolved = await resolvePluginSpec(spec, parsed.subpath ? { subpath: parsed.subpath } : {});
+
+  return {
+    source: spec,
+    type: 'marketplace',
+    available: resolved !== null,
+    path: resolved?.path ?? '',
   };
 }
