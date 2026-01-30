@@ -896,4 +896,33 @@ clients:
       expect(state2.files.copilot).toBeUndefined();
     });
   });
+
+  describe('syncWorkspace - client filtering', () => {
+    it('should sync only the specified client when clients option is provided', async () => {
+      // Setup plugin with a skill (skills require a subdirectory with SKILL.md)
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'skills', 'test-skill'), { recursive: true });
+      await writeFile(
+        join(pluginDir, 'skills', 'test-skill', 'SKILL.md'),
+        '---\nname: test-skill\ndescription: A test skill\n---\n# Test Skill\n',
+      );
+
+      // Setup workspace config with two clients
+      const configDir = join(testDir, '.allagents');
+      await mkdir(configDir, { recursive: true });
+      await writeFile(
+        join(configDir, 'workspace.yaml'),
+        `repositories: []\nplugins:\n  - ./my-plugin\nclients:\n  - claude\n  - opencode\n`,
+      );
+
+      // Sync with only opencode
+      const result = await syncWorkspace(testDir, { clients: ['opencode'] });
+
+      expect(result.success).toBe(true);
+      // opencode files should exist
+      expect(existsSync(join(testDir, '.opencode', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+      // claude files should NOT exist
+      expect(existsSync(join(testDir, '.claude', 'skills'))).toBe(false);
+    });
+  });
 });

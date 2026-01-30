@@ -81,6 +81,8 @@ export interface SyncOptions {
    * instead of the target workspace. If not provided, defaults to workspacePath.
    */
   workspaceSourceBase?: string;
+  /** Override which clients to sync. If provided, only these clients are synced instead of all configured clients. */
+  clients?: string[];
 }
 
 /**
@@ -833,6 +835,11 @@ export async function syncWorkspace(
     };
   }
 
+  // Filter clients if override provided
+  const clients = options.clients
+    ? config.clients.filter((c) => options.clients!.includes(c))
+    : config.clients;
+
   // Step 1: Validate all plugins before any destructive action
   const validatedPlugins = await validateAllPlugins(
     config.plugins,
@@ -894,7 +901,7 @@ export async function syncWorkspace(
   // Step 2b: Get paths that will be purged (for dry-run reporting)
   // In non-destructive mode, only show files from state (or nothing on first sync)
   const purgedPaths = previousState
-    ? config.clients
+    ? clients
         .map((client) => ({
           client,
           paths: getPreviouslySyncedFiles(previousState, client),
@@ -904,7 +911,7 @@ export async function syncWorkspace(
 
   // Step 3: Selective purge - only remove files we previously synced (skip in dry-run mode)
   if (!dryRun) {
-    await selectivePurgeWorkspace(workspacePath, previousState, config.clients);
+    await selectivePurgeWorkspace(workspacePath, previousState, clients);
   }
 
   // Step 3b: Two-pass skill name resolution
@@ -922,7 +929,7 @@ export async function syncWorkspace(
       return copyValidatedPlugin(
         validatedPlugin,
         workspacePath,
-        config.clients,
+        clients,
         dryRun,
         skillNameMap,
       );
@@ -989,7 +996,7 @@ export async function syncWorkspace(
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
-    if (!dryRun && config.clients.includes('claude') && sourcePath) {
+    if (!dryRun && clients.includes('claude') && sourcePath) {
       const claudePath = join(workspacePath, 'CLAUDE.md');
       const agentsPath = join(workspacePath, 'AGENTS.md');
       const claudeExistsInSource = existsSync(join(sourcePath, 'CLAUDE.md'));
@@ -1054,7 +1061,7 @@ export async function syncWorkspace(
     ];
 
     // Group by client and save state
-    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, config.clients);
+    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, clients);
     await saveSyncState(workspacePath, syncedFiles);
   }
 
