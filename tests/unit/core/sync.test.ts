@@ -939,5 +939,48 @@ clients:
       // claude files should NOT exist
       expect(existsSync(join(testDir, '.claude', 'skills'))).toBe(false);
     });
+
+    it('should preserve sync state for non-targeted clients during partial sync', async () => {
+      // Setup plugin with a skill (skills require a subdirectory with SKILL.md)
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'skills', 'test-skill'), { recursive: true });
+      await writeFile(
+        join(pluginDir, 'skills', 'test-skill', 'SKILL.md'),
+        '---\nname: test-skill\ndescription: A test skill\n---\n# Test Skill\n',
+      );
+
+      // Setup workspace config with two clients
+      const configDir = join(testDir, '.allagents');
+      await mkdir(configDir, { recursive: true });
+      await writeFile(
+        join(configDir, 'workspace.yaml'),
+        `repositories: []\nplugins:\n  - ./my-plugin\nclients:\n  - claude\n  - opencode\n`,
+      );
+
+      // First: full sync (both clients)
+      const result1 = await syncWorkspace(testDir);
+      expect(result1.success).toBe(true);
+
+      // Verify both clients synced
+      expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.opencode', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+
+      // Second: sync only opencode
+      const result2 = await syncWorkspace(testDir, { clients: ['opencode'] });
+      expect(result2.success).toBe(true);
+
+      // Claude files should still be on disk (not purged)
+      expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+      // opencode files should still exist (re-synced)
+      expect(existsSync(join(testDir, '.opencode', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+
+      // Verify sync state preserves both clients' files
+      const stateFile = join(testDir, '.allagents', 'sync-state.json');
+      const state = JSON.parse(await readFile(stateFile, 'utf-8'));
+      expect(state.files.claude).toBeDefined();
+      expect(state.files.claude.length).toBeGreaterThan(0);
+      expect(state.files.opencode).toBeDefined();
+      expect(state.files.opencode.length).toBeGreaterThan(0);
+    });
   });
 });

@@ -222,6 +222,7 @@ export async function selectivePurgeWorkspace(
   workspacePath: string,
   state: SyncState | null,
   clients: ClientType[],
+  options?: { partialSync?: boolean },
 ): Promise<PurgePaths[]> {
   // First sync - no state, skip purge entirely (safe overlay)
   if (!state) {
@@ -236,7 +237,11 @@ export async function selectivePurgeWorkspace(
   // Include both current clients AND clients that were removed from config.
   // Removed clients must be purged to avoid orphaned files on disk when a user
   // removes a client from workspace.yaml (e.g., removes 'copilot' from clients list).
-  const clientsToProcess = [...new Set([...clients, ...previousClients])];
+  // However, during partial sync (--client flag), only purge the targeted clients
+  // to avoid removing files for clients that aren't being synced.
+  const clientsToProcess = options?.partialSync
+    ? clients
+    : [...new Set([...clients, ...previousClients])];
 
   for (const client of clientsToProcess) {
     const previousFiles = getPreviouslySyncedFiles(state, client);
@@ -929,7 +934,9 @@ export async function syncWorkspace(
 
   // Step 3: Selective purge - only remove files we previously synced (skip in dry-run mode)
   if (!dryRun) {
-    await selectivePurgeWorkspace(workspacePath, previousState, clients);
+    await selectivePurgeWorkspace(workspacePath, previousState, clients, {
+      partialSync: !!options.clients,
+    });
   }
 
   // Step 3b: Two-pass skill name resolution
@@ -1080,6 +1087,16 @@ export async function syncWorkspace(
 
     // Group by client and save state
     const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, clients);
+
+    // When syncing a subset of clients, merge with existing state for non-targeted clients
+    if (options.clients && previousState) {
+      for (const [client, files] of Object.entries(previousState.files)) {
+        if (!clients.includes(client as ClientType)) {
+          syncedFiles[client as ClientType] = files;
+        }
+      }
+    }
+
     await saveSyncState(workspacePath, syncedFiles);
   }
 
