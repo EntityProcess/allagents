@@ -45,7 +45,7 @@ export async function parseMarketplaceManifest(
   } catch {
     return {
       success: false,
-      error: `Failed to parse marketplace.json as JSON: invalid syntax`,
+      error: 'Failed to parse marketplace.json as JSON: invalid syntax',
     };
   }
 

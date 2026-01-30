@@ -420,14 +420,15 @@ export async function getMarketplacePluginsFromManifest(
 
   return result.data.plugins.map((plugin) => {
     const resolvedSource = resolvePluginSourcePath(plugin.source, marketplacePath);
-    return {
+    const info: MarketplacePluginInfo = {
       name: plugin.name,
       path: typeof plugin.source === 'string' ? resolve(marketplacePath, plugin.source) : resolvedSource,
       description: plugin.description,
-      category: plugin.category,
-      homepage: plugin.homepage,
       source: resolvedSource,
     };
+    if (plugin.category) info.category = plugin.category;
+    if (plugin.homepage) info.homepage = plugin.homepage;
+    return info;
   });
 }
 
