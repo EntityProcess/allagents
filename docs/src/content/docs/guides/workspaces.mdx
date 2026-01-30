@@ -149,6 +149,16 @@ This means your personal commands, skills, or customizations in `.claude/command
 
 AllAgents tracks synced files in `.allagents/sync-state.json`. This file is automatically created and updated on each sync.
 
+### Syncing a Single Client
+
+To sync only a specific client instead of all configured clients:
+
+```bash
+allagents workspace sync --client opencode
+```
+
+This is useful when you want to update files for one client without touching others. Files and sync state for non-targeted clients are preserved.
+
 ### Dry Run
 
 Preview what would happen without making changes:
