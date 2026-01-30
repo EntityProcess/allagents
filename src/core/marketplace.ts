@@ -2,6 +2,10 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { execa } from 'execa';
+import {
+  parseMarketplaceManifest,
+  resolvePluginSourcePath,
+} from '../utils/marketplace-manifest-parser.js';
 
 /**
  * Source types for marketplaces
@@ -388,6 +392,43 @@ export async function updateMarketplace(
 export async function getMarketplacePath(name: string): Promise<string | null> {
   const marketplace = await getMarketplace(name);
   return marketplace?.path || null;
+}
+
+/**
+ * Plugin info returned from marketplace discovery
+ */
+export interface MarketplacePluginInfo {
+  name: string;
+  path: string;
+  description?: string;
+  category?: string;
+  homepage?: string;
+  source?: string;
+}
+
+/**
+ * Get plugins from a marketplace directory using its manifest.
+ * Returns an empty array if no manifest is found.
+ */
+export async function getMarketplacePluginsFromManifest(
+  marketplacePath: string,
+): Promise<MarketplacePluginInfo[]> {
+  const result = await parseMarketplaceManifest(marketplacePath);
+  if (!result.success) {
+    return [];
+  }
+
+  return result.data.plugins.map((plugin) => {
+    const resolvedSource = resolvePluginSourcePath(plugin.source, marketplacePath);
+    return {
+      name: plugin.name,
+      path: typeof plugin.source === 'string' ? resolve(marketplacePath, plugin.source) : resolvedSource,
+      description: plugin.description,
+      category: plugin.category,
+      homepage: plugin.homepage,
+      source: resolvedSource,
+    };
+  });
 }
 
 /**
