@@ -842,7 +842,7 @@ export async function syncWorkspace(
 
   // Filter clients if override provided
   const clients = options.clients
-    ? config.clients.filter((c) => options.clients!.includes(c))
+    ? config.clients.filter((c) => options.clients?.includes(c))
     : config.clients;
 
   // Validate requested clients are in config
