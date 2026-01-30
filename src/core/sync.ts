@@ -91,6 +91,8 @@ export interface ValidatedPlugin {
   resolved: string;
   success: boolean;
   error?: string;
+  /** Plugin name from marketplace manifest (overrides plugin.json / directory name) */
+  pluginName?: string;
 }
 
 /**
@@ -594,6 +596,7 @@ async function validatePlugin(
       plugin: pluginSource,
       resolved: resolved.path ?? '',
       success: true,
+      ...(resolved.pluginName && { pluginName: resolved.pluginName }),
     };
   }
 
@@ -724,7 +727,7 @@ async function collectAllSkills(
   const allSkills: CollectedSkillEntry[] = [];
 
   for (const plugin of validatedPlugins) {
-    const pluginName = await getPluginName(plugin.resolved);
+    const pluginName = plugin.pluginName ?? await getPluginName(plugin.resolved);
     const skills = await collectPluginSkills(plugin.resolved, plugin.plugin);
 
     for (const skill of skills) {
@@ -1081,7 +1084,7 @@ export async function syncWorkspace(
 async function resolvePluginSpecWithAutoRegister(
   spec: string,
   _offline = false,
-): Promise<{ success: boolean; path?: string; error?: string }> {
+): Promise<{ success: boolean; path?: string; pluginName?: string; error?: string }> {
   // Parse plugin@marketplace using the new parser
   const parsed = parsePluginSpec(spec);
 
@@ -1121,8 +1124,12 @@ async function resolvePluginSpecWithAutoRegister(
   // Determine the expected subpath for error messages
   const expectedSubpath = subpath ?? 'plugins';
 
-  // Now resolve the plugin within the marketplace (pass subpath if specified)
-  const resolved = await resolvePluginSpec(spec, subpath ? { subpath } : {});
+  // Now resolve the plugin within the marketplace
+  // Pass the actual marketplace name (may differ from spec if manifest overrode it)
+  const resolved = await resolvePluginSpec(spec, {
+    ...(subpath && { subpath }),
+    marketplaceNameOverride: marketplace.name,
+  });
   if (!resolved) {
     return {
       success: false,
@@ -1133,6 +1140,7 @@ async function resolvePluginSpecWithAutoRegister(
   return {
     success: true,
     path: resolved.path,
+    pluginName: resolved.plugin,
   };
 }
 
@@ -1163,12 +1171,13 @@ async function autoRegisterMarketplace(
     const parts = name.split('/');
     if (parts.length === 2 && parts[0] && parts[1]) {
       console.log(`Auto-registering GitHub marketplace: ${name}`);
-      const repoName = parts[1];
-      const result = await addMarketplace(name, repoName);
+      const result = await addMarketplace(name);
       if (!result.success) {
         return { success: false, error: result.error || 'Unknown error' };
       }
-      return { success: true, name: repoName };
+      // Use the name from the registered entry (may differ from repo name if manifest has a name)
+      const registeredName = result.marketplace?.name ?? parts[1];
+      return { success: true, name: registeredName };
     }
   }
 
