@@ -52,7 +52,7 @@ async function runSyncAndPrint(): Promise<boolean> {
     }
   }
 
-  console.log(`\nSync complete:`);
+  console.log('\nSync complete:');
   console.log(`  Total copied: ${result.totalCopied}`);
   if (result.totalGenerated > 0) {
     console.log(`  Total generated: ${result.totalGenerated}`);
