@@ -2,6 +2,10 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { execa } from 'execa';
+import {
+  parseMarketplaceManifest,
+  resolvePluginSourcePath,
+} from '../utils/marketplace-manifest-parser.js';
 
 /**
  * Source types for marketplaces
@@ -187,10 +191,11 @@ export async function addMarketplace(
     };
   }
 
-  const name = customName || parsed.name;
+  let name = customName || parsed.name;
   const registry = await loadRegistry();
 
-  // Check if already exists
+  // For initial duplicate check, use the pre-manifest name
+  // (will re-check after manifest is read if name changes)
   if (registry.marketplaces[name]) {
     return {
       success: false,
@@ -250,6 +255,25 @@ export async function addMarketplace(
         success: false,
         error: `Local directory not found: ${marketplacePath}`,
       };
+    }
+  }
+
+  // Read manifest to get canonical name (overrides repo/directory name)
+  if (!customName) {
+    const manifestResult = await parseMarketplaceManifest(marketplacePath);
+    if (manifestResult.success && manifestResult.data.name) {
+      const manifestName = manifestResult.data.name;
+      if (manifestName !== name) {
+        // If the manifest name is already registered, return the existing entry
+        const existing = registry.marketplaces[manifestName];
+        if (existing) {
+          return {
+            success: true,
+            marketplace: existing,
+          };
+        }
+        name = manifestName;
+      }
     }
   }
 
@@ -391,19 +415,65 @@ export async function getMarketplacePath(name: string): Promise<string | null> {
 }
 
 /**
- * List plugins available in a marketplace
+ * Plugin info returned from marketplace discovery
+ */
+export interface MarketplacePluginInfo {
+  name: string;
+  path: string;
+  description?: string;
+  category?: string;
+  homepage?: string;
+  source?: string;
+}
+
+/**
+ * Get plugins from a marketplace directory using its manifest.
+ * Returns an empty array if no manifest is found.
+ */
+export async function getMarketplacePluginsFromManifest(
+  marketplacePath: string,
+): Promise<MarketplacePluginInfo[]> {
+  const result = await parseMarketplaceManifest(marketplacePath);
+  if (!result.success) {
+    return [];
+  }
+
+  return result.data.plugins.map((plugin) => {
+    const resolvedSource = resolvePluginSourcePath(plugin.source, marketplacePath);
+    const info: MarketplacePluginInfo = {
+      name: plugin.name,
+      path: typeof plugin.source === 'string' ? resolve(marketplacePath, plugin.source) : resolvedSource,
+      description: plugin.description,
+      source: resolvedSource,
+    };
+    if (plugin.category) info.category = plugin.category;
+    if (plugin.homepage) info.homepage = plugin.homepage;
+    return info;
+  });
+}
+
+/**
+ * List plugins available in a marketplace.
+ * Prefers .claude-plugin/marketplace.json when available,
+ * falls back to scanning the plugins/ directory.
  */
 export async function listMarketplacePlugins(
   name: string,
-): Promise<Array<{ name: string; path: string }>> {
+): Promise<MarketplacePluginInfo[]> {
   const marketplace = await getMarketplace(name);
   if (!marketplace) {
     return [];
   }
 
+  // Try manifest first
+  const manifestPlugins = await getMarketplacePluginsFromManifest(marketplace.path);
+  if (manifestPlugins.length > 0) {
+    return manifestPlugins;
+  }
+
+  // Fall back to directory scanning
   const pluginsDir = join(marketplace.path, 'plugins');
   if (!existsSync(pluginsDir)) {
-    // Marketplace might not have plugins subdirectory (it IS the plugin)
     return [];
   }
 
@@ -482,28 +552,52 @@ export function parsePluginSpec(spec: string): {
  * - plugin@owner/repo (looks in plugins/ subdir)
  * - plugin@owner/repo/subpath (looks in subpath/ subdir)
  *
+ * Resolution order:
+ * 1. If marketplace has a manifest, look up plugin by name in manifest entries
+ * 2. Fall back to directory-based lookup: <marketplace>/<subpath>/<plugin-name>/
+ *
  * @param spec - Plugin spec (e.g., "code-review@claude-plugins-official")
  * @param options - Resolution options
  * @returns Local path to plugin directory, or null if not found
  */
 export async function resolvePluginSpec(
   spec: string,
-  options: { subpath?: string } = {},
+  options: { subpath?: string; marketplaceNameOverride?: string } = {},
 ): Promise<{ path: string; marketplace: string; plugin: string } | null> {
   const parsed = parsePluginSpec(spec);
   if (!parsed) {
     return null;
   }
 
-  const marketplace = await getMarketplace(parsed.marketplaceName);
+  // Use override name if provided (e.g., when manifest changed the marketplace name)
+  const marketplaceName = options.marketplaceNameOverride ?? parsed.marketplaceName;
+  const marketplace = await getMarketplace(marketplaceName);
   if (!marketplace) {
     return null;
   }
 
-  // Determine the subpath: explicit option > parsed from spec > default 'plugins'
-  const subpath = options.subpath ?? parsed.subpath ?? 'plugins';
+  // Try manifest-based resolution first: look up plugin name in manifest entries
+  const manifestResult = await parseMarketplaceManifest(marketplace.path);
+  if (manifestResult.success) {
+    const pluginEntry = manifestResult.data.plugins.find(
+      (p) => p.name === parsed.plugin,
+    );
+    if (pluginEntry) {
+      const resolvedSource = typeof pluginEntry.source === 'string'
+        ? resolve(marketplace.path, pluginEntry.source)
+        : pluginEntry.source.url;
+      if (typeof resolvedSource === 'string' && existsSync(resolvedSource)) {
+        return {
+          path: resolvedSource,
+          marketplace: marketplaceName,
+          plugin: parsed.plugin,
+        };
+      }
+    }
+  }
 
-  // Plugin path is: <marketplace>/<subpath>/<plugin-name>/
+  // Fall back to directory-based lookup
+  const subpath = options.subpath ?? parsed.subpath ?? 'plugins';
   const pluginPath = join(marketplace.path, subpath, parsed.plugin);
 
   if (!existsSync(pluginPath)) {
@@ -512,7 +606,7 @@ export async function resolvePluginSpec(
 
   return {
     path: pluginPath,
-    marketplace: parsed.marketplaceName,
+    marketplace: marketplaceName,
     plugin: parsed.plugin,
   };
 }
