@@ -690,7 +690,7 @@ export async function resolvePluginSpecWithAutoRegister(
     success: true,
     path: resolved.path,
     pluginName: resolved.plugin,
-    registeredAs: marketplace.name !== marketplaceName ? marketplace.name : undefined,
+    ...(marketplace.name !== marketplaceName && { registeredAs: marketplace.name }),
   };
 }
 
