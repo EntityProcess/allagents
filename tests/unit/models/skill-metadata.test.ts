@@ -44,6 +44,20 @@ describe('SkillMetadataSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('should accept allowed-tools as a single string and normalize to array', () => {
+    const validSkill = {
+      name: 'browser-skill',
+      description: 'A browser automation skill',
+      'allowed-tools': 'Bash(agent-browser:*)',
+    };
+
+    const result = SkillMetadataSchema.safeParse(validSkill);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data['allowed-tools']).toEqual(['Bash(agent-browser:*)']);
+    }
+  });
+
   it('should reject skill with name longer than 128 characters', () => {
     const invalidSkill = {
       name: 'a'.repeat(129),
