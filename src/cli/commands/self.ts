@@ -37,7 +37,11 @@ function getCurrentVersion(): string {
   }
 }
 
-export const updateCommand = new Command('update')
+export const selfCommand = new Command('self')
+  .description('Manage the allagents installation');
+
+selfCommand
+  .command('update')
   .description('Update allagents to the latest version')
   .option('--npm', 'Force update using npm')
   .option('--bun', 'Force update using bun')

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { workspaceCommand } from './commands/workspace.js';
 import { pluginCommand } from './commands/plugin.js';
-import { updateCommand } from './commands/update.js';
+import { selfCommand } from './commands/self.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -25,6 +25,6 @@ program
 // Add commands
 program.addCommand(workspaceCommand);
 program.addCommand(pluginCommand);
-program.addCommand(updateCommand);
+program.addCommand(selfCommand);
 
 program.parse();
