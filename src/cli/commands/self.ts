@@ -1,10 +1,10 @@
-import { command, subcommands, flag } from 'cmd-ts';
+import { command, flag } from 'cmd-ts';
 import { execa } from 'execa';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isJsonMode, jsonOutput } from '../json-output.js';
-import { buildDescription } from '../help.js';
+import { buildDescription, conciseSubcommands } from '../help.js';
 import { updateMeta } from '../metadata/self.js';
 
 /**
@@ -164,7 +164,7 @@ const updateCmd = command({
 // self subcommands group
 // =============================================================================
 
-export const selfCmd = subcommands({
+export const selfCmd = conciseSubcommands({
   name: 'self',
   description: 'Manage the allagents installation',
   cmds: {

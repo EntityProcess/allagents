@@ -1,4 +1,4 @@
-import { command, subcommands, positional, option, string, optional } from 'cmd-ts';
+import { command, positional, option, string, optional } from 'cmd-ts';
 import {
   addMarketplace,
   listMarketplaces,
@@ -10,7 +10,7 @@ import {
 import { syncWorkspace } from '../../core/sync.js';
 import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
-import { buildDescription } from '../help.js';
+import { buildDescription, conciseSubcommands } from '../help.js';
 import {
   marketplaceListMeta,
   marketplaceAddMeta,
@@ -366,7 +366,7 @@ const marketplaceUpdateCmd = command({
 // plugin marketplace subcommands group
 // =============================================================================
 
-const marketplaceCmd = subcommands({
+const marketplaceCmd = conciseSubcommands({
   name: 'marketplace',
   description: 'Manage plugin marketplaces',
   cmds: {
@@ -641,7 +641,7 @@ const pluginUninstallCmd = command({
 // plugin subcommands group
 // =============================================================================
 
-export const pluginCmd = subcommands({
+export const pluginCmd = conciseSubcommands({
   name: 'plugin',
   description: 'Manage plugins and marketplaces',
   cmds: {

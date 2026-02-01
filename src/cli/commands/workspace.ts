@@ -1,9 +1,9 @@
-import { command, subcommands, positional, option, flag, string, optional } from 'cmd-ts';
+import { command, positional, option, flag, string, optional } from 'cmd-ts';
 import { initWorkspace } from '../../core/workspace.js';
 import { syncWorkspace } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
-import { buildDescription } from '../help.js';
+import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta } from '../metadata/workspace.js';
 
 /**
@@ -302,7 +302,7 @@ const statusCmd = command({
 // workspace subcommands group
 // =============================================================================
 
-export const workspaceCmd = subcommands({
+export const workspaceCmd = conciseSubcommands({
   name: 'workspace',
   description: 'Manage AI agent workspaces - initialize, sync, and configure plugins',
   cmds: {
