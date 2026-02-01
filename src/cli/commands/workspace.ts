@@ -1,12 +1,8 @@
-import { Command } from 'commander';
+import { command, subcommands, positional, option, flag, string, optional } from 'cmd-ts';
 import { initWorkspace } from '../../core/workspace.js';
 import { syncWorkspace } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
-
-export const workspaceCommand = new Command('workspace').description(
-  'Manage AI agent workspaces - initialize, sync, and configure plugins',
-);
 
 /**
  * Run sync and print results. Returns true if sync succeeded.
@@ -21,7 +17,7 @@ async function runSyncAndPrint(): Promise<boolean> {
   }
 
   for (const pluginResult of result.pluginResults) {
-    const status = pluginResult.success ? '✓' : '✗';
+    const status = pluginResult.success ? '\u2713' : '\u2717';
     console.log(`${status} Plugin: ${pluginResult.plugin}`);
 
     if (pluginResult.error) {
@@ -67,14 +63,21 @@ async function runSyncAndPrint(): Promise<boolean> {
   return result.success && result.totalFailed === 0;
 }
 
-workspaceCommand
-  .command('init [path]')
-  .description('Create new workspace and sync plugins')
-  .option('--from <template>', 'Copy workspace.yaml from existing template/workspace')
-  .action(async (path: string | undefined, options: { from?: string }) => {
+// =============================================================================
+// workspace init
+// =============================================================================
+
+const initCmd = command({
+  name: 'init',
+  description: 'Create new workspace and sync plugins',
+  args: {
+    path: positional({ type: optional(string), displayName: 'path' }),
+    from: option({ type: optional(string), long: 'from', description: 'Copy workspace.yaml from existing template/workspace' }),
+  },
+  handler: async ({ path, from }) => {
     try {
       const targetPath = path ?? '.';
-      const result = await initWorkspace(targetPath, options.from ? { from: options.from } : {});
+      const result = await initWorkspace(targetPath, from ? { from } : {});
 
       // Print sync results if sync was performed
       if (result.syncResult) {
@@ -83,7 +86,7 @@ workspaceCommand
         if (syncResult.pluginResults.length > 0) {
           console.log('\nPlugin sync results:');
           for (const pluginResult of syncResult.pluginResults) {
-            const status = pluginResult.success ? '✓' : '✗';
+            const status = pluginResult.success ? '\u2713' : '\u2717';
             console.log(`  ${status} ${pluginResult.plugin}`);
             if (pluginResult.error) {
               console.log(`    Error: ${pluginResult.error}`);
@@ -103,30 +106,34 @@ workspaceCommand
       }
       throw error;
     }
-  });
+  },
+});
 
-workspaceCommand
-  .command('sync')
-  .description('Sync plugins to workspace')
-  .option('--offline', 'Use cached plugins without fetching latest from remote')
-  .option('-n, --dry-run', 'Simulate sync without making changes')
-  .option('-c, --client <client>', 'Sync only the specified client (e.g., opencode, claude)')
-  .action(async (options: { offline?: boolean; dryRun?: boolean; client?: string }) => {
+// =============================================================================
+// workspace sync
+// =============================================================================
+
+const syncCmd = command({
+  name: 'sync',
+  description: 'Sync plugins to workspace',
+  args: {
+    offline: flag({ long: 'offline', description: 'Use cached plugins without fetching latest from remote' }),
+    dryRun: flag({ long: 'dry-run', short: 'n', description: 'Simulate sync without making changes' }),
+    client: option({ type: optional(string), long: 'client', short: 'c', description: 'Sync only the specified client (e.g., opencode, claude)' }),
+  },
+  handler: async ({ offline, dryRun, client }) => {
     try {
-      const offline = options.offline ?? false;
-      const dryRun = options.dryRun ?? false;
-
       if (dryRun) {
         console.log('Dry run mode - no changes will be made\n');
       }
-      if (options.client) {
-        console.log(`Syncing client: ${options.client}\n`);
+      if (client) {
+        console.log(`Syncing client: ${client}\n`);
       }
       console.log('Syncing workspace...\n');
       const result = await syncWorkspace(process.cwd(), {
         offline,
         dryRun,
-        ...(options.client && { clients: [options.client] }),
+        ...(client && { clients: [client] }),
       });
 
       // Early exit only for top-level errors (e.g., missing .allagents/workspace.yaml)
@@ -150,7 +157,7 @@ workspaceCommand
 
       // Print plugin results
       for (const pluginResult of result.pluginResults) {
-        const status = pluginResult.success ? '✓' : '✗';
+        const status = pluginResult.success ? '\u2713' : '\u2717';
         console.log(`${status} Plugin: ${pluginResult.plugin}`);
 
         if (pluginResult.error) {
@@ -213,12 +220,18 @@ workspaceCommand
       }
       throw error;
     }
-  });
+  },
+});
 
-workspaceCommand
-  .command('status')
-  .description('Show sync status of plugins')
-  .action(async () => {
+// =============================================================================
+// workspace status
+// =============================================================================
+
+const statusCmd = command({
+  name: 'status',
+  description: 'Show sync status of plugins',
+  args: {},
+  handler: async () => {
     try {
       const result = await getWorkspaceStatus();
 
@@ -233,7 +246,7 @@ workspaceCommand
         console.log('  No plugins configured');
       } else {
         for (const plugin of result.plugins) {
-          const status = plugin.available ? '✓' : '✗';
+          const status = plugin.available ? '\u2713' : '\u2717';
           let typeLabel: string;
           if (plugin.type === 'marketplace') {
             typeLabel = plugin.available ? 'marketplace' : 'not synced';
@@ -260,22 +273,20 @@ workspaceCommand
       }
       throw error;
     }
-  });
+  },
+});
 
 // =============================================================================
-// workspace plugin subcommand group
+// workspace plugin install
 // =============================================================================
 
-const pluginSubcommand = new Command('plugin').description(
-  'Manage plugins in .allagents/workspace.yaml',
-);
-
-pluginSubcommand
-  .command('install <plugin>')
-  .description(
-    'Install plugin to .allagents/workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
-  )
-  .action(async (plugin: string) => {
+const pluginInstallCmd = command({
+  name: 'install',
+  description: 'Install plugin to .allagents/workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
+  args: {
+    plugin: positional({ type: string, displayName: 'plugin' }),
+  },
+  handler: async ({ plugin }) => {
     try {
       const result = await addPlugin(plugin);
 
@@ -285,9 +296,9 @@ pluginSubcommand
       }
 
       if (result.autoRegistered) {
-        console.log(`✓ Auto-registered marketplace: ${result.autoRegistered}`);
+        console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
       }
-      console.log(`✓ Installed plugin: ${plugin}`);
+      console.log(`\u2713 Installed plugin: ${plugin}`);
 
       const syncOk = await runSyncAndPrint();
       if (!syncOk) {
@@ -300,13 +311,21 @@ pluginSubcommand
       }
       throw error;
     }
-  });
+  },
+});
 
-pluginSubcommand
-  .command('uninstall <plugin>')
-  .alias('remove')
-  .description('Uninstall plugin from .allagents/workspace.yaml')
-  .action(async (plugin: string) => {
+// =============================================================================
+// workspace plugin uninstall
+// =============================================================================
+
+const pluginUninstallCmd = command({
+  name: 'uninstall',
+  description: 'Uninstall plugin from .allagents/workspace.yaml',
+  aliases: ['remove'],
+  args: {
+    plugin: positional({ type: string, displayName: 'plugin' }),
+  },
+  handler: async ({ plugin }) => {
     try {
       const result = await removePlugin(plugin);
 
@@ -315,7 +334,7 @@ pluginSubcommand
         process.exit(1);
       }
 
-      console.log(`✓ Uninstalled plugin: ${plugin}`);
+      console.log(`\u2713 Uninstalled plugin: ${plugin}`);
 
       const syncOk = await runSyncAndPrint();
       if (!syncOk) {
@@ -328,6 +347,33 @@ pluginSubcommand
       }
       throw error;
     }
-  });
+  },
+});
 
-workspaceCommand.addCommand(pluginSubcommand);
+// =============================================================================
+// workspace plugin subcommands group
+// =============================================================================
+
+const workspacePluginCmd = subcommands({
+  name: 'plugin',
+  description: 'Manage plugins in .allagents/workspace.yaml',
+  cmds: {
+    install: pluginInstallCmd,
+    uninstall: pluginUninstallCmd,
+  },
+});
+
+// =============================================================================
+// workspace subcommands group
+// =============================================================================
+
+export const workspaceCmd = subcommands({
+  name: 'workspace',
+  description: 'Manage AI agent workspaces - initialize, sync, and configure plugins',
+  cmds: {
+    init: initCmd,
+    sync: syncCmd,
+    status: statusCmd,
+    plugin: workspacePluginCmd,
+  },
+});
