@@ -6,6 +6,7 @@ import {
   parsePluginSpec,
   isPluginSpec,
   getMarketplacePluginsFromManifest,
+  resolvePluginSpec,
 } from '../../../src/core/marketplace.js';
 
 describe('parsePluginSpec', () => {
@@ -158,6 +159,73 @@ describe('getMarketplacePluginsFromManifest', () => {
     expect(result.plugins).toHaveLength(1);
     expect(result.plugins[0].name).toBe('external');
     expect(result.plugins[0].source).toBe('https://github.com/org/repo.git');
+  });
+
+  it('should handle URL source plugins with resolved cache path', async () => {
+    // Create a fake cached plugin directory (simulating what fetchPlugin would produce)
+    const cachedPluginDir = join(testDir, 'cached-external');
+    mkdirSync(cachedPluginDir, { recursive: true });
+
+    const manifest = {
+      name: 'test',
+      description: 'Test',
+      plugins: [
+        {
+          name: 'external',
+          description: 'External plugin',
+          source: { source: 'url', url: 'https://github.com/org/repo.git' },
+        },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    // resolvePluginSpec should resolve URL-source plugins by fetching them
+    // We pass a mock fetchFn that returns the cached path
+    const result = await resolvePluginSpec('external@test-marketplace', {
+      marketplacePathOverride: testDir,
+      fetchFn: async () => ({
+        success: true,
+        action: 'fetched' as const,
+        cachePath: cachedPluginDir,
+      }),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.path).toBe(cachedPluginDir);
+    expect(result!.plugin).toBe('external');
+  });
+
+  it('should return null for URL source plugins when fetch fails', async () => {
+    const manifest = {
+      name: 'test',
+      description: 'Test',
+      plugins: [
+        {
+          name: 'external',
+          description: 'External plugin',
+          source: { source: 'url', url: 'https://github.com/org/repo.git' },
+        },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await resolvePluginSpec('external@test-marketplace', {
+      marketplacePathOverride: testDir,
+      fetchFn: async () => ({
+        success: false,
+        action: 'skipped' as const,
+        cachePath: '',
+        error: 'Network error',
+      }),
+    });
+
+    expect(result).toBeNull();
   });
 
   it('should return plugins without warnings when manifest is missing description', async () => {
