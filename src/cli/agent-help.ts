@@ -1,6 +1,6 @@
 import type { AgentCommandMeta } from './help.js';
 
-import { initMeta, syncMeta, statusMeta, pluginInstallMeta, pluginUninstallMeta } from './metadata/workspace.js';
+import { initMeta, syncMeta, statusMeta } from './metadata/workspace.js';
 import {
   marketplaceListMeta,
   marketplaceAddMeta,
@@ -8,6 +8,8 @@ import {
   marketplaceUpdateMeta,
   pluginListMeta,
   pluginValidateMeta,
+  pluginInstallMeta,
+  pluginUninstallMeta,
 } from './metadata/plugin.js';
 import { updateMeta } from './metadata/self.js';
 

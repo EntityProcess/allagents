@@ -7,6 +7,8 @@ import {
   listMarketplacePlugins,
   getWellKnownMarketplaces,
 } from '../../core/marketplace.js';
+import { syncWorkspace } from '../../core/sync.js';
+import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription } from '../help.js';
 import {
@@ -16,7 +18,98 @@ import {
   marketplaceUpdateMeta,
   pluginListMeta,
   pluginValidateMeta,
+  pluginInstallMeta,
+  pluginUninstallMeta,
 } from '../metadata/plugin.js';
+
+/**
+ * Build a JSON-friendly sync data object from a sync result.
+ */
+function buildSyncData(result: Awaited<ReturnType<typeof syncWorkspace>>) {
+  return {
+    copied: result.totalCopied,
+    generated: result.totalGenerated,
+    failed: result.totalFailed,
+    skipped: result.totalSkipped,
+    plugins: result.pluginResults.map((pr) => ({
+      plugin: pr.plugin,
+      success: pr.success,
+      error: pr.error,
+      copied: pr.copyResults.filter((r) => r.action === 'copied').length,
+      generated: pr.copyResults.filter((r) => r.action === 'generated').length,
+      failed: pr.copyResults.filter((r) => r.action === 'failed').length,
+      copyResults: pr.copyResults,
+    })),
+    purgedPaths: result.purgedPaths ?? [],
+  };
+}
+
+/**
+ * Run sync and print results. Returns true if sync succeeded.
+ */
+async function runSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnType<typeof buildSyncData> | null }> {
+  if (!isJsonMode()) {
+    console.log('\nSyncing workspace...\n');
+  }
+  const result = await syncWorkspace();
+
+  if (!result.success && result.error) {
+    if (!isJsonMode()) {
+      console.error(`Sync error: ${result.error}`);
+    }
+    return { ok: false, syncData: null };
+  }
+
+  const syncData = buildSyncData(result);
+
+  if (!isJsonMode()) {
+    for (const pluginResult of result.pluginResults) {
+      const status = pluginResult.success ? '\u2713' : '\u2717';
+      console.log(`${status} Plugin: ${pluginResult.plugin}`);
+
+      if (pluginResult.error) {
+        console.log(`  Error: ${pluginResult.error}`);
+      }
+
+      const copied = pluginResult.copyResults.filter(
+        (r) => r.action === 'copied',
+      ).length;
+      const generated = pluginResult.copyResults.filter(
+        (r) => r.action === 'generated',
+      ).length;
+      const failed = pluginResult.copyResults.filter(
+        (r) => r.action === 'failed',
+      ).length;
+
+      if (copied > 0) console.log(`  Copied: ${copied} files`);
+      if (generated > 0) console.log(`  Generated: ${generated} files`);
+      if (failed > 0) {
+        console.log(`  Failed: ${failed} files`);
+        for (const failedResult of pluginResult.copyResults.filter(
+          (r) => r.action === 'failed',
+        )) {
+          console.log(
+            `    - ${failedResult.destination}: ${failedResult.error}`,
+          );
+        }
+      }
+    }
+
+    console.log('\nSync complete:');
+    console.log(`  Total copied: ${result.totalCopied}`);
+    if (result.totalGenerated > 0) {
+      console.log(`  Total generated: ${result.totalGenerated}`);
+    }
+    if (result.totalFailed > 0) {
+      console.log(`  Total failed: ${result.totalFailed}`);
+    }
+    if (result.totalSkipped > 0) {
+      console.log(`  Total skipped: ${result.totalSkipped}`);
+    }
+  }
+
+  return { ok: result.success && result.totalFailed === 0, syncData };
+}
 
 // =============================================================================
 // plugin marketplace list
@@ -420,6 +513,131 @@ const pluginValidateCmd = command({
 });
 
 // =============================================================================
+// plugin install
+// =============================================================================
+
+const pluginInstallCmd = command({
+  name: 'install',
+  description: buildDescription(pluginInstallMeta),
+  args: {
+    plugin: positional({ type: string, displayName: 'plugin' }),
+  },
+  handler: async ({ plugin }) => {
+    try {
+      const result = await addPlugin(plugin);
+
+      if (!result.success) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin install', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+
+      if (isJsonMode()) {
+        const { ok, syncData } = await runSyncAndPrint();
+        jsonOutput({
+          success: ok,
+          command: 'plugin install',
+          data: {
+            plugin,
+            autoRegistered: result.autoRegistered ?? null,
+            syncResult: syncData,
+          },
+          ...(!ok && { error: 'Sync completed with failures' }),
+        });
+        if (!ok) {
+          process.exit(1);
+        }
+        return;
+      }
+
+      if (result.autoRegistered) {
+        console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
+      }
+      console.log(`\u2713 Installed plugin: ${plugin}`);
+
+      const { ok: syncOk } = await runSyncAndPrint();
+      if (!syncOk) {
+        process.exit(1);
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin install', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
+// plugin uninstall
+// =============================================================================
+
+const pluginUninstallCmd = command({
+  name: 'uninstall',
+  description: buildDescription(pluginUninstallMeta),
+  aliases: ['remove'],
+  args: {
+    plugin: positional({ type: string, displayName: 'plugin' }),
+  },
+  handler: async ({ plugin }) => {
+    try {
+      const result = await removePlugin(plugin);
+
+      if (!result.success) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin uninstall', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+
+      if (isJsonMode()) {
+        const { ok, syncData } = await runSyncAndPrint();
+        jsonOutput({
+          success: ok,
+          command: 'plugin uninstall',
+          data: {
+            plugin,
+            syncResult: syncData,
+          },
+          ...(!ok && { error: 'Sync completed with failures' }),
+        });
+        if (!ok) {
+          process.exit(1);
+        }
+        return;
+      }
+
+      console.log(`\u2713 Uninstalled plugin: ${plugin}`);
+
+      const { ok: syncOk } = await runSyncAndPrint();
+      if (!syncOk) {
+        process.exit(1);
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin uninstall', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
 // plugin subcommands group
 // =============================================================================
 
@@ -427,6 +645,8 @@ export const pluginCmd = subcommands({
   name: 'plugin',
   description: 'Manage plugins and marketplaces',
   cmds: {
+    install: pluginInstallCmd,
+    uninstall: pluginUninstallCmd,
     marketplace: marketplaceCmd,
     list: pluginListCmd,
     validate: pluginValidateCmd,

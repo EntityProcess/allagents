@@ -88,21 +88,21 @@ describe('CLI --json error cases', () => {
     expect(typeof json.error).toBe('string');
   });
 
-  it('workspace plugin install --json with bad plugin returns error JSON', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'plugin', 'install', 'nonexistent-plugin-xyz', '--json']);
+  it('plugin install --json with bad plugin returns error JSON', async () => {
+    const { stdout, exitCode } = await runCli(['plugin', 'install', 'nonexistent-plugin-xyz', '--json']);
     expect(exitCode).toBe(1);
     const json = parseJson(stdout);
     expect(json.success).toBe(false);
-    expect(json.command).toBe('workspace plugin install');
+    expect(json.command).toBe('plugin install');
     expect(typeof json.error).toBe('string');
   });
 
-  it('workspace plugin uninstall --json with bad plugin returns error JSON', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'plugin', 'uninstall', 'nonexistent-plugin-xyz', '--json']);
+  it('plugin uninstall --json with bad plugin returns error JSON', async () => {
+    const { stdout, exitCode } = await runCli(['plugin', 'uninstall', 'nonexistent-plugin-xyz', '--json']);
     expect(exitCode).toBe(1);
     const json = parseJson(stdout);
     expect(json.success).toBe(false);
-    expect(json.command).toBe('workspace plugin uninstall');
+    expect(json.command).toBe('plugin uninstall');
     expect(typeof json.error).toBe('string');
   });
 
