@@ -17,7 +17,9 @@ const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
 
 const app = subcommands({
   name: 'allagents',
-  description: 'CLI tool for managing multi-repo AI agent workspaces with plugin synchronization',
+  description:
+    'CLI tool for managing multi-repo AI agent workspaces with plugin synchronization\n\n' +
+    'For AI agents: use --agent-help for machine-readable help, or --json for structured output',
   version: packageJson.version,
   cmds: {
     workspace: workspaceCmd,
