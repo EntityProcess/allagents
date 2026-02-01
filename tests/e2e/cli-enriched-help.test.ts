@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { buildDescription, type CommandMeta } from '../../src/cli/help.js';
-import { initMeta, syncMeta, statusMeta, pluginInstallMeta, pluginUninstallMeta } from '../../src/cli/metadata/workspace.js';
-import { marketplaceListMeta, marketplaceAddMeta, marketplaceRemoveMeta, marketplaceUpdateMeta, pluginListMeta, pluginValidateMeta } from '../../src/cli/metadata/plugin.js';
+import { initMeta, syncMeta, statusMeta } from '../../src/cli/metadata/workspace.js';
+import { marketplaceListMeta, marketplaceAddMeta, marketplaceRemoveMeta, marketplaceUpdateMeta, pluginListMeta, pluginValidateMeta, pluginInstallMeta, pluginUninstallMeta } from '../../src/cli/metadata/plugin.js';
 import { updateMeta } from '../../src/cli/metadata/self.js';
 
 /**
@@ -11,8 +11,8 @@ const allCommandMetas: { name: string; meta: CommandMeta }[] = [
   { name: 'workspace init', meta: initMeta },
   { name: 'workspace sync', meta: syncMeta },
   { name: 'workspace status', meta: statusMeta },
-  { name: 'workspace plugin install', meta: pluginInstallMeta },
-  { name: 'workspace plugin uninstall', meta: pluginUninstallMeta },
+  { name: 'plugin install', meta: pluginInstallMeta },
+  { name: 'plugin uninstall', meta: pluginUninstallMeta },
   { name: 'plugin marketplace list', meta: marketplaceListMeta },
   { name: 'plugin marketplace add', meta: marketplaceAddMeta },
   { name: 'plugin marketplace remove', meta: marketplaceRemoveMeta },

@@ -40,16 +40,16 @@ describe('allagents --agent-help (full tree)', () => {
 
     const commandNames = json.commands.map((c: any) => c.command).sort();
     expect(commandNames).toEqual([
+      'plugin install',
       'plugin list',
       'plugin marketplace add',
       'plugin marketplace list',
       'plugin marketplace remove',
       'plugin marketplace update',
+      'plugin uninstall',
       'plugin validate',
       'self update',
       'workspace init',
-      'workspace plugin install',
-      'workspace plugin uninstall',
       'workspace status',
       'workspace sync',
     ]);
@@ -109,11 +109,11 @@ describe('allagents <command> --agent-help (single command)', () => {
     expect(offline.short).toBeUndefined();
   });
 
-  it('workspace plugin install --agent-help includes positionals', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'plugin', 'install', '--agent-help']);
+  it('plugin install --agent-help includes positionals', async () => {
+    const { stdout, exitCode } = await runCli(['plugin', 'install', '--agent-help']);
     expect(exitCode).toBe(0);
     const json = parseJson(stdout);
-    expect(json.command).toBe('workspace plugin install');
+    expect(json.command).toBe('plugin install');
     expect(json.positionals).toBeInstanceOf(Array);
     expect(json.positionals.length).toBe(1);
     expect(json.positionals[0].name).toBe('plugin');
@@ -159,13 +159,11 @@ describe('allagents <group> --agent-help (subcommand group)', () => {
     const json = parseJson(stdout);
     expect(json.name).toBe('workspace');
     expect(json.commands).toBeInstanceOf(Array);
-    expect(json.commands.length).toBe(5);
+    expect(json.commands.length).toBe(3);
 
     const commandNames = json.commands.map((c: any) => c.command).sort();
     expect(commandNames).toEqual([
       'workspace init',
-      'workspace plugin install',
-      'workspace plugin uninstall',
       'workspace status',
       'workspace sync',
     ]);
@@ -177,7 +175,7 @@ describe('allagents <group> --agent-help (subcommand group)', () => {
     const json = parseJson(stdout);
     expect(json.name).toBe('plugin');
     expect(json.commands).toBeInstanceOf(Array);
-    expect(json.commands.length).toBe(6);
+    expect(json.commands.length).toBe(8);
   });
 
   it('plugin marketplace --agent-help outputs group with marketplace commands', async () => {

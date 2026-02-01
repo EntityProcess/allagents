@@ -32,13 +32,12 @@ describe('CLI e2e help output', () => {
   });
 
   // 3. Workspace help
-  it('allagents workspace --help lists init, sync, status, plugin subcommands', async () => {
+  it('allagents workspace --help lists init, sync, status subcommands', async () => {
     const { stdout, exitCode } = await runCli(['workspace', '--help']);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('init');
     expect(stdout).toContain('sync');
     expect(stdout).toContain('status');
-    expect(stdout).toContain('plugin');
   });
 
   // 4. Workspace sync help
@@ -67,35 +66,35 @@ describe('CLI e2e help output', () => {
     expect(stdout.length).toBeGreaterThan(0);
   });
 
-  // 7. Workspace plugin help
-  it('allagents workspace plugin --help lists install and uninstall subcommands', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'plugin', '--help']);
+  // 7. Plugin help includes install and uninstall
+  it('allagents plugin --help lists install and uninstall subcommands', async () => {
+    const { stdout, exitCode } = await runCli(['plugin', '--help']);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('install');
     expect(stdout).toContain('uninstall');
   });
 
-  // 8. Workspace plugin install help
-  it('allagents workspace plugin install --help shows required plugin positional', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'plugin', 'install', '--help']);
+  // 8. Plugin install help
+  it('allagents plugin install --help shows required plugin positional', async () => {
+    const { stdout, exitCode } = await runCli(['plugin', 'install', '--help']);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('plugin');
   });
 
-  // 9. Workspace plugin uninstall help and alias shown in parent
-  it('allagents workspace plugin uninstall --help exits 0', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'plugin', 'uninstall', '--help']);
+  // 9. Plugin uninstall help and alias shown in parent
+  it('allagents plugin uninstall --help exits 0', async () => {
+    const { stdout, exitCode } = await runCli(['plugin', 'uninstall', '--help']);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('plugin');
   });
 
-  it('allagents workspace plugin --help shows remove alias for uninstall', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'plugin', '--help']);
+  it('allagents plugin --help shows remove alias for uninstall', async () => {
+    const { stdout, exitCode } = await runCli(['plugin', '--help']);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('remove');
   });
 
-  // 10. Plugin help
+  // 10. Plugin help also lists marketplace, list, validate
   it('allagents plugin --help lists marketplace, list, validate subcommands', async () => {
     const { stdout, exitCode } = await runCli(['plugin', '--help']);
     expect(exitCode).toBe(0);
@@ -161,8 +160,8 @@ describe('CLI e2e error cases', () => {
   });
 
   // 18. Missing required arg
-  it('allagents workspace plugin install (no plugin arg) exits with non-zero', async () => {
-    const { exitCode } = await runCli(['workspace', 'plugin', 'install']);
+  it('allagents plugin install (no plugin arg) exits with non-zero', async () => {
+    const { exitCode } = await runCli(['plugin', 'install']);
     expect(exitCode).not.toBe(0);
   });
 });
