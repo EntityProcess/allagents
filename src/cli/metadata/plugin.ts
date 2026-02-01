@@ -114,3 +114,55 @@ export const pluginValidateMeta: AgentCommandMeta = {
     message: 'string',
   },
 };
+
+export const pluginInstallMeta: AgentCommandMeta = {
+  command: 'plugin install',
+  description: 'Install plugin to .allagents/workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
+  whenToUse: 'To add a new plugin to your workspace and immediately sync it',
+  examples: [
+    'allagents plugin install my-plugin@official',
+    'allagents plugin install https://github.com/user/plugin',
+    'allagents plugin install ../local-plugin',
+  ],
+  expectedOutput:
+    'Confirms the plugin was added, then runs sync. Shows sync results. Exit 0 on success, exit 1 on failure.',
+  positionals: [
+    { name: 'plugin', type: 'string', required: true, description: 'Plugin identifier (plugin@marketplace, GitHub URL, or local path)' },
+  ],
+  outputSchema: {
+    plugin: 'string',
+    autoRegistered: 'string | null',
+    syncResult: {
+      copied: 'number',
+      generated: 'number',
+      failed: 'number',
+      skipped: 'number',
+      plugins: [{ plugin: 'string', success: 'boolean', copied: 'number', generated: 'number', failed: 'number' }],
+    },
+  },
+};
+
+export const pluginUninstallMeta: AgentCommandMeta = {
+  command: 'plugin uninstall',
+  description: 'Uninstall plugin from .allagents/workspace.yaml',
+  whenToUse: 'To remove a plugin from your workspace config and re-sync',
+  examples: [
+    'allagents plugin uninstall my-plugin@official',
+    'allagents plugin uninstall https://github.com/user/plugin',
+  ],
+  expectedOutput:
+    'Confirms the plugin was removed, then runs sync to clean up. Exit 0 on success, exit 1 on failure.',
+  positionals: [
+    { name: 'plugin', type: 'string', required: true, description: 'Plugin identifier to uninstall' },
+  ],
+  outputSchema: {
+    plugin: 'string',
+    syncResult: {
+      copied: 'number',
+      generated: 'number',
+      failed: 'number',
+      skipped: 'number',
+      plugins: [{ plugin: 'string', success: 'boolean', copied: 'number', generated: 'number', failed: 'number' }],
+    },
+  },
+};
