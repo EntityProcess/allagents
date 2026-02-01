@@ -95,7 +95,7 @@ describe('getMarketplacePluginsFromManifest', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('should return plugins from manifest with metadata', async () => {
+  it('should return plugins from manifest with metadata and no warnings', async () => {
     const manifest = {
       name: 'test',
       description: 'Test',
@@ -119,20 +119,22 @@ describe('getMarketplacePluginsFromManifest', () => {
     );
 
     const result = await getMarketplacePluginsFromManifest(testDir);
-    expect(result).toHaveLength(2);
-    expect(result[0].name).toBe('plugin-a');
-    expect(result[0].description).toBe('Plugin A desc');
-    expect(result[0].category).toBe('development');
-    expect(result[0].path).toBe(join(testDir, 'plugins', 'plugin-a'));
-    expect(result[1].name).toBe('plugin-b');
-    expect(result[1].description).toBe('Plugin B desc');
-    expect(result[1].category).toBeUndefined();
+    expect(result.plugins).toHaveLength(2);
+    expect(result.plugins[0].name).toBe('plugin-a');
+    expect(result.plugins[0].description).toBe('Plugin A desc');
+    expect(result.plugins[0].category).toBe('development');
+    expect(result.plugins[0].path).toBe(join(testDir, 'plugins', 'plugin-a'));
+    expect(result.plugins[1].name).toBe('plugin-b');
+    expect(result.plugins[1].description).toBe('Plugin B desc');
+    expect(result.plugins[1].category).toBeUndefined();
+    expect(result.warnings).toEqual([]);
   });
 
-  it('should return empty array when no manifest exists', async () => {
+  it('should return empty plugins and warnings when no manifest exists', async () => {
     rmSync(join(testDir, '.claude-plugin'), { recursive: true, force: true });
     const result = await getMarketplacePluginsFromManifest(testDir);
-    expect(result).toEqual([]);
+    expect(result.plugins).toEqual([]);
+    expect(result.warnings).toEqual([]);
   });
 
   it('should handle URL source plugins', async () => {
@@ -153,8 +155,30 @@ describe('getMarketplacePluginsFromManifest', () => {
     );
 
     const result = await getMarketplacePluginsFromManifest(testDir);
-    expect(result).toHaveLength(1);
-    expect(result[0].name).toBe('external');
-    expect(result[0].source).toBe('https://github.com/org/repo.git');
+    expect(result.plugins).toHaveLength(1);
+    expect(result.plugins[0].name).toBe('external');
+    expect(result.plugins[0].source).toBe('https://github.com/org/repo.git');
+  });
+
+  it('should return plugins without warnings when manifest is missing description', async () => {
+    const manifest = {
+      name: 'test',
+      plugins: [
+        {
+          name: 'plugin-a',
+          description: 'Plugin A desc',
+          source: './plugins/plugin-a',
+        },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await getMarketplacePluginsFromManifest(testDir);
+    expect(result.plugins).toHaveLength(1);
+    expect(result.plugins[0].name).toBe('plugin-a');
+    expect(result.warnings).toEqual([]);
   });
 });

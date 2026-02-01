@@ -19,7 +19,7 @@ describe('parseMarketplaceManifest', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('should parse a valid marketplace.json', async () => {
+  it('should parse a valid marketplace.json with no warnings', async () => {
     const manifest = {
       name: 'test-marketplace',
       description: 'Test marketplace',
@@ -37,6 +37,7 @@ describe('parseMarketplaceManifest', () => {
     if (result.success) {
       expect(result.data.name).toBe('test-marketplace');
       expect(result.data.plugins).toHaveLength(1);
+      expect(result.warnings).toEqual([]);
     }
   });
 
@@ -61,7 +62,7 @@ describe('parseMarketplaceManifest', () => {
     }
   });
 
-  it('should return error for JSON that fails schema validation', async () => {
+  it('should return error when no plugins array exists', async () => {
     writeFileSync(
       join(testDir, '.claude-plugin', 'marketplace.json'),
       JSON.stringify({ invalid: true }),
@@ -69,7 +70,172 @@ describe('parseMarketplaceManifest', () => {
     const result = await parseMarketplaceManifest(testDir);
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error).toContain('validation');
+      expect(result.error).toContain('plugins');
+    }
+  });
+
+  // Lenient parsing tests
+
+  it('should leniently parse manifest missing top-level description', async () => {
+    const manifest = {
+      name: 'test-marketplace',
+      plugins: [
+        { name: 'plugin-a', description: 'Plugin A', source: './plugins/plugin-a' },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.plugins).toHaveLength(1);
+      expect(result.data.plugins[0].name).toBe('plugin-a');
+      expect(result.warnings).toEqual([]);
+    }
+  });
+
+  it('should leniently parse manifest missing top-level name and description', async () => {
+    const manifest = {
+      plugins: [
+        { name: 'plugin-a', description: 'Plugin A', source: './plugins/plugin-a' },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.plugins).toHaveLength(1);
+      expect(result.warnings).toEqual([]);
+    }
+  });
+
+  it('should extract plugin entries with description in metadata', async () => {
+    const manifest = {
+      name: 'test-marketplace',
+      plugins: [
+        {
+          name: 'plugin-a',
+          metadata: { description: 'Description from metadata' },
+          source: './plugins/plugin-a',
+        },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.plugins).toHaveLength(1);
+      expect(result.data.plugins[0].description).toBe('Description from metadata');
+      expect(result.warnings.some(w => w.includes('metadata instead of top level'))).toBe(true);
+    }
+  });
+
+  it('should skip plugin entries without a name', async () => {
+    const manifest = {
+      name: 'test-marketplace',
+      description: 'Test',
+      plugins: [
+        { description: 'No name plugin', source: './plugins/noname' },
+        { name: 'valid-plugin', description: 'Valid', source: './plugins/valid' },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // Only the valid plugin is included
+      expect(result.data.plugins).toHaveLength(1);
+      expect(result.data.plugins[0].name).toBe('valid-plugin');
+      expect(result.warnings.some(w => w.includes('missing "name"'))).toBe(true);
+    }
+  });
+
+  it('should skip non-object plugin entries', async () => {
+    const manifest = {
+      name: 'test-marketplace',
+      plugins: [
+        'not-an-object',
+        { name: 'valid-plugin', description: 'Valid', source: './plugins/valid' },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.plugins).toHaveLength(1);
+      expect(result.data.plugins[0].name).toBe('valid-plugin');
+      expect(result.warnings.some(w => w.includes('not an object'))).toBe(true);
+    }
+  });
+
+  it('should warn about missing source field', async () => {
+    const manifest = {
+      name: 'test-marketplace',
+      plugins: [
+        { name: 'no-source', description: 'No source' },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.plugins).toHaveLength(1);
+      expect(result.data.plugins[0].name).toBe('no-source');
+      expect(result.data.plugins[0].source).toBe('');
+      expect(result.warnings.some(w => w.includes('missing or invalid "source"'))).toBe(true);
+    }
+  });
+
+  it('should include valid and best-effort entries together', async () => {
+    const manifest = {
+      name: 'mixed-marketplace',
+      plugins: [
+        { name: 'strict-valid', description: 'Fully valid', source: './plugins/valid' },
+        { name: 'missing-desc', source: './plugins/missing-desc' },
+        { name: 'missing-source', description: 'Has desc' },
+        'garbage',
+        { description: 'no name' },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // strict-valid passes strict per-entry check
+      // missing-desc and missing-source extracted with best-effort
+      // 'garbage' and {description:'no name'} skipped
+      expect(result.data.plugins).toHaveLength(3);
+      expect(result.data.plugins.map(p => p.name)).toEqual([
+        'strict-valid', 'missing-desc', 'missing-source',
+      ]);
+      expect(result.warnings.length).toBeGreaterThan(0);
     }
   });
 });
