@@ -264,15 +264,16 @@ const statusCmd = command({
       } else {
         for (const plugin of result.plugins) {
           const status = plugin.available ? '\u2713' : '\u2717';
-          let typeLabel: string;
+          let typeLabel: string | undefined;
           if (plugin.type === 'marketplace') {
-            typeLabel = plugin.available ? 'marketplace' : 'not synced';
+            typeLabel = plugin.available ? undefined : 'not synced';
           } else if (plugin.type === 'github') {
             typeLabel = plugin.available ? 'cached' : 'not cached';
           } else {
             typeLabel = 'local';
           }
-          console.log(`  ${status} ${plugin.source} (${typeLabel})`);
+          const suffix = typeLabel ? ` (${typeLabel})` : '';
+          console.log(`  ${status} ${plugin.source}${suffix}`);
         }
       }
 
