@@ -74,7 +74,7 @@ export function printAgentHelp(args: string[], version: string): void {
       console.log(JSON.stringify(formatForAgent(match), null, 2));
     } else {
       // Try prefix match for subcommand groups
-      const matches = allCommands.filter(c => c.command.startsWith(commandPath + ' '));
+      const matches = allCommands.filter(c => c.command.startsWith(`${commandPath} `));
       if (matches.length > 0) {
         const group = {
           name: commandPath,
