@@ -8,6 +8,15 @@ import {
   getWellKnownMarketplaces,
 } from '../../core/marketplace.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
+import { buildDescription } from '../help.js';
+import {
+  marketplaceListMeta,
+  marketplaceAddMeta,
+  marketplaceRemoveMeta,
+  marketplaceUpdateMeta,
+  pluginListMeta,
+  pluginValidateMeta,
+} from '../metadata/plugin.js';
 
 // =============================================================================
 // plugin marketplace list
@@ -15,7 +24,7 @@ import { isJsonMode, jsonOutput } from '../json-output.js';
 
 const marketplaceListCmd = command({
   name: 'list',
-  description: 'List registered marketplaces',
+  description: buildDescription(marketplaceListMeta),
   args: {},
   handler: async () => {
     try {
@@ -81,7 +90,7 @@ const marketplaceListCmd = command({
 
 const marketplaceAddCmd = command({
   name: 'add',
-  description: 'Add a marketplace from GitHub URL, owner/repo, local path, or well-known name',
+  description: buildDescription(marketplaceAddMeta),
   args: {
     source: positional({ type: string, displayName: 'source' }),
     name: option({ type: optional(string), long: 'name', short: 'n', description: 'Custom name for the marketplace' }),
@@ -139,7 +148,7 @@ const marketplaceAddCmd = command({
 
 const marketplaceRemoveCmd = command({
   name: 'remove',
-  description: 'Remove a marketplace from registry (does not delete files)',
+  description: buildDescription(marketplaceRemoveMeta),
   args: {
     name: positional({ type: string, displayName: 'name' }),
   },
@@ -190,7 +199,7 @@ const marketplaceRemoveCmd = command({
 
 const marketplaceUpdateCmd = command({
   name: 'update',
-  description: 'Update marketplace(s) from remote',
+  description: buildDescription(marketplaceUpdateMeta),
   args: {
     name: positional({ type: optional(string), displayName: 'name' }),
   },
@@ -281,7 +290,7 @@ const marketplaceCmd = subcommands({
 
 const pluginListCmd = command({
   name: 'list',
-  description: 'List available plugins from registered marketplaces',
+  description: buildDescription(pluginListMeta),
   args: {
     marketplace: positional({ type: optional(string), displayName: 'marketplace' }),
   },
@@ -377,7 +386,7 @@ const pluginListCmd = command({
 
 const pluginValidateCmd = command({
   name: 'validate',
-  description: 'Validate plugin structure at the given path',
+  description: buildDescription(pluginValidateMeta),
   args: {
     path: positional({ type: string, displayName: 'path' }),
   },
