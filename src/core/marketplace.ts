@@ -6,6 +6,8 @@ import {
   parseMarketplaceManifest,
   resolvePluginSourcePath,
 } from '../utils/marketplace-manifest-parser.js';
+import { fetchPlugin } from './plugin.js';
+import type { FetchResult } from './plugin.js';
 
 /**
  * Source types for marketplaces
@@ -575,7 +577,12 @@ export function parsePluginSpec(spec: string): {
  */
 export async function resolvePluginSpec(
   spec: string,
-  options: { subpath?: string; marketplaceNameOverride?: string } = {},
+  options: {
+    subpath?: string;
+    marketplaceNameOverride?: string;
+    marketplacePathOverride?: string;
+    fetchFn?: (url: string) => Promise<FetchResult>;
+  } = {},
 ): Promise<{ path: string; marketplace: string; plugin: string } | null> {
   const parsed = parsePluginSpec(spec);
   if (!parsed) {
@@ -584,34 +591,52 @@ export async function resolvePluginSpec(
 
   // Use override name if provided (e.g., when manifest changed the marketplace name)
   const marketplaceName = options.marketplaceNameOverride ?? parsed.marketplaceName;
-  const marketplace = await getMarketplace(marketplaceName);
-  if (!marketplace) {
-    return null;
+
+  // Determine marketplace path: use override or look up from registry
+  let marketplacePath: string | null = options.marketplacePathOverride ?? null;
+  if (!marketplacePath) {
+    const marketplace = await getMarketplace(marketplaceName);
+    if (!marketplace) {
+      return null;
+    }
+    marketplacePath = marketplace.path;
   }
 
   // Try manifest-based resolution first: look up plugin name in manifest entries
-  const manifestResult = await parseMarketplaceManifest(marketplace.path);
+  const manifestResult = await parseMarketplaceManifest(marketplacePath);
   if (manifestResult.success) {
     const pluginEntry = manifestResult.data.plugins.find(
       (p) => p.name === parsed.plugin,
     );
     if (pluginEntry) {
-      const resolvedSource = typeof pluginEntry.source === 'string'
-        ? resolve(marketplace.path, pluginEntry.source)
-        : pluginEntry.source.url;
-      if (typeof resolvedSource === 'string' && existsSync(resolvedSource)) {
-        return {
-          path: resolvedSource,
-          marketplace: marketplaceName,
-          plugin: parsed.plugin,
-        };
+      if (typeof pluginEntry.source === 'string') {
+        // Local path source - resolve relative to marketplace
+        const resolvedPath = resolve(marketplacePath, pluginEntry.source);
+        if (existsSync(resolvedPath)) {
+          return {
+            path: resolvedPath,
+            marketplace: marketplaceName,
+            plugin: parsed.plugin,
+          };
+        }
+      } else {
+        // URL source - fetch/clone the plugin
+        const fetchFn = options.fetchFn ?? fetchPlugin;
+        const fetchResult = await fetchFn(pluginEntry.source.url);
+        if (fetchResult.success && fetchResult.cachePath) {
+          return {
+            path: fetchResult.cachePath,
+            marketplace: marketplaceName,
+            plugin: parsed.plugin,
+          };
+        }
       }
     }
   }
 
   // Fall back to directory-based lookup
   const subpath = options.subpath ?? parsed.subpath ?? 'plugins';
-  const pluginPath = join(marketplace.path, subpath, parsed.plugin);
+  const pluginPath = join(marketplacePath, subpath, parsed.plugin);
 
   if (!existsSync(pluginPath)) {
     return null;
