@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { command, subcommands, positional, option, string, optional } from 'cmd-ts';
 import {
   addMarketplace,
   listMarketplaces,
@@ -8,22 +8,15 @@ import {
   getWellKnownMarketplaces,
 } from '../../core/marketplace.js';
 
-export const pluginCommand = new Command('plugin').description(
-  'Manage plugins and marketplaces',
-);
-
 // =============================================================================
-// plugin marketplace subcommand group
+// plugin marketplace list
 // =============================================================================
 
-const marketplaceCommand = new Command('marketplace').description(
-  'Manage plugin marketplaces',
-);
-
-marketplaceCommand
-  .command('list')
-  .description('List registered marketplaces')
-  .action(async () => {
+const marketplaceListCmd = command({
+  name: 'list',
+  description: 'List registered marketplaces',
+  args: {},
+  handler: async () => {
     try {
       const marketplaces = await listMarketplaces();
 
@@ -34,7 +27,7 @@ marketplaceCommand
         console.log('Well-known marketplaces:');
         const wellKnown = getWellKnownMarketplaces();
         for (const [name, repo] of Object.entries(wellKnown)) {
-          console.log(`  ${name} → ${repo}`);
+          console.log(`  ${name} \u2192 ${repo}`);
         }
         return;
       }
@@ -65,24 +58,32 @@ marketplaceCommand
       }
       throw error;
     }
-  });
+  },
+});
 
-marketplaceCommand
-  .command('add <source>')
-  .description('Add a marketplace from GitHub URL, owner/repo, local path, or well-known name')
-  .option('-n, --name <name>', 'Custom name for the marketplace')
-  .action(async (source: string, options: { name?: string }) => {
+// =============================================================================
+// plugin marketplace add
+// =============================================================================
+
+const marketplaceAddCmd = command({
+  name: 'add',
+  description: 'Add a marketplace from GitHub URL, owner/repo, local path, or well-known name',
+  args: {
+    source: positional({ type: string, displayName: 'source' }),
+    name: option({ type: optional(string), long: 'name', short: 'n', description: 'Custom name for the marketplace' }),
+  },
+  handler: async ({ source, name }) => {
     try {
       console.log(`Adding marketplace: ${source}...`);
 
-      const result = await addMarketplace(source, options.name);
+      const result = await addMarketplace(source, name);
 
       if (!result.success) {
         console.error(`\nError: ${result.error}`);
         process.exit(1);
       }
 
-      console.log(`✓ Marketplace '${result.marketplace?.name}' added`);
+      console.log(`\u2713 Marketplace '${result.marketplace?.name}' added`);
       console.log(`  Path: ${result.marketplace?.path}`);
     } catch (error) {
       if (error instanceof Error) {
@@ -91,12 +92,20 @@ marketplaceCommand
       }
       throw error;
     }
-  });
+  },
+});
 
-marketplaceCommand
-  .command('remove <name>')
-  .description('Remove a marketplace from registry (does not delete files)')
-  .action(async (name: string) => {
+// =============================================================================
+// plugin marketplace remove
+// =============================================================================
+
+const marketplaceRemoveCmd = command({
+  name: 'remove',
+  description: 'Remove a marketplace from registry (does not delete files)',
+  args: {
+    name: positional({ type: string, displayName: 'name' }),
+  },
+  handler: async ({ name }) => {
     try {
       const result = await removeMarketplace(name);
 
@@ -105,7 +114,7 @@ marketplaceCommand
         process.exit(1);
       }
 
-      console.log(`✓ Marketplace '${name}' removed from registry`);
+      console.log(`\u2713 Marketplace '${name}' removed from registry`);
       console.log(`  Note: Files at ${result.marketplace?.path} were not deleted`);
     } catch (error) {
       if (error instanceof Error) {
@@ -114,12 +123,20 @@ marketplaceCommand
       }
       throw error;
     }
-  });
+  },
+});
 
-marketplaceCommand
-  .command('update [name]')
-  .description('Update marketplace(s) from remote')
-  .action(async (name?: string) => {
+// =============================================================================
+// plugin marketplace update
+// =============================================================================
+
+const marketplaceUpdateCmd = command({
+  name: 'update',
+  description: 'Update marketplace(s) from remote',
+  args: {
+    name: positional({ type: optional(string), displayName: 'name' }),
+  },
+  handler: async ({ name }) => {
     try {
       console.log(
         name
@@ -140,10 +157,10 @@ marketplaceCommand
 
       for (const result of results) {
         if (result.success) {
-          console.log(`✓ ${result.name}`);
+          console.log(`\u2713 ${result.name}`);
           successCount++;
         } else {
-          console.log(`✗ ${result.name}: ${result.error}`);
+          console.log(`\u2717 ${result.name}: ${result.error}`);
           failCount++;
         }
       }
@@ -161,18 +178,35 @@ marketplaceCommand
       }
       throw error;
     }
-  });
+  },
+});
 
-pluginCommand.addCommand(marketplaceCommand);
+// =============================================================================
+// plugin marketplace subcommands group
+// =============================================================================
+
+const marketplaceCmd = subcommands({
+  name: 'marketplace',
+  description: 'Manage plugin marketplaces',
+  cmds: {
+    list: marketplaceListCmd,
+    add: marketplaceAddCmd,
+    remove: marketplaceRemoveCmd,
+    update: marketplaceUpdateCmd,
+  },
+});
 
 // =============================================================================
 // plugin list command - list plugins from marketplaces
 // =============================================================================
 
-pluginCommand
-  .command('list [marketplace]')
-  .description('List available plugins from registered marketplaces')
-  .action(async (marketplace?: string) => {
+const pluginListCmd = command({
+  name: 'list',
+  description: 'List available plugins from registered marketplaces',
+  args: {
+    marketplace: positional({ type: optional(string), displayName: 'marketplace' }),
+  },
+  handler: async ({ marketplace }) => {
     try {
       const marketplaces = await listMarketplaces();
 
@@ -223,17 +257,36 @@ pluginCommand
       }
       throw error;
     }
-  });
+  },
+});
 
 // =============================================================================
 // plugin validate command - validate a plugin structure
 // =============================================================================
 
-pluginCommand
-  .command('validate <path>')
-  .description('Validate plugin structure at the given path')
-  .action(async (path: string) => {
+const pluginValidateCmd = command({
+  name: 'validate',
+  description: 'Validate plugin structure at the given path',
+  args: {
+    path: positional({ type: string, displayName: 'path' }),
+  },
+  handler: async ({ path }) => {
     // TODO: Implement plugin validation
     console.log(`Validating plugin at: ${path}`);
     console.log('(validation not yet implemented)');
-  });
+  },
+});
+
+// =============================================================================
+// plugin subcommands group
+// =============================================================================
+
+export const pluginCmd = subcommands({
+  name: 'plugin',
+  description: 'Manage plugins and marketplaces',
+  cmds: {
+    marketplace: marketplaceCmd,
+    list: pluginListCmd,
+    validate: pluginValidateCmd,
+  },
+});

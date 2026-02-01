@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { command, subcommands, flag } from 'cmd-ts';
 import { execa } from 'execa';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -37,27 +37,30 @@ function getCurrentVersion(): string {
   }
 }
 
-export const selfCommand = new Command('self')
-  .description('Manage the allagents installation');
+// =============================================================================
+// self update
+// =============================================================================
 
-selfCommand
-  .command('update')
-  .description('Update allagents to the latest version')
-  .option('--npm', 'Force update using npm')
-  .option('--bun', 'Force update using bun')
-  .action(async (options: { npm?: boolean; bun?: boolean }) => {
+const updateCmd = command({
+  name: 'update',
+  description: 'Update allagents to the latest version',
+  args: {
+    npm: flag({ long: 'npm', description: 'Force update using npm' }),
+    bun: flag({ long: 'bun', description: 'Force update using bun' }),
+  },
+  handler: async ({ npm, bun }) => {
     try {
       // Determine package manager to use
       let packageManager: 'bun' | 'npm';
 
-      if (options.npm && options.bun) {
+      if (npm && bun) {
         console.error('Error: Cannot specify both --npm and --bun');
         process.exit(1);
       }
 
-      if (options.npm) {
+      if (npm) {
         packageManager = 'npm';
-      } else if (options.bun) {
+      } else if (bun) {
         packageManager = 'bun';
       } else {
         packageManager = detectPackageManager();
@@ -83,7 +86,7 @@ selfCommand
         try {
           const versionResult = await execa('allagents', ['--version']);
           const newVersion = versionResult.stdout.trim();
-          console.log(`\nUpdate complete: ${currentVersion} → ${newVersion}`);
+          console.log(`\nUpdate complete: ${currentVersion} \u2192 ${newVersion}`);
         } catch {
           // Fallback if we can't get new version
           console.log('\nUpdate complete.');
@@ -108,4 +111,17 @@ selfCommand
       }
       throw error;
     }
-  });
+  },
+});
+
+// =============================================================================
+// self subcommands group
+// =============================================================================
+
+export const selfCmd = subcommands({
+  name: 'self',
+  description: 'Manage the allagents installation',
+  cmds: {
+    update: updateCmd,
+  },
+});
