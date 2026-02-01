@@ -7,6 +7,7 @@ import {
   listMarketplacePlugins,
   getWellKnownMarketplaces,
 } from '../../core/marketplace.js';
+import { isJsonMode, jsonOutput } from '../json-output.js';
 
 // =============================================================================
 // plugin marketplace list
@@ -19,6 +20,15 @@ const marketplaceListCmd = command({
   handler: async () => {
     try {
       const marketplaces = await listMarketplaces();
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'plugin marketplace list',
+          data: { marketplaces },
+        });
+        return;
+      }
 
       if (marketplaces.length === 0) {
         console.log('No marketplaces registered.\n');
@@ -53,6 +63,10 @@ const marketplaceListCmd = command({
       console.log(`Total: ${marketplaces.length} marketplace(s)`);
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace list', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }
@@ -74,19 +88,43 @@ const marketplaceAddCmd = command({
   },
   handler: async ({ source, name }) => {
     try {
-      console.log(`Adding marketplace: ${source}...`);
+      if (!isJsonMode()) {
+        console.log(`Adding marketplace: ${source}...`);
+      }
 
       const result = await addMarketplace(source, name);
 
       if (!result.success) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace add', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
         console.error(`\nError: ${result.error}`);
         process.exit(1);
+      }
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'plugin marketplace add',
+          data: {
+            marketplace: {
+              name: result.marketplace?.name,
+              path: result.marketplace?.path,
+            },
+          },
+        });
+        return;
       }
 
       console.log(`\u2713 Marketplace '${result.marketplace?.name}' added`);
       console.log(`  Path: ${result.marketplace?.path}`);
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace add', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }
@@ -110,14 +148,34 @@ const marketplaceRemoveCmd = command({
       const result = await removeMarketplace(name);
 
       if (!result.success) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace remove', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
         console.error(`Error: ${result.error}`);
         process.exit(1);
+      }
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'plugin marketplace remove',
+          data: {
+            name,
+            path: result.marketplace?.path,
+          },
+        });
+        return;
       }
 
       console.log(`\u2713 Marketplace '${name}' removed from registry`);
       console.log(`  Note: Files at ${result.marketplace?.path} were not deleted`);
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace remove', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }
@@ -138,14 +196,31 @@ const marketplaceUpdateCmd = command({
   },
   handler: async ({ name }) => {
     try {
-      console.log(
-        name
-          ? `Updating marketplace: ${name}...`
-          : 'Updating all marketplaces...',
-      );
-      console.log();
+      if (!isJsonMode()) {
+        console.log(
+          name
+            ? `Updating marketplace: ${name}...`
+            : 'Updating all marketplaces...',
+        );
+        console.log();
+      }
 
       const results = await updateMarketplace(name);
+
+      if (isJsonMode()) {
+        const succeeded = results.filter((r) => r.success).length;
+        const failed = results.filter((r) => !r.success).length;
+        jsonOutput({
+          success: failed === 0,
+          command: 'plugin marketplace update',
+          data: { results, succeeded, failed },
+          ...(failed > 0 && { error: `${failed} marketplace(s) failed to update` }),
+        });
+        if (failed > 0) {
+          process.exit(1);
+        }
+        return;
+      }
 
       if (results.length === 0) {
         console.log('No marketplaces to update.');
@@ -173,6 +248,10 @@ const marketplaceUpdateCmd = command({
       }
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace update', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }
@@ -211,6 +290,14 @@ const pluginListCmd = command({
       const marketplaces = await listMarketplaces();
 
       if (marketplaces.length === 0) {
+        if (isJsonMode()) {
+          jsonOutput({
+            success: true,
+            command: 'plugin list',
+            data: { plugins: [], total: 0 },
+          });
+          return;
+        }
         console.log('No marketplaces registered.\n');
         console.log('Add a marketplace first:');
         console.log('  allagents plugin marketplace add <source>');
@@ -223,8 +310,28 @@ const pluginListCmd = command({
         : marketplaces;
 
       if (marketplace && toList.length === 0) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin list', error: `Marketplace '${marketplace}' not found` });
+          process.exit(1);
+        }
         console.error(`Marketplace '${marketplace}' not found`);
         process.exit(1);
+      }
+
+      if (isJsonMode()) {
+        const allPlugins: Array<{ name: string; marketplace: string }> = [];
+        for (const mp of toList) {
+          const plugins = await listMarketplacePlugins(mp.name);
+          for (const plugin of plugins) {
+            allPlugins.push({ name: plugin.name, marketplace: mp.name });
+          }
+        }
+        jsonOutput({
+          success: true,
+          command: 'plugin list',
+          data: { plugins: allPlugins, total: allPlugins.length },
+        });
+        return;
       }
 
       let totalPlugins = 0;
@@ -252,6 +359,10 @@ const pluginListCmd = command({
       }
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin list', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }
@@ -271,6 +382,14 @@ const pluginValidateCmd = command({
     path: positional({ type: string, displayName: 'path' }),
   },
   handler: async ({ path }) => {
+    if (isJsonMode()) {
+      jsonOutput({
+        success: true,
+        command: 'plugin validate',
+        data: { path, valid: false, message: 'not yet implemented' },
+      });
+      return;
+    }
     // TODO: Implement plugin validation
     console.log(`Validating plugin at: ${path}`);
     console.log('(validation not yet implemented)');

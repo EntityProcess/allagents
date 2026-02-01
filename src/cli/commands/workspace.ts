@@ -3,64 +3,95 @@ import { initWorkspace } from '../../core/workspace.js';
 import { syncWorkspace } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
+import { isJsonMode, jsonOutput } from '../json-output.js';
+
+/**
+ * Build a JSON-friendly sync data object from a sync result.
+ */
+function buildSyncData(result: Awaited<ReturnType<typeof syncWorkspace>>) {
+  return {
+    copied: result.totalCopied,
+    generated: result.totalGenerated,
+    failed: result.totalFailed,
+    skipped: result.totalSkipped,
+    plugins: result.pluginResults.map((pr) => ({
+      plugin: pr.plugin,
+      success: pr.success,
+      error: pr.error,
+      copied: pr.copyResults.filter((r) => r.action === 'copied').length,
+      generated: pr.copyResults.filter((r) => r.action === 'generated').length,
+      failed: pr.copyResults.filter((r) => r.action === 'failed').length,
+      copyResults: pr.copyResults,
+    })),
+    purgedPaths: result.purgedPaths ?? [],
+  };
+}
 
 /**
  * Run sync and print results. Returns true if sync succeeded.
  */
-async function runSyncAndPrint(): Promise<boolean> {
-  console.log('\nSyncing workspace...\n');
+async function runSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnType<typeof buildSyncData> | null }> {
+  if (!isJsonMode()) {
+    console.log('\nSyncing workspace...\n');
+  }
   const result = await syncWorkspace();
 
   if (!result.success && result.error) {
-    console.error(`Sync error: ${result.error}`);
-    return false;
+    if (!isJsonMode()) {
+      console.error(`Sync error: ${result.error}`);
+    }
+    return { ok: false, syncData: null };
   }
 
-  for (const pluginResult of result.pluginResults) {
-    const status = pluginResult.success ? '\u2713' : '\u2717';
-    console.log(`${status} Plugin: ${pluginResult.plugin}`);
+  const syncData = buildSyncData(result);
 
-    if (pluginResult.error) {
-      console.log(`  Error: ${pluginResult.error}`);
-    }
+  if (!isJsonMode()) {
+    for (const pluginResult of result.pluginResults) {
+      const status = pluginResult.success ? '\u2713' : '\u2717';
+      console.log(`${status} Plugin: ${pluginResult.plugin}`);
 
-    const copied = pluginResult.copyResults.filter(
-      (r) => r.action === 'copied',
-    ).length;
-    const generated = pluginResult.copyResults.filter(
-      (r) => r.action === 'generated',
-    ).length;
-    const failed = pluginResult.copyResults.filter(
-      (r) => r.action === 'failed',
-    ).length;
+      if (pluginResult.error) {
+        console.log(`  Error: ${pluginResult.error}`);
+      }
 
-    if (copied > 0) console.log(`  Copied: ${copied} files`);
-    if (generated > 0) console.log(`  Generated: ${generated} files`);
-    if (failed > 0) {
-      console.log(`  Failed: ${failed} files`);
-      for (const failedResult of pluginResult.copyResults.filter(
+      const copied = pluginResult.copyResults.filter(
+        (r) => r.action === 'copied',
+      ).length;
+      const generated = pluginResult.copyResults.filter(
+        (r) => r.action === 'generated',
+      ).length;
+      const failed = pluginResult.copyResults.filter(
         (r) => r.action === 'failed',
-      )) {
-        console.log(
-          `    - ${failedResult.destination}: ${failedResult.error}`,
-        );
+      ).length;
+
+      if (copied > 0) console.log(`  Copied: ${copied} files`);
+      if (generated > 0) console.log(`  Generated: ${generated} files`);
+      if (failed > 0) {
+        console.log(`  Failed: ${failed} files`);
+        for (const failedResult of pluginResult.copyResults.filter(
+          (r) => r.action === 'failed',
+        )) {
+          console.log(
+            `    - ${failedResult.destination}: ${failedResult.error}`,
+          );
+        }
       }
     }
+
+    console.log('\nSync complete:');
+    console.log(`  Total copied: ${result.totalCopied}`);
+    if (result.totalGenerated > 0) {
+      console.log(`  Total generated: ${result.totalGenerated}`);
+    }
+    if (result.totalFailed > 0) {
+      console.log(`  Total failed: ${result.totalFailed}`);
+    }
+    if (result.totalSkipped > 0) {
+      console.log(`  Total skipped: ${result.totalSkipped}`);
+    }
   }
 
-  console.log('\nSync complete:');
-  console.log(`  Total copied: ${result.totalCopied}`);
-  if (result.totalGenerated > 0) {
-    console.log(`  Total generated: ${result.totalGenerated}`);
-  }
-  if (result.totalFailed > 0) {
-    console.log(`  Total failed: ${result.totalFailed}`);
-  }
-  if (result.totalSkipped > 0) {
-    console.log(`  Total skipped: ${result.totalSkipped}`);
-  }
-
-  return result.success && result.totalFailed === 0;
+  return { ok: result.success && result.totalFailed === 0, syncData };
 }
 
 // =============================================================================
@@ -78,6 +109,16 @@ const initCmd = command({
     try {
       const targetPath = path ?? '.';
       const result = await initWorkspace(targetPath, from ? { from } : {});
+
+      if (isJsonMode()) {
+        const syncData = result.syncResult ? buildSyncData(result.syncResult) : null;
+        jsonOutput({
+          success: true,
+          command: 'workspace init',
+          data: { path: targetPath, syncResult: syncData },
+        });
+        return;
+      }
 
       // Print sync results if sync was performed
       if (result.syncResult) {
@@ -101,6 +142,10 @@ const initCmd = command({
       }
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace init', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }
@@ -123,13 +168,15 @@ const syncCmd = command({
   },
   handler: async ({ offline, dryRun, client }) => {
     try {
-      if (dryRun) {
-        console.log('Dry run mode - no changes will be made\n');
+      if (!isJsonMode()) {
+        if (dryRun) {
+          console.log('Dry run mode - no changes will be made\n');
+        }
+        if (client) {
+          console.log(`Syncing client: ${client}\n`);
+        }
+        console.log('Syncing workspace...\n');
       }
-      if (client) {
-        console.log(`Syncing client: ${client}\n`);
-      }
-      console.log('Syncing workspace...\n');
       const result = await syncWorkspace(process.cwd(), {
         offline,
         dryRun,
@@ -139,8 +186,27 @@ const syncCmd = command({
       // Early exit only for top-level errors (e.g., missing .allagents/workspace.yaml)
       // Plugin-level errors are handled in the loop below
       if (!result.success && result.error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace sync', error: result.error });
+          process.exit(1);
+        }
         console.error(`Error: ${result.error}`);
         process.exit(1);
+      }
+
+      if (isJsonMode()) {
+        const syncData = buildSyncData(result);
+        const success = result.success && result.totalFailed === 0;
+        jsonOutput({
+          success,
+          command: 'workspace sync',
+          data: syncData,
+          ...(!success && { error: 'Sync completed with failures' }),
+        });
+        if (!success) {
+          process.exit(1);
+        }
+        return;
       }
 
       // Show purge plan in dry-run mode
@@ -215,6 +281,10 @@ const syncCmd = command({
       }
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace sync', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }
@@ -236,8 +306,21 @@ const statusCmd = command({
       const result = await getWorkspaceStatus();
 
       if (!result.success) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace status', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
         console.error(`Error: ${result.error}`);
         process.exit(1);
+      }
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'workspace status',
+          data: { plugins: result.plugins, clients: result.clients },
+        });
+        return;
       }
 
       // Display plugins
@@ -268,6 +351,10 @@ const statusCmd = command({
       }
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace status', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }
@@ -291,8 +378,30 @@ const pluginInstallCmd = command({
       const result = await addPlugin(plugin);
 
       if (!result.success) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace plugin install', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
         console.error(`Error: ${result.error}`);
         process.exit(1);
+      }
+
+      if (isJsonMode()) {
+        const { ok, syncData } = await runSyncAndPrint();
+        jsonOutput({
+          success: ok,
+          command: 'workspace plugin install',
+          data: {
+            plugin,
+            autoRegistered: result.autoRegistered ?? null,
+            syncResult: syncData,
+          },
+          ...(!ok && { error: 'Sync completed with failures' }),
+        });
+        if (!ok) {
+          process.exit(1);
+        }
+        return;
       }
 
       if (result.autoRegistered) {
@@ -300,12 +409,16 @@ const pluginInstallCmd = command({
       }
       console.log(`\u2713 Installed plugin: ${plugin}`);
 
-      const syncOk = await runSyncAndPrint();
+      const { ok: syncOk } = await runSyncAndPrint();
       if (!syncOk) {
         process.exit(1);
       }
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace plugin install', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }
@@ -330,18 +443,43 @@ const pluginUninstallCmd = command({
       const result = await removePlugin(plugin);
 
       if (!result.success) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace plugin uninstall', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
         console.error(`Error: ${result.error}`);
         process.exit(1);
       }
 
+      if (isJsonMode()) {
+        const { ok, syncData } = await runSyncAndPrint();
+        jsonOutput({
+          success: ok,
+          command: 'workspace plugin uninstall',
+          data: {
+            plugin,
+            syncResult: syncData,
+          },
+          ...(!ok && { error: 'Sync completed with failures' }),
+        });
+        if (!ok) {
+          process.exit(1);
+        }
+        return;
+      }
+
       console.log(`\u2713 Uninstalled plugin: ${plugin}`);
 
-      const syncOk = await runSyncAndPrint();
+      const { ok: syncOk } = await runSyncAndPrint();
       if (!syncOk) {
         process.exit(1);
       }
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace plugin uninstall', error: error.message });
+          process.exit(1);
+        }
         console.error(`Error: ${error.message}`);
         process.exit(1);
       }

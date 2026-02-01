@@ -3,6 +3,7 @@ import { execa } from 'execa';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isJsonMode, jsonOutput } from '../json-output.js';
 
 /**
  * Detect package manager from a script path
@@ -54,6 +55,10 @@ const updateCmd = command({
       let packageManager: 'bun' | 'npm';
 
       if (npm && bun) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'self update', error: 'Cannot specify both --npm and --bun' });
+          process.exit(1);
+        }
         console.error('Error: Cannot specify both --npm and --bun');
         process.exit(1);
       }
@@ -67,8 +72,11 @@ const updateCmd = command({
       }
 
       const currentVersion = getCurrentVersion();
-      console.log(`Current version: ${currentVersion}`);
-      console.log(`Updating allagents using ${packageManager}...\n`);
+
+      if (!isJsonMode()) {
+        console.log(`Current version: ${currentVersion}`);
+        console.log(`Updating allagents using ${packageManager}...\n`);
+      }
 
       // Build the update command
       const args =
@@ -76,24 +84,60 @@ const updateCmd = command({
           ? ['install', '-g', 'allagents@latest']
           : ['add', '-g', 'allagents@latest'];
 
-      // Execute the update
+      // In JSON mode, capture output instead of inheriting stdio
       const result = await execa(packageManager, args, {
-        stdio: 'inherit',
+        stdio: isJsonMode() ? 'pipe' : 'inherit',
       });
 
       if (result.exitCode === 0) {
         // Get the new version by spawning allagents --version
+        let newVersion: string | undefined;
         try {
           const versionResult = await execa('allagents', ['--version']);
-          const newVersion = versionResult.stdout.trim();
-          console.log(`\nUpdate complete: ${currentVersion} \u2192 ${newVersion}`);
+          newVersion = versionResult.stdout.trim();
         } catch {
           // Fallback if we can't get new version
+        }
+
+        if (isJsonMode()) {
+          jsonOutput({
+            success: true,
+            command: 'self update',
+            data: {
+              previousVersion: currentVersion,
+              newVersion: newVersion ?? 'unknown',
+              packageManager,
+            },
+          });
+          return;
+        }
+
+        if (newVersion) {
+          console.log(`\nUpdate complete: ${currentVersion} \u2192 ${newVersion}`);
+        } else {
           console.log('\nUpdate complete.');
         }
       }
     } catch (error) {
       if (error instanceof Error) {
+        if (isJsonMode()) {
+          // Check if package manager is not available
+          if (
+            error.message.includes('ENOENT') ||
+            error.message.includes('not found')
+          ) {
+            const detected = detectPackageManager();
+            const alternative = detected === 'npm' ? 'bun' : 'npm';
+            jsonOutput({
+              success: false,
+              command: 'self update',
+              error: `${detected} not found. Try using --${alternative} flag.`,
+            });
+          } else {
+            jsonOutput({ success: false, command: 'self update', error: error.message });
+          }
+          process.exit(1);
+        }
         // Check if package manager is not available
         if (
           error.message.includes('ENOENT') ||
