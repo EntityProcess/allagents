@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isJsonMode, jsonOutput } from '../json-output.js';
+import { buildDescription } from '../help.js';
+import { updateMeta } from '../metadata/self.js';
 
 /**
  * Detect package manager from a script path
@@ -44,7 +46,7 @@ function getCurrentVersion(): string {
 
 const updateCmd = command({
   name: 'update',
-  description: 'Update allagents to the latest version',
+  description: buildDescription(updateMeta),
   args: {
     npm: flag({ long: 'npm', description: 'Force update using npm' }),
     bun: flag({ long: 'bun', description: 'Force update using bun' }),

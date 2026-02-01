@@ -4,6 +4,8 @@ import { syncWorkspace } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
+import { buildDescription } from '../help.js';
+import { initMeta, syncMeta, statusMeta, pluginInstallMeta, pluginUninstallMeta } from '../metadata/workspace.js';
 
 /**
  * Build a JSON-friendly sync data object from a sync result.
@@ -100,7 +102,7 @@ async function runSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnType<ty
 
 const initCmd = command({
   name: 'init',
-  description: 'Create new workspace and sync plugins',
+  description: buildDescription(initMeta),
   args: {
     path: positional({ type: optional(string), displayName: 'path' }),
     from: option({ type: optional(string), long: 'from', description: 'Copy workspace.yaml from existing template/workspace' }),
@@ -160,7 +162,7 @@ const initCmd = command({
 
 const syncCmd = command({
   name: 'sync',
-  description: 'Sync plugins to workspace',
+  description: buildDescription(syncMeta),
   args: {
     offline: flag({ long: 'offline', description: 'Use cached plugins without fetching latest from remote' }),
     dryRun: flag({ long: 'dry-run', short: 'n', description: 'Simulate sync without making changes' }),
@@ -299,7 +301,7 @@ const syncCmd = command({
 
 const statusCmd = command({
   name: 'status',
-  description: 'Show sync status of plugins',
+  description: buildDescription(statusMeta),
   args: {},
   handler: async () => {
     try {
@@ -369,7 +371,7 @@ const statusCmd = command({
 
 const pluginInstallCmd = command({
   name: 'install',
-  description: 'Install plugin to .allagents/workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
+  description: buildDescription(pluginInstallMeta),
   args: {
     plugin: positional({ type: string, displayName: 'plugin' }),
   },
@@ -433,7 +435,7 @@ const pluginInstallCmd = command({
 
 const pluginUninstallCmd = command({
   name: 'uninstall',
-  description: 'Uninstall plugin from .allagents/workspace.yaml',
+  description: buildDescription(pluginUninstallMeta),
   aliases: ['remove'],
   args: {
     plugin: positional({ type: string, displayName: 'plugin' }),
