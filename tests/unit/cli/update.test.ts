@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { detectPackageManagerFromPath } from '../../../src/cli/commands/update.js';
+import { detectPackageManagerFromPath } from '../../../src/cli/commands/self.js';
 
 describe('update command', () => {
   describe('detectPackageManagerFromPath', () => {
