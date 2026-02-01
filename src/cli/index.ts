@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { workspaceCmd } from './commands/workspace.js';
 import { pluginCmd } from './commands/plugin.js';
 import { selfCmd } from './commands/self.js';
+import { extractJsonFlag, setJsonMode } from './json-output.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -24,4 +25,8 @@ const app = subcommands({
   },
 });
 
-run(app, process.argv.slice(2));
+const rawArgs = process.argv.slice(2);
+const { args, json } = extractJsonFlag(rawArgs);
+setJsonMode(json);
+
+run(app, args);
