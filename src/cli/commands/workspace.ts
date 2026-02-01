@@ -303,8 +303,9 @@ pluginSubcommand
   });
 
 pluginSubcommand
-  .command('remove <plugin>')
-  .description('Remove plugin from .allagents/workspace.yaml')
+  .command('uninstall <plugin>')
+  .alias('remove')
+  .description('Uninstall plugin from .allagents/workspace.yaml')
   .action(async (plugin: string) => {
     try {
       const result = await removePlugin(plugin);
@@ -314,7 +315,7 @@ pluginSubcommand
         process.exit(1);
       }
 
-      console.log(`✓ Removed plugin: ${plugin}`);
+      console.log(`✓ Uninstalled plugin: ${plugin}`);
 
       const syncOk = await runSyncAndPrint();
       if (!syncOk) {
