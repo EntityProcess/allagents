@@ -2,8 +2,8 @@ import { command, flag } from 'cmd-ts';
 import { execa } from 'execa';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
-import { findPackageJson } from '../package-json.js';
 import { updateMeta } from '../metadata/self.js';
+import packageJson from '../../../package.json';
 
 /**
  * Detect package manager from a script path
@@ -28,11 +28,7 @@ function detectPackageManager(): 'bun' | 'npm' {
  * Get current installed version from package.json
  */
 function getCurrentVersion(): string {
-  try {
-    return findPackageJson(import.meta.url).version;
-  } catch {
-    return 'unknown';
-  }
+  return packageJson.version;
 }
 
 // =============================================================================

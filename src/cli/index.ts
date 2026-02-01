@@ -7,9 +7,7 @@ import { pluginCmd } from './commands/plugin.js';
 import { selfCmd } from './commands/self.js';
 import { extractJsonFlag, setJsonMode } from './json-output.js';
 import { extractAgentHelpFlag, printAgentHelp } from './agent-help.js';
-import { findPackageJson } from './package-json.js';
-
-const packageJson = findPackageJson(import.meta.url);
+import packageJson from '../../package.json';
 
 const app = conciseSubcommands({
   name: 'allagents',
