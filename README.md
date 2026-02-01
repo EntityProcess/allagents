@@ -67,8 +67,8 @@ allagents workspace init my-workspace --from owner/repo/path/to/template
 allagents plugin marketplace add anthropics/claude-plugins-official
 
 # Install plugins to workspace
-allagents workspace plugin install code-review@claude-plugins-official
-allagents workspace plugin install my-plugin@someuser/their-repo
+allagents plugin install code-review@claude-plugins-official
+allagents plugin install my-plugin@someuser/their-repo
 
 # Sync plugins to workspace
 allagents workspace sync
@@ -112,12 +112,6 @@ allagents workspace sync [options]
 
 # Show status of workspace and plugins
 allagents workspace status
-
-# Install a plugin to .allagents/workspace.yaml (auto-registers marketplace if needed)
-allagents workspace plugin install <plugin@marketplace>
-
-# Remove a plugin from .allagents/workspace.yaml
-allagents workspace plugin remove <plugin>
 ```
 
 ### Plugin Marketplace Commands
@@ -142,6 +136,12 @@ allagents plugin marketplace update [name]
 ### Plugin Commands
 
 ```bash
+# Install a plugin to .allagents/workspace.yaml (auto-registers marketplace if needed)
+allagents plugin install <plugin@marketplace>
+
+# Remove a plugin from .allagents/workspace.yaml
+allagents plugin uninstall <plugin>
+
 # List available plugins from marketplaces
 allagents plugin list [marketplace]
 
