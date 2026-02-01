@@ -9,9 +9,7 @@ import {
 } from '../utils/plugin-path.js';
 import {
   isPluginSpec,
-  resolvePluginSpec,
-  parsePluginSpec,
-  getMarketplace,
+  resolvePluginSpecWithAutoRegister,
 } from './marketplace.js';
 
 /**
@@ -123,35 +121,12 @@ function getPluginStatus(parsed: ParsedPluginSource): PluginStatus {
  * Get status of a plugin@marketplace spec
  */
 async function getMarketplacePluginStatus(spec: string): Promise<PluginStatus> {
-  const parsed = parsePluginSpec(spec);
-
-  if (!parsed) {
-    return {
-      source: spec,
-      type: 'marketplace',
-      available: false,
-      path: '',
-    };
-  }
-
-  // Check if the marketplace is registered
-  const marketplace = await getMarketplace(parsed.marketplaceName);
-  if (!marketplace) {
-    return {
-      source: spec,
-      type: 'marketplace',
-      available: false,
-      path: '',
-    };
-  }
-
-  // Try to resolve the plugin within the marketplace
-  const resolved = await resolvePluginSpec(spec, parsed.subpath ? { subpath: parsed.subpath } : {});
+  const resolved = await resolvePluginSpecWithAutoRegister(spec);
 
   return {
     source: spec,
     type: 'marketplace',
-    available: resolved !== null,
-    path: resolved?.path ?? '',
+    available: resolved.success,
+    path: resolved.path ?? '',
   };
 }

@@ -9,7 +9,9 @@ export const SkillMetadataSchema = z.object({
     .min(1, 'Skill name is required')
     .max(128, 'Skill name too long'),
   description: z.string().min(1, 'Description is required'),
-  'allowed-tools': z.array(z.string()).optional(),
+  'allowed-tools': z
+    .union([z.array(z.string()), z.string().transform((s) => [s])])
+    .optional(),
   model: z.string().optional(),
 });
 

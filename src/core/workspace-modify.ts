@@ -11,11 +11,7 @@ import {
 import type { WorkspaceConfig } from '../models/workspace-config.js';
 import {
   isPluginSpec,
-  getMarketplace,
-  addMarketplace,
-  getWellKnownMarketplaces,
-  resolvePluginSpec,
-  parsePluginSpec,
+  resolvePluginSpecWithAutoRegister,
 } from './marketplace.js';
 
 /**
@@ -58,46 +54,21 @@ export async function addPlugin(
 
   // Handle plugin@marketplace format
   if (isPluginSpec(plugin)) {
-    const parsed = parsePluginSpec(plugin);
-    if (!parsed) {
+    const resolved = await resolvePluginSpecWithAutoRegister(plugin);
+    if (!resolved.success) {
       return {
         success: false,
-        error: `Invalid plugin spec: ${plugin}`,
+        error: resolved.error || 'Unknown error',
       };
     }
 
-    const autoRegResult = await ensureMarketplaceRegistered(plugin);
-    if (!autoRegResult.success) {
-      return {
-        success: false,
-        error: autoRegResult.error || 'Unknown error',
-      };
-    }
-
-    // Verify the plugin exists in the marketplace (pass subpath if specified)
-    const resolved = await resolvePluginSpec(
-      plugin,
-      parsed.subpath ? { subpath: parsed.subpath } : {},
-    );
-    if (!resolved) {
-      const marketplace = await getMarketplace(
-        autoRegResult.registeredAs || parsed.marketplaceName,
-      );
-      const expectedSubpath = parsed.subpath ?? 'plugins';
-
-      return {
-        success: false,
-        error: `Plugin '${parsed.plugin}' not found in marketplace '${parsed.marketplaceName}'\n  Expected at: ${marketplace?.path ?? `~/.allagents/marketplaces/${parsed.marketplaceName}`}/${expectedSubpath}/${parsed.plugin}/`,
-      };
-    }
-
-    // Add to .allagents/workspace.yaml (use the original spec or normalized one with repo name)
+    // Add to .allagents/workspace.yaml (use the original spec or normalized one with registered name)
     return await addPluginToConfig(
-      autoRegResult.registeredAs
-        ? plugin.replace(/@[^@]+$/, `@${autoRegResult.registeredAs}`)
+      resolved.registeredAs
+        ? plugin.replace(/@[^@]+$/, `@${resolved.registeredAs}`)
         : plugin,
       configPath,
-      autoRegResult.registeredAs,
+      resolved.registeredAs,
     );
   }
 
@@ -132,71 +103,6 @@ export async function addPlugin(
   }
 
   return await addPluginToConfig(plugin, configPath);
-}
-
-/**
- * Ensure marketplace is registered, auto-registering if needed
- */
-async function ensureMarketplaceRegistered(
-  spec: string,
-): Promise<{ success: boolean; error?: string; registeredAs?: string }> {
-  const atIndex = spec.lastIndexOf('@');
-  const marketplaceName = spec.slice(atIndex + 1);
-
-  if (!marketplaceName) {
-    return {
-      success: false,
-      error: `Invalid plugin spec: ${spec}`,
-    };
-  }
-
-  // Check if already registered
-  const existing = await getMarketplace(marketplaceName);
-  if (existing) {
-    return { success: true };
-  }
-
-  // Try to auto-register
-  const wellKnown = getWellKnownMarketplaces();
-
-  // Well-known marketplace name
-  if (wellKnown[marketplaceName]) {
-    console.log(`Auto-registering well-known marketplace: ${marketplaceName}`);
-    const result = await addMarketplace(marketplaceName);
-    if (!result.success) {
-      return { success: false, error: result.error || 'Unknown error' };
-    }
-    return { success: true, registeredAs: marketplaceName };
-  }
-
-  // owner/repo or owner/repo/subpath format
-  if (marketplaceName.includes('/') && !marketplaceName.includes('://')) {
-    const parts = marketplaceName.split('/');
-    if (parts.length >= 2 && parts[0] && parts[1]) {
-      const owner = parts[0];
-      const repo = parts[1];
-      const ownerRepo = `${owner}/${repo}`;
-
-      // Check if this marketplace is already registered by repo name
-      const existingByRepo = await getMarketplace(repo);
-      if (existingByRepo) {
-        return { success: true, registeredAs: repo };
-      }
-
-      console.log(`Auto-registering GitHub marketplace: ${ownerRepo}`);
-      const result = await addMarketplace(ownerRepo, repo);
-      if (!result.success) {
-        return { success: false, error: result.error || 'Unknown error' };
-      }
-      return { success: true, registeredAs: repo };
-    }
-  }
-
-  // Unknown marketplace
-  return {
-    success: false,
-    error: `Marketplace '${marketplaceName}' not found.\n  Options:\n  1. Use fully qualified name: plugin@owner/repo\n  2. Register first: allagents plugin marketplace add <source>\n  3. Well-known marketplaces: ${Object.keys(wellKnown).join(', ')}`,
-  };
 }
 
 /**
