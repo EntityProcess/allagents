@@ -8,6 +8,7 @@ import { workspaceCmd } from './commands/workspace.js';
 import { pluginCmd } from './commands/plugin.js';
 import { selfCmd } from './commands/self.js';
 import { extractJsonFlag, setJsonMode } from './json-output.js';
+import { extractAgentHelpFlag, printAgentHelp } from './agent-help.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -26,7 +27,12 @@ const app = subcommands({
 });
 
 const rawArgs = process.argv.slice(2);
-const { args, json } = extractJsonFlag(rawArgs);
+const { args: argsNoJson, json } = extractJsonFlag(rawArgs);
+const { args: finalArgs, agentHelp } = extractAgentHelpFlag(argsNoJson);
 setJsonMode(json);
 
-run(app, args);
+if (agentHelp) {
+  printAgentHelp(finalArgs, packageJson.version);
+} else {
+  run(app, finalArgs);
+}

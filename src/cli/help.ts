@@ -8,6 +8,29 @@ export interface CommandMeta {
   expectedOutput: string;
 }
 
+export interface CommandOption {
+  flag: string;
+  short?: string;
+  type: 'boolean' | 'string';
+  description: string;
+  required?: boolean;
+  choices?: string[];
+}
+
+export interface CommandPositional {
+  name: string;
+  type: 'string';
+  required: boolean;
+  description?: string;
+}
+
+export interface AgentCommandMeta extends CommandMeta {
+  command: string;
+  positionals?: CommandPositional[];
+  options?: CommandOption[];
+  outputSchema?: Record<string, unknown>;
+}
+
 /**
  * Build an enriched description string from structured command metadata.
  * The result is used as the `description` field in cmd-ts command definitions,
