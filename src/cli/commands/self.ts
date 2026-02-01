@@ -1,11 +1,9 @@
-import { command, subcommands, flag } from 'cmd-ts';
+import { command, flag } from 'cmd-ts';
 import { execa } from 'execa';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { isJsonMode, jsonOutput } from '../json-output.js';
-import { buildDescription } from '../help.js';
+import { buildDescription, conciseSubcommands } from '../help.js';
 import { updateMeta } from '../metadata/self.js';
+import packageJson from '../../../package.json';
 
 /**
  * Detect package manager from a script path
@@ -30,14 +28,7 @@ function detectPackageManager(): 'bun' | 'npm' {
  * Get current installed version from package.json
  */
 function getCurrentVersion(): string {
-  try {
-    const __dirname = dirname(fileURLToPath(import.meta.url));
-    const packageJsonPath = join(__dirname, '..', 'package.json');
-    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-    return packageJson.version;
-  } catch {
-    return 'unknown';
-  }
+  return packageJson.version;
 }
 
 // =============================================================================
@@ -164,7 +155,7 @@ const updateCmd = command({
 // self subcommands group
 // =============================================================================
 
-export const selfCmd = subcommands({
+export const selfCmd = conciseSubcommands({
   name: 'self',
   description: 'Manage the allagents installation',
   cmds: {

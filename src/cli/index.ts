@@ -1,21 +1,15 @@
 #!/usr/bin/env node
 
-import { subcommands, run } from 'cmd-ts';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { run } from 'cmd-ts';
+import { conciseSubcommands } from './help.js';
 import { workspaceCmd } from './commands/workspace.js';
 import { pluginCmd } from './commands/plugin.js';
 import { selfCmd } from './commands/self.js';
 import { extractJsonFlag, setJsonMode } from './json-output.js';
 import { extractAgentHelpFlag, printAgentHelp } from './agent-help.js';
+import packageJson from '../../package.json';
 
-// Read version from package.json
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const packageJsonPath = join(__dirname, '..', 'package.json');
-const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-
-const app = subcommands({
+const app = conciseSubcommands({
   name: 'allagents',
   description:
     'CLI tool for managing multi-repo AI agent workspaces with plugin synchronization\n\n' +
