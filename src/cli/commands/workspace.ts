@@ -271,9 +271,9 @@ const pluginSubcommand = new Command('plugin').description(
 );
 
 pluginSubcommand
-  .command('add <plugin>')
+  .command('install <plugin>')
   .description(
-    'Add plugin to .allagents/workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
+    'Install plugin to .allagents/workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
   )
   .action(async (plugin: string) => {
     try {
@@ -287,7 +287,7 @@ pluginSubcommand
       if (result.autoRegistered) {
         console.log(`✓ Auto-registered marketplace: ${result.autoRegistered}`);
       }
-      console.log(`✓ Added plugin: ${plugin}`);
+      console.log(`✓ Installed plugin: ${plugin}`);
 
       const syncOk = await runSyncAndPrint();
       if (!syncOk) {
