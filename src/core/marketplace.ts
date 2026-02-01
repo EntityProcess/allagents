@@ -427,18 +427,28 @@ export interface MarketplacePluginInfo {
 }
 
 /**
+ * Result of listing marketplace plugins, including any warnings
+ * from lenient manifest parsing.
+ */
+export interface MarketplacePluginsResult {
+  plugins: MarketplacePluginInfo[];
+  warnings: string[];
+}
+
+/**
  * Get plugins from a marketplace directory using its manifest.
  * Returns an empty array if no manifest is found.
+ * Includes warnings from lenient parsing when applicable.
  */
 export async function getMarketplacePluginsFromManifest(
   marketplacePath: string,
-): Promise<MarketplacePluginInfo[]> {
+): Promise<MarketplacePluginsResult> {
   const result = await parseMarketplaceManifest(marketplacePath);
   if (!result.success) {
-    return [];
+    return { plugins: [], warnings: [] };
   }
 
-  return result.data.plugins.map((plugin) => {
+  const plugins = result.data.plugins.map((plugin) => {
     const resolvedSource = resolvePluginSourcePath(plugin.source, marketplacePath);
     const info: MarketplacePluginInfo = {
       name: plugin.name,
@@ -450,6 +460,8 @@ export async function getMarketplacePluginsFromManifest(
     if (plugin.homepage) info.homepage = plugin.homepage;
     return info;
   });
+
+  return { plugins, warnings: result.warnings };
 }
 
 /**
@@ -459,35 +471,36 @@ export async function getMarketplacePluginsFromManifest(
  */
 export async function listMarketplacePlugins(
   name: string,
-): Promise<MarketplacePluginInfo[]> {
+): Promise<MarketplacePluginsResult> {
   const marketplace = await getMarketplace(name);
   if (!marketplace) {
-    return [];
+    return { plugins: [], warnings: [] };
   }
 
   // Try manifest first
-  const manifestPlugins = await getMarketplacePluginsFromManifest(marketplace.path);
-  if (manifestPlugins.length > 0) {
-    return manifestPlugins;
+  const manifestResult = await getMarketplacePluginsFromManifest(marketplace.path);
+  if (manifestResult.plugins.length > 0) {
+    return manifestResult;
   }
 
   // Fall back to directory scanning
   const pluginsDir = join(marketplace.path, 'plugins');
   if (!existsSync(pluginsDir)) {
-    return [];
+    return { plugins: [], warnings: manifestResult.warnings };
   }
 
   try {
     const entries = await readdir(pluginsDir, { withFileTypes: true });
-    return entries
+    const plugins = entries
       .filter((e) => e.isDirectory())
       .map((e) => ({
         name: e.name,
         path: join(pluginsDir, e.name),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+    return { plugins, warnings: manifestResult.warnings };
   } catch {
-    return [];
+    return { plugins: [], warnings: manifestResult.warnings };
   }
 }
 

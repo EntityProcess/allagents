@@ -71,3 +71,13 @@ export const MarketplaceManifestSchema = z.object({
 });
 
 export type MarketplaceManifest = z.infer<typeof MarketplaceManifestSchema>;
+
+/**
+ * Lenient marketplace manifest schema for best-effort parsing.
+ * Only requires a plugins array (of unknown entries) so we can
+ * validate each entry individually.
+ */
+export const MarketplaceManifestLenientSchema = z.object({
+  name: z.string().optional(),
+  plugins: z.array(z.unknown()),
+}).passthrough();

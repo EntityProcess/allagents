@@ -329,16 +329,24 @@ const pluginListCmd = command({
 
       if (isJsonMode()) {
         const allPlugins: Array<{ name: string; marketplace: string }> = [];
+        const allWarnings: string[] = [];
         for (const mp of toList) {
-          const plugins = await listMarketplacePlugins(mp.name);
-          for (const plugin of plugins) {
+          const result = await listMarketplacePlugins(mp.name);
+          for (const plugin of result.plugins) {
             allPlugins.push({ name: plugin.name, marketplace: mp.name });
+          }
+          for (const warning of result.warnings) {
+            allWarnings.push(`${mp.name}: ${warning}`);
           }
         }
         jsonOutput({
           success: true,
           command: 'plugin list',
-          data: { plugins: allPlugins, total: allPlugins.length },
+          data: {
+            plugins: allPlugins,
+            total: allPlugins.length,
+            ...(allWarnings.length > 0 && { warnings: allWarnings }),
+          },
         });
         return;
       }
@@ -346,15 +354,21 @@ const pluginListCmd = command({
       let totalPlugins = 0;
 
       for (const mp of toList) {
-        const plugins = await listMarketplacePlugins(mp.name);
+        const result = await listMarketplacePlugins(mp.name);
 
-        if (plugins.length === 0) {
+        if (result.plugins.length === 0 && result.warnings.length === 0) {
           console.log(`${mp.name}: (no plugins found)`);
           continue;
         }
 
         console.log(`${mp.name}:`);
-        for (const plugin of plugins) {
+        for (const warning of result.warnings) {
+          console.log(`  Warning: ${warning}`);
+        }
+        if (result.plugins.length === 0) {
+          console.log('  (no plugins found)');
+        }
+        for (const plugin of result.plugins) {
           console.log(`  - ${plugin.name}@${mp.name}`);
           totalPlugins++;
         }
