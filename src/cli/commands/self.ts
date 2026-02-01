@@ -1,10 +1,8 @@
 import { command, flag } from 'cmd-ts';
 import { execa } from 'execa';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
+import { findPackageJson } from '../package-json.js';
 import { updateMeta } from '../metadata/self.js';
 
 /**
@@ -31,10 +29,7 @@ function detectPackageManager(): 'bun' | 'npm' {
  */
 function getCurrentVersion(): string {
   try {
-    const __dirname = dirname(fileURLToPath(import.meta.url));
-    const packageJsonPath = join(__dirname, '..', 'package.json');
-    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-    return packageJson.version;
+    return findPackageJson(import.meta.url).version;
   } catch {
     return 'unknown';
   }

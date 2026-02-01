@@ -2,19 +2,14 @@
 
 import { run } from 'cmd-ts';
 import { conciseSubcommands } from './help.js';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { workspaceCmd } from './commands/workspace.js';
 import { pluginCmd } from './commands/plugin.js';
 import { selfCmd } from './commands/self.js';
 import { extractJsonFlag, setJsonMode } from './json-output.js';
 import { extractAgentHelpFlag, printAgentHelp } from './agent-help.js';
+import { findPackageJson } from './package-json.js';
 
-// Read version from package.json
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const packageJsonPath = join(__dirname, '..', 'package.json');
-const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+const packageJson = findPackageJson(import.meta.url);
 
 const app = conciseSubcommands({
   name: 'allagents',
