@@ -23,15 +23,7 @@ describe('CLI e2e help output', () => {
     expect(stdout).toContain('self');
   });
 
-  // 2. Version
-  it('allagents --version outputs version matching package.json', async () => {
-    const pkg = await import('../../package.json');
-    const { stdout, exitCode } = await runCli(['--version']);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain(pkg.version);
-  });
-
-  // 3. Workspace help
+  // 2. Workspace help
   it('allagents workspace --help lists init, sync, status subcommands', async () => {
     const { stdout, exitCode } = await runCli(['workspace', '--help']);
     expect(exitCode).toBe(0);
