@@ -405,7 +405,7 @@ export async function updateMarketplace(
             { cwd: marketplace.path },
           );
           const match = stdout.match(/HEAD branch:\s*(\S+)/);
-          if (match) {
+          if (match?.[1]) {
             defaultBranch = match[1];
           }
         } catch {
