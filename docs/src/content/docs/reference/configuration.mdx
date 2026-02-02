@@ -66,6 +66,19 @@ The `workspace` section enables syncing files from external sources to your work
 - Deleted local files are restored on next sync
 - AGENTS.md and CLAUDE.md automatically receive WORKSPACE-RULES injection
 
+## User-Level workspace.yaml
+
+When using `--scope user`, AllAgents stores a separate config at `~/.allagents/workspace.yaml`:
+
+```yaml
+plugins:
+  - superpowers@obra/superpowers
+```
+
+This file follows the same `plugins` format as the project-level workspace.yaml but does not support `workspace`, `repositories`, or `clients` fields. User-scoped plugins sync to user-level directories (`~/.claude/`, `~/.codex/`, etc.) and are available across all projects.
+
+Sync state for user-scoped plugins is tracked in `~/.allagents/sync-state.json`.
+
 ## plugin.json
 
 ```json

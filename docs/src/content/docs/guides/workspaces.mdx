@@ -166,3 +166,22 @@ Preview what would happen without making changes:
 ```bash
 allagents workspace sync --dry-run
 ```
+
+### User Scope
+
+By default, plugins are installed to the current project. Use `--scope user` to install plugins to your home directory so they are available across all projects:
+
+```bash
+# Install a plugin for the current user
+allagents workspace plugin install superpowers@obra/superpowers --scope user
+
+# Sync user-scoped plugins
+allagents workspace sync --scope user
+
+# Remove a user-scoped plugin
+allagents workspace plugin remove superpowers@obra/superpowers --scope user
+```
+
+User-scoped plugins are stored in `~/.allagents/workspace.yaml` and sync to user-level directories (`~/.claude/`, `~/.codex/`, etc.) instead of the project. This is useful for plugins you want available everywhere, like personal skills or productivity tools.
+
+User-scoped and project-scoped plugins are independent — they do not interfere with each other.
