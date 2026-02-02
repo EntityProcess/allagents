@@ -5,6 +5,7 @@ import {
   MarketplaceManifestSchema,
   MarketplaceManifestLenientSchema,
   MarketplacePluginEntrySchema,
+  PluginSourceRefSchema,
   type MarketplaceManifest,
   type MarketplacePluginEntry,
   type PluginSourceRef,
@@ -152,17 +153,11 @@ function extractPluginEntry(
     warnings.push(`plugins[${index}] ("${name}"): missing "description" field`);
   }
 
-  // Try to extract source
+  // Try to extract and normalize source via the schema (handles string, url, github→url transform)
   let source: PluginSourceRef = '';
-  if (typeof obj.source === 'string') {
-    source = obj.source;
-  } else if (
-    obj.source &&
-    typeof obj.source === 'object' &&
-    (obj.source as Record<string, unknown>).source === 'url' &&
-    typeof (obj.source as Record<string, unknown>).url === 'string'
-  ) {
-    source = obj.source as { source: 'url'; url: string };
+  const sourceResult = PluginSourceRefSchema.safeParse(obj.source);
+  if (sourceResult.success) {
+    source = sourceResult.data;
   } else {
     warnings.push(`plugins[${index}] ("${name}"): missing or invalid "source" field`);
   }

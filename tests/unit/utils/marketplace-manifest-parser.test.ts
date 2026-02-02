@@ -238,6 +238,51 @@ describe('parseMarketplaceManifest', () => {
       expect(result.warnings.length).toBeGreaterThan(0);
     }
   });
+
+  it('should leniently parse GitHub source and normalize to URL source', async () => {
+    // This mimics the real WTG marketplace.json where ediprod uses github source
+    const manifest = {
+      name: 'wtg-ai-prompts',
+      description: 'WiseTech Global plugins',
+      plugins: [
+        {
+          name: 'cargowise',
+          description: 'CargoWise coding guidelines',
+          source: './plugins/cargowise',
+        },
+        {
+          name: 'ediprod',
+          source: { source: 'github', repo: 'WiseTechGlobal/mcp-ediprod' },
+        },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.plugins).toHaveLength(2);
+
+      // cargowise should be a local path string
+      expect(result.data.plugins[0].name).toBe('cargowise');
+      expect(result.data.plugins[0].source).toBe('./plugins/cargowise');
+
+      // ediprod should be normalized from github to url source
+      const ediprod = result.data.plugins[1];
+      expect(ediprod.name).toBe('ediprod');
+      expect(typeof ediprod.source).toBe('object');
+      if (typeof ediprod.source === 'object') {
+        expect(ediprod.source.source).toBe('url');
+        expect(ediprod.source.url).toBe('https://github.com/WiseTechGlobal/mcp-ediprod');
+      }
+
+      // Should have a warning about missing description on ediprod
+      expect(result.warnings.some(w => w.includes('ediprod') && w.includes('description'))).toBe(true);
+    }
+  });
 });
 
 describe('resolvePluginSourcePath', () => {
