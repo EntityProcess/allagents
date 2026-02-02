@@ -14,7 +14,6 @@ export async function runInit(): Promise<void> {
     });
 
     if (p.isCancel(targetPath)) {
-      p.cancel('Cancelled');
       return;
     }
 
@@ -25,7 +24,6 @@ export async function runInit(): Promise<void> {
     });
 
     if (p.isCancel(fromSource)) {
-      p.cancel('Cancelled');
       return;
     }
 

@@ -1,5 +1,6 @@
 import * as p from '@clack/prompts';
 import chalk from 'chalk';
+import { relative } from 'node:path';
 import packageJson from '../../../package.json';
 import { getTuiContext, type TuiContext } from './context.js';
 import { runInit } from './actions/init.js';
@@ -34,11 +35,10 @@ export function buildMenuOptions(context: TuiContext) {
     });
   } else if (context.needsSync) {
     // State 2: Workspace exists, needs sync
-    const total = context.projectPluginCount + context.userPluginCount;
     options.push({
       label: 'Sync plugins',
       value: 'sync',
-      hint: `${total} plugin${total !== 1 ? 's' : ''}`,
+      hint: 'sync needed',
     });
     options.push({ label: 'View status', value: 'status' });
     options.push({ label: 'Install plugin', value: 'install' });
@@ -64,7 +64,8 @@ function buildSummary(context: TuiContext): string {
   const lines: string[] = [];
 
   if (context.hasWorkspace && context.workspacePath) {
-    lines.push(`Workspace: ${context.workspacePath}`);
+    const relPath = relative(process.cwd(), context.workspacePath) || '.';
+    lines.push(`Workspace: ${relPath}`);
     lines.push(`Project plugins: ${context.projectPluginCount}`);
   } else {
     lines.push('No workspace detected');
@@ -114,7 +115,7 @@ export async function runWizard(): Promise<void> {
         await runSync(context);
         break;
       case 'status':
-        await runStatus();
+        await runStatus(context);
         break;
       case 'install':
         await runInstallPlugin(context);

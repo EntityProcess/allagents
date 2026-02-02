@@ -83,22 +83,10 @@ describe('buildMenuOptions', () => {
       expect(values[values.length - 1]).toBe('exit');
     });
 
-    it('should show plugin count hint on sync option', () => {
+    it('should show sync needed hint on sync option', () => {
       const options = buildMenuOptions(context);
       const syncOption = options.find((o) => o.value === 'sync');
-      expect(syncOption?.hint).toBe('3 plugins');
-    });
-
-    it('should show singular hint when total is 1', () => {
-      const ctx = makeContext({
-        hasWorkspace: true,
-        needsSync: true,
-        projectPluginCount: 1,
-        userPluginCount: 0,
-      });
-      const options = buildMenuOptions(ctx);
-      const syncOption = options.find((o) => o.value === 'sync');
-      expect(syncOption?.hint).toBe('1 plugin');
+      expect(syncOption?.hint).toBe('sync needed');
     });
   });
 

@@ -32,7 +32,6 @@ export async function runInstallPlugin(context: TuiContext): Promise<void> {
       });
 
       if (p.isCancel(source)) {
-        p.cancel('Cancelled');
         return;
       }
 
@@ -76,7 +75,6 @@ export async function runInstallPlugin(context: TuiContext): Promise<void> {
     });
 
     if (p.isCancel(selected)) {
-      p.cancel('Cancelled');
       return;
     }
 
@@ -92,7 +90,6 @@ export async function runInstallPlugin(context: TuiContext): Promise<void> {
       });
 
       if (p.isCancel(scopeChoice)) {
-        p.cancel('Cancelled');
         return;
       }
 
@@ -145,7 +142,7 @@ export async function runInstallPlugin(context: TuiContext): Promise<void> {
  */
 export async function runManagePlugins(context: TuiContext): Promise<void> {
   try {
-    const status = await getWorkspaceStatus();
+    const status = await getWorkspaceStatus(context.workspacePath ?? undefined);
 
     if (!status.success || status.plugins.length === 0) {
       p.note('No plugins installed in this workspace.', 'Plugins');
@@ -164,7 +161,6 @@ export async function runManagePlugins(context: TuiContext): Promise<void> {
     });
 
     if (p.isCancel(selected)) {
-      p.cancel('Cancelled');
       return;
     }
 
@@ -185,7 +181,6 @@ export async function runManagePlugins(context: TuiContext): Promise<void> {
       });
 
       if (p.isCancel(scopeChoice)) {
-        p.cancel('Cancelled');
         return;
       }
 
