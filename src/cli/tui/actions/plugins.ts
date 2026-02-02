@@ -1,6 +1,5 @@
 import * as p from '@clack/prompts';
-import { addPlugin } from '../../../core/workspace-modify.js';
-import { removePlugin } from '../../../core/workspace-modify.js';
+import { addPlugin, removePlugin } from '../../../core/workspace-modify.js';
 import { addUserPlugin, removeUserPlugin } from '../../../core/user-workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
 import {
@@ -175,7 +174,7 @@ export async function runManagePlugins(context: TuiContext): Promise<void> {
     }
 
     // Determine scope
-    let scope: 'project' | 'user' = 'project';
+    let scope: 'project' | 'user' = context.hasWorkspace ? 'project' : 'user';
     if (context.hasWorkspace) {
       const scopeChoice = await p.select({
         message: 'Remove from which scope?',

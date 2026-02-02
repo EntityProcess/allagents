@@ -123,6 +123,7 @@ export async function runWizard(): Promise<void> {
         await runManagePlugins(context);
         break;
       case 'marketplace':
+        // Browse marketplace is the same flow as install — user picks from marketplace plugins
         await runInstallPlugin(context);
         break;
       case 'update':
