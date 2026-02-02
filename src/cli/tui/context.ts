@@ -33,25 +33,45 @@ export async function getTuiContext(
   // Project-level plugin count
   let projectPluginCount = 0;
   if (hasWorkspace) {
-    const status = await getWorkspaceStatus(cwd);
-    projectPluginCount = status.plugins.length;
+    try {
+      const status = await getWorkspaceStatus(cwd);
+      projectPluginCount = status.plugins.length;
+    } catch {
+      // Workspace config malformed or unreadable -- degrade gracefully
+    }
   }
 
   // User-level config and plugin count
-  const userConfig = await getUserWorkspaceConfig();
-  const hasUserConfig = userConfig !== null;
-  const userPluginCount = userConfig?.plugins.length ?? 0;
+  let userPluginCount = 0;
+  let hasUserConfig = false;
+  try {
+    const userConfig = await getUserWorkspaceConfig();
+    hasUserConfig = userConfig !== null;
+    userPluginCount = userConfig?.plugins.length ?? 0;
+  } catch {
+    // User config unavailable -- degrade gracefully
+  }
 
   // Sync state detection
-  const needsSync = await detectNeedsSync(
-    cwd,
-    hasWorkspace,
-    projectPluginCount,
-  );
+  let needsSync = false;
+  try {
+    needsSync = await detectNeedsSync(
+      cwd,
+      hasWorkspace,
+      projectPluginCount,
+    );
+  } catch {
+    // Sync state detection failed -- degrade gracefully
+  }
 
   // Marketplace count
-  const marketplaces = await listMarketplaces();
-  const marketplaceCount = marketplaces.length;
+  let marketplaceCount = 0;
+  try {
+    const marketplaces = await listMarketplaces();
+    marketplaceCount = marketplaces.length;
+  } catch {
+    // Marketplace listing failed -- degrade gracefully
+  }
 
   return {
     hasWorkspace,
@@ -79,18 +99,23 @@ async function detectNeedsSync(
     return false;
   }
 
-  const syncState = await loadSyncState(cwd);
+  try {
+    const syncState = await loadSyncState(cwd);
 
-  // No sync state but plugins exist — needs sync
-  if (syncState === null) {
-    return pluginCount > 0;
+    // No sync state but plugins exist — needs sync
+    if (syncState === null) {
+      return pluginCount > 0;
+    }
+
+    // Sync state exists but has no files recorded — needs sync
+    const totalFiles = Object.values(syncState.files).reduce(
+      (sum, files) => sum + files.length,
+      0,
+    );
+
+    return totalFiles === 0 && pluginCount > 0;
+  } catch {
+    // Sync state loading failed -- assume no sync needed
+    return false;
   }
-
-  // Sync state exists but has no files recorded — needs sync
-  const totalFiles = Object.values(syncState.files).reduce(
-    (sum, files) => sum + files.length,
-    0,
-  );
-
-  return totalFiles === 0 && pluginCount > 0;
 }
