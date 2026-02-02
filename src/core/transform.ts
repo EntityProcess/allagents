@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
+import type { ClientMapping } from '../models/client-mapping.js';
 import type { ClientType, WorkspaceFile } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
 import { WORKSPACE_RULES } from '../constants.js';
@@ -68,6 +69,8 @@ export interface CopyResult {
 export interface CopyOptions {
   /** Simulate copy without making changes */
   dryRun?: boolean;
+  /** Override client path mappings (defaults to CLIENT_MAPPINGS) */
+  clientMappings?: Record<string, ClientMapping>;
 }
 
 /**
@@ -95,6 +98,13 @@ export interface WorkspaceCopyOptions extends CopyOptions {
 }
 
 /**
+ * Get the client mapping, using override if provided, otherwise falling back to CLIENT_MAPPINGS
+ */
+function getMapping(client: ClientType, options?: { clientMappings?: Record<string, ClientMapping> }): ClientMapping {
+  return (options?.clientMappings as Record<ClientType, ClientMapping>)?.[client] ?? CLIENT_MAPPINGS[client];
+}
+
+/**
  * Copy commands from plugin to workspace for a specific client
  * Commands are a Claude-specific feature (only claude client supports them)
  * @param pluginPath - Path to plugin directory
@@ -110,7 +120,7 @@ export async function copyCommands(
   options: CopyOptions = {},
 ): Promise<CopyResult[]> {
   const { dryRun = false } = options;
-  const mapping = CLIENT_MAPPINGS[client];
+  const mapping = getMapping(client, options);
   const results: CopyResult[] = [];
 
   // Skip if client doesn't support commands (only Claude has commandsPath)
@@ -173,7 +183,7 @@ export async function copySkills(
   options: SkillCopyOptions = {},
 ): Promise<CopyResult[]> {
   const { dryRun = false, skillNameMap } = options;
-  const mapping = CLIENT_MAPPINGS[client];
+  const mapping = getMapping(client, options);
   const results: CopyResult[] = [];
 
   // Skip if client doesn't support skills
@@ -298,7 +308,7 @@ export async function copyHooks(
   options: CopyOptions = {},
 ): Promise<CopyResult[]> {
   const { dryRun = false } = options;
-  const mapping = CLIENT_MAPPINGS[client];
+  const mapping = getMapping(client, options);
   const results: CopyResult[] = [];
 
   // Skip if client doesn't support hooks
@@ -351,7 +361,7 @@ export async function copyAgents(
   options: CopyOptions = {},
 ): Promise<CopyResult[]> {
   const { dryRun = false } = options;
-  const mapping = CLIENT_MAPPINGS[client];
+  const mapping = getMapping(client, options);
   const results: CopyResult[] = [];
 
   // Skip if client doesn't support agents
