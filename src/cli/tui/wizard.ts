@@ -8,7 +8,7 @@ import { runStatus } from './actions/status.js';
 import { runInstallPlugin, runManagePlugins } from './actions/plugins.js';
 import { runUpdate } from './actions/update.js';
 
-type MenuAction =
+export type MenuAction =
   | 'init'
   | 'sync'
   | 'status'
@@ -21,7 +21,7 @@ type MenuAction =
 /**
  * Build context-aware menu options based on workspace state.
  */
-function buildMenuOptions(context: TuiContext) {
+export function buildMenuOptions(context: TuiContext) {
   const options: Array<{ label: string; value: MenuAction; hint?: string }> = [];
 
   if (!context.hasWorkspace) {
