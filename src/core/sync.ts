@@ -20,7 +20,8 @@ import {
   collectPluginSkills,
   type CopyResult,
 } from './transform.js';
-import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
+import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../models/client-mapping.js';
+import type { ClientMapping } from '../models/client-mapping.js';
 import {
   resolveSkillNames,
   getSkillKey,
@@ -36,6 +37,7 @@ import {
   getPreviouslySyncedFiles,
 } from './sync-state.js';
 import type { SyncState } from '../models/sync-state.js';
+import { getUserWorkspaceConfig } from './user-workspace.js';
 
 /**
  * Result of a sync operation
@@ -522,6 +524,7 @@ export function collectSyncedPaths(
   copyResults: CopyResult[],
   workspacePath: string,
   clients: ClientType[],
+  clientMappings?: Record<string, ClientMapping>,
 ): Partial<Record<ClientType, string[]>> {
   const result: Partial<Record<ClientType, string[]>> = {};
 
@@ -540,7 +543,7 @@ export function collectSyncedPaths(
 
     // Determine which client this file belongs to
     for (const client of clients) {
-      const mapping = CLIENT_MAPPINGS[client];
+      const mapping = clientMappings?.[client] ?? CLIENT_MAPPINGS[client];
 
       // Check if this is a skill directory (copy results for skills point to the dir)
       // e.g., relativePath = '.claude/skills/my-skill', skillsPath = '.claude/skills/'
@@ -680,6 +683,7 @@ async function copyValidatedPlugin(
   clients: string[],
   dryRun: boolean,
   skillNameMap?: Map<string, string>,
+  clientMappings?: Record<string, ClientMapping>,
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
 
@@ -689,7 +693,7 @@ async function copyValidatedPlugin(
       validatedPlugin.resolved,
       workspacePath,
       client as ClientType,
-      { dryRun, ...(skillNameMap && { skillNameMap }) },
+      { dryRun, ...(skillNameMap && { skillNameMap }), ...(clientMappings && { clientMappings }) },
     );
     copyResults.push(...results);
   }
@@ -1107,6 +1111,117 @@ export async function syncWorkspace(
     totalSkipped,
     totalGenerated,
     purgedPaths,
+  };
+}
+
+/**
+ * Sync user-scoped plugins to user home directories using USER_CLIENT_MAPPINGS.
+ * Reads config from ~/.allagents/workspace.yaml and syncs to paths relative to $HOME.
+ *
+ * @param options - Sync options (offline, dryRun)
+ * @returns Sync result
+ */
+export async function syncUserWorkspace(
+  options: { offline?: boolean; dryRun?: boolean } = {},
+): Promise<SyncResult> {
+  const homeDir = resolve(process.env.HOME || process.env.USERPROFILE || '~');
+  const config = await getUserWorkspaceConfig();
+
+  if (!config) {
+    return {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+    };
+  }
+
+  const clients = config.clients;
+  const { offline = false, dryRun = false } = options;
+
+  // Validate all plugins
+  const validatedPlugins = await validateAllPlugins(config.plugins, homeDir, offline);
+  const failedValidations = validatedPlugins.filter((v) => !v.success);
+  if (failedValidations.length > 0) {
+    const errors = failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n');
+    return {
+      success: false,
+      pluginResults: failedValidations.map((v) => ({
+        plugin: v.plugin,
+        resolved: v.resolved,
+        success: false,
+        copyResults: [],
+        ...(v.error && { error: v.error }),
+      })),
+      totalCopied: 0,
+      totalFailed: failedValidations.length,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      error: `Plugin validation failed:\n${errors}`,
+    };
+  }
+
+  // Load previous sync state (stored at ~/.allagents/sync-state.json)
+  const previousState = await loadSyncState(homeDir);
+
+  // Selective purge
+  if (!dryRun) {
+    await selectivePurgeWorkspace(homeDir, previousState, clients);
+  }
+
+  // Two-pass skill name resolution
+  const allSkills = await collectAllSkills(validatedPlugins);
+  const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
+
+  // Copy plugins using USER_CLIENT_MAPPINGS
+  const pluginResults = await Promise.all(
+    validatedPlugins.map((vp) => {
+      const skillNameMap = pluginSkillMaps.get(vp.resolved);
+      return copyValidatedPlugin(vp, homeDir, clients, dryRun, skillNameMap, USER_CLIENT_MAPPINGS);
+    }),
+  );
+
+  // Count results
+  let totalCopied = 0;
+  let totalFailed = 0;
+  let totalSkipped = 0;
+  let totalGenerated = 0;
+
+  for (const pluginResult of pluginResults) {
+    for (const copyResult of pluginResult.copyResults) {
+      switch (copyResult.action) {
+        case 'copied':
+          totalCopied++;
+          break;
+        case 'failed':
+          totalFailed++;
+          break;
+        case 'skipped':
+          totalSkipped++;
+          break;
+        case 'generated':
+          totalGenerated++;
+          break;
+      }
+    }
+  }
+
+  // Save sync state
+  if (!dryRun) {
+    const allCopyResults = pluginResults.flatMap((r) => r.copyResults);
+    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, clients as ClientType[], USER_CLIENT_MAPPINGS);
+    await saveSyncState(homeDir, syncedFiles);
+  }
+
+  return {
+    success: totalFailed === 0,
+    pluginResults,
+    totalCopied,
+    totalFailed,
+    totalSkipped,
+    totalGenerated,
   };
 }
 

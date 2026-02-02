@@ -7,10 +7,10 @@ description: Complete reference for AllAgents CLI commands.
 
 ```bash
 allagents workspace init <path> [--from <source>]
-allagents workspace sync [--offline] [--dry-run] [--client <client>]
+allagents workspace sync [--offline] [--dry-run] [--client <client>] [--scope <scope>]
 allagents workspace status
-allagents workspace plugin install <plugin@marketplace>
-allagents workspace plugin remove <plugin>
+allagents workspace plugin install <plugin@marketplace> [--scope <scope>]
+allagents workspace plugin remove <plugin> [--scope <scope>]
 ```
 
 ### workspace init
@@ -37,6 +37,9 @@ Syncs plugins to the workspace using non-destructive sync. By default, remote pl
 | `--offline` | Use cached plugins without fetching latest from remote |
 | `--dry-run` | Preview changes without applying them |
 | `-c, --client <client>` | Sync only the specified client (e.g., `opencode`, `claude`) |
+| `-s, --scope <scope>` | Sync scope: `project` (default) or `user` |
+
+When `--scope user` is used, sync targets the user-level workspace at `~/.allagents/workspace.yaml` and installs plugins to user directories (`~/.claude/`, `~/.codex/`, etc.) instead of the project.
 
 **Non-destructive behavior:**
 - First sync overlays files without deleting existing user files
@@ -44,6 +47,14 @@ Syncs plugins to the workspace using non-destructive sync. By default, remote pl
 - User files (not from plugins) are never deleted
 
 Sync state is tracked in `.allagents/sync-state.json`.
+
+### workspace plugin install / remove
+
+| Flag | Description |
+|------|-------------|
+| `-s, --scope <scope>` | Installation scope: `project` (default) or `user` |
+
+When `--scope user` is used, the plugin is added to the user-level config at `~/.allagents/workspace.yaml` instead of the project workspace. User-scoped plugins sync to user directories (`~/.claude/`, `~/.codex/`, etc.) and are available across all projects.
 
 ## Plugin Commands
 

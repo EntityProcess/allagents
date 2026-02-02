@@ -1,6 +1,6 @@
 import { command, positional, option, flag, string, optional } from 'cmd-ts';
 import { initWorkspace } from '../../core/workspace.js';
-import { syncWorkspace } from '../../core/sync.js';
+import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
@@ -99,9 +99,11 @@ const syncCmd = command({
     offline: flag({ long: 'offline', description: 'Use cached plugins without fetching latest from remote' }),
     dryRun: flag({ long: 'dry-run', short: 'n', description: 'Simulate sync without making changes' }),
     client: option({ type: optional(string), long: 'client', short: 'c', description: 'Sync only the specified client (e.g., opencode, claude)' }),
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Sync scope: "project" (default) or "user"' }),
   },
-  handler: async ({ offline, dryRun, client }) => {
+  handler: async ({ offline, dryRun, client, scope }) => {
     try {
+      const isUser = scope === 'user';
       if (!isJsonMode()) {
         if (dryRun) {
           console.log('Dry run mode - no changes will be made\n');
@@ -109,13 +111,15 @@ const syncCmd = command({
         if (client) {
           console.log(`Syncing client: ${client}\n`);
         }
-        console.log('Syncing workspace...\n');
+        console.log(`Syncing ${isUser ? 'user' : ''} workspace...\n`);
       }
-      const result = await syncWorkspace(process.cwd(), {
-        offline,
-        dryRun,
-        ...(client && { clients: [client] }),
-      });
+      const result = isUser
+        ? await syncUserWorkspace({ offline, dryRun })
+        : await syncWorkspace(process.cwd(), {
+            offline,
+            dryRun,
+            ...(client && { clients: [client] }),
+          });
 
       // Early exit only for top-level errors (e.g., missing .allagents/workspace.yaml)
       // Plugin-level errors are handled in the loop below
