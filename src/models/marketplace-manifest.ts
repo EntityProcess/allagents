@@ -12,9 +12,23 @@ export const UrlSourceSchema = z.object({
 export type UrlSource = z.infer<typeof UrlSourceSchema>;
 
 /**
- * Plugin source: either a relative path string or a URL source object
+ * GitHub source object for plugins hosted on GitHub
+ * e.g. { source: "github", repo: "WiseTechGlobal/mcp-ediprod" }
+ * Normalized to UrlSource at parse time.
  */
-export const PluginSourceRefSchema = z.union([z.string(), UrlSourceSchema]);
+export const GitHubSourceSchema = z.object({
+  source: z.literal('github'),
+  repo: z.string().min(1),
+}).transform((val) => ({
+  source: 'url' as const,
+  url: `https://github.com/${val.repo}`,
+}));
+
+/**
+ * Plugin source: a relative path string, a URL source object, or a GitHub source object.
+ * GitHub sources are normalized to URL sources during parsing.
+ */
+export const PluginSourceRefSchema = z.union([z.string(), UrlSourceSchema, GitHubSourceSchema]);
 
 export type PluginSourceRef = z.infer<typeof PluginSourceRefSchema>;
 

@@ -156,4 +156,28 @@ describe('MarketplaceManifestSchema', () => {
     const result = MarketplaceManifestSchema.safeParse(manifest);
     expect(result.success).toBe(false);
   });
+
+  it('should validate plugin with GitHub source object and normalize to URL', () => {
+    const manifest = {
+      name: 'test',
+      description: 'test',
+      plugins: [
+        {
+          name: 'ediprod',
+          description: 'EDI product plugin',
+          source: { source: 'github', repo: 'WiseTechGlobal/mcp-ediprod' },
+        },
+      ],
+    };
+    const result = MarketplaceManifestSchema.safeParse(manifest);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const source = result.data.plugins[0].source;
+      expect(typeof source).toBe('object');
+      if (typeof source === 'object') {
+        expect(source.source).toBe('url');
+        expect(source.url).toBe('https://github.com/WiseTechGlobal/mcp-ediprod');
+      }
+    }
+  });
 });

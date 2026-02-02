@@ -228,6 +228,82 @@ describe('getMarketplacePluginsFromManifest', () => {
     expect(result).toBeNull();
   });
 
+  it('should resolve GitHub source plugin via fetch (normalized to URL)', async () => {
+    // Simulates the WTG marketplace.json where ediprod has a github source
+    const cachedPluginDir = join(testDir, 'cached-ediprod');
+    mkdirSync(cachedPluginDir, { recursive: true });
+
+    const manifest = {
+      name: 'wtg-ai-prompts',
+      description: 'WiseTech Global plugins',
+      plugins: [
+        {
+          name: 'cargowise',
+          description: 'CargoWise coding guidelines',
+          source: './plugins/cargowise',
+        },
+        {
+          name: 'ediprod',
+          source: { source: 'github', repo: 'WiseTechGlobal/mcp-ediprod' },
+        },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    // Create local plugin dir for cargowise
+    mkdirSync(join(testDir, 'plugins', 'cargowise'), { recursive: true });
+
+    let fetchedUrl = '';
+    const result = await resolvePluginSpec('ediprod@wtg-ai-prompts', {
+      marketplacePathOverride: testDir,
+      fetchFn: async (url: string) => {
+        fetchedUrl = url;
+        return {
+          success: true,
+          action: 'fetched' as const,
+          cachePath: cachedPluginDir,
+        };
+      },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.path).toBe(cachedPluginDir);
+    expect(result!.plugin).toBe('ediprod');
+    // Verify the github source was normalized to a full URL
+    expect(fetchedUrl).toBe('https://github.com/WiseTechGlobal/mcp-ediprod');
+  });
+
+  it('should handle GitHub source plugins in plugin listing', async () => {
+    const manifest = {
+      name: 'test',
+      description: 'Test',
+      plugins: [
+        {
+          name: 'local-plugin',
+          description: 'Local plugin',
+          source: './plugins/local-plugin',
+        },
+        {
+          name: 'github-plugin',
+          description: 'GitHub plugin',
+          source: { source: 'github', repo: 'org/repo' },
+        },
+      ],
+    };
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await getMarketplacePluginsFromManifest(testDir);
+    expect(result.plugins).toHaveLength(2);
+    expect(result.plugins[1].name).toBe('github-plugin');
+    expect(result.plugins[1].source).toBe('https://github.com/org/repo');
+  });
+
   it('should return plugins without warnings when manifest is missing description', async () => {
     const manifest = {
       name: 'test',
