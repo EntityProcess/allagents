@@ -383,6 +383,38 @@ export async function updateMarketplace(
     }
 
     try {
+      // Ensure we're on the default branch before pulling
+      let defaultBranch = 'main';
+      try {
+        const { stdout } = await execa(
+          'git',
+          ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
+          { cwd: marketplace.path },
+        );
+        // stdout is like "origin/main" - strip remote prefix to get local branch name
+        const ref = stdout.trim();
+        defaultBranch = ref.startsWith('origin/')
+          ? ref.slice('origin/'.length)
+          : ref;
+      } catch {
+        // symbolic-ref not set; query remote for HEAD branch
+        try {
+          const { stdout } = await execa(
+            'git',
+            ['remote', 'show', 'origin'],
+            { cwd: marketplace.path },
+          );
+          const match = stdout.match(/HEAD branch:\s*(\S+)/);
+          if (match) {
+            defaultBranch = match[1];
+          }
+        } catch {
+          // Network unavailable or remote unreachable; fall back to 'main'
+        }
+      }
+      await execa('git', ['checkout', defaultBranch], {
+        cwd: marketplace.path,
+      });
       await execa('git', ['pull'], { cwd: marketplace.path });
 
       // Update lastUpdated in registry
