@@ -117,20 +117,25 @@ export const pluginValidateMeta: AgentCommandMeta = {
 
 export const pluginInstallMeta: AgentCommandMeta = {
   command: 'plugin install',
-  description: 'Install plugin to .allagents/workspace.yaml (supports plugin@marketplace, GitHub URL, or local path)',
-  whenToUse: 'To add a new plugin to your workspace and immediately sync it',
+  description: 'Install plugin to workspace (supports plugin@marketplace, GitHub URL, or local path). Use --scope user for user-level install.',
+  whenToUse: 'To add a new plugin to your workspace (or user-level config with --scope user) and immediately sync it',
   examples: [
     'allagents plugin install my-plugin@official',
     'allagents plugin install https://github.com/user/plugin',
     'allagents plugin install ../local-plugin',
+    'allagents plugin install my-plugin@official --scope user',
   ],
   expectedOutput:
     'Confirms the plugin was added, then runs sync. Shows sync results. Exit 0 on success, exit 1 on failure.',
   positionals: [
     { name: 'plugin', type: 'string', required: true, description: 'Plugin identifier (plugin@marketplace, GitHub URL, or local path)' },
   ],
+  options: [
+    { flag: '--scope', short: '-s', type: 'string', description: 'Installation scope: "project" (default) or "user"' },
+  ],
   outputSchema: {
     plugin: 'string',
+    scope: 'string',
     autoRegistered: 'string | null',
     syncResult: {
       copied: 'number',
@@ -144,19 +149,24 @@ export const pluginInstallMeta: AgentCommandMeta = {
 
 export const pluginUninstallMeta: AgentCommandMeta = {
   command: 'plugin uninstall',
-  description: 'Uninstall plugin from .allagents/workspace.yaml',
-  whenToUse: 'To remove a plugin from your workspace config and re-sync',
+  description: 'Uninstall plugin from workspace config. Use --scope user for user-level uninstall.',
+  whenToUse: 'To remove a plugin from your workspace (or user-level config with --scope user) and re-sync',
   examples: [
     'allagents plugin uninstall my-plugin@official',
     'allagents plugin uninstall https://github.com/user/plugin',
+    'allagents plugin uninstall my-plugin@official --scope user',
   ],
   expectedOutput:
     'Confirms the plugin was removed, then runs sync to clean up. Exit 0 on success, exit 1 on failure.',
   positionals: [
     { name: 'plugin', type: 'string', required: true, description: 'Plugin identifier to uninstall' },
   ],
+  options: [
+    { flag: '--scope', short: '-s', type: 'string', description: 'Installation scope: "project" (default) or "user"' },
+  ],
   outputSchema: {
     plugin: 'string',
+    scope: 'string',
     syncResult: {
       copied: 'number',
       generated: 'number',

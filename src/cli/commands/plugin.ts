@@ -7,8 +7,9 @@ import {
   listMarketplacePlugins,
   getWellKnownMarketplaces,
 } from '../../core/marketplace.js';
-import { syncWorkspace } from '../../core/sync.js';
+import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
+import { addUserPlugin, removeUserPlugin } from '../../core/user-workspace.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import {
@@ -96,6 +97,73 @@ async function runSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnType<ty
     }
 
     console.log('\nSync complete:');
+    console.log(`  Total copied: ${result.totalCopied}`);
+    if (result.totalGenerated > 0) {
+      console.log(`  Total generated: ${result.totalGenerated}`);
+    }
+    if (result.totalFailed > 0) {
+      console.log(`  Total failed: ${result.totalFailed}`);
+    }
+    if (result.totalSkipped > 0) {
+      console.log(`  Total skipped: ${result.totalSkipped}`);
+    }
+  }
+
+  return { ok: result.success && result.totalFailed === 0, syncData };
+}
+
+/**
+ * Run user-scope sync and print results. Returns true if sync succeeded.
+ */
+async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnType<typeof buildSyncData> | null }> {
+  if (!isJsonMode()) {
+    console.log('\nSyncing user workspace...\n');
+  }
+  const result = await syncUserWorkspace();
+
+  if (!result.success && result.error) {
+    if (!isJsonMode()) {
+      console.error(`Sync error: ${result.error}`);
+    }
+    return { ok: false, syncData: null };
+  }
+
+  const syncData = buildSyncData(result);
+
+  if (!isJsonMode()) {
+    for (const pluginResult of result.pluginResults) {
+      const status = pluginResult.success ? '\u2713' : '\u2717';
+      console.log(`${status} Plugin: ${pluginResult.plugin}`);
+
+      if (pluginResult.error) {
+        console.log(`  Error: ${pluginResult.error}`);
+      }
+
+      const copied = pluginResult.copyResults.filter(
+        (r) => r.action === 'copied',
+      ).length;
+      const generated = pluginResult.copyResults.filter(
+        (r) => r.action === 'generated',
+      ).length;
+      const failed = pluginResult.copyResults.filter(
+        (r) => r.action === 'failed',
+      ).length;
+
+      if (copied > 0) console.log(`  Copied: ${copied} files`);
+      if (generated > 0) console.log(`  Generated: ${generated} files`);
+      if (failed > 0) {
+        console.log(`  Failed: ${failed} files`);
+        for (const failedResult of pluginResult.copyResults.filter(
+          (r) => r.action === 'failed',
+        )) {
+          console.log(
+            `    - ${failedResult.destination}: ${failedResult.error}`,
+          );
+        }
+      }
+    }
+
+    console.log('\nUser sync complete:');
     console.log(`  Total copied: ${result.totalCopied}`);
     if (result.totalGenerated > 0) {
       console.log(`  Total generated: ${result.totalGenerated}`);
@@ -521,10 +589,14 @@ const pluginInstallCmd = command({
   description: buildDescription(pluginInstallMeta),
   args: {
     plugin: positional({ type: string, displayName: 'plugin' }),
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Installation scope: "project" (default) or "user"' }),
   },
-  handler: async ({ plugin }) => {
+  handler: async ({ plugin, scope }) => {
     try {
-      const result = await addPlugin(plugin);
+      const isUser = scope === 'user';
+      const result = isUser
+        ? await addUserPlugin(plugin)
+        : await addPlugin(plugin);
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -536,12 +608,15 @@ const pluginInstallCmd = command({
       }
 
       if (isJsonMode()) {
-        const { ok, syncData } = await runSyncAndPrint();
+        const { ok, syncData } = isUser
+          ? await runUserSyncAndPrint()
+          : await runSyncAndPrint();
         jsonOutput({
           success: ok,
           command: 'plugin install',
           data: {
             plugin,
+            scope: isUser ? 'user' : 'project',
             autoRegistered: result.autoRegistered ?? null,
             syncResult: syncData,
           },
@@ -556,9 +631,11 @@ const pluginInstallCmd = command({
       if (result.autoRegistered) {
         console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
       }
-      console.log(`\u2713 Installed plugin: ${plugin}`);
+      console.log(`\u2713 Installed plugin${isUser ? ' (user scope)' : ''}: ${plugin}`);
 
-      const { ok: syncOk } = await runSyncAndPrint();
+      const { ok: syncOk } = isUser
+        ? await runUserSyncAndPrint()
+        : await runSyncAndPrint();
       if (!syncOk) {
         process.exit(1);
       }
@@ -586,10 +663,14 @@ const pluginUninstallCmd = command({
   aliases: ['remove'],
   args: {
     plugin: positional({ type: string, displayName: 'plugin' }),
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Installation scope: "project" (default) or "user"' }),
   },
-  handler: async ({ plugin }) => {
+  handler: async ({ plugin, scope }) => {
     try {
-      const result = await removePlugin(plugin);
+      const isUser = scope === 'user';
+      const result = isUser
+        ? await removeUserPlugin(plugin)
+        : await removePlugin(plugin);
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -601,12 +682,15 @@ const pluginUninstallCmd = command({
       }
 
       if (isJsonMode()) {
-        const { ok, syncData } = await runSyncAndPrint();
+        const { ok, syncData } = isUser
+          ? await runUserSyncAndPrint()
+          : await runSyncAndPrint();
         jsonOutput({
           success: ok,
           command: 'plugin uninstall',
           data: {
             plugin,
+            scope: isUser ? 'user' : 'project',
             syncResult: syncData,
           },
           ...(!ok && { error: 'Sync completed with failures' }),
@@ -617,9 +701,11 @@ const pluginUninstallCmd = command({
         return;
       }
 
-      console.log(`\u2713 Uninstalled plugin: ${plugin}`);
+      console.log(`\u2713 Uninstalled plugin${isUser ? ' (user scope)' : ''}: ${plugin}`);
 
-      const { ok: syncOk } = await runSyncAndPrint();
+      const { ok: syncOk } = isUser
+        ? await runUserSyncAndPrint()
+        : await runSyncAndPrint();
       if (!syncOk) {
         process.exit(1);
       }
