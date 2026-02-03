@@ -80,36 +80,14 @@ async function installSelectedPlugin(
 export async function runInstallPlugin(context: TuiContext): Promise<void> {
   try {
     // Get available marketplaces
-    let marketplaces = await listMarketplaces();
+    const marketplaces = await listMarketplaces();
 
-    // If no marketplaces, prompt to add one
     if (marketplaces.length === 0) {
       p.note(
-        'No marketplaces registered. Add one to browse plugins.',
+        'No marketplaces registered.\nUse "Manage marketplaces" to add one first.',
         'Marketplace',
       );
-
-      const source = await p.text({
-        message: 'Marketplace source (GitHub URL, owner/repo, or name)',
-        placeholder: 'e.g., anthropics/claude-plugins-official',
-      });
-
-      if (p.isCancel(source)) {
-        return;
-      }
-
-      const s = p.spinner();
-      s.start('Adding marketplace...');
-      const result = await addMarketplace(source);
-      s.stop(result.success ? 'Marketplace added' : 'Failed to add marketplace');
-
-      if (!result.success) {
-        p.note(result.error ?? 'Unknown error', 'Error');
-        return;
-      }
-
-      // Refresh list
-      marketplaces = await listMarketplaces();
+      return;
     }
 
     // Collect plugins from all marketplaces
