@@ -339,6 +339,12 @@ const marketplaceRemoveCmd = command({
       }
 
       console.log(`\u2713 Marketplace '${name}' removed from registry`);
+      if (result.removedUserPlugins && result.removedUserPlugins.length > 0) {
+        console.log(`  Removed ${result.removedUserPlugins.length} user plugin(s):`);
+        for (const p of result.removedUserPlugins) {
+          console.log(`    - ${p}`);
+        }
+      }
       console.log(`  Note: Files at ${result.marketplace?.path} were not deleted`);
     } catch (error) {
       if (error instanceof Error) {

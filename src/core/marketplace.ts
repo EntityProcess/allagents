@@ -49,6 +49,8 @@ export interface MarketplaceResult {
   success: boolean;
   marketplace?: MarketplaceEntry;
   error?: string;
+  /** User-level plugins that were removed during marketplace removal cascade */
+  removedUserPlugins?: string[];
 }
 
 /**
@@ -318,9 +320,14 @@ export async function removeMarketplace(name: string): Promise<MarketplaceResult
   delete registry.marketplaces[name];
   await saveRegistry(registry);
 
+  // Cascade: remove user-level plugins referencing this marketplace
+  const { removeUserPluginsForMarketplace } = await import('./user-workspace.js');
+  const removedUserPlugins = await removeUserPluginsForMarketplace(name);
+
   return {
     success: true,
     marketplace: entry,
+    removedUserPlugins,
   };
 }
 

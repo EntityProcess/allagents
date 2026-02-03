@@ -7,6 +7,7 @@ import type { WorkspaceConfig, ClientType } from '../models/workspace-config.js'
 import { getAllagentsDir } from './marketplace.js';
 import {
   isPluginSpec,
+  parsePluginSpec,
   resolvePluginSpecWithAutoRegister,
 } from './marketplace.js';
 import {
@@ -145,6 +146,40 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/**
+ * Get user plugins that reference a given marketplace name.
+ * Matches plugins with `@marketplace-name` suffix.
+ */
+export async function getUserPluginsForMarketplace(marketplaceName: string): Promise<string[]> {
+  const config = await getUserWorkspaceConfig();
+  if (!config) return [];
+  return config.plugins.filter((p) => {
+    const parsed = parsePluginSpec(p);
+    return parsed?.marketplaceName === marketplaceName;
+  });
+}
+
+/**
+ * Remove all user plugins that reference a given marketplace name.
+ * Returns the list of removed plugin specs.
+ */
+export async function removeUserPluginsForMarketplace(marketplaceName: string): Promise<string[]> {
+  const config = await getUserWorkspaceConfig();
+  if (!config) return [];
+
+  const matching = config.plugins.filter((p) => {
+    const parsed = parsePluginSpec(p);
+    return parsed?.marketplaceName === marketplaceName;
+  });
+
+  if (matching.length === 0) return [];
+
+  const configPath = getUserWorkspaceConfigPath();
+  config.plugins = config.plugins.filter((p) => !matching.includes(p));
+  await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+  return matching;
 }
 
 /**

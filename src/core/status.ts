@@ -11,6 +11,7 @@ import {
   isPluginSpec,
   resolvePluginSpecWithAutoRegister,
 } from './marketplace.js';
+import { getUserWorkspaceConfig } from './user-workspace.js';
 
 /**
  * Status of a single plugin
@@ -31,6 +32,8 @@ export interface WorkspaceStatusResult {
   success: boolean;
   error?: string;
   plugins: PluginStatus[];
+  /** User-level plugins from ~/.allagents/workspace.yaml */
+  userPlugins?: PluginStatus[];
   clients: string[];
 }
 
@@ -69,9 +72,12 @@ export async function getWorkspaceStatus(
       }
     }
 
+    const userPlugins = await getUserPluginStatuses();
+
     return {
       success: true,
       plugins,
+      userPlugins,
       clients: config.clients,
     };
   } catch (error) {
@@ -115,6 +121,25 @@ function getPluginStatus(parsed: ParsedPluginSource): PluginStatus {
     available,
     path: parsed.normalized,
   };
+}
+
+/**
+ * Get statuses for all user-level plugins from ~/.allagents/workspace.yaml
+ */
+async function getUserPluginStatuses(): Promise<PluginStatus[]> {
+  const config = await getUserWorkspaceConfig();
+  if (!config) return [];
+
+  const statuses: PluginStatus[] = [];
+  for (const pluginSource of config.plugins) {
+    if (isPluginSpec(pluginSource)) {
+      statuses.push(await getMarketplacePluginStatus(pluginSource));
+    } else {
+      const parsed = parsePluginSource(pluginSource, process.env.HOME || '~');
+      statuses.push(getPluginStatus(parsed));
+    }
+  }
+  return statuses;
 }
 
 /**
