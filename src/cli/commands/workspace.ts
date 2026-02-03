@@ -153,7 +153,8 @@ const syncCmd = command({
         combined = combined ? mergeSyncResults(combined, projectResult) : projectResult;
       }
 
-      const result = combined!;
+      // At this point, at least one config existed so combined is set
+      const result = combined as SyncResult;
 
       if (isJsonMode()) {
         const syncData = buildSyncData(result);
