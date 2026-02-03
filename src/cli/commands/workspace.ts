@@ -2,9 +2,10 @@ import { command, positional, option, flag, string, optional } from 'cmd-ts';
 import { initWorkspace } from '../../core/workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
+import { pruneOrphanedPlugins } from '../../core/prune.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
-import { initMeta, syncMeta, statusMeta } from '../metadata/workspace.js';
+import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
 
 /**
  * Build a JSON-friendly sync data object from a sync result.
@@ -333,6 +334,63 @@ const statusCmd = command({
 });
 
 // =============================================================================
+// workspace prune
+// =============================================================================
+
+const pruneCmd = command({
+  name: 'prune',
+  description: buildDescription(pruneMeta),
+  args: {},
+  handler: async () => {
+    try {
+      const result = await pruneOrphanedPlugins(process.cwd());
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'workspace prune',
+          data: result,
+        });
+        return;
+      }
+
+      const totalRemoved = result.project.removed.length + result.user.removed.length;
+
+      if (totalRemoved === 0) {
+        console.log('No orphaned plugins found.');
+        return;
+      }
+
+      if (result.project.removed.length > 0) {
+        console.log(`Project plugins pruned (${result.project.removed.length}):`);
+        for (const p of result.project.removed) {
+          console.log(`  - ${p}`);
+        }
+      }
+
+      if (result.user.removed.length > 0) {
+        console.log(`User plugins pruned (${result.user.removed.length}):`);
+        for (const p of result.user.removed) {
+          console.log(`  - ${p}`);
+        }
+      }
+
+      console.log(`\n\u2713 Removed ${totalRemoved} orphaned plugin(s)`);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace prune', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
 // workspace subcommands group
 // =============================================================================
 
@@ -343,5 +401,6 @@ export const workspaceCmd = conciseSubcommands({
     init: initCmd,
     sync: syncCmd,
     status: statusCmd,
+    prune: pruneCmd,
   },
 });

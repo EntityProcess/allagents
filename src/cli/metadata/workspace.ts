@@ -57,6 +57,21 @@ export const syncMeta: AgentCommandMeta = {
   },
 };
 
+export const pruneMeta: AgentCommandMeta = {
+  command: 'workspace prune',
+  description: 'Remove orphaned plugin references',
+  whenToUse: 'After removing a marketplace to clean up stale plugin references in workspace configs',
+  examples: [
+    'allagents workspace prune',
+  ],
+  expectedOutput:
+    'Lists removed orphaned plugins from both project and user scopes. Exit 0 on success, exit 1 on error.',
+  outputSchema: {
+    project: { removed: ['string'], kept: ['string'] },
+    user: { removed: ['string'], kept: ['string'] },
+  },
+};
+
 export const statusMeta: AgentCommandMeta = {
   command: 'workspace status',
   description: 'Show sync status of plugins',
