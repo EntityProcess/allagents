@@ -74,8 +74,14 @@ export async function getTuiContext(
   // Marketplace count
   let marketplaceCount = 0;
   try {
-    const marketplaces = await listMarketplaces();
-    marketplaceCount = marketplaces.length;
+    const cachedMarketplaces = cache?.getMarketplaces();
+    if (cachedMarketplaces) {
+      marketplaceCount = cachedMarketplaces.length;
+    } else {
+      const marketplaces = await listMarketplaces();
+      cache?.setMarketplaces(marketplaces);
+      marketplaceCount = marketplaces.length;
+    }
   } catch {
     // Marketplace listing failed -- degrade gracefully
   }

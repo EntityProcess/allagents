@@ -8,11 +8,26 @@ import {
   addMarketplace,
   removeMarketplace,
   updateMarketplace,
+  type MarketplaceEntry,
   type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
+
+/**
+ * Get marketplace list, using cache when available.
+ */
+async function getCachedMarketplaces(
+  cache?: TuiCache,
+): Promise<MarketplaceEntry[]> {
+  const cached = cache?.getMarketplaces();
+  if (cached) return cached;
+
+  const result = await listMarketplaces();
+  cache?.setMarketplaces(result);
+  return result;
+}
 
 /**
  * Get marketplace plugins, using cache when available.
@@ -99,7 +114,7 @@ async function installSelectedPlugin(
 export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): Promise<void> {
   try {
     // Get available marketplaces
-    const marketplaces = await listMarketplaces();
+    const marketplaces = await getCachedMarketplaces(cache);
 
     if (marketplaces.length === 0) {
       p.note(
@@ -240,7 +255,7 @@ export async function runBrowseMarketplaces(
 ): Promise<void> {
   try {
     while (true) {
-      const marketplaces = await listMarketplaces();
+      const marketplaces = await getCachedMarketplaces(cache);
 
       const options: Array<{ label: string; value: string }> = [
         { label: '+ Add marketplace', value: '__add__' },

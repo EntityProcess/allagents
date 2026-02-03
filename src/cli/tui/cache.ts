@@ -1,4 +1,4 @@
-import type { MarketplaceRegistry, MarketplacePluginsResult } from '../../core/marketplace.js';
+import type { MarketplaceEntry, MarketplacePluginsResult } from '../../core/marketplace.js';
 import type { TuiContext } from './context.js';
 
 /**
@@ -7,23 +7,18 @@ import type { TuiContext } from './context.js';
  * Call invalidate() after any write operation (install, remove, sync, etc.).
  */
 export class TuiCache {
-  private registry: MarketplaceRegistry | undefined;
+  private marketplaces: MarketplaceEntry[] | undefined;
   private context: TuiContext | undefined;
   private marketplacePlugins: Map<string, MarketplacePluginsResult> = new Map();
 
-  /** Check if registry is cached */
-  hasCachedRegistry(): boolean {
-    return this.registry !== undefined;
+  /** Get cached marketplace list (undefined if not cached) */
+  getMarketplaces(): MarketplaceEntry[] | undefined {
+    return this.marketplaces;
   }
 
-  /** Get cached registry (undefined if not cached) */
-  getRegistry(): MarketplaceRegistry | undefined {
-    return this.registry;
-  }
-
-  /** Store registry in cache */
-  setRegistry(registry: MarketplaceRegistry): void {
-    this.registry = registry;
+  /** Store marketplace list in cache */
+  setMarketplaces(marketplaces: MarketplaceEntry[]): void {
+    this.marketplaces = marketplaces;
   }
 
   /** Check if context is cached */
@@ -53,7 +48,7 @@ export class TuiCache {
 
   /** Clear all cached data. Call after any write operation. */
   invalidate(): void {
-    this.registry = undefined;
+    this.marketplaces = undefined;
     this.context = undefined;
     this.marketplacePlugins.clear();
   }

@@ -9,15 +9,14 @@ describe('TuiCache', () => {
   });
 
   it('should start with empty cache', () => {
-    expect(cache.hasCachedRegistry()).toBe(false);
+    expect(cache.getMarketplaces()).toBeUndefined();
     expect(cache.hasCachedContext()).toBe(false);
   });
 
-  it('should store and return cached registry', () => {
-    const registry = { version: 1 as const, marketplaces: {} };
-    cache.setRegistry(registry);
-    expect(cache.hasCachedRegistry()).toBe(true);
-    expect(cache.getRegistry()).toEqual(registry);
+  it('should store and return cached marketplaces', () => {
+    const marketplaces = [{ name: 'test', source: { type: 'github' as const, location: 'org/repo' }, path: '/tmp/test' }];
+    cache.setMarketplaces(marketplaces);
+    expect(cache.getMarketplaces()).toEqual(marketplaces);
   });
 
   it('should store and return cached context', () => {
@@ -36,8 +35,7 @@ describe('TuiCache', () => {
   });
 
   it('should clear all caches on invalidate()', () => {
-    const registry = { version: 1 as const, marketplaces: {} };
-    cache.setRegistry(registry);
+    cache.setMarketplaces([]);
     cache.setContext({
       hasWorkspace: false,
       workspacePath: null,
@@ -47,11 +45,13 @@ describe('TuiCache', () => {
       hasUserConfig: false,
       marketplaceCount: 0,
     });
+    cache.setMarketplacePlugins('my-marketplace', { plugins: [], warnings: [] });
 
     cache.invalidate();
 
-    expect(cache.hasCachedRegistry()).toBe(false);
+    expect(cache.getMarketplaces()).toBeUndefined();
     expect(cache.hasCachedContext()).toBe(false);
+    expect(cache.getMarketplacePlugins('my-marketplace')).toBeUndefined();
   });
 
   it('should store and return cached marketplace plugins', () => {
@@ -62,11 +62,5 @@ describe('TuiCache', () => {
 
   it('should return undefined for uncached marketplace plugins', () => {
     expect(cache.getMarketplacePlugins('nonexistent')).toBeUndefined();
-  });
-
-  it('should clear marketplace plugins on invalidate()', () => {
-    cache.setMarketplacePlugins('my-marketplace', { plugins: [], warnings: [] });
-    cache.invalidate();
-    expect(cache.getMarketplacePlugins('my-marketplace')).toBeUndefined();
   });
 });
