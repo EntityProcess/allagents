@@ -1,5 +1,6 @@
 import * as p from '@clack/prompts';
 import { execa } from 'execa';
+import { confirm } from '../prompts.js';
 
 /**
  * Self-update action.
@@ -7,7 +8,7 @@ import { execa } from 'execa';
  */
 export async function runUpdate(): Promise<void> {
   try {
-    const confirmed = await p.confirm({
+    const confirmed = await confirm({
       message: 'Check for and install updates?',
     });
 
