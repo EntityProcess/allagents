@@ -7,9 +7,12 @@ import { tmpdir } from 'node:os';
 
 const CLI = resolve(import.meta.dir, '../../dist/index.js');
 
-async function runCli(args: string[], env?: Record<string, string>) {
+async function runCli(args: string[], options?: { env?: Record<string, string>; cwd?: string }) {
   try {
-    const result = await execa('node', [CLI, ...args], env ? { env: { ...process.env, ...env } } : undefined);
+    const result = await execa('node', [CLI, ...args], {
+      ...(options?.env && { env: { ...process.env, ...options.env } }),
+      ...(options?.cwd && { cwd: options.cwd }),
+    });
     return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
   } catch (error: any) {
     return { stdout: error.stdout || '', stderr: error.stderr || '', exitCode: error.exitCode || 1 };
@@ -83,7 +86,7 @@ describe('CLI --json error cases', () => {
   });
 
   it('workspace sync --json in non-workspace dir with no user config returns success JSON', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'sync', '--json'], { HOME: mockHome });
+    const { stdout, exitCode } = await runCli(['workspace', 'sync', '--json'], { env: { HOME: mockHome }, cwd: mockHome });
     expect(exitCode).toBe(0);
     const json = parseJson(stdout);
     expect(json.success).toBe(true);
@@ -91,7 +94,7 @@ describe('CLI --json error cases', () => {
   });
 
   it('workspace status --json in non-workspace dir falls back to user workspace', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'status', '--json'], { HOME: mockHome });
+    const { stdout, exitCode } = await runCli(['workspace', 'status', '--json'], { env: { HOME: mockHome }, cwd: mockHome });
     expect(exitCode).toBe(0);
     const json = parseJson(stdout);
     expect(json.success).toBe(true);
@@ -166,7 +169,7 @@ describe('CLI output without --json is unchanged', () => {
   it('workspace sync without --json in non-workspace dir outputs guidance', async () => {
     const mockHome2 = await mkdtemp(join(tmpdir(), 'allagents-e2e-human-'));
     try {
-      const { stdout, exitCode } = await runCli(['workspace', 'sync'], { HOME: mockHome2 });
+      const { stdout, exitCode } = await runCli(['workspace', 'sync'], { env: { HOME: mockHome2 }, cwd: mockHome2 });
       expect(exitCode).toBe(0);
       expect(stdout).toContain('No plugins configured');
     } finally {
