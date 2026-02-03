@@ -113,6 +113,24 @@ export async function addUserPlugin(plugin: string): Promise<ModifyResult> {
 }
 
 /**
+ * Check if a plugin exists in the user-level workspace config.
+ * @param plugin - Plugin source to find (exact match or partial match)
+ * @returns true if the plugin is found
+ */
+export async function hasUserPlugin(plugin: string): Promise<boolean> {
+  const config = await getUserWorkspaceConfig();
+  if (!config) return false;
+
+  // Exact match first
+  if (config.plugins.indexOf(plugin) !== -1) return true;
+
+  // Partial match
+  return config.plugins.some(
+    (p) => p.startsWith(`${plugin}@`) || p === plugin,
+  );
+}
+
+/**
  * Remove a plugin from the user-level workspace config.
  */
 export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
