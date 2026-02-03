@@ -147,7 +147,7 @@ async function getUserPluginStatuses(): Promise<PluginStatus[]> {
  * Get status of a plugin@marketplace spec
  */
 async function getMarketplacePluginStatus(spec: string): Promise<PluginStatus> {
-  const resolved = await resolvePluginSpecWithAutoRegister(spec);
+  const resolved = await resolvePluginSpecWithAutoRegister(spec, { offline: true });
 
   return {
     source: spec,

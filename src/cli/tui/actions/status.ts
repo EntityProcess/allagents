@@ -1,14 +1,19 @@
 import * as p from '@clack/prompts';
 import { getWorkspaceStatus } from '../../../core/status.js';
 import type { TuiContext } from '../context.js';
+import type { TuiCache } from '../cache.js';
 
 /**
  * Display workspace and plugin status.
  * Shows plugin availability and configured clients.
  */
-export async function runStatus(context: TuiContext): Promise<void> {
+export async function runStatus(context: TuiContext, cache?: TuiCache): Promise<void> {
   try {
-    const status = await getWorkspaceStatus(context.workspacePath ?? undefined);
+    let status = cache?.getStatus();
+    if (!status) {
+      status = await getWorkspaceStatus(context.workspacePath ?? undefined);
+      cache?.setStatus(status);
+    }
 
     if (!status.success) {
       p.note(status.error ?? 'Unknown error', 'Status Error');

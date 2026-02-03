@@ -95,7 +95,7 @@ export async function fetchPlugin(
 
   // Check if gh CLI is available
   try {
-    await execaFn('gh', ['--version']);
+    await execaFn('gh', ['--version'], { stdin: 'ignore' });
   } catch {
     return {
       success: false,
@@ -120,7 +120,7 @@ export async function fetchPlugin(
   try {
     if (isCached) {
       // Default: pull latest changes
-      await execaFn('git', ['pull'], { cwd: cachePath });
+      await execaFn('git', ['pull'], { cwd: cachePath, stdin: 'ignore' });
 
       return {
         success: true,
@@ -135,9 +135,9 @@ export async function fetchPlugin(
 
     // Clone repository with specific branch if provided
     if (branch) {
-      await execaFn('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath, '--', '--branch', branch]);
+      await execaFn('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath, '--', '--branch', branch], { stdin: 'ignore' });
     } else {
-      await execaFn('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath]);
+      await execaFn('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath], { stdin: 'ignore' });
     }
 
     return {
@@ -281,7 +281,7 @@ export async function updateCachedPlugins(
 
   for (const plugin of toUpdate) {
     try {
-      await execa('git', ['pull'], { cwd: plugin.path });
+      await execa('git', ['pull'], { cwd: plugin.path, stdin: 'ignore' });
       results.push({ name: plugin.name, success: true });
     } catch (error) {
       results.push({

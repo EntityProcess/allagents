@@ -167,7 +167,11 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
  */
 export async function runManagePlugins(context: TuiContext, cache?: TuiCache): Promise<void> {
   try {
-    const status = await getWorkspaceStatus(context.workspacePath ?? undefined);
+    let status = cache?.getStatus();
+    if (!status) {
+      status = await getWorkspaceStatus(context.workspacePath ?? undefined);
+      cache?.setStatus(status);
+    }
 
     if (!status.success || status.plugins.length === 0) {
       p.note('No plugins installed in this workspace.', 'Plugins');

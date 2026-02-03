@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -324,5 +324,83 @@ describe('getMarketplacePluginsFromManifest', () => {
     expect(result.plugins).toHaveLength(1);
     expect(result.plugins[0].name).toBe('plugin-a');
     expect(result.warnings).toEqual([]);
+  });
+});
+
+describe('resolvePluginSpec offline mode', () => {
+  it('does not call fetchFn when offline is true', async () => {
+    const testDir = mkdtempSync(join(tmpdir(), 'mp-offline-'));
+    const manifestDir = join(testDir, '.claude-plugin');
+    mkdirSync(manifestDir, { recursive: true });
+
+    const manifest = {
+      name: 'test-marketplace',
+      plugins: [
+        {
+          name: 'remote-plugin',
+          description: 'A remote plugin',
+          source: { source: 'url', url: 'https://github.com/owner/repo' },
+        },
+      ],
+    };
+
+    writeFileSync(
+      join(manifestDir, 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    let fetchCalled = false;
+    const result = await resolvePluginSpec('remote-plugin@test-marketplace', {
+      marketplacePathOverride: testDir,
+      offline: true,
+      fetchFn: async () => {
+        fetchCalled = true;
+        return { success: true, action: 'fetched' as const, cachePath: '/fake' };
+      },
+    });
+
+    expect(fetchCalled).toBe(false);
+    expect(result).toBeNull();
+
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('returns cached path when offline and plugin is already cached', async () => {
+    const testDir = mkdtempSync(join(tmpdir(), 'mp-offline-cached-'));
+    const manifestDir = join(testDir, '.claude-plugin');
+    mkdirSync(manifestDir, { recursive: true });
+
+    // Create a fake cache directory that matches what getPluginCachePath returns
+    const { getPluginCachePath: getCachePath } = await import('../../../src/utils/plugin-path.js');
+    const cachePath = getCachePath('someowner', 'somerepo');
+    mkdirSync(cachePath, { recursive: true });
+
+    const manifest = {
+      name: 'test-marketplace',
+      plugins: [
+        {
+          name: 'cached-plugin',
+          description: 'A cached remote plugin',
+          source: { source: 'url', url: 'https://github.com/someowner/somerepo' },
+        },
+      ],
+    };
+
+    writeFileSync(
+      join(manifestDir, 'marketplace.json'),
+      JSON.stringify(manifest),
+    );
+
+    const result = await resolvePluginSpec('cached-plugin@test-marketplace', {
+      marketplacePathOverride: testDir,
+      offline: true,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.path).toBe(cachePath);
+
+    // Cleanup
+    rmSync(cachePath, { recursive: true, force: true });
+    rmSync(testDir, { recursive: true, force: true });
   });
 });

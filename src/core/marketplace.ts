@@ -8,6 +8,7 @@ import {
 } from '../utils/marketplace-manifest-parser.js';
 import { fetchPlugin } from './plugin.js';
 import type { FetchResult } from './plugin.js';
+import { parseGitHubUrl, getPluginCachePath } from '../utils/plugin-path.js';
 
 /**
  * Source types for marketplaces
@@ -220,7 +221,7 @@ export async function addMarketplace(
     } else {
       // Check if gh CLI is available
       try {
-        await execa('gh', ['--version']);
+        await execa('gh', ['--version'], { stdin: 'ignore' });
       } catch {
         return {
           success: false,
@@ -236,7 +237,7 @@ export async function addMarketplace(
 
       // Clone repository
       try {
-        await execa('gh', ['repo', 'clone', parsed.location, marketplacePath]);
+        await execa('gh', ['repo', 'clone', parsed.location, marketplacePath], { stdin: 'ignore' });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
@@ -418,7 +419,7 @@ export async function updateMarketplace(
         const { stdout } = await execa(
           'git',
           ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
-          { cwd: marketplace.path },
+          { cwd: marketplace.path, stdin: 'ignore' },
         );
         // stdout is like "origin/main" - strip remote prefix to get local branch name
         const ref = stdout.trim();
@@ -431,7 +432,7 @@ export async function updateMarketplace(
           const { stdout } = await execa(
             'git',
             ['remote', 'show', 'origin'],
-            { cwd: marketplace.path },
+            { cwd: marketplace.path, stdin: 'ignore' },
           );
           const match = stdout.match(/HEAD branch:\s*(\S+)/);
           if (match?.[1]) {
@@ -443,8 +444,9 @@ export async function updateMarketplace(
       }
       await execa('git', ['checkout', defaultBranch], {
         cwd: marketplace.path,
+        stdin: 'ignore',
       });
-      await execa('git', ['pull'], { cwd: marketplace.path });
+      await execa('git', ['pull'], { cwd: marketplace.path, stdin: 'ignore' });
 
       // Update lastUpdated in registry
       marketplace.lastUpdated = new Date().toISOString();
@@ -642,6 +644,7 @@ export async function resolvePluginSpec(
     subpath?: string;
     marketplaceNameOverride?: string;
     marketplacePathOverride?: string;
+    offline?: boolean;
     fetchFn?: (url: string) => Promise<FetchResult>;
   } = {},
 ): Promise<{ path: string; marketplace: string; plugin: string } | null> {
@@ -681,6 +684,21 @@ export async function resolvePluginSpec(
           };
         }
       } else {
+        if (options.offline) {
+          // Offline mode: check if plugin is already cached, don't fetch
+          const parsedUrl = parseGitHubUrl(pluginEntry.source.url);
+          if (parsedUrl) {
+            const cachePath = getPluginCachePath(parsedUrl.owner, parsedUrl.repo);
+            if (existsSync(cachePath)) {
+              return {
+                path: cachePath,
+                marketplace: marketplaceName,
+                plugin: parsed.plugin,
+              };
+            }
+          }
+          return null;
+        }
         // URL source - fetch/clone the plugin
         const fetchFn = options.fetchFn ?? fetchPlugin;
         const fetchResult = await fetchFn(pluginEntry.source.url);
@@ -732,6 +750,7 @@ export interface ResolvePluginSpecResult {
  */
 export async function resolvePluginSpecWithAutoRegister(
   spec: string,
+  options: { offline?: boolean } = {},
 ): Promise<ResolvePluginSpecResult> {
   // Parse plugin@marketplace using the parser
   const parsed = parsePluginSpec(spec);
@@ -778,6 +797,7 @@ export async function resolvePluginSpecWithAutoRegister(
   const resolved = await resolvePluginSpec(spec, {
     ...(subpath && { subpath }),
     marketplaceNameOverride: marketplace.name,
+    ...(options.offline != null && { offline: options.offline }),
   });
   if (!resolved) {
     return {

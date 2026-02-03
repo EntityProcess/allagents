@@ -1,4 +1,5 @@
 import type { MarketplaceEntry, MarketplacePluginsResult } from '../../core/marketplace.js';
+import type { WorkspaceStatusResult } from '../../core/status.js';
 import type { TuiContext } from './context.js';
 
 /**
@@ -10,6 +11,7 @@ export class TuiCache {
   private marketplaces: MarketplaceEntry[] | undefined;
   private context: TuiContext | undefined;
   private marketplacePlugins: Map<string, MarketplacePluginsResult> = new Map();
+  private status: WorkspaceStatusResult | undefined;
 
   /** Get cached marketplace list (undefined if not cached) */
   getMarketplaces(): MarketplaceEntry[] | undefined {
@@ -46,10 +48,21 @@ export class TuiCache {
     this.marketplacePlugins.set(name, result);
   }
 
+  /** Get cached workspace status (undefined if not cached) */
+  getStatus(): WorkspaceStatusResult | undefined {
+    return this.status;
+  }
+
+  /** Store workspace status in cache */
+  setStatus(status: WorkspaceStatusResult): void {
+    this.status = status;
+  }
+
   /** Clear all cached data. Call after any write operation. */
   invalidate(): void {
     this.marketplaces = undefined;
     this.context = undefined;
     this.marketplacePlugins.clear();
+    this.status = undefined;
   }
 }

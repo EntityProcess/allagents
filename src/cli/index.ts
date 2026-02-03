@@ -32,7 +32,7 @@ if (agentHelp) {
 } else if (finalArgs.length === 0 && process.stdout.isTTY && !json) {
   // Interactive wizard when no args and running in a terminal
   const { runWizard } = await import('./tui/wizard.js');
-  runWizard();
+  await runWizard();
 } else {
   run(app, finalArgs);
 }
