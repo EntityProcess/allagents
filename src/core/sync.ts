@@ -57,6 +57,24 @@ export interface SyncResult {
 }
 
 /**
+ * Merge two SyncResult objects into one combined result.
+ */
+export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
+  const warnings = [...(a.warnings || []), ...(b.warnings || [])];
+  const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
+  return {
+    success: a.success && b.success,
+    pluginResults: [...a.pluginResults, ...b.pluginResults],
+    totalCopied: a.totalCopied + b.totalCopied,
+    totalFailed: a.totalFailed + b.totalFailed,
+    totalSkipped: a.totalSkipped + b.totalSkipped,
+    totalGenerated: a.totalGenerated + b.totalGenerated,
+    ...(warnings.length > 0 && { warnings }),
+    ...(purgedPaths.length > 0 && { purgedPaths }),
+  };
+}
+
+/**
  * Result of syncing a single plugin
  */
 export interface PluginSyncResult {

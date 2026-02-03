@@ -91,7 +91,7 @@ describe('allagents <command> --agent-help (single command)', () => {
     const { stdout } = await runCli(['workspace', 'sync', '--agent-help']);
     const json = parseJson(stdout);
     expect(json.options).toBeInstanceOf(Array);
-    expect(json.options.length).toBe(4);
+    expect(json.options.length).toBe(3);
 
     const dryRun = json.options.find((o: any) => o.flag === '--dry-run');
     expect(dryRun).toBeDefined();
@@ -109,9 +109,7 @@ describe('allagents <command> --agent-help (single command)', () => {
     expect(offline.short).toBeUndefined();
 
     const scope = json.options.find((o: any) => o.flag === '--scope');
-    expect(scope).toBeDefined();
-    expect(scope.type).toBe('string');
-    expect(scope.short).toBe('-s');
+    expect(scope).toBeUndefined();
   });
 
   it('plugin install --agent-help includes positionals', async () => {
