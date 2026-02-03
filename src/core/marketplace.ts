@@ -350,6 +350,28 @@ export async function getMarketplace(name: string): Promise<MarketplaceEntry | n
 }
 
 /**
+ * Find a marketplace by name, falling back to source location lookup.
+ * Single registry load for both checks.
+ */
+export async function findMarketplace(
+  name: string,
+  sourceLocation?: string,
+): Promise<MarketplaceEntry | null> {
+  const registry = await loadRegistry();
+  if (registry.marketplaces[name]) {
+    return registry.marketplaces[name];
+  }
+  if (sourceLocation) {
+    for (const entry of Object.values(registry.marketplaces)) {
+      if (entry.source.location === sourceLocation) {
+        return entry;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Update marketplace(s) by pulling latest changes
  * @param name - Optional marketplace name (updates all if not specified)
  */
@@ -723,8 +745,9 @@ export async function resolvePluginSpecWithAutoRegister(
 
   const { plugin: pluginName, marketplaceName, owner, repo, subpath } = parsed;
 
-  // Check if marketplace is already registered
-  let marketplace = await getMarketplace(marketplaceName);
+  // Check if marketplace is already registered (by name, then by source location)
+  const sourceLocation = owner && repo ? `${owner}/${repo}` : undefined;
+  let marketplace = await findMarketplace(marketplaceName, sourceLocation);
 
   // If not registered, try auto-registration
   if (!marketplace) {
