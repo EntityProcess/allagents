@@ -6,9 +6,72 @@ import {
   listMarketplaces,
   listMarketplacePlugins,
   addMarketplace,
+  removeMarketplace,
+  updateMarketplace,
 } from '../../../core/marketplace.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
 import type { TuiContext } from '../context.js';
+
+/**
+ * Shared helper: determine scope, install a plugin, sync, and show success.
+ * Returns true if installed successfully, false if cancelled or failed.
+ */
+async function installSelectedPlugin(
+  pluginRef: string,
+  context: TuiContext,
+): Promise<boolean> {
+  // Determine scope
+  let scope: 'project' | 'user' = 'user';
+  if (context.hasWorkspace) {
+    const scopeChoice = await p.select({
+      message: 'Install scope',
+      options: [
+        { label: 'Project (this workspace)', value: 'project' as const },
+        { label: 'User (global)', value: 'user' as const },
+      ],
+    });
+
+    if (p.isCancel(scopeChoice)) {
+      return false;
+    }
+
+    scope = scopeChoice;
+  }
+
+  const s = p.spinner();
+  s.start('Installing plugin...');
+
+  if (scope === 'project' && context.workspacePath) {
+    const result = await addPlugin(pluginRef, context.workspacePath);
+    if (!result.success) {
+      s.stop('Installation failed');
+      p.note(result.error ?? 'Unknown error', 'Error');
+      return false;
+    }
+    s.stop('Plugin added');
+
+    const syncS = p.spinner();
+    syncS.start('Syncing...');
+    await syncWorkspace(context.workspacePath);
+    syncS.stop('Sync complete');
+  } else {
+    const result = await addUserPlugin(pluginRef);
+    if (!result.success) {
+      s.stop('Installation failed');
+      p.note(result.error ?? 'Unknown error', 'Error');
+      return false;
+    }
+    s.stop('Plugin added');
+
+    const syncS = p.spinner();
+    syncS.start('Syncing...');
+    await syncUserWorkspace();
+    syncS.stop('Sync complete');
+  }
+
+  p.note(`Installed: ${pluginRef}`, 'Success');
+  return true;
+}
 
 /**
  * Plugin installation flow.
@@ -17,36 +80,14 @@ import type { TuiContext } from '../context.js';
 export async function runInstallPlugin(context: TuiContext): Promise<void> {
   try {
     // Get available marketplaces
-    let marketplaces = await listMarketplaces();
+    const marketplaces = await listMarketplaces();
 
-    // If no marketplaces, prompt to add one
     if (marketplaces.length === 0) {
       p.note(
-        'No marketplaces registered. Add one to browse plugins.',
+        'No marketplaces registered.\nUse "Manage marketplaces" to add one first.',
         'Marketplace',
       );
-
-      const source = await p.text({
-        message: 'Marketplace source (GitHub URL, owner/repo, or name)',
-        placeholder: 'e.g., anthropics/claude-plugins-official',
-      });
-
-      if (p.isCancel(source)) {
-        return;
-      }
-
-      const s = p.spinner();
-      s.start('Adding marketplace...');
-      const result = await addMarketplace(source);
-      s.stop(result.success ? 'Marketplace added' : 'Failed to add marketplace');
-
-      if (!result.success) {
-        p.note(result.error ?? 'Unknown error', 'Error');
-        return;
-      }
-
-      // Refresh list
-      marketplaces = await listMarketplaces();
+      return;
     }
 
     // Collect plugins from all marketplaces
@@ -78,58 +119,7 @@ export async function runInstallPlugin(context: TuiContext): Promise<void> {
       return;
     }
 
-    // Determine scope
-    let scope: 'project' | 'user' = 'user';
-    if (context.hasWorkspace) {
-      const scopeChoice = await p.select({
-        message: 'Install scope',
-        options: [
-          { label: 'Project (this workspace)', value: 'project' as const },
-          { label: 'User (global)', value: 'user' as const },
-        ],
-      });
-
-      if (p.isCancel(scopeChoice)) {
-        return;
-      }
-
-      scope = scopeChoice;
-    }
-
-    const s = p.spinner();
-    s.start('Installing plugin...');
-
-    if (scope === 'project' && context.workspacePath) {
-      const result = await addPlugin(selected, context.workspacePath);
-      if (!result.success) {
-        s.stop('Installation failed');
-        p.note(result.error ?? 'Unknown error', 'Error');
-        return;
-      }
-      s.stop('Plugin added');
-
-      // Auto-sync
-      const syncS = p.spinner();
-      syncS.start('Syncing...');
-      await syncWorkspace(context.workspacePath);
-      syncS.stop('Sync complete');
-    } else {
-      const result = await addUserPlugin(selected);
-      if (!result.success) {
-        s.stop('Installation failed');
-        p.note(result.error ?? 'Unknown error', 'Error');
-        return;
-      }
-      s.stop('Plugin added');
-
-      // Auto-sync
-      const syncS = p.spinner();
-      syncS.start('Syncing...');
-      await syncUserWorkspace();
-      syncS.stop('Sync complete');
-    }
-
-    p.note(`Installed: ${selected}`, 'Success');
+    await installSelectedPlugin(selected, context);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     p.note(message, 'Error');
@@ -217,5 +207,182 @@ export async function runManagePlugins(context: TuiContext): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     p.note(message, 'Error');
+  }
+}
+
+/**
+ * Browse and manage registered marketplaces.
+ * Lists marketplaces, allows adding new ones, and drilling into marketplace details.
+ */
+export async function runBrowseMarketplaces(
+  context: TuiContext,
+): Promise<void> {
+  try {
+    while (true) {
+      const marketplaces = await listMarketplaces();
+
+      const options: Array<{ label: string; value: string }> = [
+        { label: '+ Add marketplace', value: '__add__' },
+        ...marketplaces.map((m) => ({
+          label: `${m.name} (${m.source.type}: ${m.source.location})`,
+          value: m.name,
+        })),
+        { label: 'Back', value: '__back__' },
+      ];
+
+      const selected = await p.select({
+        message: 'Marketplaces',
+        options,
+      });
+
+      if (p.isCancel(selected) || selected === '__back__') {
+        return;
+      }
+
+      if (selected === '__add__') {
+        const source = await p.text({
+          message: 'Marketplace source (GitHub URL, owner/repo, or name)',
+          placeholder: 'e.g., anthropics/claude-plugins-official',
+        });
+
+        if (p.isCancel(source)) {
+          continue;
+        }
+
+        const s = p.spinner();
+        s.start('Adding marketplace...');
+        const result = await addMarketplace(source);
+        s.stop(
+          result.success ? 'Marketplace added' : 'Failed to add marketplace',
+        );
+
+        if (!result.success) {
+          p.note(result.error ?? 'Unknown error', 'Error');
+        }
+
+        continue;
+      }
+
+      // User selected a marketplace — show detail screen
+      await runMarketplaceDetail(selected, context);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    p.note(message, 'Error');
+  }
+}
+
+/**
+ * Marketplace detail screen.
+ * Shows actions for a specific marketplace: browse plugins, update, remove.
+ */
+async function runMarketplaceDetail(
+  marketplaceName: string,
+  context: TuiContext,
+): Promise<void> {
+  while (true) {
+    const action = await p.select({
+      message: `Marketplace: ${marketplaceName}`,
+      options: [
+        { label: 'Browse plugins', value: 'browse' as const },
+        { label: 'Update marketplace', value: 'update' as const },
+        { label: 'Remove marketplace', value: 'remove' as const },
+        { label: 'Back', value: 'back' as const },
+      ],
+    });
+
+    if (p.isCancel(action) || action === 'back') {
+      return;
+    }
+
+    if (action === 'browse') {
+      try {
+        const result = await listMarketplacePlugins(marketplaceName);
+
+        if (result.plugins.length === 0) {
+          p.note('No plugins found in this marketplace.', 'Plugins');
+          continue;
+        }
+
+        const pluginOptions: Array<{ label: string; value: string }> =
+          result.plugins.map((plugin) => {
+            const label = plugin.description
+              ? `${plugin.name} - ${plugin.description}`
+              : plugin.name;
+            return { label, value: plugin.name };
+          });
+        pluginOptions.push({ label: 'Back', value: '__back__' });
+
+        const selectedPlugin = await p.select({
+          message: 'Select a plugin to install',
+          options: pluginOptions,
+        });
+
+        if (p.isCancel(selectedPlugin) || selectedPlugin === '__back__') {
+          continue;
+        }
+
+        const pluginRef = `${selectedPlugin}@${marketplaceName}`;
+        await installSelectedPlugin(pluginRef, context);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        p.note(message, 'Error');
+      }
+
+      continue;
+    }
+
+    if (action === 'update') {
+      try {
+        const s = p.spinner();
+        s.start('Updating marketplace...');
+        const results = await updateMarketplace(marketplaceName);
+        const summary = results
+          .map(
+            (r) =>
+              `${r.success ? '\u2713' : '\u2717'} ${r.name}${r.error ? ` - ${r.error}` : ''}`,
+          )
+          .join('\n');
+        s.stop('Update complete');
+        p.note(summary || 'Marketplace updated.', 'Update');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        p.note(message, 'Error');
+      }
+
+      continue;
+    }
+
+    if (action === 'remove') {
+      const confirmed = await p.confirm({
+        message: `Remove marketplace "${marketplaceName}"?`,
+      });
+
+      if (p.isCancel(confirmed) || !confirmed) {
+        continue;
+      }
+
+      try {
+        const s = p.spinner();
+        s.start('Removing marketplace...');
+        const result = await removeMarketplace(marketplaceName);
+        s.stop(
+          result.success
+            ? 'Marketplace removed'
+            : 'Failed to remove marketplace',
+        );
+
+        if (!result.success) {
+          p.note(result.error ?? 'Unknown error', 'Error');
+          continue;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        p.note(message, 'Error');
+      }
+
+      // Exit detail loop so marketplace list refreshes
+      return;
+    }
   }
 }

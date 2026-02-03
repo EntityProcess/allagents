@@ -6,7 +6,7 @@ import { getTuiContext, type TuiContext } from './context.js';
 import { runInit } from './actions/init.js';
 import { runSync } from './actions/sync.js';
 import { runStatus } from './actions/status.js';
-import { runInstallPlugin, runManagePlugins } from './actions/plugins.js';
+import { runInstallPlugin, runManagePlugins, runBrowseMarketplaces } from './actions/plugins.js';
 import { runUpdate } from './actions/update.js';
 
 export type MenuAction =
@@ -28,7 +28,7 @@ export function buildMenuOptions(context: TuiContext) {
   if (!context.hasWorkspace) {
     // State 1: No workspace detected
     options.push({ label: 'Initialize workspace', value: 'init' });
-    options.push({ label: 'Browse marketplace', value: 'marketplace' });
+    options.push({ label: 'Manage marketplaces', value: 'marketplace' });
     options.push({
       label: 'Install plugin (user scope)',
       value: 'install',
@@ -43,13 +43,13 @@ export function buildMenuOptions(context: TuiContext) {
     options.push({ label: 'View status', value: 'status' });
     options.push({ label: 'Install plugin', value: 'install' });
     options.push({ label: 'Manage plugins', value: 'manage' });
-    options.push({ label: 'Browse marketplace', value: 'marketplace' });
+    options.push({ label: 'Manage marketplaces', value: 'marketplace' });
   } else {
     // State 3: Workspace exists, all synced
     options.push({ label: 'View status', value: 'status' });
     options.push({ label: 'Install plugin', value: 'install' });
     options.push({ label: 'Manage plugins', value: 'manage' });
-    options.push({ label: 'Browse marketplace', value: 'marketplace' });
+    options.push({ label: 'Manage marketplaces', value: 'marketplace' });
     options.push({ label: 'Check for updates', value: 'update' });
   }
 
@@ -124,8 +124,7 @@ export async function runWizard(): Promise<void> {
         await runManagePlugins(context);
         break;
       case 'marketplace':
-        // Browse marketplace is the same flow as install — user picks from marketplace plugins
-        await runInstallPlugin(context);
+        await runBrowseMarketplaces(context);
         break;
       case 'update':
         await runUpdate();
