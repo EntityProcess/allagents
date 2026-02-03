@@ -146,6 +146,39 @@ async function addPluginToConfig(
 }
 
 /**
+ * Check if a plugin exists in .allagents/workspace.yaml (project scope)
+ * @param plugin - Plugin source to find (exact match or partial match)
+ * @param workspacePath - Path to workspace directory (default: cwd)
+ * @returns true if the plugin is found
+ */
+export async function hasPlugin(
+  plugin: string,
+  workspacePath: string = process.cwd(),
+): Promise<boolean> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) return false;
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+
+    // Exact match first
+    if (config.plugins.indexOf(plugin) !== -1) return true;
+
+    // Partial match
+    if (!isPluginSpec(plugin)) {
+      return config.plugins.some(
+        (p) => p.startsWith(`${plugin}@`) || p === plugin,
+      );
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Remove a plugin from .allagents/workspace.yaml
  * @param plugin - Plugin source to remove (exact match or partial match)
  * @param workspacePath - Path to workspace directory (default: cwd)

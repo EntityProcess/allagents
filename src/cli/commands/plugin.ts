@@ -8,8 +8,8 @@ import {
   getWellKnownMarketplaces,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
-import { addPlugin, removePlugin } from '../../core/workspace-modify.js';
-import { addUserPlugin, removeUserPlugin } from '../../core/user-workspace.js';
+import { addPlugin, removePlugin, hasPlugin } from '../../core/workspace-modify.js';
+import { addUserPlugin, removeUserPlugin, hasUserPlugin } from '../../core/user-workspace.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import {
@@ -637,7 +637,7 @@ const pluginInstallCmd = command({
       if (result.autoRegistered) {
         console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
       }
-      console.log(`\u2713 Installed plugin${isUser ? ' (user scope)' : ''}: ${plugin}`);
+      console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${plugin}`);
 
       const { ok: syncOk } = isUser
         ? await runUserSyncAndPrint()
@@ -673,48 +673,122 @@ const pluginUninstallCmd = command({
   },
   handler: async ({ plugin, scope }) => {
     try {
-      const isUser = scope === 'user';
-      const result = isUser
-        ? await removeUserPlugin(plugin)
-        : await removePlugin(plugin);
+      // When an explicit scope is given, only uninstall from that scope
+      if (scope) {
+        const isUser = scope === 'user';
+        const result = isUser
+          ? await removeUserPlugin(plugin)
+          : await removePlugin(plugin);
 
-      if (!result.success) {
-        if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin uninstall', error: result.error ?? 'Unknown error' });
+        if (!result.success) {
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin uninstall', error: result.error ?? 'Unknown error' });
+            process.exit(1);
+          }
+          console.error(`Error: ${result.error}`);
           process.exit(1);
         }
-        console.error(`Error: ${result.error}`);
-        process.exit(1);
-      }
 
-      if (isJsonMode()) {
-        const { ok, syncData } = isUser
+        if (isJsonMode()) {
+          const { ok, syncData } = isUser
+            ? await runUserSyncAndPrint()
+            : await runSyncAndPrint();
+          jsonOutput({
+            success: ok,
+            command: 'plugin uninstall',
+            data: { plugin, scope, syncResult: syncData },
+            ...(!ok && { error: 'Sync completed with failures' }),
+          });
+          if (!ok) process.exit(1);
+          return;
+        }
+
+        console.log(`\u2713 Uninstalled plugin (${scope} scope): ${plugin}`);
+        const { ok: syncOk } = isUser
           ? await runUserSyncAndPrint()
           : await runSyncAndPrint();
-        jsonOutput({
-          success: ok,
-          command: 'plugin uninstall',
-          data: {
-            plugin,
-            scope: isUser ? 'user' : 'project',
-            syncResult: syncData,
-          },
-          ...(!ok && { error: 'Sync completed with failures' }),
-        });
-        if (!ok) {
-          process.exit(1);
-        }
+        if (!syncOk) process.exit(1);
         return;
       }
 
-      console.log(`\u2713 Uninstalled plugin${isUser ? ' (user scope)' : ''}: ${plugin}`);
+      // No explicit scope: uninstall from all scopes where the plugin exists
+      const inProject = await hasPlugin(plugin);
+      const inUser = await hasUserPlugin(plugin);
 
-      const { ok: syncOk } = isUser
-        ? await runUserSyncAndPrint()
-        : await runSyncAndPrint();
-      if (!syncOk) {
+      if (!inProject && !inUser) {
+        const error = `Plugin not found: ${plugin}`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin uninstall', error });
+          process.exit(1);
+        }
+        console.error(`Error: ${error}`);
         process.exit(1);
       }
+
+      const removedScopes: string[] = [];
+
+      if (inProject) {
+        const result = await removePlugin(plugin);
+        if (!result.success) {
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin uninstall', error: result.error ?? 'Unknown error' });
+            process.exit(1);
+          }
+          console.error(`Error: ${result.error}`);
+          process.exit(1);
+        }
+        removedScopes.push('project');
+      }
+
+      if (inUser) {
+        const result = await removeUserPlugin(plugin);
+        if (!result.success) {
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin uninstall', error: result.error ?? 'Unknown error' });
+            process.exit(1);
+          }
+          console.error(`Error: ${result.error}`);
+          process.exit(1);
+        }
+        removedScopes.push('user');
+      }
+
+      if (isJsonMode()) {
+        const syncResults: Record<string, ReturnType<typeof buildSyncData> | null> = {};
+        let allOk = true;
+        if (removedScopes.includes('project')) {
+          const { ok, syncData } = await runSyncAndPrint();
+          syncResults.project = syncData;
+          if (!ok) allOk = false;
+        }
+        if (removedScopes.includes('user')) {
+          const { ok, syncData } = await runUserSyncAndPrint();
+          syncResults.user = syncData;
+          if (!ok) allOk = false;
+        }
+        jsonOutput({
+          success: allOk,
+          command: 'plugin uninstall',
+          data: { plugin, scopes: removedScopes, syncResults },
+          ...(!allOk && { error: 'Sync completed with failures' }),
+        });
+        if (!allOk) process.exit(1);
+        return;
+      }
+
+      const scopeLabel = removedScopes.join(' + ');
+      console.log(`\u2713 Uninstalled plugin (${scopeLabel} scope): ${plugin}`);
+
+      let syncOk = true;
+      if (removedScopes.includes('project')) {
+        const { ok } = await runSyncAndPrint();
+        if (!ok) syncOk = false;
+      }
+      if (removedScopes.includes('user')) {
+        const { ok } = await runUserSyncAndPrint();
+        if (!ok) syncOk = false;
+      }
+      if (!syncOk) process.exit(1);
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
