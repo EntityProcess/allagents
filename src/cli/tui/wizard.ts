@@ -2,6 +2,7 @@ import * as p from '@clack/prompts';
 import chalk from 'chalk';
 import { relative } from 'node:path';
 import packageJson from '../../../package.json';
+import { TuiCache } from './cache.js';
 import { getTuiContext, type TuiContext } from './context.js';
 import { runInit } from './actions/init.js';
 import { runSync } from './actions/sync.js';
@@ -91,7 +92,8 @@ function buildSummary(context: TuiContext): string {
 export async function runWizard(): Promise<void> {
   p.intro(`${chalk.cyan('allagents')} v${packageJson.version}`);
 
-  let context = await getTuiContext();
+  const cache = new TuiCache();
+  let context = await getTuiContext(process.cwd(), cache);
 
   // biome-ignore lint/correctness/noConstantCondition: intentional wizard loop
   while (true) {
@@ -110,31 +112,34 @@ export async function runWizard(): Promise<void> {
     switch (action) {
       case 'init':
         await runInit();
+        cache.invalidate();
         break;
       case 'sync':
         await runSync(context);
+        cache.invalidate();
         break;
       case 'status':
         await runStatus(context);
         break;
       case 'install':
-        await runInstallPlugin(context);
+        await runInstallPlugin(context, cache);
         break;
       case 'manage':
-        await runManagePlugins(context);
+        await runManagePlugins(context, cache);
         break;
       case 'marketplace':
-        await runBrowseMarketplaces(context);
+        await runBrowseMarketplaces(context, cache);
         break;
       case 'update':
         await runUpdate();
+        cache.invalidate();
         break;
       case 'exit':
         p.outro('Bye');
         return;
     }
 
-    // Refresh context after each action
-    context = await getTuiContext();
+    // Refresh context after each action (cache makes this cheap when nothing changed)
+    context = await getTuiContext(process.cwd(), cache);
   }
 }

@@ -8,9 +8,41 @@ import {
   addMarketplace,
   removeMarketplace,
   updateMarketplace,
+  type MarketplaceEntry,
+  type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
 import type { TuiContext } from '../context.js';
+import type { TuiCache } from '../cache.js';
+
+/**
+ * Get marketplace list, using cache when available.
+ */
+async function getCachedMarketplaces(
+  cache?: TuiCache,
+): Promise<MarketplaceEntry[]> {
+  const cached = cache?.getMarketplaces();
+  if (cached) return cached;
+
+  const result = await listMarketplaces();
+  cache?.setMarketplaces(result);
+  return result;
+}
+
+/**
+ * Get marketplace plugins, using cache when available.
+ */
+async function getCachedMarketplacePlugins(
+  name: string,
+  cache?: TuiCache,
+): Promise<MarketplacePluginsResult> {
+  const cached = cache?.getMarketplacePlugins(name);
+  if (cached) return cached;
+
+  const result = await listMarketplacePlugins(name);
+  cache?.setMarketplacePlugins(name, result);
+  return result;
+}
 
 /**
  * Shared helper: determine scope, install a plugin, sync, and show success.
@@ -19,6 +51,7 @@ import type { TuiContext } from '../context.js';
 async function installSelectedPlugin(
   pluginRef: string,
   context: TuiContext,
+  cache?: TuiCache,
 ): Promise<boolean> {
   // Determine scope
   let scope: 'project' | 'user' = 'user';
@@ -69,6 +102,7 @@ async function installSelectedPlugin(
     syncS.stop('Sync complete');
   }
 
+  cache?.invalidate();
   p.note(`Installed: ${pluginRef}`, 'Success');
   return true;
 }
@@ -77,10 +111,10 @@ async function installSelectedPlugin(
  * Plugin installation flow.
  * Lists marketplace plugins, lets user pick one, installs it, and auto-syncs.
  */
-export async function runInstallPlugin(context: TuiContext): Promise<void> {
+export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): Promise<void> {
   try {
     // Get available marketplaces
-    const marketplaces = await listMarketplaces();
+    const marketplaces = await getCachedMarketplaces(cache);
 
     if (marketplaces.length === 0) {
       p.note(
@@ -93,7 +127,7 @@ export async function runInstallPlugin(context: TuiContext): Promise<void> {
     // Collect plugins from all marketplaces
     const allPlugins: Array<{ label: string; value: string }> = [];
     for (const marketplace of marketplaces) {
-      const result = await listMarketplacePlugins(marketplace.name);
+      const result = await getCachedMarketplacePlugins(marketplace.name, cache);
       for (const plugin of result.plugins) {
         const label = plugin.description
           ? `${plugin.name} - ${plugin.description}`
@@ -119,7 +153,7 @@ export async function runInstallPlugin(context: TuiContext): Promise<void> {
       return;
     }
 
-    await installSelectedPlugin(selected, context);
+    await installSelectedPlugin(selected, context, cache);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     p.note(message, 'Error');
@@ -130,7 +164,7 @@ export async function runInstallPlugin(context: TuiContext): Promise<void> {
  * Plugin management (uninstall) flow.
  * Lists installed plugins, lets user pick which to remove, and auto-syncs.
  */
-export async function runManagePlugins(context: TuiContext): Promise<void> {
+export async function runManagePlugins(context: TuiContext, cache?: TuiCache): Promise<void> {
   try {
     const status = await getWorkspaceStatus(context.workspacePath ?? undefined);
 
@@ -202,6 +236,7 @@ export async function runManagePlugins(context: TuiContext): Promise<void> {
       await syncUserWorkspace();
     }
     syncS.stop('Sync complete');
+    cache?.invalidate();
 
     p.note(results.join('\n'), 'Removed');
   } catch (error) {
@@ -216,10 +251,11 @@ export async function runManagePlugins(context: TuiContext): Promise<void> {
  */
 export async function runBrowseMarketplaces(
   context: TuiContext,
+  cache?: TuiCache,
 ): Promise<void> {
   try {
     while (true) {
-      const marketplaces = await listMarketplaces();
+      const marketplaces = await getCachedMarketplaces(cache);
 
       const options: Array<{ label: string; value: string }> = [
         { label: '+ Add marketplace', value: '__add__' },
@@ -258,13 +294,15 @@ export async function runBrowseMarketplaces(
 
         if (!result.success) {
           p.note(result.error ?? 'Unknown error', 'Error');
+        } else {
+          cache?.invalidate();
         }
 
         continue;
       }
 
       // User selected a marketplace — show detail screen
-      await runMarketplaceDetail(selected, context);
+      await runMarketplaceDetail(selected, context, cache);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -279,6 +317,7 @@ export async function runBrowseMarketplaces(
 async function runMarketplaceDetail(
   marketplaceName: string,
   context: TuiContext,
+  cache?: TuiCache,
 ): Promise<void> {
   while (true) {
     const action = await p.select({
@@ -297,7 +336,7 @@ async function runMarketplaceDetail(
 
     if (action === 'browse') {
       try {
-        const result = await listMarketplacePlugins(marketplaceName);
+        const result = await getCachedMarketplacePlugins(marketplaceName, cache);
 
         if (result.plugins.length === 0) {
           p.note('No plugins found in this marketplace.', 'Plugins');
@@ -323,7 +362,7 @@ async function runMarketplaceDetail(
         }
 
         const pluginRef = `${selectedPlugin}@${marketplaceName}`;
-        await installSelectedPlugin(pluginRef, context);
+        await installSelectedPlugin(pluginRef, context, cache);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         p.note(message, 'Error');
@@ -344,6 +383,7 @@ async function runMarketplaceDetail(
           )
           .join('\n');
         s.stop('Update complete');
+        cache?.invalidate();
         p.note(summary || 'Marketplace updated.', 'Update');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -376,6 +416,8 @@ async function runMarketplaceDetail(
           p.note(result.error ?? 'Unknown error', 'Error');
           continue;
         }
+
+        cache?.invalidate();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         p.note(message, 'Error');

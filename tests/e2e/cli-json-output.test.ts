@@ -91,7 +91,7 @@ describe('CLI --json error cases', () => {
   });
 
   it('workspace status --json in non-workspace dir falls back to user workspace', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'status', '--json']);
+    const { stdout, exitCode } = await runCli(['workspace', 'status', '--json'], { HOME: mockHome });
     expect(exitCode).toBe(0);
     const json = parseJson(stdout);
     expect(json.success).toBe(true);
