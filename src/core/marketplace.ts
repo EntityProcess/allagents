@@ -221,7 +221,7 @@ export async function addMarketplace(
     } else {
       // Check if gh CLI is available
       try {
-        await execa('gh', ['--version']);
+        await execa('gh', ['--version'], { stdin: 'ignore' });
       } catch {
         return {
           success: false,
@@ -237,7 +237,7 @@ export async function addMarketplace(
 
       // Clone repository
       try {
-        await execa('gh', ['repo', 'clone', parsed.location, marketplacePath]);
+        await execa('gh', ['repo', 'clone', parsed.location, marketplacePath], { stdin: 'ignore' });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
@@ -419,7 +419,7 @@ export async function updateMarketplace(
         const { stdout } = await execa(
           'git',
           ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
-          { cwd: marketplace.path },
+          { cwd: marketplace.path, stdin: 'ignore' },
         );
         // stdout is like "origin/main" - strip remote prefix to get local branch name
         const ref = stdout.trim();
@@ -432,7 +432,7 @@ export async function updateMarketplace(
           const { stdout } = await execa(
             'git',
             ['remote', 'show', 'origin'],
-            { cwd: marketplace.path },
+            { cwd: marketplace.path, stdin: 'ignore' },
           );
           const match = stdout.match(/HEAD branch:\s*(\S+)/);
           if (match?.[1]) {
@@ -444,8 +444,9 @@ export async function updateMarketplace(
       }
       await execa('git', ['checkout', defaultBranch], {
         cwd: marketplace.path,
+        stdin: 'ignore',
       });
-      await execa('git', ['pull'], { cwd: marketplace.path });
+      await execa('git', ['pull'], { cwd: marketplace.path, stdin: 'ignore' });
 
       // Update lastUpdated in registry
       marketplace.lastUpdated = new Date().toISOString();
