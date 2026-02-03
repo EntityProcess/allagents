@@ -71,6 +71,30 @@ describe('workspace status - both scopes', () => {
     expect(result.userPlugins!.length).toBe(1);
   });
 
+  it('should fall back to user plugins when no project workspace exists', async () => {
+    // Use a separate HOME so user config doesn't overlap with project dir
+    const homeDir = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
+    process.env.HOME = homeDir;
+
+    const userPlugin = await createLocalPlugin('user-plugin');
+    const allagentsDir = join(homeDir, '.allagents');
+    await mkdir(allagentsDir, { recursive: true });
+    await writeFile(
+      join(allagentsDir, WORKSPACE_CONFIG_FILE),
+      dump({ repositories: [], plugins: [userPlugin], clients: ['claude'] } satisfies WorkspaceConfig, { lineWidth: -1 }),
+      'utf-8',
+    );
+
+    // No project config — should succeed with user plugins only
+    const result = await getWorkspaceStatus(testDir);
+    expect(result.success).toBe(true);
+    expect(result.plugins).toEqual([]);
+    expect(result.clients).toEqual([]);
+    expect(result.userPlugins!.length).toBe(1);
+
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
   it('should show empty userPlugins when no user config exists', async () => {
     // Use a separate HOME dir so there's no user config
     const separateHome = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));

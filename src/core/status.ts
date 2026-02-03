@@ -47,12 +47,13 @@ export async function getWorkspaceStatus(
 ): Promise<WorkspaceStatusResult> {
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
-  // Check if .allagents/workspace.yaml exists
+  // If no project workspace.yaml, return user-level plugins only
   if (!existsSync(configPath)) {
+    const userPlugins = await getUserPluginStatuses();
     return {
-      success: false,
-      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
+      success: true,
       plugins: [],
+      userPlugins,
       clients: [],
     };
   }
