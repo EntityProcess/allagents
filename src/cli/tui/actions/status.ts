@@ -17,11 +17,26 @@ export async function runStatus(context: TuiContext): Promise<void> {
 
     const lines: string[] = [];
 
-    if (status.plugins.length === 0) {
+    const userPlugins = status.userPlugins ?? [];
+    const hasProjectPlugins = status.plugins.length > 0;
+    const hasUserPlugins = userPlugins.length > 0;
+
+    if (!hasProjectPlugins && !hasUserPlugins) {
       lines.push('No plugins configured');
-    } else {
-      lines.push('Plugins:');
+    }
+
+    if (hasProjectPlugins) {
+      lines.push('Project plugins:');
       for (const plugin of status.plugins) {
+        const icon = plugin.available ? '\u2713' : '\u2717';
+        lines.push(`  ${icon} ${plugin.source} (${plugin.type})`);
+      }
+    }
+
+    if (hasUserPlugins) {
+      if (hasProjectPlugins) lines.push('');
+      lines.push('User plugins:');
+      for (const plugin of userPlugins) {
         const icon = plugin.available ? '\u2713' : '\u2717';
         lines.push(`  ${icon} ${plugin.source} (${plugin.type})`);
       }

@@ -90,13 +90,13 @@ describe('CLI --json error cases', () => {
     expect(json.command).toBe('workspace sync');
   });
 
-  it('workspace status --json in non-workspace dir returns error JSON with exit code 1', async () => {
+  it('workspace status --json in non-workspace dir falls back to user workspace', async () => {
     const { stdout, exitCode } = await runCli(['workspace', 'status', '--json']);
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     const json = parseJson(stdout);
-    expect(json.success).toBe(false);
+    expect(json.success).toBe(true);
     expect(json.command).toBe('workspace status');
-    expect(typeof json.error).toBe('string');
+    expect(json.data.plugins).toEqual([]);
   });
 
   it('plugin install --json with bad plugin returns error JSON', async () => {
