@@ -182,6 +182,12 @@ export async function initWorkspace(
       if (parsedUrl) {
         const basePath = parsedUrl.subpath || '';
         for (const agentFile of AGENT_FILES) {
+          const targetFilePath = join(absoluteTarget, agentFile);
+          // Skip if file already exists in target - don't overwrite user content
+          if (existsSync(targetFilePath)) {
+            copiedAgentFiles.push(agentFile);
+            continue;
+          }
           const filePath = basePath ? `${basePath}/${agentFile}` : agentFile;
           const content = await fetchFileFromGitHub(
             parsedUrl.owner,
@@ -190,7 +196,7 @@ export async function initWorkspace(
             parsedUrl.branch,
           );
           if (content) {
-            await writeFile(join(absoluteTarget, agentFile), content, 'utf-8');
+            await writeFile(targetFilePath, content, 'utf-8');
             copiedAgentFiles.push(agentFile);
           }
         }
@@ -199,10 +205,16 @@ export async function initWorkspace(
       // Copy agent files from local source
       const effectiveSourceDir = sourceDir ?? defaultTemplatePath;
       for (const agentFile of AGENT_FILES) {
+        const targetFilePath = join(absoluteTarget, agentFile);
+        // Skip if file already exists in target - don't overwrite user content
+        if (existsSync(targetFilePath)) {
+          copiedAgentFiles.push(agentFile);
+          continue;
+        }
         const sourcePath = join(effectiveSourceDir, agentFile);
         if (existsSync(sourcePath)) {
           const content = await readFile(sourcePath, 'utf-8');
-          await writeFile(join(absoluteTarget, agentFile), content, 'utf-8');
+          await writeFile(targetFilePath, content, 'utf-8');
           copiedAgentFiles.push(agentFile);
         }
       }
