@@ -5,6 +5,7 @@ import { getWorkspaceStatus } from '../../core/status.js';
 import { loadSyncState } from '../../core/sync-state.js';
 import { getUserWorkspaceConfig } from '../../core/user-workspace.js';
 import { listMarketplaces } from '../../core/marketplace.js';
+import type { TuiCache } from './cache.js';
 
 /**
  * Workspace context detected at TUI startup and after each action.
@@ -26,7 +27,12 @@ export interface TuiContext {
  */
 export async function getTuiContext(
   cwd: string = process.cwd(),
+  cache?: TuiCache,
 ): Promise<TuiContext> {
+  // Return cached context if available
+  if (cache?.hasCachedContext()) {
+    return cache.getContext()!;
+  }
   const configPath = join(cwd, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
   const hasWorkspace = existsSync(configPath);
 
@@ -73,7 +79,7 @@ export async function getTuiContext(
     // Marketplace listing failed -- degrade gracefully
   }
 
-  return {
+  const context: TuiContext = {
     hasWorkspace,
     workspacePath: hasWorkspace ? cwd : null,
     projectPluginCount,
@@ -82,6 +88,9 @@ export async function getTuiContext(
     hasUserConfig,
     marketplaceCount,
   };
+
+  cache?.setContext(context);
+  return context;
 }
 
 /**
