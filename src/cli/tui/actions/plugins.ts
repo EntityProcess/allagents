@@ -8,10 +8,26 @@ import {
   addMarketplace,
   removeMarketplace,
   updateMarketplace,
+  type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
+
+/**
+ * Get marketplace plugins, using cache when available.
+ */
+async function getCachedMarketplacePlugins(
+  name: string,
+  cache?: TuiCache,
+): Promise<MarketplacePluginsResult> {
+  const cached = cache?.getMarketplacePlugins(name);
+  if (cached) return cached;
+
+  const result = await listMarketplacePlugins(name);
+  cache?.setMarketplacePlugins(name, result);
+  return result;
+}
 
 /**
  * Shared helper: determine scope, install a plugin, sync, and show success.
@@ -96,7 +112,7 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
     // Collect plugins from all marketplaces
     const allPlugins: Array<{ label: string; value: string }> = [];
     for (const marketplace of marketplaces) {
-      const result = await listMarketplacePlugins(marketplace.name);
+      const result = await getCachedMarketplacePlugins(marketplace.name, cache);
       for (const plugin of result.plugins) {
         const label = plugin.description
           ? `${plugin.name} - ${plugin.description}`
@@ -305,7 +321,7 @@ async function runMarketplaceDetail(
 
     if (action === 'browse') {
       try {
-        const result = await listMarketplacePlugins(marketplaceName);
+        const result = await getCachedMarketplacePlugins(marketplaceName, cache);
 
         if (result.plugins.length === 0) {
           p.note('No plugins found in this marketplace.', 'Plugins');
