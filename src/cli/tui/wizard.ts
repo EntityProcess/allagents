@@ -120,7 +120,7 @@ export async function runWizard(): Promise<void> {
         cache.invalidate();
         break;
       case 'status':
-        await runStatus(context);
+        await runStatus(context, cache);
         break;
       case 'install':
         await runInstallPlugin(context, cache);

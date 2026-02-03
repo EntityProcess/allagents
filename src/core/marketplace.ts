@@ -797,7 +797,7 @@ export async function resolvePluginSpecWithAutoRegister(
   const resolved = await resolvePluginSpec(spec, {
     ...(subpath && { subpath }),
     marketplaceNameOverride: marketplace.name,
-    offline: options.offline,
+    ...(options.offline != null && { offline: options.offline }),
   });
   if (!resolved) {
     return {
