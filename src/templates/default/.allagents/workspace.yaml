@@ -13,3 +13,6 @@ plugins: []
 
 clients:
   - claude
+  - copilot
+  - codex
+  - opencode
