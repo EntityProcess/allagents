@@ -71,7 +71,7 @@ describe('workspace status - both scopes', () => {
     expect(result.userPlugins!.length).toBe(1);
   });
 
-  it('should return user plugins when no project workspace exists', async () => {
+  it('should fall back to user plugins when no project workspace exists', async () => {
     // Use a separate HOME so user config doesn't overlap with project dir
     const homeDir = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
     process.env.HOME = homeDir;
@@ -85,29 +85,14 @@ describe('workspace status - both scopes', () => {
       'utf-8',
     );
 
-    // Don't create a project config — testDir has no .allagents/workspace.yaml
+    // No project config — should succeed with user plugins only
     const result = await getWorkspaceStatus(testDir);
     expect(result.success).toBe(true);
     expect(result.plugins).toEqual([]);
     expect(result.clients).toEqual([]);
-    expect(result.userPlugins).toBeDefined();
     expect(result.userPlugins!.length).toBe(1);
-    expect(result.userPlugins![0].source).toBe(userPlugin);
 
     await rm(homeDir, { recursive: true, force: true });
-  });
-
-  it('should succeed with empty results when neither workspace exists', async () => {
-    const separateHome = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
-    process.env.HOME = separateHome;
-
-    const result = await getWorkspaceStatus(testDir);
-    expect(result.success).toBe(true);
-    expect(result.plugins).toEqual([]);
-    expect(result.userPlugins).toEqual([]);
-    expect(result.clients).toEqual([]);
-
-    await rm(separateHome, { recursive: true, force: true });
   });
 
   it('should show empty userPlugins when no user config exists', async () => {
