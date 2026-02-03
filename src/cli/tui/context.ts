@@ -30,8 +30,9 @@ export async function getTuiContext(
   cache?: TuiCache,
 ): Promise<TuiContext> {
   // Return cached context if available
-  if (cache?.hasCachedContext()) {
-    return cache.getContext()!;
+  const cachedContext = cache?.getContext();
+  if (cachedContext) {
+    return cachedContext;
   }
   const configPath = join(cwd, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
   const hasWorkspace = existsSync(configPath);
