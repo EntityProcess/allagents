@@ -8,6 +8,7 @@ import {
 } from '../utils/marketplace-manifest-parser.js';
 import { fetchPlugin } from './plugin.js';
 import type { FetchResult } from './plugin.js';
+import { parseGitHubUrl, getPluginCachePath } from '../utils/plugin-path.js';
 
 /**
  * Source types for marketplaces
@@ -642,6 +643,7 @@ export async function resolvePluginSpec(
     subpath?: string;
     marketplaceNameOverride?: string;
     marketplacePathOverride?: string;
+    offline?: boolean;
     fetchFn?: (url: string) => Promise<FetchResult>;
   } = {},
 ): Promise<{ path: string; marketplace: string; plugin: string } | null> {
@@ -681,6 +683,21 @@ export async function resolvePluginSpec(
           };
         }
       } else {
+        if (options.offline) {
+          // Offline mode: check if plugin is already cached, don't fetch
+          const parsedUrl = parseGitHubUrl(pluginEntry.source.url);
+          if (parsedUrl) {
+            const cachePath = getPluginCachePath(parsedUrl.owner, parsedUrl.repo);
+            if (existsSync(cachePath)) {
+              return {
+                path: cachePath,
+                marketplace: marketplaceName,
+                plugin: parsed.plugin,
+              };
+            }
+          }
+          return null;
+        }
         // URL source - fetch/clone the plugin
         const fetchFn = options.fetchFn ?? fetchPlugin;
         const fetchResult = await fetchFn(pluginEntry.source.url);
