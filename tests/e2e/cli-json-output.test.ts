@@ -69,14 +69,12 @@ describe('CLI --json output envelope', () => {
 // =============================================================================
 
 describe('CLI --json error cases', () => {
-  it('workspace sync --json in non-workspace dir returns error JSON with exit code 1', async () => {
+  it('workspace sync --json in non-workspace dir returns success JSON', async () => {
     const { stdout, exitCode } = await runCli(['workspace', 'sync', '--json']);
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     const json = parseJson(stdout);
-    expect(json.success).toBe(false);
+    expect(json.success).toBe(true);
     expect(json.command).toBe('workspace sync');
-    expect(typeof json.error).toBe('string');
-    expect(json.error.length).toBeGreaterThan(0);
   });
 
   it('workspace status --json in non-workspace dir returns error JSON with exit code 1', async () => {
@@ -152,10 +150,10 @@ describe('CLI output without --json is unchanged', () => {
     expect(() => JSON.parse(stdout)).toThrow();
   });
 
-  it('workspace sync without --json in non-workspace dir outputs human error', async () => {
-    const { stderr, exitCode } = await runCli(['workspace', 'sync']);
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('Error');
+  it('workspace sync without --json in non-workspace dir outputs sync results', async () => {
+    const { stdout, exitCode } = await runCli(['workspace', 'sync']);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('Sync');
   });
 
   it('plugin marketplace list without --json outputs human text', async () => {

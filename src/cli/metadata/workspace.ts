@@ -38,7 +38,6 @@ export const syncMeta: AgentCommandMeta = {
     'allagents workspace sync --dry-run',
     'allagents workspace sync --client claude',
     'allagents workspace sync --offline',
-    'allagents workspace sync --scope user',
   ],
   expectedOutput:
     'Lists synced files with status per plugin. Exit 0 on success, exit 1 if any files failed.',
@@ -46,7 +45,6 @@ export const syncMeta: AgentCommandMeta = {
     { flag: '--offline', type: 'boolean', description: 'Use cached plugins without fetching latest from remote' },
     { flag: '--dry-run', short: '-n', type: 'boolean', description: 'Simulate sync without making changes' },
     { flag: '--client', short: '-c', type: 'string', description: 'Sync only the specified client (e.g., opencode, claude)' },
-    { flag: '--scope', short: '-s', type: 'string', description: 'Sync scope: "project" (default) or "user"' },
   ],
   outputSchema: {
     copied: 'number',

@@ -1,8 +1,12 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { command, positional, option, flag, string, optional } from 'cmd-ts';
 import { initWorkspace } from '../../core/workspace.js';
-import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
+import { syncWorkspace, syncUserWorkspace, mergeSyncResults } from '../../core/sync.js';
+import type { SyncResult } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { pruneOrphanedPlugins } from '../../core/prune.js';
+import { getUserWorkspaceConfig, ensureUserWorkspace } from '../../core/user-workspace.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
@@ -10,7 +14,7 @@ import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace
 /**
  * Build a JSON-friendly sync data object from a sync result.
  */
-function buildSyncData(result: Awaited<ReturnType<typeof syncWorkspace>>) {
+function buildSyncData(result: SyncResult) {
   return {
     copied: result.totalCopied,
     generated: result.totalGenerated,
@@ -100,38 +104,56 @@ const syncCmd = command({
     offline: flag({ long: 'offline', description: 'Use cached plugins without fetching latest from remote' }),
     dryRun: flag({ long: 'dry-run', short: 'n', description: 'Simulate sync without making changes' }),
     client: option({ type: optional(string), long: 'client', short: 'c', description: 'Sync only the specified client (e.g., opencode, claude)' }),
-    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Sync scope: "project" (default) or "user"' }),
   },
-  handler: async ({ offline, dryRun, client, scope }) => {
+  handler: async ({ offline, dryRun, client }) => {
     try {
-      const isUser = scope === 'user';
-      if (!isJsonMode()) {
-        if (dryRun) {
-          console.log('Dry run mode - no changes will be made\n');
-        }
-        if (client) {
-          console.log(`Syncing client: ${client}\n`);
-        }
-        console.log(`Syncing ${isUser ? 'user' : ''} workspace...\n`);
+      if (!isJsonMode() && dryRun) {
+        console.log('Dry run mode - no changes will be made\n');
       }
-      const result = isUser
-        ? await syncUserWorkspace({ offline, dryRun })
-        : await syncWorkspace(process.cwd(), {
-            offline,
-            dryRun,
-            ...(client && { clients: [client] }),
-          });
+      if (!isJsonMode() && client) {
+        console.log(`Syncing client: ${client}\n`);
+      }
 
-      // Early exit only for top-level errors (e.g., missing .allagents/workspace.yaml)
-      // Plugin-level errors are handled in the loop below
-      if (!result.success && result.error) {
+      const userConfigExists = !!(await getUserWorkspaceConfig());
+      const projectConfigPath = join(process.cwd(), '.allagents', 'workspace.yaml');
+      const projectConfigExists = existsSync(projectConfigPath);
+
+      // If neither config exists, auto-create user config and show guidance
+      if (!userConfigExists && !projectConfigExists) {
+        await ensureUserWorkspace();
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace sync', error: result.error });
-          process.exit(1);
+          jsonOutput({ success: true, command: 'workspace sync', data: { message: 'No plugins configured' } });
+        } else {
+          console.log('No plugins configured. Run `allagents plugin install <plugin>` to get started.');
         }
-        console.error(`Error: ${result.error}`);
-        process.exit(1);
+        return;
       }
+
+      let combined: SyncResult | null = null;
+
+      // Sync user workspace if config exists
+      if (userConfigExists) {
+        if (!isJsonMode()) {
+          console.log('Syncing user workspace...\n');
+        }
+        const userResult = await syncUserWorkspace({ offline, dryRun });
+        combined = userResult;
+      }
+
+      // Sync project workspace if config exists
+      if (projectConfigExists) {
+        if (!isJsonMode()) {
+          console.log('Syncing project workspace...\n');
+        }
+        const projectResult = await syncWorkspace(process.cwd(), {
+          offline,
+          dryRun,
+          ...(client && { clients: [client] }),
+        });
+        combined = combined ? mergeSyncResults(combined, projectResult) : projectResult;
+      }
+
+      const result = combined!;
 
       if (isJsonMode()) {
         const syncData = buildSyncData(result);
@@ -169,37 +191,21 @@ const syncCmd = command({
           console.log(`  Error: ${pluginResult.error}`);
         }
 
-        // Count by action
-        const copied = pluginResult.copyResults.filter(
-          (r) => r.action === 'copied',
-        ).length;
-        const generated = pluginResult.copyResults.filter(
-          (r) => r.action === 'generated',
-        ).length;
-        const failed = pluginResult.copyResults.filter(
-          (r) => r.action === 'failed',
-        ).length;
+        const copied = pluginResult.copyResults.filter((r) => r.action === 'copied').length;
+        const generated = pluginResult.copyResults.filter((r) => r.action === 'generated').length;
+        const failed = pluginResult.copyResults.filter((r) => r.action === 'failed').length;
 
-        if (copied > 0) {
-          console.log(`  Copied: ${copied} files`);
-        }
-        if (generated > 0) {
-          console.log(`  Generated: ${generated} files`);
-        }
+        if (copied > 0) console.log(`  Copied: ${copied} files`);
+        if (generated > 0) console.log(`  Generated: ${generated} files`);
         if (failed > 0) {
           console.log(`  Failed: ${failed} files`);
-          // Show failure details
-          for (const failedResult of pluginResult.copyResults.filter(
-            (r) => r.action === 'failed',
-          )) {
-            console.log(
-              `    - ${failedResult.destination}: ${failedResult.error}`,
-            );
+          for (const failedResult of pluginResult.copyResults.filter((r) => r.action === 'failed')) {
+            console.log(`    - ${failedResult.destination}: ${failedResult.error}`);
           }
         }
       }
 
-      // Show warnings for skipped plugins
+      // Show warnings
       if (result.warnings && result.warnings.length > 0) {
         console.log('\nWarnings:');
         for (const warning of result.warnings) {
@@ -209,20 +215,11 @@ const syncCmd = command({
 
       // Print summary
       console.log(`\nSync complete${dryRun ? ' (dry run)' : ''}:`);
-      console.log(
-        `  Total ${dryRun ? 'would copy' : 'copied'}: ${result.totalCopied}`,
-      );
-      if (result.totalGenerated > 0) {
-        console.log(`  Total generated: ${result.totalGenerated}`);
-      }
-      if (result.totalFailed > 0) {
-        console.log(`  Total failed: ${result.totalFailed}`);
-      }
-      if (result.totalSkipped > 0) {
-        console.log(`  Total skipped: ${result.totalSkipped}`);
-      }
+      console.log(`  Total ${dryRun ? 'would copy' : 'copied'}: ${result.totalCopied}`);
+      if (result.totalGenerated > 0) console.log(`  Total generated: ${result.totalGenerated}`);
+      if (result.totalFailed > 0) console.log(`  Total failed: ${result.totalFailed}`);
+      if (result.totalSkipped > 0) console.log(`  Total skipped: ${result.totalSkipped}`);
 
-      // Exit with error if any failures occurred (plugin-level or copy-level)
       if (!result.success || result.totalFailed > 0) {
         process.exit(1);
       }
