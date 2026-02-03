@@ -52,6 +52,8 @@ export interface SyncResult {
   /** Paths that were/would be purged per client */
   purgedPaths?: PurgePaths[];
   error?: string;
+  /** Warnings for plugins that were skipped during sync */
+  warnings?: string[];
 }
 
 /**
@@ -897,27 +899,24 @@ export async function syncWorkspace(
     }
   }
 
-  // Check if any plugin validation failed
+  // Separate valid and failed plugins
   const failedValidations = validatedPlugins.filter((v) => !v.success);
-  if (failedValidations.length > 0) {
-    // Return early - workspace unchanged
-    const errors = failedValidations
-      .map((v) => `  - ${v.plugin}: ${v.error}`)
-      .join('\n');
+  const validPlugins = validatedPlugins.filter((v) => v.success);
+  const warnings = failedValidations.map(
+    (v) => `${v.plugin}: ${v.error} (skipped)`,
+  );
+
+  // If ALL plugins failed, abort
+  if (validPlugins.length === 0 && config.plugins.length > 0) {
     return {
       success: false,
-      pluginResults: failedValidations.map((v) => ({
-        plugin: v.plugin,
-        resolved: v.resolved,
-        success: false,
-        copyResults: [],
-        ...(v.error && { error: v.error }),
-      })),
+      pluginResults: [],
       totalCopied: 0,
       totalFailed: failedValidations.length,
       totalSkipped: 0,
       totalGenerated: 0,
-      error: `Plugin validation failed (workspace unchanged):\n${errors}`,
+      warnings,
+      error: `All plugins failed validation (workspace unchanged):\n${failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n')}`,
     };
   }
 
@@ -944,7 +943,7 @@ export async function syncWorkspace(
 
   // Step 3b: Two-pass skill name resolution
   // Pass 1: Collect all skills from all plugins
-  const allSkills = await collectAllSkills(validatedPlugins);
+  const allSkills = await collectAllSkills(validPlugins);
 
   // Build per-plugin skill name maps (handles conflicts automatically)
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
@@ -952,7 +951,7 @@ export async function syncWorkspace(
   // Step 4: Copy fresh from all validated plugins
   // Pass 2: Copy skills using resolved names
   const pluginResults = await Promise.all(
-    validatedPlugins.map((validatedPlugin) => {
+    validPlugins.map((validatedPlugin) => {
       const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
       return copyValidatedPlugin(
         validatedPlugin,
@@ -1111,6 +1110,7 @@ export async function syncWorkspace(
     totalSkipped,
     totalGenerated,
     purgedPaths,
+    ...(warnings.length > 0 && { warnings }),
   };
 }
 
@@ -1144,22 +1144,22 @@ export async function syncUserWorkspace(
   // Validate all plugins
   const validatedPlugins = await validateAllPlugins(config.plugins, homeDir, offline);
   const failedValidations = validatedPlugins.filter((v) => !v.success);
-  if (failedValidations.length > 0) {
-    const errors = failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n');
+  const validPlugins = validatedPlugins.filter((v) => v.success);
+  const warnings = failedValidations.map(
+    (v) => `${v.plugin}: ${v.error} (skipped)`,
+  );
+
+  // If ALL plugins failed, abort
+  if (validPlugins.length === 0 && config.plugins.length > 0) {
     return {
       success: false,
-      pluginResults: failedValidations.map((v) => ({
-        plugin: v.plugin,
-        resolved: v.resolved,
-        success: false,
-        copyResults: [],
-        ...(v.error && { error: v.error }),
-      })),
+      pluginResults: [],
       totalCopied: 0,
       totalFailed: failedValidations.length,
       totalSkipped: 0,
       totalGenerated: 0,
-      error: `Plugin validation failed:\n${errors}`,
+      warnings,
+      error: `All plugins failed validation:\n${failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n')}`,
     };
   }
 
@@ -1172,12 +1172,12 @@ export async function syncUserWorkspace(
   }
 
   // Two-pass skill name resolution
-  const allSkills = await collectAllSkills(validatedPlugins);
+  const allSkills = await collectAllSkills(validPlugins);
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
 
   // Copy plugins using USER_CLIENT_MAPPINGS
   const pluginResults = await Promise.all(
-    validatedPlugins.map((vp) => {
+    validPlugins.map((vp) => {
       const skillNameMap = pluginSkillMaps.get(vp.resolved);
       return copyValidatedPlugin(vp, homeDir, clients, dryRun, skillNameMap, USER_CLIENT_MAPPINGS);
     }),
@@ -1222,6 +1222,7 @@ export async function syncUserWorkspace(
     totalFailed,
     totalSkipped,
     totalGenerated,
+    ...(warnings.length > 0 && { warnings }),
   };
 }
 

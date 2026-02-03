@@ -198,6 +198,14 @@ const syncCmd = command({
         }
       }
 
+      // Show warnings for skipped plugins
+      if (result.warnings && result.warnings.length > 0) {
+        console.log('\nWarnings:');
+        for (const warning of result.warnings) {
+          console.log(`  \u26A0 ${warning}`);
+        }
+      }
+
       // Print summary
       console.log(`\nSync complete${dryRun ? ' (dry run)' : ''}:`);
       console.log(
