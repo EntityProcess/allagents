@@ -1,12 +1,15 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import { execa } from 'execa';
 import { resolve } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const CLI = resolve(import.meta.dir, '../../dist/index.js');
 
-async function runCli(args: string[]) {
+async function runCli(args: string[], env?: Record<string, string>) {
   try {
-    const result = await execa('node', [CLI, ...args]);
+    const result = await execa('node', [CLI, ...args], env ? { env: { ...process.env, ...env } } : undefined);
     return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
   } catch (error: any) {
     return { stdout: error.stdout || '', stderr: error.stderr || '', exitCode: error.exitCode || 1 };
@@ -69,11 +72,21 @@ describe('CLI --json output envelope', () => {
 // =============================================================================
 
 describe('CLI --json error cases', () => {
-  it('workspace sync --json in non-workspace dir returns valid JSON', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'sync', '--json']);
-    // Exit code depends on whether user workspace has resolvable plugins
-    expect([0, 1]).toContain(exitCode);
+  let mockHome: string;
+
+  beforeAll(async () => {
+    mockHome = await mkdtemp(join(tmpdir(), 'allagents-e2e-json-'));
+  });
+
+  afterAll(async () => {
+    await rm(mockHome, { recursive: true, force: true });
+  });
+
+  it('workspace sync --json in non-workspace dir with no user config returns success JSON', async () => {
+    const { stdout, exitCode } = await runCli(['workspace', 'sync', '--json'], { HOME: mockHome });
+    expect(exitCode).toBe(0);
     const json = parseJson(stdout);
+    expect(json.success).toBe(true);
     expect(json.command).toBe('workspace sync');
   });
 
@@ -150,11 +163,15 @@ describe('CLI output without --json is unchanged', () => {
     expect(() => JSON.parse(stdout)).toThrow();
   });
 
-  it('workspace sync without --json in non-workspace dir outputs sync results', async () => {
-    const { stdout, exitCode } = await runCli(['workspace', 'sync']);
-    // Exit code depends on whether user workspace has resolvable plugins
-    expect([0, 1]).toContain(exitCode);
-    expect(stdout).toContain('Sync');
+  it('workspace sync without --json in non-workspace dir outputs guidance', async () => {
+    const mockHome2 = await mkdtemp(join(tmpdir(), 'allagents-e2e-human-'));
+    try {
+      const { stdout, exitCode } = await runCli(['workspace', 'sync'], { HOME: mockHome2 });
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('No plugins configured');
+    } finally {
+      await rm(mockHome2, { recursive: true, force: true });
+    }
   });
 
   it('plugin marketplace list without --json outputs human text', async () => {
