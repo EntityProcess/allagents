@@ -67,6 +67,16 @@ git checkout -b fix/<short-description>
 # Apply fixes on the fresh branch
 ```
 
+## Testing
+
+Tests use `bun:test`. Run with `bun test` or target a specific file with `bun test tests/unit/core/foo.test.ts`.
+
+### Approach
+
+- One test per distinct code path. Avoid testing the same branch with slightly different inputs — if the code path is the same, one test is enough.
+- Prefer covering the input matrix (e.g. config present/absent across scopes) but collapse cases that exercise identical logic.
+- Tests should be fast and not slow down CI. Remove redundant tests rather than keeping them for completeness.
+
 ### Git Worktrees
 
 When creating a git worktree, place it in a **sibling folder** using the naming convention `projectname_branchname`:
