@@ -264,13 +264,13 @@ const statusCmd = command({
         jsonOutput({
           success: true,
           command: 'workspace status',
-          data: { plugins: result.plugins, clients: result.clients },
+          data: { plugins: result.plugins, userPlugins: result.userPlugins ?? [], clients: result.clients },
         });
         return;
       }
 
-      // Display plugins
-      console.log(`Plugins (${result.plugins.length}):`);
+      // Display project plugins
+      console.log(`Project Plugins (${result.plugins.length}):`);
       if (result.plugins.length === 0) {
         console.log('  No plugins configured');
       } else {
@@ -286,6 +286,28 @@ const statusCmd = command({
           }
           const suffix = typeLabel ? ` (${typeLabel})` : '';
           console.log(`  ${status} ${plugin.source}${suffix}`);
+        }
+      }
+
+      // Display user plugins
+      if (result.userPlugins) {
+        console.log(`\nUser Plugins (${result.userPlugins.length}):`);
+        if (result.userPlugins.length === 0) {
+          console.log('  No user plugins configured');
+        } else {
+          for (const plugin of result.userPlugins) {
+            const status = plugin.available ? '\u2713' : '\u2717';
+            let typeLabel: string | undefined;
+            if (plugin.type === 'marketplace') {
+              typeLabel = plugin.available ? undefined : 'not synced';
+            } else if (plugin.type === 'github') {
+              typeLabel = plugin.available ? 'cached' : 'not cached';
+            } else {
+              typeLabel = 'local';
+            }
+            const suffix = typeLabel ? ` (${typeLabel})` : '';
+            console.log(`  ${status} ${plugin.source}${suffix}`);
+          }
         }
       }
 
