@@ -749,6 +749,7 @@ export interface ResolvePluginSpecResult {
  */
 export async function resolvePluginSpecWithAutoRegister(
   spec: string,
+  options: { offline?: boolean } = {},
 ): Promise<ResolvePluginSpecResult> {
   // Parse plugin@marketplace using the parser
   const parsed = parsePluginSpec(spec);
@@ -795,6 +796,7 @@ export async function resolvePluginSpecWithAutoRegister(
   const resolved = await resolvePluginSpec(spec, {
     ...(subpath && { subpath }),
     marketplaceNameOverride: marketplace.name,
+    offline: options.offline,
   });
   if (!resolved) {
     return {
