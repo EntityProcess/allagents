@@ -1,5 +1,6 @@
 import * as p from '@clack/prompts';
 import { initWorkspace } from '../../../core/workspace.js';
+import { text } from '../prompts.js';
 
 /**
  * Guided workspace initialization action.
@@ -7,7 +8,7 @@ import { initWorkspace } from '../../../core/workspace.js';
  */
 export async function runInit(): Promise<void> {
   try {
-    const targetPath = await p.text({
+    const targetPath = await text({
       message: 'Where should the workspace be created?',
       placeholder: '.',
       defaultValue: '.',
@@ -17,7 +18,7 @@ export async function runInit(): Promise<void> {
       return;
     }
 
-    const fromSource = await p.text({
+    const fromSource = await text({
       message: 'Template source (leave empty for default)',
       placeholder: 'GitHub URL, path, or leave empty',
       defaultValue: '',

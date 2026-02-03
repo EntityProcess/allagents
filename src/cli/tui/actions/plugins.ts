@@ -14,6 +14,7 @@ import {
 import { getWorkspaceStatus } from '../../../core/status.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
+import { select, multiselect, text, confirm } from '../prompts.js';
 
 /**
  * Get marketplace list, using cache when available.
@@ -56,7 +57,7 @@ async function installSelectedPlugin(
   // Determine scope
   let scope: 'project' | 'user' = 'user';
   if (context.hasWorkspace) {
-    const scopeChoice = await p.select({
+    const scopeChoice = await select({
       message: 'Install scope',
       options: [
         { label: 'Project (this workspace)', value: 'project' as const },
@@ -144,7 +145,7 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
       return;
     }
 
-    const selected = await p.select({
+    const selected = await select({
       message: 'Select a plugin to install',
       options: allPlugins,
     });
@@ -178,7 +179,7 @@ export async function runManagePlugins(context: TuiContext, cache?: TuiCache): P
       value: plugin.source,
     }));
 
-    const selected = await p.multiselect({
+    const selected = await multiselect({
       message: 'Select plugins to remove',
       options,
       required: false,
@@ -196,7 +197,7 @@ export async function runManagePlugins(context: TuiContext, cache?: TuiCache): P
     // Determine scope
     let scope: 'project' | 'user' = context.hasWorkspace ? 'project' : 'user';
     if (context.hasWorkspace) {
-      const scopeChoice = await p.select({
+      const scopeChoice = await select({
         message: 'Remove from which scope?',
         options: [
           { label: 'Project (this workspace)', value: 'project' as const },
@@ -266,7 +267,7 @@ export async function runBrowseMarketplaces(
         { label: 'Back', value: '__back__' },
       ];
 
-      const selected = await p.select({
+      const selected = await select({
         message: 'Marketplaces',
         options,
       });
@@ -276,7 +277,7 @@ export async function runBrowseMarketplaces(
       }
 
       if (selected === '__add__') {
-        const source = await p.text({
+        const source = await text({
           message: 'Marketplace source (GitHub URL, owner/repo, or name)',
           placeholder: 'e.g., anthropics/claude-plugins-official',
         });
@@ -320,7 +321,7 @@ async function runMarketplaceDetail(
   cache?: TuiCache,
 ): Promise<void> {
   while (true) {
-    const action = await p.select({
+    const action = await select({
       message: `Marketplace: ${marketplaceName}`,
       options: [
         { label: 'Browse plugins', value: 'browse' as const },
@@ -352,7 +353,7 @@ async function runMarketplaceDetail(
           });
         pluginOptions.push({ label: 'Back', value: '__back__' });
 
-        const selectedPlugin = await p.select({
+        const selectedPlugin = await select({
           message: 'Select a plugin to install',
           options: pluginOptions,
         });
@@ -394,7 +395,7 @@ async function runMarketplaceDetail(
     }
 
     if (action === 'remove') {
-      const confirmed = await p.confirm({
+      const confirmed = await confirm({
         message: `Remove marketplace "${marketplaceName}"?`,
       });
 

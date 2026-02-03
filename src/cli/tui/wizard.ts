@@ -4,6 +4,7 @@ import { relative } from 'node:path';
 import packageJson from '../../../package.json';
 import { TuiCache } from './cache.js';
 import { getTuiContext, type TuiContext } from './context.js';
+import { select } from './prompts.js';
 import { runInit } from './actions/init.js';
 import { runSync } from './actions/sync.js';
 import { runStatus } from './actions/status.js';
@@ -99,7 +100,7 @@ export async function runWizard(): Promise<void> {
   while (true) {
     p.note(buildSummary(context), 'Workspace');
 
-    const action = await p.select<MenuAction>({
+    const action = await select<MenuAction>({
       message: 'What would you like to do?',
       options: buildMenuOptions(context),
     });
