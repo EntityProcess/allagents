@@ -27,6 +27,7 @@ export interface GenerateVscodeWorkspaceInput {
  */
 interface WorkspaceFolder {
   path: string;
+  name?: string;
 }
 
 /**
@@ -94,11 +95,13 @@ export function generateVscodeWorkspace(
     seenPaths.add(absolutePath);
   }
 
-  // 2. Template folders (deduplicated against repo folders)
+  // 2. Template folders (deduplicated against repo folders, preserve optional name)
   if (resolvedTemplate && Array.isArray(resolvedTemplate.folders)) {
     for (const folder of resolvedTemplate.folders as WorkspaceFolder[]) {
       if (!seenPaths.has(folder.path)) {
-        folders.push({ path: folder.path });
+        const entry: WorkspaceFolder = { path: folder.path };
+        if (folder.name) entry.name = folder.name;
+        folders.push(entry);
         seenPaths.add(folder.path);
       }
     }
