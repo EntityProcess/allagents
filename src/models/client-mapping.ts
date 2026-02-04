@@ -59,6 +59,10 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     skillsPath: '',
     agentFile: 'AGENTS.md',
   },
+  vscode: {
+    skillsPath: '',
+    agentFile: '',
+  },
 };
 
 /**
@@ -104,5 +108,9 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   ampcode: {
     skillsPath: '.config/amp/skills/',
     agentFile: 'AGENTS.md',
+  },
+  vscode: {
+    skillsPath: '',
+    agentFile: '',
   },
 };
