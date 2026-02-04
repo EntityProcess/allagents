@@ -287,7 +287,11 @@ workspace:
   files:
     - CLAUDE.md
     - AGENTS.md
-repositories: []
+repositories:
+  - path: ./repo
+    owner: test
+    repo: repo
+    description: test repo
 plugins: []
 clients:
   - claude
@@ -325,7 +329,11 @@ workspace:
   source: ./workspace-source
   files:
     - CLAUDE.md
-repositories: []
+repositories:
+  - path: ./repo
+    owner: test
+    repo: repo
+    description: test repo
 plugins: []
 clients:
   - claude
@@ -357,7 +365,11 @@ workspace:
   source: ./workspace-source
   files:
     - AGENTS.md
-repositories: []
+repositories:
+  - path: ./repo
+    owner: test
+    repo: repo
+    description: test repo
 plugins: []
 clients:
   - claude
@@ -389,7 +401,11 @@ workspace:
   source: ./workspace-source
   files:
     - README.md
-repositories: []
+repositories:
+  - path: ./repo
+    owner: test
+    repo: repo
+    description: test repo
 plugins: []
 clients:
   - claude
@@ -674,7 +690,11 @@ workspace:
   source: ./workspace-source
   files:
     - CLAUDE.md
-repositories: []
+repositories:
+  - path: ./repo
+    owner: test
+    repo: repo
+    description: test repo
 plugins: []
 clients:
   - claude
@@ -981,6 +1001,183 @@ clients:
       expect(state.files.claude.length).toBeGreaterThan(0);
       expect(state.files.opencode).toBeDefined();
       expect(state.files.opencode.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('syncWorkspace - conditional agent files based on repositories', () => {
+    it('should skip agent file auto-inclusion and WORKSPACE-RULES when repositories is empty', async () => {
+      // Setup: Create workspace source with agent files and a regular file
+      const sourceDir = join(testDir, 'workspace-source');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'CLAUDE.md'), '# Claude Agent\n');
+      await writeFile(join(sourceDir, 'AGENTS.md'), '# Agents\n');
+      await writeFile(join(sourceDir, 'README.md'), '# README\n');
+
+      // Setup: workspace.yaml with empty repositories
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+workspace:
+  source: ./workspace-source
+  files:
+    - README.md
+repositories: []
+plugins: []
+clients:
+  - claude
+`,
+      );
+
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // README.md should be copied (non-agent workspace file)
+      expect(existsSync(join(testDir, 'README.md'))).toBe(true);
+      const readmeContent = await readFile(join(testDir, 'README.md'), 'utf-8');
+      expect(readmeContent).toBe('# README\n');
+
+      // Agent files should NOT be auto-included from source
+      expect(existsSync(join(testDir, 'CLAUDE.md'))).toBe(false);
+      expect(existsSync(join(testDir, 'AGENTS.md'))).toBe(false);
+    });
+
+    it('should skip WORKSPACE-RULES on explicitly listed agent files when repositories is empty', async () => {
+      // Setup: Create workspace source with an agent file
+      const sourceDir = join(testDir, 'workspace-source');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'AGENTS.md'), '# Agents\n');
+
+      // Setup: workspace.yaml with empty repositories but explicit agent file in files list
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+workspace:
+  source: ./workspace-source
+  files:
+    - AGENTS.md
+repositories: []
+plugins: []
+clients:
+  - claude
+`,
+      );
+
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // AGENTS.md should be copied (explicitly listed) but without WORKSPACE-RULES
+      expect(existsSync(join(testDir, 'AGENTS.md'))).toBe(true);
+      const agentsContent = await readFile(join(testDir, 'AGENTS.md'), 'utf-8');
+      expect(agentsContent).toBe('# Agents\n');
+      expect(agentsContent).not.toContain('WORKSPACE-RULES');
+    });
+
+    it('should still sync skills and commands when repositories is empty', async () => {
+      // Setup: Create a plugin with commands and skills
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'my-cmd.md'), '# My Command');
+      const skillDir = join(pluginDir, 'skills', 'my-skill');
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, 'SKILL.md'),
+        `---
+name: my-skill
+description: A test skill
+---
+
+# My Skill`,
+      );
+
+      // Setup: workspace.yaml with empty repositories
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // Commands and skills should be synced regardless of repositories
+      expect(existsSync(join(testDir, '.claude', 'commands', 'my-cmd.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+    });
+
+    it('should auto-include agent files and inject WORKSPACE-RULES when repositories has entries', async () => {
+      // Setup: Create workspace source with agent files
+      const sourceDir = join(testDir, 'workspace-source');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'CLAUDE.md'), '# Claude Agent\n');
+
+      // Setup: workspace.yaml with repositories
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+workspace:
+  source: ./workspace-source
+  files: []
+repositories:
+  - path: ./repo
+    owner: test
+    repo: repo
+    description: test repo
+plugins: []
+clients:
+  - claude
+`,
+      );
+
+      const result = await syncWorkspace(testDir);
+      expect(result.success).toBe(true);
+
+      // CLAUDE.md should be auto-included and have WORKSPACE-RULES
+      expect(existsSync(join(testDir, 'CLAUDE.md'))).toBe(true);
+      const claudeContent = await readFile(join(testDir, 'CLAUDE.md'), 'utf-8');
+      expect(claudeContent).toContain('# Claude Agent');
+      expect(claudeContent).toContain('<!-- WORKSPACE-RULES:START -->');
+      expect(claudeContent).toContain('<!-- WORKSPACE-RULES:END -->');
+    });
+
+    it('should not delete user-created agent files when repositories becomes empty', async () => {
+      // Setup: User manually created CLAUDE.md (not synced by allagents)
+      await writeFile(join(testDir, 'CLAUDE.md'), '# My Custom Agent\n');
+
+      // Setup: workspace.yaml with empty repositories and a plugin
+      const pluginDir = join(testDir, 'my-plugin');
+      await mkdir(join(pluginDir, 'commands'), { recursive: true });
+      await writeFile(join(pluginDir, 'commands', 'cmd.md'), '# Command');
+
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins:
+  - ./my-plugin
+clients:
+  - claude
+`,
+      );
+
+      await syncWorkspace(testDir);
+
+      // User-created CLAUDE.md should still exist (not tracked in sync state, never deleted)
+      expect(existsSync(join(testDir, 'CLAUDE.md'))).toBe(true);
+      const content = await readFile(join(testDir, 'CLAUDE.md'), 'utf-8');
+      expect(content).toBe('# My Custom Agent\n');
+
+      // Plugin commands should still be synced
+      expect(existsSync(join(testDir, '.claude', 'commands', 'cmd.md'))).toBe(true);
     });
   });
 });
