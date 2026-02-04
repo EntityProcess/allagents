@@ -72,9 +72,19 @@ export const ClientTypeSchema = z.enum([
   'gemini',
   'factory',
   'ampcode',
+  'vscode',
 ]);
 
 export type ClientType = z.infer<typeof ClientTypeSchema>;
+
+/**
+ * VSCode workspace generation configuration
+ */
+export const VscodeConfigSchema = z.object({
+  output: z.string().optional(),
+});
+
+export type VscodeConfig = z.infer<typeof VscodeConfigSchema>;
 
 /**
  * Complete workspace configuration (workspace.yaml)
@@ -84,6 +94,7 @@ export const WorkspaceConfigSchema = z.object({
   repositories: z.array(RepositorySchema),
   plugins: z.array(PluginSourceSchema),
   clients: z.array(ClientTypeSchema),
+  vscode: VscodeConfigSchema.optional(),
 });
 
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
