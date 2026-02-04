@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, afterEach } from 'bun:test';
+import { writeFile, unlink } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   getCachedUpdateInfo,
   shouldCheck,
@@ -44,8 +47,29 @@ describe('update-check', () => {
   });
 
   describe('getCachedUpdateInfo', () => {
+    const tmpPath = join(tmpdir(), `update-check-test-${process.pid}.json`);
+
+    afterEach(async () => {
+      try {
+        await unlink(tmpPath);
+      } catch {}
+    });
+
     it('returns null for a nonexistent file', async () => {
       const result = await getCachedUpdateInfo('/tmp/does-not-exist.json');
+      expect(result).toBeNull();
+    });
+
+    it('reads back a valid JSON cache file', async () => {
+      const cache = { latestVersion: '1.2.3', lastCheckedAt: '2025-01-01T00:00:00.000Z' };
+      await writeFile(tmpPath, JSON.stringify(cache));
+      const result = await getCachedUpdateInfo(tmpPath);
+      expect(result).toEqual(cache);
+    });
+
+    it('returns null for malformed JSON', async () => {
+      await writeFile(tmpPath, '{not valid json!!!');
+      const result = await getCachedUpdateInfo(tmpPath);
       expect(result).toBeNull();
     });
   });

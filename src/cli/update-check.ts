@@ -47,8 +47,11 @@ export function shouldCheck(cache: UpdateCache | null): boolean {
  * Compare two semver strings. Returns true if a > b.
  */
 function isNewer(a: string, b: string): boolean {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
+  // Strip pre-release suffixes (e.g. "1.0.0-beta.1" -> "1.0.0")
+  // The npm `latest` dist-tag should never have pre-release versions,
+  // but handle it defensively.
+  const pa = a.split('.').map((s) => Number(s.replace(/-.*$/, '')));
+  const pb = b.split('.').map((s) => Number(s.replace(/-.*$/, '')));
   for (let i = 0; i < 3; i++) {
     if ((pa[i] ?? 0) > (pb[i] ?? 0)) return true;
     if ((pa[i] ?? 0) < (pb[i] ?? 0)) return false;
