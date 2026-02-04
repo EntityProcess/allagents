@@ -124,6 +124,62 @@ allagents workspace repo remove <path>
 allagents workspace repo list
 ```
 
+### `workspace setup`
+
+Generate a VSCode `.code-workspace` file from your workspace.yaml configuration. Repository paths are resolved to absolute paths. Plugin folders are included with prompt/instruction file location settings for Copilot.
+
+```bash
+allagents workspace setup
+allagents workspace setup --output my-workspace
+```
+
+#### Output filename
+
+Priority: `--output` flag > `vscode.output` in workspace.yaml > `<dirname>.code-workspace`
+
+```yaml
+# workspace.yaml
+vscode:
+  output: my-project.code-workspace
+```
+
+#### Template file
+
+Create `.allagents/vscode-template.json` for VSCode-specific settings, launch configurations, extensions, and extra folders. The template supports `{repo:../path}` placeholders that resolve to absolute paths using repository paths from workspace.yaml.
+
+```json
+{
+  "folders": [
+    { "path": "{repo:../Shared}", "name": "SharedLib" }
+  ],
+  "settings": {
+    "cSpell.words": ["myterm"],
+    "chat.agent.maxRequests": 999,
+    "chat.useClaudeSkills": true
+  },
+  "launch": {
+    "configurations": [
+      {
+        "type": "node",
+        "name": "dev",
+        "cwd": "{repo:../myapp}/src",
+        "runtimeExecutable": "npm",
+        "runtimeArgs": ["run", "dev"]
+      }
+    ]
+  },
+  "extensions": {
+    "recommendations": ["dbaeumer.vscode-eslint"]
+  }
+}
+```
+
+The generated workspace includes:
+- Repository folders from workspace.yaml (resolved to absolute paths, listed first)
+- Template folders (deduplicated against repository folders)
+- Plugin folders with Copilot prompt/instruction file location settings
+- All other template content (settings, launch, extensions) with `{repo:..}` placeholders resolved
+
 ### Plugin Marketplace Commands
 
 ```bash
