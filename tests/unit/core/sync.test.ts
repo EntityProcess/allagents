@@ -289,8 +289,8 @@ workspace:
     - AGENTS.md
 repositories:
   - path: ./repo
-    owner: test
-    repo: repo
+    source: github
+    repo: test/repo
     description: test repo
 plugins: []
 clients:
@@ -331,8 +331,8 @@ workspace:
     - CLAUDE.md
 repositories:
   - path: ./repo
-    owner: test
-    repo: repo
+    source: github
+    repo: test/repo
     description: test repo
 plugins: []
 clients:
@@ -367,8 +367,8 @@ workspace:
     - AGENTS.md
 repositories:
   - path: ./repo
-    owner: test
-    repo: repo
+    source: github
+    repo: test/repo
     description: test repo
 plugins: []
 clients:
@@ -403,8 +403,8 @@ workspace:
     - README.md
 repositories:
   - path: ./repo
-    owner: test
-    repo: repo
+    source: github
+    repo: test/repo
     description: test repo
 plugins: []
 clients:
@@ -692,8 +692,8 @@ workspace:
     - CLAUDE.md
 repositories:
   - path: ./repo
-    owner: test
-    repo: repo
+    source: github
+    repo: test/repo
     description: test repo
 plugins: []
 clients:
@@ -1128,8 +1128,8 @@ workspace:
   files: []
 repositories:
   - path: ./repo
-    owner: test
-    repo: repo
+    source: github
+    repo: test/repo
     description: test repo
 plugins: []
 clients:

@@ -16,8 +16,8 @@ describe('parseWorkspaceConfig', () => {
       const validConfig = `
 repositories:
   - path: ../allagents
-    owner: EntityProcess
-    repo: allagents
+    source: github
+    repo: EntityProcess/allagents
     description: primary project
 
 plugins:
@@ -81,8 +81,8 @@ clients:
       const configPath = join(testDir, 'workspace.yaml');
       const invalidConfig = `
 repositories:
-  - path: ../test
-    # missing owner, repo, description
+  - source: github
+    # missing path (required)
 plugins: []
 clients: []
 `;

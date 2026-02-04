@@ -11,8 +11,8 @@ describe('WorkspaceConfigSchema', () => {
       repositories: [
         {
           path: '../allagents',
-          owner: 'EntityProcess',
-          repo: 'allagents',
+          source: 'github',
+          repo: 'EntityProcess/allagents',
           description: 'primary project',
         },
       ],
@@ -57,26 +57,28 @@ describe('ClientTypeSchema', () => {
 });
 
 describe('RepositorySchema', () => {
-  it('should validate a valid repository', () => {
-    const validRepo = {
-      path: '../my-repo',
-      owner: 'username',
-      repo: 'repo-name',
-      description: 'A repository',
-    };
-
-    const result = RepositorySchema.safeParse(validRepo);
+  it('should accept full repository entry', () => {
+    const result = RepositorySchema.safeParse({
+      path: '../Glow',
+      source: 'github',
+      repo: 'WiseTechGlobal/Glow',
+      description: 'Main Glow application repository',
+    });
     expect(result.success).toBe(true);
   });
 
-  it('should reject repository missing required fields', () => {
-    const invalidRepo = {
-      path: '../my-repo',
-      owner: 'username',
-      // missing repo and description
-    };
+  it('should accept path-only entry', () => {
+    const result = RepositorySchema.safeParse({
+      path: '../Glow',
+    });
+    expect(result.success).toBe(true);
+  });
 
-    const result = RepositorySchema.safeParse(invalidRepo);
+  it('should reject entry without path', () => {
+    const result = RepositorySchema.safeParse({
+      source: 'github',
+      repo: 'WiseTechGlobal/Glow',
+    });
     expect(result.success).toBe(false);
   });
 });
