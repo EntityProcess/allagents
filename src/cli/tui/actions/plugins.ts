@@ -14,7 +14,8 @@ import {
 import { getWorkspaceStatus } from '../../../core/status.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
-import { select, multiselect, text, confirm } from '../prompts.js';
+
+const { select, multiselect, text, confirm } = p;
 
 /**
  * Get marketplace list, using cache when available.
@@ -145,12 +146,14 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
       return;
     }
 
+    allPlugins.push({ label: 'Back', value: '__back__' });
+
     const selected = await select({
       message: 'Select a plugin to install',
       options: allPlugins,
     });
 
-    if (p.isCancel(selected)) {
+    if (p.isCancel(selected) || selected === '__back__') {
       return;
     }
 
@@ -184,7 +187,7 @@ export async function runManagePlugins(context: TuiContext, cache?: TuiCache): P
     }));
 
     const selected = await multiselect({
-      message: 'Select plugins to remove',
+      message: 'Select plugins to remove (submit empty to go back)',
       options,
       required: false,
     });
