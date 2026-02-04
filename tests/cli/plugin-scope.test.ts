@@ -1,8 +1,10 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { load } from 'js-yaml';
+import type { WorkspaceConfig } from '../../src/models/workspace-config.js';
 
 describe('plugin install --scope integration', () => {
   let tempHome: string;
@@ -37,11 +39,28 @@ describe('plugin install --scope integration', () => {
     expect(existsSync(join(tempHome, '.claude', 'skills', 'test-skill'))).toBe(true);
   });
 
-  test('project scope: addPlugin requires workspace.yaml', async () => {
+  test('project scope: addPlugin auto-creates workspace.yaml when missing', async () => {
+    // Create a local plugin so addPlugin has something valid to add
+    const pluginDir = join(tempHome, 'my-plugin');
+    await mkdir(pluginDir, { recursive: true });
+
     const { addPlugin } = await import('../../src/core/workspace-modify.js');
-    const result = await addPlugin('/nonexistent-plugin', tempHome);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('workspace.yaml');
+    const configPath = join(tempHome, '.allagents', 'workspace.yaml');
+
+    // workspace.yaml should not exist yet
+    expect(existsSync(configPath)).toBe(false);
+
+    const result = await addPlugin(pluginDir, tempHome);
+    expect(result.success).toBe(true);
+
+    // workspace.yaml should now exist with the plugin added
+    expect(existsSync(configPath)).toBe(true);
+
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    expect(config.repositories).toEqual([]);
+    expect(config.plugins).toContain(pluginDir);
+    expect(config.clients).toEqual(['claude', 'copilot', 'codex', 'opencode']);
   });
 
   test('user scope uninstall: removeUserPlugin + syncUserWorkspace purges files', async () => {

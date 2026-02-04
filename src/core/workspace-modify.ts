@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { load, dump } from 'js-yaml';
@@ -8,11 +8,19 @@ import {
   isGitHubUrl,
   verifyGitHubUrlExists,
 } from '../utils/plugin-path.js';
-import type { WorkspaceConfig } from '../models/workspace-config.js';
+import type { WorkspaceConfig, ClientType } from '../models/workspace-config.js';
 import {
   isPluginSpec,
   resolvePluginSpecWithAutoRegister,
 } from './marketplace.js';
+
+/**
+ * Default clients for auto-created project workspace.yaml.
+ * Matches the template at src/templates/default/.allagents/workspace.yaml.
+ */
+const DEFAULT_PROJECT_CLIENTS: ClientType[] = [
+  'claude', 'copilot', 'codex', 'opencode',
+];
 
 /**
  * Result of add/remove operations
@@ -21,6 +29,25 @@ export interface ModifyResult {
   success: boolean;
   error?: string;
   autoRegistered?: string; // marketplace name if auto-registered
+}
+
+/**
+ * Ensure .allagents/workspace.yaml exists with default config.
+ * Creates it if missing, does not overwrite existing.
+ */
+export async function ensureWorkspace(workspacePath: string): Promise<void> {
+  const configDir = join(workspacePath, CONFIG_DIR);
+  const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
+  if (existsSync(configPath)) return;
+
+  const defaultConfig: WorkspaceConfig = {
+    repositories: [],
+    plugins: [],
+    clients: [...DEFAULT_PROJECT_CLIENTS],
+  };
+
+  await mkdir(configDir, { recursive: true });
+  await writeFile(configPath, dump(defaultConfig, { lineWidth: -1 }), 'utf-8');
 }
 
 /**
@@ -44,13 +71,8 @@ export async function addPlugin(
 ): Promise<ModifyResult> {
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
-  // Check if .allagents/workspace.yaml exists
-  if (!existsSync(configPath)) {
-    return {
-      success: false,
-      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
-    };
-  }
+  // Auto-create .allagents/workspace.yaml with defaults if missing
+  await ensureWorkspace(workspacePath);
 
   // Handle plugin@marketplace format
   if (isPluginSpec(plugin)) {
