@@ -12,9 +12,16 @@ import type { WorkspaceConfig, Repository } from '../models/workspace-config.js'
  */
 export async function detectRemote(repoPath: string): Promise<{ source: string; repo: string } | undefined> {
   try {
+    // Unset GIT_DIR/GIT_WORK_TREE so we read the target repo's config,
+    // not the caller's (important when run from git hooks or worktrees).
+    const env = { ...process.env };
+    env.GIT_DIR = undefined;
+    env.GIT_WORK_TREE = undefined;
+
     const proc = Bun.spawn(['git', '-C', repoPath, 'remote', 'get-url', 'origin'], {
       stdout: 'pipe',
       stderr: 'pipe',
+      env,
     });
     const text = await new Response(proc.stdout).text();
     await proc.exited;
@@ -49,9 +56,9 @@ export async function detectRemote(repoPath: string): Promise<{ source: string; 
 }
 
 interface AddRepoOptions {
-  source?: string;
-  repo?: string;
-  description?: string;
+  source?: string | undefined;
+  repo?: string | undefined;
+  description?: string | undefined;
 }
 
 /**
