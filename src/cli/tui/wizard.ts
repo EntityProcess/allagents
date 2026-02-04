@@ -16,6 +16,7 @@ import { runSync } from './actions/sync.js';
 import { runStatus } from './actions/status.js';
 import { runInstallPlugin, runManagePlugins, runBrowseMarketplaces } from './actions/plugins.js';
 import { runUpdate } from './actions/update.js';
+import { getUpdateNotice } from '../update-check.js';
 
 export type MenuAction =
   | 'init'
@@ -98,6 +99,11 @@ function buildSummary(context: TuiContext): string {
  */
 export async function runWizard(): Promise<void> {
   p.intro(`${chalk.cyan('allagents')} v${packageJson.version}`);
+
+  const updateNotice = await getUpdateNotice(packageJson.version);
+  if (updateNotice) {
+    p.log.info(updateNotice);
+  }
 
   const cache = new TuiCache();
   let context = await getTuiContext(process.cwd(), cache);
