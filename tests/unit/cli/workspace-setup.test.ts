@@ -33,7 +33,7 @@ clients:
     const result = generateVscodeWorkspace({
       workspacePath: testDir,
       repositories: config.repositories,
-      plugins: [],
+
       template: undefined,
     });
 
@@ -79,7 +79,7 @@ clients:
     const result = generateVscodeWorkspace({
       workspacePath: testDir,
       repositories: config.repositories,
-      plugins: [],
+
       template: templateContent,
     });
 

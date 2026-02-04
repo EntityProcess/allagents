@@ -179,7 +179,6 @@ Create `.allagents/vscode-template.json` for VSCode-specific settings, launch co
 The generated workspace includes:
 - Repository folders from workspace.yaml (resolved to absolute paths, listed first)
 - Template folders (deduplicated against repository folders)
-- Plugin folders with Copilot prompt/instruction file location settings
 - All other template content (settings, launch, extensions) with `{repo:..}` placeholders resolved
 
 ### Plugin Marketplace Commands

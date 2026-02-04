@@ -42,8 +42,6 @@ import { getUserWorkspaceConfig } from './user-workspace.js';
 import {
   generateVscodeWorkspace,
   getWorkspaceOutputPath,
-  scanPluginForCopilotDirs,
-  type ResolvedPluginInfo,
 } from './vscode-workspace.js';
 
 /**
@@ -609,7 +607,7 @@ export function collectSyncedPaths(
  * @param offline - Skip fetching from remote and use cached version
  * @returns Validation result with resolved path
  */
-export async function validatePlugin(
+async function validatePlugin(
   pluginSource: string,
   workspacePath: string,
   offline: boolean,
@@ -820,14 +818,13 @@ function buildPluginSkillNameMaps(
 const VSCODE_TEMPLATE_FILE = 'vscode-template.json';
 
 /**
- * Generate a VSCode .code-workspace file from workspace config and validated plugins.
+ * Generate a VSCode .code-workspace file from workspace config.
  * Called automatically during sync when 'vscode' client is configured.
  */
-async function generateVscodeWorkspaceFile(
+function generateVscodeWorkspaceFile(
   workspacePath: string,
   config: WorkspaceConfig,
-  validPlugins: ValidatedPlugin[],
-): Promise<void> {
+): void {
   const configDir = join(workspacePath, CONFIG_DIR);
 
   // Load template if it exists
@@ -837,23 +834,9 @@ async function generateVscodeWorkspaceFile(
     template = JSON.parse(readFileSync(templatePath, 'utf-8'));
   }
 
-  // Resolve plugin info
-  const plugins: ResolvedPluginInfo[] = [];
-  for (const validated of validPlugins) {
-    const dirs = scanPluginForCopilotDirs(validated.resolved);
-    const pluginName = validated.pluginName ?? await getPluginName(validated.resolved);
-    plugins.push({
-      resolvedPath: validated.resolved,
-      displayName: pluginName,
-      hasPrompts: dirs.hasPrompts,
-      hasInstructions: dirs.hasInstructions,
-    });
-  }
-
   const content = generateVscodeWorkspace({
     workspacePath,
     repositories: config.repositories,
-    plugins,
     template,
   });
 
@@ -1122,11 +1105,7 @@ export async function syncWorkspace(
 
   // Step 5d: Generate VSCode .code-workspace file if vscode client is configured
   if (clients.includes('vscode') && !dryRun) {
-    await generateVscodeWorkspaceFile(
-      workspacePath,
-      config,
-      validPlugins,
-    );
+    generateVscodeWorkspaceFile(workspacePath, config);
   }
 
   // Count results from plugins

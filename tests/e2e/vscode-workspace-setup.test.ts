@@ -76,7 +76,6 @@ vscode:
     const content = generateVscodeWorkspace({
       workspacePath: testDir,
       repositories: config.repositories,
-      plugins: [],
       template,
     });
 
@@ -131,7 +130,6 @@ clients:
     const content = generateVscodeWorkspace({
       workspacePath: testDir,
       repositories: config.repositories,
-      plugins: [],
       template: undefined,
     });
 

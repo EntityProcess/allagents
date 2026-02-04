@@ -13,7 +13,6 @@ describe('generateVscodeWorkspace', () => {
         { path: '../backend' },
         { path: '../frontend' },
       ],
-      plugins: [],
       template: undefined,
     });
 
@@ -27,33 +26,12 @@ describe('generateVscodeWorkspace', () => {
     const result = generateVscodeWorkspace({
       workspacePath: '/home/user/projects/myapp',
       repositories: [],
-      plugins: [],
       template: undefined,
     });
 
     expect(result.settings).toEqual({
       'chat.agent.maxRequests': 999,
     });
-  });
-
-  test('includes plugin folders with display names', () => {
-    const result = generateVscodeWorkspace({
-      workspacePath: '/home/user/projects/myapp',
-      repositories: [],
-      plugins: [
-        {
-          resolvedPath: '/home/user/.allagents/marketplaces/official/plugins/code-review',
-          displayName: 'code-review',
-        },
-      ],
-      template: undefined,
-    });
-
-    expect(result.folders).toEqual([
-      {
-        path: '/home/user/.allagents/marketplaces/official/plugins/code-review',
-      },
-    ]);
   });
 
   test('merges template folders after repo folders, deduplicating by path', () => {
@@ -63,7 +41,6 @@ describe('generateVscodeWorkspace', () => {
         { path: '../backend' },
         { path: '../shared' },
       ],
-      plugins: [],
       template: {
         folders: [
           { path: '/home/user/projects/shared', name: 'SharedLib' },
@@ -85,7 +62,6 @@ describe('generateVscodeWorkspace', () => {
     const result = generateVscodeWorkspace({
       workspacePath: '/home/user/projects/myapp',
       repositories: [],
-      plugins: [],
       template: {
         settings: {
           'chat.agent.maxRequests': 50,
@@ -116,37 +92,11 @@ describe('generateVscodeWorkspace', () => {
     const result = generateVscodeWorkspace({
       workspacePath: '/home/user/projects/myapp',
       repositories: [],
-      plugins: [],
       template,
     });
 
     expect(result.launch).toEqual(template.launch);
     expect(result.extensions).toEqual(template.extensions);
-  });
-
-  test('adds prompt/instruction location settings from plugins', () => {
-    const result = generateVscodeWorkspace({
-      workspacePath: '/home/user/projects/myapp',
-      repositories: [],
-      plugins: [
-        {
-          resolvedPath: '/home/user/.allagents/cache/code-review',
-          displayName: 'code-review',
-          hasPrompts: true,
-          hasInstructions: true,
-        },
-      ],
-      template: {
-        settings: { 'chat.agent.maxRequests': 999 },
-      },
-    });
-
-    expect(result.settings['chat.promptFilesLocations']).toEqual({
-      '/home/user/.allagents/cache/code-review/prompts/**/*.prompt.md': true,
-    });
-    expect(result.settings['chat.instructionsFilesLocations']).toEqual({
-      '/home/user/.allagents/cache/code-review/instructions/**/*.instructions.md': true,
-    });
   });
 });
 

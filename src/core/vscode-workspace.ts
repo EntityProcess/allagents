@@ -1,16 +1,5 @@
-import { existsSync } from 'node:fs';
-import { resolve, join, basename } from 'node:path';
+import { resolve, basename } from 'node:path';
 import type { Repository, VscodeConfig } from '../models/workspace-config.js';
-
-/**
- * Resolved plugin info for workspace generation
- */
-export interface ResolvedPluginInfo {
-  resolvedPath: string;
-  displayName: string;
-  hasPrompts?: boolean;
-  hasInstructions?: boolean;
-}
 
 /**
  * Input for generating a VSCode workspace
@@ -18,7 +7,6 @@ export interface ResolvedPluginInfo {
 export interface GenerateVscodeWorkspaceInput {
   workspacePath: string;
   repositories: Repository[];
-  plugins: ResolvedPluginInfo[];
   template: Record<string, unknown> | undefined;
 }
 
@@ -71,7 +59,7 @@ export function substituteRepoPlaceholders<T>(
 export function generateVscodeWorkspace(
   input: GenerateVscodeWorkspaceInput,
 ): Record<string, unknown> {
-  const { workspacePath, repositories, plugins, template } = input;
+  const { workspacePath, repositories, template } = input;
 
   // Build repo path map for placeholder substitution
   const repoMap = new Map<string, string>();
@@ -107,12 +95,6 @@ export function generateVscodeWorkspace(
     }
   }
 
-  // 3. Plugin folders
-  for (const plugin of plugins) {
-    const entry: WorkspaceFolder = { path: plugin.resolvedPath };
-    folders.push(entry);
-  }
-
   // Build settings
   let settings: Record<string, unknown>;
   if (resolvedTemplate?.settings) {
@@ -120,32 +102,6 @@ export function generateVscodeWorkspace(
     settings = { ...(resolvedTemplate.settings as Record<string, unknown>) };
   } else {
     settings = { ...DEFAULT_SETTINGS };
-  }
-
-  // Add prompt/instruction file locations from plugins
-  const promptLocations: Record<string, boolean> = {};
-  const instructionLocations: Record<string, boolean> = {};
-
-  for (const plugin of plugins) {
-    if (plugin.hasPrompts) {
-      promptLocations[`${plugin.resolvedPath}/prompts/**/*.prompt.md`] = true;
-    }
-    if (plugin.hasInstructions) {
-      instructionLocations[`${plugin.resolvedPath}/instructions/**/*.instructions.md`] = true;
-    }
-  }
-
-  if (Object.keys(promptLocations).length > 0) {
-    settings['chat.promptFilesLocations'] = {
-      ...(settings['chat.promptFilesLocations'] as Record<string, boolean> | undefined),
-      ...promptLocations,
-    };
-  }
-  if (Object.keys(instructionLocations).length > 0) {
-    settings['chat.instructionsFilesLocations'] = {
-      ...(settings['chat.instructionsFilesLocations'] as Record<string, boolean> | undefined),
-      ...instructionLocations,
-    };
   }
 
   // Build result — folders and settings first, then pass through all other template keys
@@ -160,19 +116,6 @@ export function generateVscodeWorkspace(
   }
 
   return result;
-}
-
-/**
- * Scan a plugin directory to check if it contains prompts/ and/or instructions/ dirs
- */
-export function scanPluginForCopilotDirs(pluginPath: string): {
-  hasPrompts: boolean;
-  hasInstructions: boolean;
-} {
-  return {
-    hasPrompts: existsSync(join(pluginPath, 'prompts')),
-    hasInstructions: existsSync(join(pluginPath, 'instructions')),
-  };
 }
 
 /**
