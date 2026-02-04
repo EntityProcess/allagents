@@ -56,6 +56,36 @@ Sync state is tracked in `.allagents/sync-state.json`.
 
 When `--scope user` is used, the plugin is added to the user-level config at `~/.allagents/workspace.yaml` instead of the project workspace. User-scoped plugins sync to user directories (`~/.claude/`, `~/.codex/`, etc.) and are available across all projects.
 
+## Self Commands
+
+```bash
+allagents self update [--npm] [--bun]
+```
+
+### self update
+
+Update AllAgents to the latest published version.
+
+| Flag | Description |
+|------|-------------|
+| `--npm` | Force update using npm |
+| `--bun` | Force update using bun |
+
+If neither flag is provided, AllAgents auto-detects the package manager used during installation.
+
+### Automatic Update Notifications
+
+When running the interactive TUI (`allagents` with no arguments), AllAgents checks the npm registry for newer versions in the background. If an update is available, a notice is shown on the next startup:
+
+```
+allagents v0.13.4
+
+  ℹ Update available: 0.13.4 → 0.14.0
+    Run `allagents self update` to upgrade.
+```
+
+The check runs at most once every 24 hours and never blocks startup. Results are cached at `~/.allagents/version-check.json`.
+
 ## Plugin Commands
 
 ```bash
