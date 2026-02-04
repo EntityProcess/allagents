@@ -173,14 +173,46 @@ export async function initWorkspace(
     // Write workspace.yaml
     await writeFile(configPath, workspaceYamlContent, 'utf-8');
 
-    // Auto-copy agent files (AGENTS.md, CLAUDE.md) from source if they exist
-    const copiedAgentFiles: string[] = [];
+    // Parse config to check repositories and clients
+    const parsed = load(workspaceYamlContent) as Record<string, unknown>;
+    const repositories = (parsed?.repositories as unknown[]) ?? [];
+    const hasRepositories = repositories.length > 0;
 
-    if (options.from && isGitHubUrl(options.from)) {
-      // Fetch agent files from GitHub
-      const parsedUrl = parseGitHubUrl(options.from);
-      if (parsedUrl) {
-        const basePath = parsedUrl.subpath || '';
+    // Only create agent files and inject WORKSPACE-RULES when repositories are configured.
+    // When repositories is empty/absent (e.g., plugin-only workspace from addPlugin auto-init),
+    // skip agent files since WORKSPACE-RULES reference repository paths that don't exist yet.
+    if (hasRepositories) {
+      // Auto-copy agent files (AGENTS.md, CLAUDE.md) from source if they exist
+      const copiedAgentFiles: string[] = [];
+
+      if (options.from && isGitHubUrl(options.from)) {
+        // Fetch agent files from GitHub
+        const parsedUrl = parseGitHubUrl(options.from);
+        if (parsedUrl) {
+          const basePath = parsedUrl.subpath || '';
+          for (const agentFile of AGENT_FILES) {
+            const targetFilePath = join(absoluteTarget, agentFile);
+            // Skip if file already exists in target - don't overwrite user content
+            if (existsSync(targetFilePath)) {
+              copiedAgentFiles.push(agentFile);
+              continue;
+            }
+            const filePath = basePath ? `${basePath}/${agentFile}` : agentFile;
+            const content = await fetchFileFromGitHub(
+              parsedUrl.owner,
+              parsedUrl.repo,
+              filePath,
+              parsedUrl.branch,
+            );
+            if (content) {
+              await writeFile(targetFilePath, content, 'utf-8');
+              copiedAgentFiles.push(agentFile);
+            }
+          }
+        }
+      } else {
+        // Copy agent files from local source
+        const effectiveSourceDir = sourceDir ?? defaultTemplatePath;
         for (const agentFile of AGENT_FILES) {
           const targetFilePath = join(absoluteTarget, agentFile);
           // Skip if file already exists in target - don't overwrite user content
@@ -188,60 +220,37 @@ export async function initWorkspace(
             copiedAgentFiles.push(agentFile);
             continue;
           }
-          const filePath = basePath ? `${basePath}/${agentFile}` : agentFile;
-          const content = await fetchFileFromGitHub(
-            parsedUrl.owner,
-            parsedUrl.repo,
-            filePath,
-            parsedUrl.branch,
-          );
-          if (content) {
+          const sourcePath = join(effectiveSourceDir, agentFile);
+          if (existsSync(sourcePath)) {
+            const content = await readFile(sourcePath, 'utf-8');
             await writeFile(targetFilePath, content, 'utf-8');
             copiedAgentFiles.push(agentFile);
           }
         }
       }
-    } else {
-      // Copy agent files from local source
-      const effectiveSourceDir = sourceDir ?? defaultTemplatePath;
-      for (const agentFile of AGENT_FILES) {
-        const targetFilePath = join(absoluteTarget, agentFile);
-        // Skip if file already exists in target - don't overwrite user content
-        if (existsSync(targetFilePath)) {
-          copiedAgentFiles.push(agentFile);
-          continue;
-        }
-        const sourcePath = join(effectiveSourceDir, agentFile);
-        if (existsSync(sourcePath)) {
-          const content = await readFile(sourcePath, 'utf-8');
-          await writeFile(targetFilePath, content, 'utf-8');
-          copiedAgentFiles.push(agentFile);
+
+      // Inject WORKSPACE-RULES into all copied agent files
+      // If no agent files were copied, create AGENTS.md with just rules
+      if (copiedAgentFiles.length === 0) {
+        await ensureWorkspaceRules(join(absoluteTarget, 'AGENTS.md'));
+        copiedAgentFiles.push('AGENTS.md');
+      } else {
+        for (const agentFile of copiedAgentFiles) {
+          await ensureWorkspaceRules(join(absoluteTarget, agentFile));
         }
       }
-    }
 
-    // Inject WORKSPACE-RULES into all copied agent files
-    // If no agent files were copied, create AGENTS.md with just rules
-    if (copiedAgentFiles.length === 0) {
-      await ensureWorkspaceRules(join(absoluteTarget, 'AGENTS.md'));
-      copiedAgentFiles.push('AGENTS.md');
-    } else {
-      for (const agentFile of copiedAgentFiles) {
-        await ensureWorkspaceRules(join(absoluteTarget, agentFile));
+      // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
+      const clients = (parsed?.clients as string[]) ?? [];
+      if (
+        clients.includes('claude') &&
+        !copiedAgentFiles.includes('CLAUDE.md') &&
+        copiedAgentFiles.includes('AGENTS.md')
+      ) {
+        const agentsPath = join(absoluteTarget, 'AGENTS.md');
+        const claudePath = join(absoluteTarget, 'CLAUDE.md');
+        await copyFile(agentsPath, claudePath);
       }
-    }
-
-    // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
-    const parsed = load(workspaceYamlContent) as Record<string, unknown>;
-    const clients = (parsed?.clients as string[]) ?? [];
-    if (
-      clients.includes('claude') &&
-      !copiedAgentFiles.includes('CLAUDE.md') &&
-      copiedAgentFiles.includes('AGENTS.md')
-    ) {
-      const agentsPath = join(absoluteTarget, 'AGENTS.md');
-      const claudePath = join(absoluteTarget, 'CLAUDE.md');
-      await copyFile(agentsPath, claudePath);
     }
 
     console.log(`✓ Workspace created at: ${absoluteTarget}`);
