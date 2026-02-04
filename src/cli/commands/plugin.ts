@@ -9,7 +9,7 @@ import {
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { addPlugin, removePlugin, hasPlugin } from '../../core/workspace-modify.js';
-import { addUserPlugin, removeUserPlugin, hasUserPlugin } from '../../core/user-workspace.js';
+import { addUserPlugin, removeUserPlugin, hasUserPlugin, isUserConfigPath } from '../../core/user-workspace.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import {
@@ -599,7 +599,8 @@ const pluginInstallCmd = command({
   },
   handler: async ({ plugin, scope }) => {
     try {
-      const isUser = scope === 'user';
+      // Treat as user scope if explicitly requested or if cwd resolves to user config
+      const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
       const result = isUser
         ? await addUserPlugin(plugin)
         : await addPlugin(plugin);
@@ -712,7 +713,8 @@ const pluginUninstallCmd = command({
       }
 
       // No explicit scope: uninstall from all scopes where the plugin exists
-      const inProject = await hasPlugin(plugin);
+      // Skip project scope if it resolves to the user config (e.g., cwd is ~)
+      const inProject = isUserConfigPath(process.cwd()) ? false : await hasPlugin(plugin);
       const inUser = await hasUserPlugin(plugin);
 
       if (!inProject && !inUser) {
