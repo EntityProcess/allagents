@@ -1,9 +1,10 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { generateVscodeWorkspace, getWorkspaceOutputPath } from '../../src/core/vscode-workspace.js';
 import { parseWorkspaceConfig } from '../../src/utils/workspace-parser.js';
+import { syncWorkspace } from '../../src/core/sync.js';
 
 describe('vscode workspace setup e2e', () => {
   let testDir: string;
@@ -140,5 +141,43 @@ clients:
     expect(content.settings).toEqual({ 'chat.agent.maxRequests': 999 });
     expect(content.launch).toBeUndefined();
     expect(content.extensions).toBeUndefined();
+  });
+
+  test('sync generates .code-workspace when vscode client is configured', async () => {
+    writeFileSync(
+      join(testDir, '.allagents', 'workspace.yaml'),
+      `repositories:
+  - path: ../myrepo
+plugins: []
+clients:
+  - vscode
+`,
+    );
+
+    await syncWorkspace(testDir);
+
+    const expectedPath = join(testDir, `${basename(testDir)}.code-workspace`);
+    expect(existsSync(expectedPath)).toBe(true);
+
+    const content = JSON.parse(readFileSync(expectedPath, 'utf-8'));
+    expect(content.folders).toHaveLength(1);
+    expect(content.settings).toEqual({ 'chat.agent.maxRequests': 999 });
+  });
+
+  test('sync does not generate .code-workspace when vscode client is absent', async () => {
+    writeFileSync(
+      join(testDir, '.allagents', 'workspace.yaml'),
+      `repositories:
+  - path: ../myrepo
+plugins: []
+clients:
+  - claude
+`,
+    );
+
+    await syncWorkspace(testDir);
+
+    const expectedPath = join(testDir, `${basename(testDir)}.code-workspace`);
+    expect(existsSync(expectedPath)).toBe(false);
   });
 });

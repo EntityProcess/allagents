@@ -199,22 +199,12 @@ describe('substituteRepoPlaceholders', () => {
 });
 
 describe('getWorkspaceOutputPath', () => {
-  test('uses --output flag when provided', () => {
-    const result = getWorkspaceOutputPath('/home/user/myapp', undefined, 'custom');
-    expect(result).toBe('/home/user/myapp/custom.code-workspace');
-  });
-
   test('uses vscode.output from config', () => {
     const result = getWorkspaceOutputPath('/home/user/myapp', { output: 'glow' });
     expect(result).toBe('/home/user/myapp/glow.code-workspace');
   });
 
-  test('--output flag takes priority over vscode.output', () => {
-    const result = getWorkspaceOutputPath('/home/user/myapp', { output: 'glow' }, 'override');
-    expect(result).toBe('/home/user/myapp/override.code-workspace');
-  });
-
-  test('defaults to dirname when no override', () => {
+  test('defaults to dirname when no config', () => {
     const result = getWorkspaceOutputPath('/home/user/myapp', undefined);
     expect(result).toBe('/home/user/myapp/myapp.code-workspace');
   });

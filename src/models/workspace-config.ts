@@ -72,6 +72,7 @@ export const ClientTypeSchema = z.enum([
   'gemini',
   'factory',
   'ampcode',
+  'vscode',
 ]);
 
 export type ClientType = z.infer<typeof ClientTypeSchema>;

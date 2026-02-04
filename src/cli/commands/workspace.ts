@@ -1,26 +1,17 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { command, positional, option, flag, string, optional } from 'cmd-ts';
 import { initWorkspace } from '../../core/workspace.js';
-import { syncWorkspace, syncUserWorkspace, mergeSyncResults, validatePlugin } from '../../core/sync.js';
+import { syncWorkspace, syncUserWorkspace, mergeSyncResults } from '../../core/sync.js';
 import type { SyncResult } from '../../core/sync.js';
-import { getPluginName } from '../../core/plugin.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { pruneOrphanedPlugins } from '../../core/prune.js';
 import { getUserWorkspaceConfig, ensureUserWorkspace } from '../../core/user-workspace.js';
 import { addRepository, removeRepository, listRepositories, detectRemote, updateAgentFiles } from '../../core/workspace-repo.js';
-import {
-  generateVscodeWorkspace,
-  getWorkspaceOutputPath,
-  scanPluginForCopilotDirs,
-  type ResolvedPluginInfo,
-} from '../../core/vscode-workspace.js';
-import { parseWorkspaceConfig } from '../../utils/workspace-parser.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
-import { setupMeta } from '../metadata/workspace-setup.js';
 
 /**
  * Build a JSON-friendly sync data object from a sync result.
@@ -576,108 +567,6 @@ const repoCmd = conciseSubcommands({
 });
 
 // =============================================================================
-// workspace setup
-// =============================================================================
-
-const VSCODE_TEMPLATE_FILE = 'vscode-template.json';
-
-const setupCmd = command({
-  name: 'setup',
-  description: buildDescription(setupMeta),
-  args: {
-    output: option({
-      type: optional(string),
-      long: 'output',
-      short: 'o',
-      description: 'Output filename (default: <dirname>.code-workspace)',
-    }),
-  },
-  handler: async ({ output }) => {
-    try {
-      const workspacePath = process.cwd();
-      const configDir = join(workspacePath, '.allagents');
-      const configPath = join(configDir, 'workspace.yaml');
-
-      if (!existsSync(configPath)) {
-        const msg = '.allagents/workspace.yaml not found. Run `allagents workspace init` first.';
-        if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace setup', error: msg });
-          process.exit(1);
-        }
-        console.error(`Error: ${msg}`);
-        process.exit(1);
-      }
-
-      const config = await parseWorkspaceConfig(configPath);
-
-      // Load template if it exists
-      const templatePath = join(configDir, VSCODE_TEMPLATE_FILE);
-      let template: Record<string, unknown> | undefined;
-      if (existsSync(templatePath)) {
-        template = JSON.parse(readFileSync(templatePath, 'utf-8'));
-      }
-
-      // Resolve plugin paths (use cached/offline)
-      const plugins: ResolvedPluginInfo[] = [];
-      for (const pluginSource of config.plugins) {
-        const validated = await validatePlugin(pluginSource, workspacePath, true);
-        if (validated.success) {
-          const dirs = scanPluginForCopilotDirs(validated.resolved);
-          const pluginName = validated.pluginName ?? await getPluginName(validated.resolved);
-          plugins.push({
-            resolvedPath: validated.resolved,
-            displayName: pluginName,
-            hasPrompts: dirs.hasPrompts,
-            hasInstructions: dirs.hasInstructions,
-          });
-        }
-      }
-
-      const content = generateVscodeWorkspace({
-        workspacePath,
-        repositories: config.repositories,
-        plugins,
-        template,
-      });
-
-      const outputPath = getWorkspaceOutputPath(workspacePath, config.vscode, output);
-
-      const { writeFileSync: writeFile } = await import('node:fs');
-      writeFile(outputPath, `${JSON.stringify(content, null, '\t')}\n`, 'utf-8');
-
-      if (isJsonMode()) {
-        jsonOutput({
-          success: true,
-          command: 'workspace setup',
-          data: {
-            path: outputPath,
-            folders: (content.folders as unknown[]).length,
-            hasTemplate: !!template,
-          },
-        });
-        return;
-      }
-
-      console.log(`\u2713 Generated: ${outputPath}`);
-      console.log(`  Folders: ${(content.folders as unknown[]).length}`);
-      if (template) {
-        console.log(`  Template: ${VSCODE_TEMPLATE_FILE}`);
-      }
-    } catch (error) {
-      if (error instanceof Error) {
-        if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace setup', error: error.message });
-          process.exit(1);
-        }
-        console.error(`Error: ${error.message}`);
-        process.exit(1);
-      }
-      throw error;
-    }
-  },
-});
-
-// =============================================================================
 // workspace subcommands group
 // =============================================================================
 
@@ -690,6 +579,5 @@ export const workspaceCmd = conciseSubcommands({
     status: statusCmd,
     prune: pruneCmd,
     repo: repoCmd,
-    setup: setupCmd,
   },
 });

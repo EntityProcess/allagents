@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm, unlink, rmdir, copyFile } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, getHomeDir } from '../constants.js';
@@ -39,6 +39,12 @@ import {
 } from './sync-state.js';
 import type { SyncState } from '../models/sync-state.js';
 import { getUserWorkspaceConfig } from './user-workspace.js';
+import {
+  generateVscodeWorkspace,
+  getWorkspaceOutputPath,
+  scanPluginForCopilotDirs,
+  type ResolvedPluginInfo,
+} from './vscode-workspace.js';
 
 /**
  * Result of a sync operation
@@ -811,6 +817,50 @@ function buildPluginSkillNameMaps(
   return pluginMaps;
 }
 
+const VSCODE_TEMPLATE_FILE = 'vscode-template.json';
+
+/**
+ * Generate a VSCode .code-workspace file from workspace config and validated plugins.
+ * Called automatically during sync when 'vscode' client is configured.
+ */
+async function generateVscodeWorkspaceFile(
+  workspacePath: string,
+  config: WorkspaceConfig,
+  validPlugins: ValidatedPlugin[],
+): Promise<void> {
+  const configDir = join(workspacePath, CONFIG_DIR);
+
+  // Load template if it exists
+  const templatePath = join(configDir, VSCODE_TEMPLATE_FILE);
+  let template: Record<string, unknown> | undefined;
+  if (existsSync(templatePath)) {
+    template = JSON.parse(readFileSync(templatePath, 'utf-8'));
+  }
+
+  // Resolve plugin info
+  const plugins: ResolvedPluginInfo[] = [];
+  for (const validated of validPlugins) {
+    const dirs = scanPluginForCopilotDirs(validated.resolved);
+    const pluginName = validated.pluginName ?? await getPluginName(validated.resolved);
+    plugins.push({
+      resolvedPath: validated.resolved,
+      displayName: pluginName,
+      hasPrompts: dirs.hasPrompts,
+      hasInstructions: dirs.hasInstructions,
+    });
+  }
+
+  const content = generateVscodeWorkspace({
+    workspacePath,
+    repositories: config.repositories,
+    plugins,
+    template,
+  });
+
+  const outputPath = getWorkspaceOutputPath(workspacePath, config.vscode);
+  writeFileSync(outputPath, `${JSON.stringify(content, null, '\t')}\n`, 'utf-8');
+}
+
 /**
  * Sync all plugins to workspace for all configured clients
  *
@@ -1068,6 +1118,15 @@ export async function syncWorkspace(
   // (When workspace.source exists, rules are injected via copyWorkspaceFiles above.)
   if (!config.workspace && !dryRun) {
     await updateAgentFiles(workspacePath);
+  }
+
+  // Step 5d: Generate VSCode .code-workspace file if vscode client is configured
+  if (clients.includes('vscode') && !dryRun) {
+    await generateVscodeWorkspaceFile(
+      workspacePath,
+      config,
+      validPlugins,
+    );
   }
 
   // Count results from plugins

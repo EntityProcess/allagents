@@ -124,23 +124,25 @@ allagents workspace repo remove <path>
 allagents workspace repo list
 ```
 
-### `workspace setup`
+### VSCode Workspace Generation
 
-Generate a VSCode `.code-workspace` file from your workspace.yaml configuration. Repository paths are resolved to absolute paths. Plugin folders are included with prompt/instruction file location settings for Copilot.
+When `vscode` is included in the `clients` list, `workspace sync` automatically generates a `.code-workspace` file. Repository paths are resolved to absolute paths. Plugin folders are included with prompt/instruction file location settings for Copilot.
 
-```bash
-allagents workspace setup
-allagents workspace setup --output my-workspace
+```yaml
+# workspace.yaml
+clients:
+  - vscode
+  - claude
 ```
 
 #### Output filename
 
-Priority: `--output` flag > `vscode.output` in workspace.yaml > `<dirname>.code-workspace`
+The output filename defaults to `<dirname>.code-workspace`. Override with `vscode.output`:
 
 ```yaml
 # workspace.yaml
 vscode:
-  output: my-project.code-workspace
+  output: my-project
 ```
 
 #### Template file

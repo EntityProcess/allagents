@@ -176,14 +176,13 @@ export function scanPluginForCopilotDirs(pluginPath: string): {
 /**
  * Determine the output filename for the .code-workspace file
  *
- * Priority: outputOverride (--output flag) > vscodeConfig.output > <dirname>.code-workspace
+ * Priority: vscodeConfig.output > <dirname>.code-workspace
  */
 export function getWorkspaceOutputPath(
   workspacePath: string,
   vscodeConfig: VscodeConfig | undefined,
-  outputOverride?: string,
 ): string {
-  const name = outputOverride ?? vscodeConfig?.output;
+  const name = vscodeConfig?.output;
 
   if (name) {
     const filename = name.endsWith('.code-workspace') ? name : `${name}.code-workspace`;
