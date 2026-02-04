@@ -52,7 +52,6 @@ describe('generateVscodeWorkspace', () => {
     expect(result.folders).toEqual([
       {
         path: '/home/user/.allagents/marketplaces/official/plugins/code-review',
-        name: 'code-review',
       },
     ]);
   });
