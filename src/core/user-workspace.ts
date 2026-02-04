@@ -1,8 +1,8 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { load, dump } from 'js-yaml';
-import { WORKSPACE_CONFIG_FILE } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type { WorkspaceConfig, ClientType } from '../models/workspace-config.js';
 import { getAllagentsDir } from './marketplace.js';
 import {
@@ -29,6 +29,18 @@ const ALL_CLIENTS: ClientType[] = [
  */
 export function getUserWorkspaceConfigPath(): string {
   return join(getAllagentsDir(), WORKSPACE_CONFIG_FILE);
+}
+
+/**
+ * Check if a workspace path's config resolves to the user-level config.
+ * This happens when cwd is the user's home directory, causing the project
+ * config path (cwd/.allagents/workspace.yaml) to be the same file as the
+ * user config (~/.allagents/workspace.yaml).
+ */
+export function isUserConfigPath(workspacePath: string): boolean {
+  const projectConfigPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  const userConfigPath = getUserWorkspaceConfigPath();
+  return resolve(projectConfigPath) === resolve(userConfigPath);
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 import { fetchPlugin } from './plugin.js';
 import type { FetchResult } from './plugin.js';
 import { parseGitHubUrl, getPluginCachePath } from '../utils/plugin-path.js';
+import { getHomeDir } from '../constants.js';
 
 /**
  * Source types for marketplaces
@@ -65,8 +66,7 @@ const WELL_KNOWN_MARKETPLACES: Record<string, string> = {
  * Get the allagents config directory
  */
 export function getAllagentsDir(): string {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
-  return resolve(homeDir, '.allagents');
+  return resolve(getHomeDir(), '.allagents');
 }
 
 /**

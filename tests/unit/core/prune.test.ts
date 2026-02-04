@@ -76,22 +76,34 @@ describe('pruneOrphanedPlugins', () => {
       },
     });
 
-    await writeProjectConfig({
-      repositories: [],
-      plugins: [
-        'pluginA@good-mp',
-        'pluginB@removed-mp',
-        '/local/plugin',
-      ],
-      clients: ['claude'],
-    });
+    // Use a subdirectory as workspace so project config doesn't overlap with user config
+    const projectDir = join(testDir, 'project');
+    const projectConfigDir = join(projectDir, CONFIG_DIR);
+    await mkdir(projectConfigDir, { recursive: true });
+    await writeFile(
+      join(projectConfigDir, WORKSPACE_CONFIG_FILE),
+      dump({
+        repositories: [],
+        plugins: [
+          'pluginA@good-mp',
+          'pluginB@removed-mp',
+          '/local/plugin',
+        ],
+        clients: ['claude'],
+      } satisfies WorkspaceConfig, { lineWidth: -1 }),
+      'utf-8',
+    );
 
-    const result = await pruneOrphanedPlugins(testDir);
+    const result = await pruneOrphanedPlugins(projectDir);
     expect(result.project.removed).toEqual(['pluginB@removed-mp']);
     expect(result.project.kept).toContain('pluginA@good-mp');
     expect(result.project.kept).toContain('/local/plugin');
 
-    const config = await readProjectConfig();
+    const content = await readFile(
+      join(projectConfigDir, WORKSPACE_CONFIG_FILE),
+      'utf-8',
+    );
+    const config = load(content) as WorkspaceConfig;
     expect(config.plugins).toEqual(['pluginA@good-mp', '/local/plugin']);
   });
 
@@ -139,13 +151,17 @@ describe('pruneOrphanedPlugins', () => {
       },
     });
 
-    await writeProjectConfig({
-      repositories: [],
-      plugins: ['pluginA@good-mp'],
-      clients: ['claude'],
-    });
+    // Use a subdirectory as workspace so project config doesn't overlap with user config
+    const projectDir = join(testDir, 'project');
+    const projectConfigDir = join(projectDir, CONFIG_DIR);
+    await mkdir(projectConfigDir, { recursive: true });
+    await writeFile(
+      join(projectConfigDir, WORKSPACE_CONFIG_FILE),
+      dump({ repositories: [], plugins: ['pluginA@good-mp'], clients: ['claude'] } satisfies WorkspaceConfig, { lineWidth: -1 }),
+      'utf-8',
+    );
 
-    const result = await pruneOrphanedPlugins(testDir);
+    const result = await pruneOrphanedPlugins(projectDir);
     expect(result.project.removed).toEqual([]);
     expect(result.user.removed).toEqual([]);
   });
@@ -156,13 +172,21 @@ describe('pruneOrphanedPlugins', () => {
     const localPlugin = join(testDir, 'my-plugin');
     await mkdir(localPlugin, { recursive: true });
 
-    await writeProjectConfig({
-      repositories: [],
-      plugins: [localPlugin, 'https://github.com/owner/repo'],
-      clients: ['claude'],
-    });
+    // Use a subdirectory as workspace so project config doesn't overlap with user config
+    const projectDir = join(testDir, 'project');
+    const projectConfigDir = join(projectDir, CONFIG_DIR);
+    await mkdir(projectConfigDir, { recursive: true });
+    await writeFile(
+      join(projectConfigDir, WORKSPACE_CONFIG_FILE),
+      dump({
+        repositories: [],
+        plugins: [localPlugin, 'https://github.com/owner/repo'],
+        clients: ['claude'],
+      } satisfies WorkspaceConfig, { lineWidth: -1 }),
+      'utf-8',
+    );
 
-    const result = await pruneOrphanedPlugins(testDir);
+    const result = await pruneOrphanedPlugins(projectDir);
     // Non-marketplace plugins should be kept, not pruned
     expect(result.project.removed).toEqual([]);
   });

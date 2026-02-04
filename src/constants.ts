@@ -1,4 +1,11 @@
 /**
+ * Get the user's home directory (cross-platform).
+ */
+export function getHomeDir(): string {
+  return process.env.HOME || process.env.USERPROFILE || '~';
+}
+
+/**
  * Configuration directory name
  */
 export const CONFIG_DIR = '.allagents';

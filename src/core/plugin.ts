@@ -8,6 +8,7 @@ import {
   validatePluginSource,
 } from '../utils/plugin-path.js';
 import { PluginManifestSchema } from '../models/plugin-config.js';
+import { getHomeDir } from '../constants.js';
 
 /**
  * Information about a cached plugin
@@ -209,8 +210,7 @@ export async function fetchPlugin(
  * @returns Path to plugin cache directory
  */
 export function getPluginCacheDir(): string {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
-  return resolve(homeDir, '.allagents', 'plugins', 'marketplaces');
+  return resolve(getHomeDir(), '.allagents', 'plugins', 'marketplaces');
 }
 
 /**

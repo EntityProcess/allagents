@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, getHomeDir } from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import {
   parsePluginSource,
@@ -11,7 +11,7 @@ import {
   isPluginSpec,
   resolvePluginSpecWithAutoRegister,
 } from './marketplace.js';
-import { getUserWorkspaceConfig } from './user-workspace.js';
+import { getUserWorkspaceConfig, isUserConfigPath } from './user-workspace.js';
 
 /**
  * Status of a single plugin
@@ -47,8 +47,9 @@ export async function getWorkspaceStatus(
 ): Promise<WorkspaceStatusResult> {
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
-  // If no project workspace.yaml, return user-level plugins only
-  if (!existsSync(configPath)) {
+  // If no project workspace.yaml, or project config IS the user config
+  // (i.e. cwd is the home directory), return user-level plugins only
+  if (!existsSync(configPath) || isUserConfigPath(workspacePath)) {
     const userPlugins = await getUserPluginStatuses();
     return {
       success: true,
@@ -136,7 +137,7 @@ async function getUserPluginStatuses(): Promise<PluginStatus[]> {
     if (isPluginSpec(pluginSource)) {
       statuses.push(await getMarketplacePluginStatus(pluginSource));
     } else {
-      const parsed = parsePluginSource(pluginSource, process.env.HOME || '~');
+      const parsed = parsePluginSource(pluginSource, getHomeDir());
       statuses.push(getPluginStatus(parsed));
     }
   }

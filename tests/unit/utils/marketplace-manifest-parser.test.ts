@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   parseMarketplaceManifest,
@@ -288,12 +288,12 @@ describe('parseMarketplaceManifest', () => {
 describe('resolvePluginSourcePath', () => {
   it('should resolve relative path source', () => {
     const result = resolvePluginSourcePath('./plugins/my-plugin', '/home/user/marketplace');
-    expect(result).toBe('/home/user/marketplace/plugins/my-plugin');
+    expect(result).toBe(resolve('/home/user/marketplace', './plugins/my-plugin'));
   });
 
   it('should resolve plain relative path', () => {
     const result = resolvePluginSourcePath('plugins/my-plugin', '/home/user/marketplace');
-    expect(result).toBe('/home/user/marketplace/plugins/my-plugin');
+    expect(result).toBe(resolve('/home/user/marketplace', 'plugins/my-plugin'));
   });
 
   it('should return url for URL source objects', () => {
