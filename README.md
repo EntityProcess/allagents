@@ -299,11 +299,25 @@ model: claude-3-opus    # Optional
 Skill instructions go here...
 ```
 
+### Self Commands
+
+```bash
+# Update to latest version (auto-detects package manager)
+allagents self update
+
+# Force a specific package manager
+allagents self update --npm
+allagents self update --bun
+```
+
+When using the interactive TUI, AllAgents automatically checks for newer versions in the background and shows a notice on startup when an update is available.
+
 ## Storage Locations
 
 ```
 ~/.allagents/
 ├── marketplaces.json              # Registry of marketplaces
+├── version-check.json             # Cached update check (auto-managed)
 └── marketplaces/                  # Cloned marketplace repos
     ├── claude-plugins-official/
     └── someuser-their-repo/

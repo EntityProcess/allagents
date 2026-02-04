@@ -32,3 +32,15 @@ After installation, verify it's working:
 ```bash
 allagents --version
 ```
+
+## Updating
+
+AllAgents automatically checks for new versions in the background when you use the interactive TUI. If an update is available, you'll see a notice on startup.
+
+To update manually:
+
+```bash
+allagents self update
+```
+
+This auto-detects whether you installed with npm or bun and uses the same package manager. You can also force a specific one with `--npm` or `--bun`.
