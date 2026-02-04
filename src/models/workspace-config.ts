@@ -5,9 +5,9 @@ import { z } from 'zod';
  */
 export const RepositorySchema = z.object({
   path: z.string(),
-  owner: z.string(),
-  repo: z.string(),
-  description: z.string(),
+  source: z.string().optional(),
+  repo: z.string().optional(),
+  description: z.string().optional(),
 });
 
 export type Repository = z.infer<typeof RepositorySchema>;
