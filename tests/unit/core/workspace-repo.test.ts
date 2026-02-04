@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { load } from 'js-yaml';
-import { addRepository, removeRepository, listRepositories } from '../../../src/core/workspace-repo.js';
+import { addRepository, removeRepository, listRepositories, detectRemote } from '../../../src/core/workspace-repo.js';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
 
 describe('addRepository', () => {
@@ -119,5 +119,70 @@ describe('listRepositories', () => {
     const repos = await listRepositories(emptyDir);
     expect(repos).toHaveLength(0);
     rmSync(emptyDir, { recursive: true, force: true });
+  });
+});
+
+describe('detectRemote', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'allagents-git-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('should detect github from HTTPS remote', async () => {
+    Bun.spawnSync(['git', 'init', tmpDir]);
+    Bun.spawnSync(['git', '-C', tmpDir, 'remote', 'add', 'origin', 'https://github.com/WiseTechGlobal/Glow.git']);
+
+    const result = await detectRemote(tmpDir);
+    expect(result).toEqual({ source: 'github', repo: 'WiseTechGlobal/Glow' });
+  });
+
+  it('should detect github from SSH remote', async () => {
+    Bun.spawnSync(['git', 'init', tmpDir]);
+    Bun.spawnSync(['git', '-C', tmpDir, 'remote', 'add', 'origin', 'git@github.com:WiseTechGlobal/Glow.git']);
+
+    const result = await detectRemote(tmpDir);
+    expect(result).toEqual({ source: 'github', repo: 'WiseTechGlobal/Glow' });
+  });
+
+  it('should detect gitlab remote', async () => {
+    Bun.spawnSync(['git', 'init', tmpDir]);
+    Bun.spawnSync(['git', '-C', tmpDir, 'remote', 'add', 'origin', 'https://gitlab.com/owner/repo.git']);
+
+    const result = await detectRemote(tmpDir);
+    expect(result).toEqual({ source: 'gitlab', repo: 'owner/repo' });
+  });
+
+  it('should detect bitbucket remote', async () => {
+    Bun.spawnSync(['git', 'init', tmpDir]);
+    Bun.spawnSync(['git', '-C', tmpDir, 'remote', 'add', 'origin', 'git@bitbucket.org:owner/repo.git']);
+
+    const result = await detectRemote(tmpDir);
+    expect(result).toEqual({ source: 'bitbucket', repo: 'owner/repo' });
+  });
+
+  it('should detect azure devops HTTPS remote', async () => {
+    Bun.spawnSync(['git', 'init', tmpDir]);
+    Bun.spawnSync(['git', '-C', tmpDir, 'remote', 'add', 'origin', 'https://dev.azure.com/myorg/myproject/_git/myrepo']);
+
+    const result = await detectRemote(tmpDir);
+    expect(result).toEqual({ source: 'azure-devops', repo: 'myorg/myproject/myrepo' });
+  });
+
+  it('should return undefined for unknown remote host', async () => {
+    Bun.spawnSync(['git', 'init', tmpDir]);
+    Bun.spawnSync(['git', '-C', tmpDir, 'remote', 'add', 'origin', 'https://selfhosted.example.com/owner/repo.git']);
+
+    const result = await detectRemote(tmpDir);
+    expect(result).toBeUndefined();
+  });
+
+  it('should return undefined for non-git directory', async () => {
+    const result = await detectRemote(tmpDir);
+    expect(result).toBeUndefined();
   });
 });
