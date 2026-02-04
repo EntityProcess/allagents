@@ -112,6 +112,16 @@ allagents workspace sync [options]
 
 # Show status of workspace and plugins
 allagents workspace status
+
+# Add a repository to the workspace (auto-detects git remote source)
+allagents workspace repo add <path>
+allagents workspace repo add <path> --description "My project"
+
+# Remove a repository from the workspace
+allagents workspace repo remove <path>
+
+# List all repositories in the workspace
+allagents workspace repo list
 ```
 
 ### Plugin Marketplace Commands
