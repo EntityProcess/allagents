@@ -422,10 +422,6 @@ const repoAddCmd = command({
         process.exit(1);
       }
 
-      // Sync to inject WORKSPACE-RULES into agent files
-      const { syncWorkspace: runSync } = await import('../../core/sync.js');
-      await runSync();
-
       if (isJsonMode()) {
         jsonOutput({
           success: true,
@@ -479,10 +475,6 @@ const repoRemoveCmd = command({
         console.error(`Error: ${result.error}`);
         process.exit(1);
       }
-
-      // Sync to update WORKSPACE-RULES in agent files
-      const { syncWorkspace: runSync } = await import('../../core/sync.js');
-      await runSync();
 
       if (isJsonMode()) {
         jsonOutput({ success: true, command: 'workspace repo remove', data: { path: repoPath } });

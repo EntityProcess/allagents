@@ -62,6 +62,15 @@ interface AddRepoOptions {
 }
 
 /**
+ * Normalize a repository path for consistent comparison and storage.
+ * Strips trailing slashes (preserving bare "/" or ".").
+ */
+function normalizePath(p: string): string {
+  const stripped = p.replace(/\/+$/, '');
+  return stripped || p;
+}
+
+/**
  * Add a repository to .allagents/workspace.yaml
  */
 export async function addRepository(
@@ -69,6 +78,7 @@ export async function addRepository(
   options: AddRepoOptions = {},
   workspacePath: string = process.cwd(),
 ): Promise<ModifyResult> {
+  const normalizedPath = normalizePath(path);
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
   await ensureWorkspace(workspacePath);
 
@@ -77,11 +87,11 @@ export async function addRepository(
     const config = load(content) as WorkspaceConfig;
 
     // Check for duplicate path
-    if (config.repositories.some((r) => r.path === path)) {
-      return { success: false, error: `Repository already exists: ${path}` };
+    if (config.repositories.some((r) => normalizePath(r.path) === normalizedPath)) {
+      return { success: false, error: `Repository already exists: ${normalizedPath}` };
     }
 
-    const entry: Repository = { path };
+    const entry: Repository = { path: normalizedPath };
     if (options.source) entry.source = options.source;
     if (options.repo) entry.repo = options.repo;
     if (options.description) entry.description = options.description;
@@ -115,7 +125,8 @@ export async function removeRepository(
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
 
-    const index = config.repositories.findIndex((r) => r.path === path);
+    const normalizedPath = normalizePath(path);
+    const index = config.repositories.findIndex((r) => normalizePath(r.path) === normalizedPath);
     if (index === -1) {
       return { success: false, error: `Repository not found: ${path}` };
     }
