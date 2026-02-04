@@ -7,7 +7,7 @@ import type { SyncResult } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { pruneOrphanedPlugins } from '../../core/prune.js';
 import { getUserWorkspaceConfig, ensureUserWorkspace } from '../../core/user-workspace.js';
-import { addRepository, removeRepository, listRepositories, detectRemote } from '../../core/workspace-repo.js';
+import { addRepository, removeRepository, listRepositories, detectRemote, updateAgentFiles } from '../../core/workspace-repo.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
@@ -422,6 +422,9 @@ const repoAddCmd = command({
         process.exit(1);
       }
 
+      // Ensure WORKSPACE-RULES are injected into agent files
+      await updateAgentFiles();
+
       if (isJsonMode()) {
         jsonOutput({
           success: true,
@@ -475,6 +478,9 @@ const repoRemoveCmd = command({
         console.error(`Error: ${result.error}`);
         process.exit(1);
       }
+
+      // Ensure WORKSPACE-RULES are injected into agent files
+      await updateAgentFiles();
 
       if (isJsonMode()) {
         jsonOutput({ success: true, command: 'workspace repo remove', data: { path: repoPath } });

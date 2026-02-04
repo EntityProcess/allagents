@@ -1,9 +1,10 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { load, dump } from 'js-yaml';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
 import { ensureWorkspace, type ModifyResult } from './workspace-modify.js';
+import { ensureWorkspaceRules } from './transform.js';
 import type { WorkspaceConfig, Repository } from '../models/workspace-config.js';
 
 /**
@@ -155,5 +156,36 @@ export async function listRepositories(
     return config.repositories ?? [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Ensure WORKSPACE-RULES are injected into agent files (AGENTS.md, CLAUDE.md).
+ * Lightweight alternative to full syncWorkspace() — only touches agent files.
+ */
+export async function updateAgentFiles(
+  workspacePath: string = process.cwd(),
+): Promise<void> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) return;
+
+  const content = await readFile(configPath, 'utf-8');
+  const config = load(content) as WorkspaceConfig;
+  const hasRepositories = config.repositories.length > 0;
+
+  if (!hasRepositories) return;
+
+  // Inject WORKSPACE-RULES into AGENTS.md (create if needed)
+  const agentsPath = join(workspacePath, AGENT_FILES[0]);
+  await ensureWorkspaceRules(agentsPath);
+
+  // For CLAUDE.md: copy from AGENTS.md if missing, otherwise inject rules
+  if (config.clients?.includes('claude')) {
+    const claudePath = join(workspacePath, AGENT_FILES[1]);
+    if (!existsSync(claudePath)) {
+      await copyFile(agentsPath, claudePath);
+    } else {
+      await ensureWorkspaceRules(claudePath);
+    }
   }
 }
