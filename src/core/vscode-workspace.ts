@@ -113,7 +113,7 @@ export function generateVscodeWorkspace(
 
   // Build settings
   let settings: Record<string, unknown>;
-  if (resolvedTemplate && resolvedTemplate.settings) {
+  if (resolvedTemplate?.settings) {
     // Template has full control over settings
     settings = { ...(resolvedTemplate.settings as Record<string, unknown>) };
   } else {

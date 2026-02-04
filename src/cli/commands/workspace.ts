@@ -643,7 +643,7 @@ const setupCmd = command({
       const outputPath = getWorkspaceOutputPath(workspacePath, config.vscode, output);
 
       const { writeFileSync: writeFile } = await import('node:fs');
-      writeFile(outputPath, JSON.stringify(content, null, '\t') + '\n', 'utf-8');
+      writeFile(outputPath, `${JSON.stringify(content, null, '\t')}\n`, 'utf-8');
 
       if (isJsonMode()) {
         jsonOutput({
