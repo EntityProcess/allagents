@@ -81,14 +81,15 @@ vscode:
 
     // Verify folders: 2 repos + 1 extra (Glow.Shared deduplicated)
     const folders = content.folders as Array<{ path: string; name?: string }>;
-    expect(folders).toHaveLength(3); // ../Glow, ../Glow.Shared (from repo), /some/other/path
-    expect(folders[0].path).toContain('/Glow');
-    expect(folders[1].path).toContain('/Glow.Shared');
-    expect(folders[2].path).toBe('/some/other/path');
+    expect(folders).toHaveLength(4); // ".", ../Glow, ../Glow.Shared (from repo), /some/other/path
+    expect(folders[0].path).toBe('.');
+    expect(folders[1].path).toContain('/Glow');
+    expect(folders[2].path).toContain('/Glow.Shared');
+    expect(folders[3].path).toBe('/some/other/path');
 
-    // All auto-generated paths should be absolute
-    expect(folders[0].path.startsWith('/')).toBe(true);
+    // All repo paths should be absolute
     expect(folders[1].path.startsWith('/')).toBe(true);
+    expect(folders[2].path.startsWith('/')).toBe(true);
 
     // Verify settings from template
     const settings = content.settings as Record<string, unknown>;
@@ -112,7 +113,7 @@ vscode:
     // Write and re-read to verify valid JSON
     writeFileSync(outputPath, JSON.stringify(content, null, '\t') + '\n');
     const written = JSON.parse(readFileSync(outputPath, 'utf-8'));
-    expect(written.folders).toHaveLength(3);
+    expect(written.folders).toHaveLength(4);
   });
 
   test('generation without template uses defaults', async () => {
@@ -134,8 +135,9 @@ clients:
     });
 
     const folders = content.folders as Array<{ path: string }>;
-    expect(folders).toHaveLength(1);
-    expect(folders[0].path).toContain('/myrepo');
+    expect(folders).toHaveLength(2);
+    expect(folders[0].path).toBe('.');
+    expect(folders[1].path).toContain('/myrepo');
     expect(content.settings).toEqual({ 'chat.agent.maxRequests': 999 });
     expect(content.launch).toBeUndefined();
     expect(content.extensions).toBeUndefined();
@@ -158,7 +160,8 @@ clients:
     expect(existsSync(expectedPath)).toBe(true);
 
     const content = JSON.parse(readFileSync(expectedPath, 'utf-8'));
-    expect(content.folders).toHaveLength(1);
+    expect(content.folders).toHaveLength(2);
+    expect(content.folders[0].path).toBe('.');
     expect(content.settings).toEqual({ 'chat.agent.maxRequests': 999 });
   });
 

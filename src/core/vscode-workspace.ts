@@ -76,6 +76,9 @@ export function generateVscodeWorkspace(
   const folders: WorkspaceFolder[] = [];
   const seenPaths = new Set<string>();
 
+  // 0. Current workspace folder
+  folders.push({ path: '.' });
+
   // 1. Repository folders (from workspace.yaml)
   for (const repo of repositories) {
     const absolutePath = resolve(workspacePath, repo.path);

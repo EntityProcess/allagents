@@ -17,6 +17,7 @@ describe('generateVscodeWorkspace', () => {
     });
 
     expect(result.folders).toEqual([
+      { path: '.' },
       { path: '/home/user/projects/backend' },
       { path: '/home/user/projects/frontend' },
     ]);
@@ -52,6 +53,7 @@ describe('generateVscodeWorkspace', () => {
     // ../shared resolves to /home/user/projects/shared — template duplicate removed
     // /extra is not a duplicate, so it's kept with its name
     expect(result.folders).toEqual([
+      { path: '.' },
       { path: '/home/user/projects/backend' },
       { path: '/home/user/projects/shared' },
       { path: '/home/user/projects/extra', name: 'ExtraLib' },

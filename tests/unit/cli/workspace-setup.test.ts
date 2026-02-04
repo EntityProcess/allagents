@@ -37,7 +37,9 @@ clients:
       template: undefined,
     });
 
-    for (const folder of result.folders as Array<{ path: string }>) {
+    const folders = result.folders as Array<{ path: string }>;
+    expect(folders[0].path).toBe('.');
+    for (const folder of folders.slice(1)) {
       expect(folder.path.startsWith('/')).toBe(true);
     }
 
