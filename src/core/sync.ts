@@ -603,7 +603,7 @@ export function collectSyncedPaths(
  * @param offline - Skip fetching from remote and use cached version
  * @returns Validation result with resolved path
  */
-async function validatePlugin(
+export async function validatePlugin(
   pluginSource: string,
   workspacePath: string,
   offline: boolean,

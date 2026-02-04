@@ -2,8 +2,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { command, positional, option, flag, string, optional } from 'cmd-ts';
 import { initWorkspace } from '../../core/workspace.js';
-import { syncWorkspace, syncUserWorkspace, mergeSyncResults } from '../../core/sync.js';
+import { syncWorkspace, syncUserWorkspace, mergeSyncResults, validatePlugin } from '../../core/sync.js';
 import type { SyncResult } from '../../core/sync.js';
+import { getPluginName } from '../../core/plugin.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { pruneOrphanedPlugins } from '../../core/prune.js';
 import { getUserWorkspaceConfig, ensureUserWorkspace } from '../../core/user-workspace.js';
@@ -618,7 +619,19 @@ const setupCmd = command({
 
       // Resolve plugin paths (use cached/offline)
       const plugins: ResolvedPluginInfo[] = [];
-      // TODO: Wire plugin resolution in Task 4
+      for (const pluginSource of config.plugins) {
+        const validated = await validatePlugin(pluginSource, workspacePath, true);
+        if (validated.success) {
+          const dirs = scanPluginForCopilotDirs(validated.resolved);
+          const pluginName = validated.pluginName ?? await getPluginName(validated.resolved);
+          plugins.push({
+            resolvedPath: validated.resolved,
+            displayName: pluginName,
+            hasPrompts: dirs.hasPrompts,
+            hasInstructions: dirs.hasInstructions,
+          });
+        }
+      }
 
       const content = generateVscodeWorkspace({
         workspacePath,
