@@ -95,6 +95,12 @@ export interface WorkspaceCopyOptions extends CopyOptions {
    * Required for resolving GitHub file sources.
    */
   githubCache?: Map<string, string>;
+  /**
+   * Skip WORKSPACE-RULES injection into agent files.
+   * Used when repositories is empty/absent — agent files should not receive rules
+   * that reference repository paths.
+   */
+  skipWorkspaceRules?: boolean;
 }
 
 /**
@@ -576,7 +582,7 @@ export async function copyWorkspaceFiles(
   files: WorkspaceFile[],
   options: WorkspaceCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false, githubCache } = options;
+  const { dryRun = false, githubCache, skipWorkspaceRules = false } = options;
   const results: CopyResult[] = [];
 
   // Separate string patterns from object entries
@@ -758,7 +764,8 @@ export async function copyWorkspaceFiles(
   }
 
   // Inject WORKSPACE-RULES into all copied agent files (idempotent)
-  if (!dryRun) {
+  // Skip when repositories is empty/absent — rules reference repository paths that don't exist
+  if (!dryRun && !skipWorkspaceRules) {
     for (const agentFile of copiedAgentFiles) {
       const targetPath = join(workspacePath, agentFile);
       try {

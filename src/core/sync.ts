@@ -18,6 +18,7 @@ import {
   copyPluginToWorkspace,
   copyWorkspaceFiles,
   collectPluginSkills,
+  ensureWorkspaceRules,
   type CopyResult,
 } from './transform.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../models/client-mapping.js';
@@ -863,6 +864,10 @@ export async function syncWorkspace(
     };
   }
 
+  // Check if repositories are configured — when empty/absent, skip agent file
+  // creation and WORKSPACE-RULES injection (same pattern as initWorkspace)
+  const hasRepositories = (config.repositories?.length ?? 0) > 0;
+
   // Filter clients if override provided
   const clients = options.clients
     ? config.clients.filter((c) => options.clients?.includes(c))
@@ -988,8 +993,10 @@ export async function syncWorkspace(
     const sourcePath = validatedWorkspaceSource?.resolved;
     const filesToCopy = [...config.workspace.files];
 
-    // Auto-include agent files if they exist in source and aren't already listed
-    if (sourcePath) {
+    // Auto-include agent files if they exist in source and aren't already listed.
+    // Skip when repositories is empty — agent files contain WORKSPACE-RULES that
+    // reference repository paths which don't exist yet.
+    if (hasRepositories && sourcePath) {
       for (const agentFile of AGENT_FILES) {
         const agentPath = join(sourcePath, agentFile);
         if (existsSync(agentPath) && !filesToCopy.includes(agentFile)) {
@@ -1033,15 +1040,17 @@ export async function syncWorkspace(
     }
 
     // Step 5c: Copy workspace files with GitHub cache
+    // When repositories is empty, skip WORKSPACE-RULES injection into any agent files
     workspaceFileResults = await copyWorkspaceFiles(
       sourcePath,
       workspacePath,
       filesToCopy,
-      { dryRun, githubCache },
+      { dryRun, githubCache, skipWorkspaceRules: !hasRepositories },
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
-    if (!dryRun && clients.includes('claude') && sourcePath) {
+    // Skip when repositories is empty (no agent files should be created)
+    if (hasRepositories && !dryRun && clients.includes('claude') && sourcePath) {
       const claudePath = join(workspacePath, 'CLAUDE.md');
       const agentsPath = join(workspacePath, 'AGENTS.md');
       const claudeExistsInSource = existsSync(join(sourcePath, 'CLAUDE.md'));
@@ -1049,6 +1058,22 @@ export async function syncWorkspace(
       // Only copy if CLAUDE.md wasn't in source and AGENTS.md exists
       if (!claudeExistsInSource && existsSync(agentsPath) && !existsSync(claudePath)) {
         await copyFile(agentsPath, claudePath);
+      }
+    }
+  }
+
+  // When repositories are configured but no workspace.source is set,
+  // ensure WORKSPACE-RULES are injected into agent files directly.
+  // This handles the case where a user has repositories but no workspace: section.
+  if (hasRepositories && !config.workspace && !dryRun) {
+    await ensureWorkspaceRules(join(workspacePath, 'AGENTS.md'));
+    // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
+    if (clients.includes('claude')) {
+      const claudePath = join(workspacePath, 'CLAUDE.md');
+      if (!existsSync(claudePath)) {
+        await copyFile(join(workspacePath, 'AGENTS.md'), claudePath);
+      } else {
+        await ensureWorkspaceRules(claudePath);
       }
     }
   }
