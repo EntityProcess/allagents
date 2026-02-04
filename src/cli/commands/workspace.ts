@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { command, positional, option, flag, string, optional } from 'cmd-ts';
 import { initWorkspace } from '../../core/workspace.js';
 import { syncWorkspace, syncUserWorkspace, mergeSyncResults } from '../../core/sync.js';
@@ -7,9 +7,11 @@ import type { SyncResult } from '../../core/sync.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { pruneOrphanedPlugins } from '../../core/prune.js';
 import { getUserWorkspaceConfig, ensureUserWorkspace } from '../../core/user-workspace.js';
+import { addRepository, removeRepository, listRepositories, detectRemote } from '../../core/workspace-repo.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
+import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
 
 /**
  * Build a JSON-friendly sync data object from a sync result.
@@ -389,6 +391,184 @@ const pruneCmd = command({
 });
 
 // =============================================================================
+// workspace repo add
+// =============================================================================
+
+const repoAddCmd = command({
+  name: 'add',
+  description: buildDescription(repoAddMeta),
+  args: {
+    path: positional({ type: string, displayName: 'path' }),
+    description: option({ type: optional(string), long: 'description', short: 'd', description: 'Repository description' }),
+  },
+  handler: async ({ path: repoPath, description }) => {
+    try {
+      // Auto-detect source and repo from git remote
+      const resolvedPath = resolve(process.cwd(), repoPath);
+      const remote = await detectRemote(resolvedPath);
+
+      const result = await addRepository(repoPath, {
+        source: remote?.source,
+        repo: remote?.repo,
+        description,
+      });
+
+      if (!result.success) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace repo add', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+
+      // Sync to inject WORKSPACE-RULES into agent files
+      const { syncWorkspace: runSync } = await import('../../core/sync.js');
+      await runSync();
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'workspace repo add',
+          data: {
+            path: repoPath,
+            source: remote?.source ?? null,
+            repo: remote?.repo ?? null,
+            description: description ?? null,
+          },
+        });
+        return;
+      }
+
+      console.log(`\u2713 Added repository: ${repoPath}`);
+      if (remote) console.log(`  Source: ${remote.source} (${remote.repo})`);
+      if (description) console.log(`  Description: ${description}`);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace repo add', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
+// workspace repo remove
+// =============================================================================
+
+const repoRemoveCmd = command({
+  name: 'remove',
+  description: buildDescription(repoRemoveMeta),
+  args: {
+    path: positional({ type: string, displayName: 'path' }),
+  },
+  handler: async ({ path: repoPath }) => {
+    try {
+      const result = await removeRepository(repoPath);
+
+      if (!result.success) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace repo remove', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+
+      // Sync to update WORKSPACE-RULES in agent files
+      const { syncWorkspace: runSync } = await import('../../core/sync.js');
+      await runSync();
+
+      if (isJsonMode()) {
+        jsonOutput({ success: true, command: 'workspace repo remove', data: { path: repoPath } });
+        return;
+      }
+
+      console.log(`\u2713 Removed repository: ${repoPath}`);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace repo remove', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
+// workspace repo list
+// =============================================================================
+
+const repoListCmd = command({
+  name: 'list',
+  description: buildDescription(repoListMeta),
+  args: {},
+  handler: async () => {
+    try {
+      const repos = await listRepositories();
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'workspace repo list',
+          data: { repositories: repos, total: repos.length },
+        });
+        return;
+      }
+
+      if (repos.length === 0) {
+        console.log('No repositories configured.\n');
+        console.log('Add a repository with:');
+        console.log('  allagents workspace repo add <path>');
+        return;
+      }
+
+      console.log('Repositories:\n');
+      for (const repo of repos) {
+        console.log(`  ${repo.path}`);
+        if (repo.source && repo.repo) console.log(`    Source: ${repo.source} (${repo.repo})`);
+        if (repo.description) console.log(`    Description: ${repo.description}`);
+        console.log();
+      }
+      console.log(`Total: ${repos.length} repository(ies)`);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'workspace repo list', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
+// workspace repo subcommands group
+// =============================================================================
+
+const repoCmd = conciseSubcommands({
+  name: 'repo',
+  description: 'Manage workspace repositories',
+  cmds: {
+    add: repoAddCmd,
+    remove: repoRemoveCmd,
+    list: repoListCmd,
+  },
+});
+
+// =============================================================================
 // workspace subcommands group
 // =============================================================================
 
@@ -400,5 +580,6 @@ export const workspaceCmd = conciseSubcommands({
     sync: syncCmd,
     status: statusCmd,
     prune: pruneCmd,
+    repo: repoCmd,
   },
 });
