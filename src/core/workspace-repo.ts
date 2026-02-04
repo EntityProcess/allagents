@@ -1,11 +1,12 @@
-import { readFile, writeFile, copyFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { load, dump } from 'js-yaml';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { ensureWorkspace, type ModifyResult } from './workspace-modify.js';
 import { ensureWorkspaceRules } from './transform.js';
-import type { WorkspaceConfig, Repository } from '../models/workspace-config.js';
+import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
+import type { WorkspaceConfig, Repository, ClientType } from '../models/workspace-config.js';
 
 /**
  * Detect source platform and owner/repo from a git remote at the given path.
@@ -160,7 +161,7 @@ export async function listRepositories(
 }
 
 /**
- * Ensure WORKSPACE-RULES are injected into agent files (AGENTS.md, CLAUDE.md).
+ * Ensure WORKSPACE-RULES are injected into agent files for all configured clients.
  * Lightweight alternative to full syncWorkspace() — only touches agent files.
  */
 export async function updateAgentFiles(
@@ -171,21 +172,19 @@ export async function updateAgentFiles(
 
   const content = await readFile(configPath, 'utf-8');
   const config = load(content) as WorkspaceConfig;
-  const hasRepositories = config.repositories.length > 0;
 
-  if (!hasRepositories) return;
+  if (config.repositories.length === 0) return;
 
-  // Inject WORKSPACE-RULES into AGENTS.md (create if needed)
-  const agentsPath = join(workspacePath, AGENT_FILES[0]);
-  await ensureWorkspaceRules(agentsPath);
+  // Collect unique agent files from configured clients
+  const agentFiles = new Set<string>();
+  for (const client of config.clients ?? []) {
+    const mapping = CLIENT_MAPPINGS[client as ClientType];
+    if (mapping?.agentFile) agentFiles.add(mapping.agentFile);
+  }
+  // Always include AGENTS.md as it's the universal fallback
+  agentFiles.add('AGENTS.md');
 
-  // For CLAUDE.md: copy from AGENTS.md if missing, otherwise inject rules
-  if (config.clients?.includes('claude')) {
-    const claudePath = join(workspacePath, AGENT_FILES[1]);
-    if (!existsSync(claudePath)) {
-      await copyFile(agentsPath, claudePath);
-    } else {
-      await ensureWorkspaceRules(claudePath);
-    }
+  for (const agentFile of agentFiles) {
+    await ensureWorkspaceRules(join(workspacePath, agentFile));
   }
 }
