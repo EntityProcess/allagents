@@ -1,5 +1,6 @@
 import { resolve, isAbsolute } from 'node:path';
 import { execa } from 'execa';
+import { getHomeDir } from '../constants.js';
 
 /**
  * Plugin source types
@@ -266,7 +267,6 @@ function sanitizeBranchForPath(branch: string): string {
  * @returns Cache directory path
  */
 export function getPluginCachePath(owner: string, repo: string, branch?: string): string {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
   const basePath = `${owner}-${repo}`;
 
   // If branch is specified, create a branch-specific cache path
@@ -274,7 +274,7 @@ export function getPluginCachePath(owner: string, repo: string, branch?: string)
   const cacheName = branch ? `${basePath}@${sanitizeBranchForPath(branch)}` : basePath;
 
   return resolve(
-    homeDir,
+    getHomeDir(),
     '.allagents',
     'plugins',
     'marketplaces',

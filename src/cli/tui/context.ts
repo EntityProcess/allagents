@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import { loadSyncState } from '../../core/sync-state.js';
-import { getUserWorkspaceConfig } from '../../core/user-workspace.js';
+import { getUserWorkspaceConfig, isUserConfigPath } from '../../core/user-workspace.js';
 import { listMarketplaces } from '../../core/marketplace.js';
 import type { TuiCache } from './cache.js';
 
@@ -35,7 +35,7 @@ export async function getTuiContext(
     return cachedContext;
   }
   const configPath = join(cwd, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
-  const hasWorkspace = existsSync(configPath);
+  const hasWorkspace = existsSync(configPath) && !isUserConfigPath(cwd);
 
   // Project-level plugin count
   let projectPluginCount = 0;

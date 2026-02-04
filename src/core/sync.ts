@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { rm, unlink, rmdir, copyFile } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, getHomeDir } from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import type {
   WorkspaceConfig,
@@ -1142,7 +1142,7 @@ export async function syncWorkspace(
 export async function syncUserWorkspace(
   options: { offline?: boolean; dryRun?: boolean } = {},
 ): Promise<SyncResult> {
-  const homeDir = resolve(process.env.HOME || process.env.USERPROFILE || '~');
+  const homeDir = resolve(getHomeDir());
   const config = await getUserWorkspaceConfig();
 
   if (!config) {

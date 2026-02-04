@@ -49,6 +49,10 @@ describe('workspace status - both scopes', () => {
   }
 
   it('should include userPlugins in status result', async () => {
+    // Use a separate HOME so user config doesn't overlap with project dir
+    const homeDir = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
+    process.env.HOME = homeDir;
+
     const projectPlugin = await createLocalPlugin('project-plugin');
     const userPlugin = await createLocalPlugin('user-plugin');
 
@@ -58,17 +62,21 @@ describe('workspace status - both scopes', () => {
       clients: ['claude'],
     });
 
-    await writeUserConfig({
-      repositories: [],
-      plugins: [userPlugin],
-      clients: ['claude'],
-    });
+    const allagentsDir = join(homeDir, '.allagents');
+    await mkdir(allagentsDir, { recursive: true });
+    await writeFile(
+      join(allagentsDir, WORKSPACE_CONFIG_FILE),
+      dump({ repositories: [], plugins: [userPlugin], clients: ['claude'] } satisfies WorkspaceConfig, { lineWidth: -1 }),
+      'utf-8',
+    );
 
     const result = await getWorkspaceStatus(testDir);
     expect(result.success).toBe(true);
     expect(result.plugins.length).toBe(1);
     expect(result.userPlugins).toBeDefined();
     expect(result.userPlugins!.length).toBe(1);
+
+    await rm(homeDir, { recursive: true, force: true });
   });
 
   it('should fall back to user plugins when no project workspace exists', async () => {
@@ -93,6 +101,26 @@ describe('workspace status - both scopes', () => {
     expect(result.userPlugins!.length).toBe(1);
 
     await rm(homeDir, { recursive: true, force: true });
+  });
+
+  it('should not duplicate plugins when workspace is the home directory', async () => {
+    // When cwd === HOME, project config and user config are the same file.
+    // Plugins should only appear as userPlugins, not both.
+    const userPlugin = await createLocalPlugin('shared-plugin');
+
+    // Both writeProjectConfig and writeUserConfig write to testDir/.allagents/
+    // which is the same path since HOME = testDir
+    await writeUserConfig({
+      repositories: [],
+      plugins: [userPlugin],
+      clients: ['claude'],
+    });
+
+    const result = await getWorkspaceStatus(testDir);
+    expect(result.success).toBe(true);
+    expect(result.plugins).toEqual([]);
+    expect(result.userPlugins!.length).toBe(1);
+    expect(result.userPlugins![0].source).toBe(userPlugin);
   });
 
   it('should show empty userPlugins when no user config exists', async () => {

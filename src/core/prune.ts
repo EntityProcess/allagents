@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { load, dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { isPluginSpec, parsePluginSpec, getMarketplace } from './marketplace.js';
-import { getUserWorkspaceConfig, getUserWorkspaceConfigPath } from './user-workspace.js';
+import { getUserWorkspaceConfig, getUserWorkspaceConfigPath, isUserConfigPath } from './user-workspace.js';
 import type { WorkspaceConfig } from '../models/workspace-config.js';
 
 export interface PruneScopeResult {
@@ -60,7 +60,7 @@ export async function pruneOrphanedPlugins(
   let projectResult: PruneScopeResult = { removed: [], kept: [] };
   const projectConfigPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
-  if (existsSync(projectConfigPath)) {
+  if (existsSync(projectConfigPath) && !isUserConfigPath(workspacePath)) {
     const content = await readFile(projectConfigPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
     projectResult = await prunePlugins(config.plugins);
