@@ -1,6 +1,7 @@
 import * as p from '@clack/prompts';
 import { execa } from 'execa';
-import { confirm } from '../prompts.js';
+
+const { confirm } = p;
 
 /**
  * Self-update action.

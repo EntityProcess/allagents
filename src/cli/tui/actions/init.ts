@@ -1,6 +1,7 @@
 import * as p from '@clack/prompts';
 import { initWorkspace } from '../../../core/workspace.js';
-import { text } from '../prompts.js';
+
+const { text } = p;
 
 /**
  * Guided workspace initialization action.

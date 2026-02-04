@@ -1,10 +1,16 @@
 import * as p from '@clack/prompts';
+import { settings } from '@clack/core';
 import chalk from 'chalk';
 import { relative } from 'node:path';
 import packageJson from '../../../package.json';
 import { TuiCache } from './cache.js';
 import { getTuiContext, type TuiContext } from './context.js';
-import { select } from './prompts.js';
+
+const { select } = p;
+
+// Disable Escape key as cancel trigger to prevent terminal freezes.
+// Ctrl+C (\x03) still works for cancellation.
+settings.aliases.delete('escape');
 import { runInit } from './actions/init.js';
 import { runSync } from './actions/sync.js';
 import { runStatus } from './actions/status.js';
