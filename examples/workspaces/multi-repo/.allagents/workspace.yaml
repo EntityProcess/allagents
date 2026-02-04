@@ -4,23 +4,23 @@ workspace:
 
 repositories:
   - path: ../allagents
-    owner: EntityProcess
-    repo: allagents
+    source: github
+    repo: EntityProcess/allagents
     description: primary project
 
   - path: ../dotagents
-    owner: iannuttall
-    repo: dotagents
+    source: github
+    repo: iannuttall/dotagents
     description: related project that inspired the primary project
 
   - path: ../openskills
-    owner: numman-ali
-    repo: openskills
+    source: github
+    repo: numman-ali/openskills
     description: Universal skills loader for AI coding agents
 
   - path: ../mcporter
-    owner: steipete
-    repo: mcporter
+    source: github
+    repo: steipete/mcporter
     description: related project used for inspiration to copy mcp tokens
 
 plugins:

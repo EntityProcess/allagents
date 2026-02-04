@@ -178,12 +178,12 @@ workspace:
 
 repositories:
   - path: ../my-project
-    owner: myorg
-    repo: my-project
+    source: github
+    repo: myorg/my-project
     description: Main project repository
   - path: ../my-api
-    owner: myorg
-    repo: my-api
+    source: github
+    repo: myorg/my-api
     description: API service
 
 plugins:

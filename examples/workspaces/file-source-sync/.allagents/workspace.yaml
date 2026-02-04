@@ -26,8 +26,8 @@ workspace:
 
 repositories:
   - path: ../my-project
-    owner: myorg
-    repo: my-project
+    source: github
+    repo: myorg/my-project
     description: Example project
 
 plugins: []
