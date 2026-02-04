@@ -18,6 +18,7 @@ import {
   copyPluginToWorkspace,
   copyWorkspaceFiles,
   collectPluginSkills,
+  ensureWorkspaceRules,
   type CopyResult,
 } from './transform.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../models/client-mapping.js';
@@ -1057,6 +1058,22 @@ export async function syncWorkspace(
       // Only copy if CLAUDE.md wasn't in source and AGENTS.md exists
       if (!claudeExistsInSource && existsSync(agentsPath) && !existsSync(claudePath)) {
         await copyFile(agentsPath, claudePath);
+      }
+    }
+  }
+
+  // When repositories are configured but no workspace.source is set,
+  // ensure WORKSPACE-RULES are injected into agent files directly.
+  // This handles the case where a user has repositories but no workspace: section.
+  if (hasRepositories && !config.workspace && !dryRun) {
+    await ensureWorkspaceRules(join(workspacePath, 'AGENTS.md'));
+    // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
+    if (clients.includes('claude')) {
+      const claudePath = join(workspacePath, 'CLAUDE.md');
+      if (!existsSync(claudePath)) {
+        await copyFile(join(workspacePath, 'AGENTS.md'), claudePath);
+      } else {
+        await ensureWorkspaceRules(claudePath);
       }
     }
   }
