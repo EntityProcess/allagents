@@ -16,10 +16,8 @@ import { getHomeDir } from '../constants.js';
  * Location format: "owner/repo" or "owner/repo/branch" (branch can contain slashes).
  */
 export function parseLocation(location: string): { owner: string; repo: string; branch?: string } {
-  const parts = location.split('/');
-  const owner = parts[0];
-  const repo = parts[1];
-  const branch = parts.length > 2 ? parts.slice(2).join('/') : undefined;
+  const [owner = '', repo = '', ...rest] = location.split('/');
+  const branch = rest.length > 0 ? rest.join('/') : undefined;
   return { owner, repo, ...(branch !== undefined && { branch }) };
 }
 
