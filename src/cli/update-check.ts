@@ -106,6 +106,7 @@ export function backgroundUpdateCheck(): void {
     const child = spawn(process.execPath, ['-e', script], {
       detached: true,
       stdio: 'ignore',
+      windowsHide: true,
     });
     child.unref();
   } catch {}
