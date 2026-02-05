@@ -12,6 +12,18 @@ import { parseGitHubUrl, getPluginCachePath } from '../utils/plugin-path.js';
 import { getHomeDir } from '../constants.js';
 
 /**
+ * Parse a marketplace location string into owner, repo, and optional branch.
+ * Location format: "owner/repo" or "owner/repo/branch" (branch can contain slashes).
+ */
+export function parseLocation(location: string): { owner: string; repo: string; branch?: string } {
+  const parts = location.split('/');
+  const owner = parts[0];
+  const repo = parts[1];
+  const branch = parts.length > 2 ? parts.slice(2).join('/') : undefined;
+  return { owner, repo, ...(branch !== undefined && { branch }) };
+}
+
+/**
  * Source types for marketplaces
  */
 export type MarketplaceSourceType = 'github' | 'local';
