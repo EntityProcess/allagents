@@ -147,12 +147,12 @@ vscode:
 
 #### Template file
 
-Create `.allagents/vscode-template.json` for VSCode-specific settings, launch configurations, extensions, and extra folders. The template supports `{repo:../path}` placeholders that resolve to absolute paths using repository paths from workspace.yaml.
+Create `.allagents/template.code-workspace` for VSCode-specific settings, launch configurations, extensions, and extra folders. The template supports `{path:../...}` placeholders that resolve to absolute paths using repository paths from workspace.yaml.
 
 ```json
 {
   "folders": [
-    { "path": "{repo:../Shared}", "name": "SharedLib" }
+    { "path": "{path:../Shared}", "name": "SharedLib" }
   ],
   "settings": {
     "cSpell.words": ["myterm"],
@@ -164,7 +164,7 @@ Create `.allagents/vscode-template.json` for VSCode-specific settings, launch co
       {
         "type": "node",
         "name": "dev",
-        "cwd": "{repo:../myapp}/src",
+        "cwd": "{path:../myapp}/src",
         "runtimeExecutable": "npm",
         "runtimeArgs": ["run", "dev"]
       }

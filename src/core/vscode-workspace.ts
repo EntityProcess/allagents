@@ -1,4 +1,4 @@
-import { resolve, basename } from 'node:path';
+import { resolve, basename, isAbsolute } from 'node:path';
 import type { Repository, VscodeConfig } from '../models/workspace-config.js';
 
 /**
@@ -26,26 +26,72 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
 };
 
 /**
- * Recursively substitute {repo:../path} placeholders in all string values
+ * Map for path placeholder resolution.
+ * Keys are relative paths from workspace.yaml (e.g., "../Glow")
  */
-export function substituteRepoPlaceholders<T>(
+export type PathPlaceholderMap = Map<string, string>;
+
+/**
+ * Build a placeholder map from repositories using path as the lookup key.
+ *
+ * @param repositories - Repository list from workspace.yaml
+ * @param workspacePath - Workspace root for resolving relative paths
+ * @returns Map of relative paths to absolute paths
+ *
+ * @example
+ * // Given: { path: "../Glow" } and workspacePath: "/home/user/workspace"
+ * // Result: Map { "../Glow" => "/home/user/Glow" }
+ */
+export function buildPathPlaceholderMap(
+  repositories: Repository[],
+  workspacePath: string,
+): PathPlaceholderMap {
+  const map = new Map<string, string>();
+
+  for (const repo of repositories) {
+    const absolutePath = resolve(workspacePath, repo.path);
+    map.set(repo.path, absolutePath);
+  }
+
+  return map;
+}
+
+/**
+ * Recursively substitute {path:...} placeholders and normalize backslashes to forward slashes.
+ *
+ * Placeholder format: {path:../Glow} where the value matches a repository path from workspace.yaml
+ *
+ * @example
+ * // Given repositories: [{ path: "../Glow" }]
+ * "{path:../Glow}/src" → "/home/user/Glow/src"
+ * "D:\\GitHub\\Glow" → "D:/GitHub/Glow"
+ */
+export function substitutePathPlaceholders<T>(
   obj: T,
-  repoMap: Map<string, string>,
+  pathMap: PathPlaceholderMap,
 ): T {
   if (typeof obj === 'string') {
-    return obj.replace(/\{repo:([^}]+)\}/g, (_match, repoPath: string) => {
-      return repoMap.get(repoPath) ?? `{repo:${repoPath}}`;
-    }) as T;
+    // First substitute placeholders, then normalize backslashes to forward slashes
+    const substituted = obj.replace(/\{path:([^}]+)\}/g, (_match, pathKey: string) => {
+      const resolved = pathMap.get(pathKey);
+      if (resolved) {
+        return resolved;
+      }
+      // Keep unresolved placeholders for debugging
+      return `{path:${pathKey}}`;
+    });
+    // Normalize all backslashes to forward slashes (cross-platform compatible)
+    return substituted.replace(/\\/g, '/') as T;
   }
 
   if (Array.isArray(obj)) {
-    return obj.map((item) => substituteRepoPlaceholders(item, repoMap)) as T;
+    return obj.map((item) => substitutePathPlaceholders(item, pathMap)) as T;
   }
 
   if (obj !== null && typeof obj === 'object') {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj)) {
-      result[key] = substituteRepoPlaceholders(value, repoMap);
+      result[key] = substitutePathPlaceholders(value, pathMap);
     }
     return result as T;
   }
@@ -61,15 +107,12 @@ export function generateVscodeWorkspace(
 ): Record<string, unknown> {
   const { workspacePath, repositories, template } = input;
 
-  // Build repo path map for placeholder substitution
-  const repoMap = new Map<string, string>();
-  for (const repo of repositories) {
-    repoMap.set(repo.path, resolve(workspacePath, repo.path));
-  }
+  // Build path placeholder map for substitution
+  const pathMap = buildPathPlaceholderMap(repositories, workspacePath);
 
   // Substitute placeholders in template
   const resolvedTemplate = template
-    ? substituteRepoPlaceholders(template, repoMap)
+    ? substitutePathPlaceholders(template, pathMap)
     : undefined;
 
   // Build folders list
@@ -78,10 +121,12 @@ export function generateVscodeWorkspace(
 
   // 0. Current workspace folder
   folders.push({ path: '.' });
+  // Track absolute path for deduplication
+  seenPaths.add(resolve(workspacePath, '.'));
 
   // 1. Repository folders (from workspace.yaml)
   for (const repo of repositories) {
-    const absolutePath = resolve(workspacePath, repo.path);
+    const absolutePath = resolve(workspacePath, repo.path).replace(/\\/g, '/');
     folders.push({ path: absolutePath });
     seenPaths.add(absolutePath);
   }
@@ -89,11 +134,15 @@ export function generateVscodeWorkspace(
   // 2. Template folders (deduplicated against repo folders, preserve optional name)
   if (resolvedTemplate && Array.isArray(resolvedTemplate.folders)) {
     for (const folder of resolvedTemplate.folders as WorkspaceFolder[]) {
-      if (!seenPaths.has(folder.path)) {
-        const entry: WorkspaceFolder = { path: folder.path };
+      const rawPath = folder.path as string;
+      const normalizedPath = (typeof rawPath === 'string' && !isAbsolute(rawPath)
+        ? resolve(workspacePath, rawPath)
+        : rawPath).replace(/\\/g, '/');
+      if (!seenPaths.has(normalizedPath)) {
+        const entry: WorkspaceFolder = { path: normalizedPath };
         if (folder.name) entry.name = folder.name;
         folders.push(entry);
-        seenPaths.add(folder.path);
+        seenPaths.add(normalizedPath);
       }
     }
   }

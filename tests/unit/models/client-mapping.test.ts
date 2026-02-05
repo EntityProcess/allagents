@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../../src/models/client-mapping.js';
+import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../../../src/models/client-mapping.js';
 
 describe('USER_CLIENT_MAPPINGS', () => {
   test('defines user-level paths for all clients in CLIENT_MAPPINGS', () => {
