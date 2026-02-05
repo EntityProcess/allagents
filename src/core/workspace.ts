@@ -15,6 +15,8 @@ import { fetchWorkspaceFromGitHub, fetchFileFromGitHub } from './github-fetch.js
 export interface InitOptions {
   /** Path to existing workspace.yaml or directory containing one to copy from */
   from?: string;
+  /** Override which clients to include in workspace.yaml */
+  clients?: string[];
 }
 
 /**
@@ -168,6 +170,13 @@ export async function initWorkspace(
         throw new Error(`Default template not found at: ${defaultTemplatePath}`);
       }
       workspaceYamlContent = await readFile(defaultYamlPath, 'utf-8');
+    }
+
+    // Override clients if provided
+    if (options.clients && options.clients.length > 0) {
+      const configParsed = load(workspaceYamlContent) as Record<string, unknown>;
+      configParsed.clients = options.clients;
+      workspaceYamlContent = dump(configParsed, { lineWidth: -1 });
     }
 
     // Write workspace.yaml

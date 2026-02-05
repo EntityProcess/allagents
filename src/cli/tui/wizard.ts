@@ -15,6 +15,7 @@ import { runInit } from './actions/init.js';
 import { runSync } from './actions/sync.js';
 import { runStatus } from './actions/status.js';
 import { runInstallPlugin, runManagePlugins, runBrowseMarketplaces } from './actions/plugins.js';
+import { runManageClients } from './actions/clients.js';
 import { runUpdate } from './actions/update.js';
 import { getUpdateNotice } from '../update-check.js';
 
@@ -24,6 +25,7 @@ export type MenuAction =
   | 'status'
   | 'install'
   | 'manage'
+  | 'manage-clients'
   | 'marketplace'
   | 'update'
   | 'exit';
@@ -52,12 +54,14 @@ export function buildMenuOptions(context: TuiContext) {
     options.push({ label: 'View status', value: 'status' });
     options.push({ label: 'Install plugin', value: 'install' });
     options.push({ label: 'Manage plugins', value: 'manage' });
+    options.push({ label: 'Manage clients', value: 'manage-clients' });
     options.push({ label: 'Manage marketplaces', value: 'marketplace' });
   } else {
     // State 3: Workspace exists, all synced
     options.push({ label: 'View status', value: 'status' });
     options.push({ label: 'Install plugin', value: 'install' });
     options.push({ label: 'Manage plugins', value: 'manage' });
+    options.push({ label: 'Manage clients', value: 'manage-clients' });
     options.push({ label: 'Manage marketplaces', value: 'marketplace' });
     options.push({ label: 'Check for updates', value: 'update' });
   }
@@ -139,6 +143,9 @@ export async function runWizard(): Promise<void> {
         break;
       case 'manage':
         await runManagePlugins(context, cache);
+        break;
+      case 'manage-clients':
+        await runManageClients(context, cache);
         break;
       case 'marketplace':
         await runBrowseMarketplaces(context, cache);

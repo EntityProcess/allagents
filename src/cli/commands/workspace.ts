@@ -11,6 +11,7 @@ import { addRepository, removeRepository, listRepositories, detectRemote, update
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
+import { ClientTypeSchema } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
 
 /**
@@ -45,11 +46,23 @@ const initCmd = command({
   args: {
     path: positional({ type: optional(string), displayName: 'path' }),
     from: option({ type: optional(string), long: 'from', description: 'Copy workspace.yaml from existing template/workspace' }),
+    client: option({ type: optional(string), long: 'client', short: 'c', description: 'Comma-separated list of clients (e.g., claude,copilot,cursor)' }),
   },
-  handler: async ({ path, from }) => {
+  handler: async ({ path, from, client }) => {
     try {
       const targetPath = path ?? '.';
-      const result = await initWorkspace(targetPath, from ? { from } : {});
+      const clients = client ? client.split(',').map((c) => c.trim()) : undefined;
+      if (clients) {
+        const validClients: readonly string[] = ClientTypeSchema.options;
+        const invalid = clients.filter((c) => !validClients.includes(c));
+        if (invalid.length > 0) {
+          throw new Error(`Invalid client(s): ${invalid.join(', ')}\n  Valid clients: ${validClients.join(', ')}`);
+        }
+      }
+      const result = await initWorkspace(targetPath, {
+        ...(from ? { from } : {}),
+        ...(clients ? { clients } : {}),
+      });
 
       if (isJsonMode()) {
         const syncData = result.syncResult ? buildSyncData(result.syncResult) : null;
