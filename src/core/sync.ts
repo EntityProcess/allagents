@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm, unlink, rmdir, copyFile } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
+import JSON5 from 'json5';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, getHomeDir } from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import type {
@@ -827,11 +828,17 @@ function generateVscodeWorkspaceFile(
 ): void {
   const configDir = join(workspacePath, CONFIG_DIR);
 
-  // Load template if it exists
+  // Load template if it exists (supports JSON with comments via JSON5)
   const templatePath = join(configDir, VSCODE_TEMPLATE_FILE);
   let template: Record<string, unknown> | undefined;
   if (existsSync(templatePath)) {
-    template = JSON.parse(readFileSync(templatePath, 'utf-8'));
+    try {
+      template = JSON5.parse(readFileSync(templatePath, 'utf-8'));
+    } catch (error) {
+      throw new Error(
+        `Failed to parse ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   const content = generateVscodeWorkspace({

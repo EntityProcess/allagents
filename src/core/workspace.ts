@@ -173,8 +173,46 @@ export async function initWorkspace(
     // Write workspace.yaml
     await writeFile(configPath, workspaceYamlContent, 'utf-8');
 
-    // Parse config to check repositories and clients
+    // Parse config to check repositories and clients (needed before copying template)
     const parsed = load(workspaceYamlContent) as Record<string, unknown>;
+    const clients = (parsed?.clients as string[]) ?? [];
+
+    // Copy template.code-workspace from source if it exists and vscode client is configured
+    const VSCODE_TEMPLATE_FILE = 'template.code-workspace';
+    if (clients.includes('vscode') && options.from) {
+      const targetTemplatePath = join(configDir, VSCODE_TEMPLATE_FILE);
+      if (!existsSync(targetTemplatePath)) {
+        if (isGitHubUrl(options.from)) {
+          // Fetch template from GitHub
+          const parsedUrl = parseGitHubUrl(options.from);
+          if (parsedUrl) {
+            const basePath = parsedUrl.subpath || '';
+            // Remove workspace.yaml from the base path if present
+            const baseDir = basePath.replace(/\/?\.allagents\/workspace\.yaml$/, '')
+                                     .replace(/\/?workspace\.yaml$/, '');
+            const templatePath = baseDir
+              ? `${baseDir}/${CONFIG_DIR}/${VSCODE_TEMPLATE_FILE}`
+              : `${CONFIG_DIR}/${VSCODE_TEMPLATE_FILE}`;
+            const templateContent = await fetchFileFromGitHub(
+              parsedUrl.owner,
+              parsedUrl.repo,
+              templatePath,
+              parsedUrl.branch,
+            );
+            if (templateContent) {
+              await writeFile(targetTemplatePath, templateContent, 'utf-8');
+            }
+          }
+        } else if (sourceDir) {
+          // Copy template from local source
+          const sourceTemplatePath = join(sourceDir, CONFIG_DIR, VSCODE_TEMPLATE_FILE);
+          if (existsSync(sourceTemplatePath)) {
+            await copyFile(sourceTemplatePath, targetTemplatePath);
+          }
+        }
+      }
+    }
+
     const repositories = (parsed?.repositories as unknown[]) ?? [];
     const hasRepositories = repositories.length > 0;
 
@@ -241,7 +279,6 @@ export async function initWorkspace(
       }
 
       // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
-      const clients = (parsed?.clients as string[]) ?? [];
       if (
         clients.includes('claude') &&
         !copiedAgentFiles.includes('CLAUDE.md') &&

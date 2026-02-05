@@ -1,4 +1,4 @@
-import { resolve, basename } from 'node:path';
+import { resolve, basename, isAbsolute } from 'node:path';
 import type { Repository, VscodeConfig } from '../models/workspace-config.js';
 
 /**
@@ -117,6 +117,8 @@ export function generateVscodeWorkspace(
 
   // 0. Current workspace folder
   folders.push({ path: '.' });
+  // Track absolute path for deduplication
+  seenPaths.add(resolve(workspacePath, '.'));
 
   // 1. Repository folders (from workspace.yaml)
   for (const repo of repositories) {
@@ -128,11 +130,15 @@ export function generateVscodeWorkspace(
   // 2. Template folders (deduplicated against repo folders, preserve optional name)
   if (resolvedTemplate && Array.isArray(resolvedTemplate.folders)) {
     for (const folder of resolvedTemplate.folders as WorkspaceFolder[]) {
-      if (!seenPaths.has(folder.path)) {
-        const entry: WorkspaceFolder = { path: folder.path };
+      const rawPath = folder.path as string;
+      const normalizedPath = typeof rawPath === 'string' && !isAbsolute(rawPath)
+        ? resolve(workspacePath, rawPath)
+        : rawPath;
+      if (!seenPaths.has(normalizedPath)) {
+        const entry: WorkspaceFolder = { path: normalizedPath };
         if (folder.name) entry.name = folder.name;
         folders.push(entry);
-        seenPaths.add(folder.path);
+        seenPaths.add(normalizedPath);
       }
     }
   }
