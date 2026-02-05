@@ -57,27 +57,31 @@ export function buildPathPlaceholderMap(
 }
 
 /**
- * Recursively substitute {path:...} placeholders in all string values.
+ * Recursively substitute {path:...} placeholders and normalize backslashes to forward slashes.
  *
  * Placeholder format: {path:../Glow} where the value matches a repository path from workspace.yaml
  *
  * @example
  * // Given repositories: [{ path: "../Glow" }]
  * "{path:../Glow}/src" → "/home/user/Glow/src"
+ * "D:\\GitHub\\Glow" → "D:/GitHub/Glow"
  */
 export function substitutePathPlaceholders<T>(
   obj: T,
   pathMap: PathPlaceholderMap,
 ): T {
   if (typeof obj === 'string') {
-    return obj.replace(/\{path:([^}]+)\}/g, (_match, pathKey: string) => {
+    // First substitute placeholders, then normalize backslashes to forward slashes
+    const substituted = obj.replace(/\{path:([^}]+)\}/g, (_match, pathKey: string) => {
       const resolved = pathMap.get(pathKey);
       if (resolved) {
         return resolved;
       }
       // Keep unresolved placeholders for debugging
       return `{path:${pathKey}}`;
-    }) as T;
+    });
+    // Normalize all backslashes to forward slashes (cross-platform compatible)
+    return substituted.replace(/\\/g, '/') as T;
   }
 
   if (Array.isArray(obj)) {
