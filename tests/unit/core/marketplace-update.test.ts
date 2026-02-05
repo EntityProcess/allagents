@@ -180,4 +180,46 @@ describe('updateMarketplace', () => {
     expect(checkoutCall).toBeDefined();
     expect(checkoutCall!.args[1]).toBe('main');
   });
+
+  it('should checkout stored branch instead of detecting default branch', async () => {
+    // Update registry to include a branch in location
+    const registry = {
+      version: 1,
+      marketplaces: {
+        'test-mp-branch': {
+          name: 'test-mp-branch',
+          source: { type: 'github', location: 'owner/test-mp/feat/v2' },
+          path: marketplacePath,
+          lastUpdated: '2024-01-01T00:00:00.000Z',
+        },
+      },
+    };
+    const registryDir = join(testHome, '.allagents');
+    writeFileSync(
+      join(registryDir, 'marketplaces.json'),
+      JSON.stringify(registry, null, 2),
+    );
+
+    execaCalls.length = 0;
+
+    const results = await updateMarketplace('test-mp-branch');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].success).toBe(true);
+
+    const gitCalls = execaCalls.filter((c) => c.cmd === 'git');
+
+    // Should NOT call symbolic-ref (no default branch detection)
+    const symbolicRefCall = gitCalls.find((c) => c.args[0] === 'symbolic-ref');
+    expect(symbolicRefCall).toBeUndefined();
+
+    // Should checkout feat/v2 directly
+    const checkoutCall = gitCalls.find((c) => c.args[0] === 'checkout');
+    expect(checkoutCall).toBeDefined();
+    expect(checkoutCall!.args[1]).toBe('feat/v2');
+
+    // Should pull
+    const pullCall = gitCalls.find((c) => c.args[0] === 'pull');
+    expect(pullCall).toBeDefined();
+  });
 });

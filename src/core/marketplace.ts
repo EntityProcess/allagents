@@ -478,36 +478,44 @@ export async function updateMarketplace(
     }
 
     try {
-      // Ensure we're on the default branch before pulling
-      let defaultBranch = 'main';
-      try {
-        const { stdout } = await execa(
-          'git',
-          ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
-          { cwd: marketplace.path, stdin: 'ignore' },
-        );
-        // stdout is like "origin/main" - strip remote prefix to get local branch name
-        const ref = stdout.trim();
-        defaultBranch = ref.startsWith('origin/')
-          ? ref.slice('origin/'.length)
-          : ref;
-      } catch {
-        // symbolic-ref not set; query remote for HEAD branch
+      // Check if location includes a branch
+      const { branch: storedBranch } = parseLocation(marketplace.source.location);
+
+      let targetBranch: string;
+      if (storedBranch) {
+        // Branch-pinned marketplace: use stored branch directly
+        targetBranch = storedBranch;
+      } else {
+        // Default branch marketplace: detect default branch (existing logic)
+        targetBranch = 'main';
         try {
           const { stdout } = await execa(
             'git',
-            ['remote', 'show', 'origin'],
+            ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
             { cwd: marketplace.path, stdin: 'ignore' },
           );
-          const match = stdout.match(/HEAD branch:\s*(\S+)/);
-          if (match?.[1]) {
-            defaultBranch = match[1];
-          }
+          const ref = stdout.trim();
+          targetBranch = ref.startsWith('origin/')
+            ? ref.slice('origin/'.length)
+            : ref;
         } catch {
-          // Network unavailable or remote unreachable; fall back to 'main'
+          try {
+            const { stdout } = await execa(
+              'git',
+              ['remote', 'show', 'origin'],
+              { cwd: marketplace.path, stdin: 'ignore' },
+            );
+            const match = stdout.match(/HEAD branch:\s*(\S+)/);
+            if (match?.[1]) {
+              targetBranch = match[1];
+            }
+          } catch {
+            // Network unavailable; fall back to 'main'
+          }
         }
       }
-      await execa('git', ['checkout', defaultBranch], {
+
+      await execa('git', ['checkout', targetBranch], {
         cwd: marketplace.path,
         stdin: 'ignore',
       });
