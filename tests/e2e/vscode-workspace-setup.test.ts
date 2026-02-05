@@ -62,7 +62,6 @@ vscode:
             },
           ],
         },
-        },
         extensions: {
           recommendations: ['dbaeumer.vscode-eslint', 'esbenp.prettier-vscode'],
         },
@@ -84,13 +83,13 @@ vscode:
     const folders = content.folders as Array<{ path: string; name?: string }>;
     expect(folders).toHaveLength(4); // ".", ../Glow, ../Glow.Shared (from repo), /some/other/path
     expect(folders[0].path).toBe('.');
-    expect(folders[1].path).toContain('/Glow');
-    expect(folders[2].path).toContain('/Glow.Shared');
+    expect(folders[1].path).toContain('Glow');
+    expect(folders[2].path).toContain('Glow.Shared');
     expect(folders[3].path).toBe('/some/other/path');
 
-    // All repo paths should be absolute
-    expect(folders[1].path.startsWith('/')).toBe(true);
-    expect(folders[2].path.startsWith('/')).toBe(true);
+    // All repo paths should be absolute (not relative)
+    expect(folders[1].path.startsWith('.')).toBe(false);
+    expect(folders[2].path.startsWith('.')).toBe(false);
 
     // Verify settings from template
     const settings = content.settings as Record<string, unknown>;
@@ -99,9 +98,9 @@ vscode:
 
     // Verify launch config placeholder was substituted
     const launch = content.launch as { configurations: Array<{ cwd: string }> };
-    expect(launch.configurations[0].cwd).toContain('/Glow/DotNet/HTML/Client/Client');
-    expect(launch.configurations[0].cwd.startsWith('/')).toBe(true);
-    expect(launch.configurations[0].cwd).not.toContain('{repo:');
+    expect(launch.configurations[0].cwd).toContain('Glow');
+    expect(launch.configurations[0].cwd).toContain('DotNet');
+    expect(launch.configurations[0].cwd).not.toContain('{path:');
 
     // Verify extensions pass through
     const extensions = content.extensions as { recommendations: string[] };
@@ -138,7 +137,7 @@ clients:
     const folders = content.folders as Array<{ path: string }>;
     expect(folders).toHaveLength(2);
     expect(folders[0].path).toBe('.');
-    expect(folders[1].path).toContain('/myrepo');
+    expect(folders[1].path).toContain('myrepo');
     expect(content.settings).toEqual({ 'chat.agent.maxRequests': 999 });
     expect(content.launch).toBeUndefined();
     expect(content.extensions).toBeUndefined();

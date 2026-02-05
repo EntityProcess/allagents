@@ -108,7 +108,6 @@ export async function runWizard(): Promise<void> {
   const cache = new TuiCache();
   let context = await getTuiContext(process.cwd(), cache);
 
-  // biome-ignore lint/correctness/noConstantCondition: intentional wizard loop
   while (true) {
     p.note(buildSummary(context), 'Workspace');
 
