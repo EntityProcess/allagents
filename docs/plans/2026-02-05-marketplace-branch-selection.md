@@ -8,21 +8,32 @@ When registering a marketplace via a GitHub URL that includes a branch (e.g., `h
 
 ## Design
 
-Branch selection is supported through full GitHub URLs during `marketplace add` and via a `--branch` CLI flag. The branch is stored in `MarketplaceSource` as a separate field and used during clone and update operations.
+Branch selection is supported through full GitHub URLs during `marketplace add` and via a `--branch` CLI flag. The branch is encoded in `MarketplaceSource.location` (e.g., `owner/repo/branch`) and used during clone and update operations.
 
 ### Changes
 
-#### 1. `MarketplaceSource` — add `branch` field
+#### 1. `MarketplaceSource.location` — encode branch in location
+
+No schema changes. The existing `location` field carries the branch:
+
+| Scenario | `location` value |
+|----------|-----------------|
+| Default branch | `owner/repo` |
+| Non-default branch | `owner/repo/feat/v2` |
+
+Code that needs the repo for cloning extracts the first two segments (`owner/repo`). Code that needs the branch extracts everything after the second `/`, if present.
+
+Helper to extract parts:
 
 ```typescript
-export interface MarketplaceSource {
-  type: MarketplaceSourceType;  // 'github' | 'local'
-  location: string;             // "owner/repo"
-  branch?: string;              // "feat/v2" — only for non-default branches
+function parseLocation(location: string): { owner: string; repo: string; branch?: string } {
+  const parts = location.split('/');
+  const owner = parts[0];
+  const repo = parts[1];
+  const branch = parts.length > 2 ? parts.slice(2).join('/') : undefined;
+  return { owner, repo, branch };
 }
 ```
-
-The `branch` field is only set for non-default branches. When absent, the marketplace uses the repo's default branch (existing behavior).
 
 #### 2. `parseMarketplaceSource` — extract branch from URL
 
@@ -32,18 +43,16 @@ Extend the GitHub URL regex to capture an optional `/tree/<branch>` suffix.
 
 **New regex:** Also captures `/tree/<branch>` where branch can contain `/` (e.g., `feat/v2`).
 
-**Return value:** Add optional `branch` field to the return type.
-
 ```typescript
 // Example inputs and outputs:
 parseMarketplaceSource("https://github.com/owner/repo/tree/feat/v2")
-// → { type: 'github', location: 'owner/repo', name: 'repo', branch: 'feat/v2' }
+// → { type: 'github', location: 'owner/repo/feat/v2', name: 'repo', branch: 'feat/v2' }
 
 parseMarketplaceSource("https://github.com/owner/repo")
 // → { type: 'github', location: 'owner/repo', name: 'repo' }  (unchanged)
 ```
 
-The `name` stays as `repo` regardless of branch. Branch does not affect the auto-generated name.
+The `name` stays as `repo` regardless of branch. The `branch` in the return value is a convenience for `addMarketplace` — it is not stored separately in the registry.
 
 #### 3. `addMarketplace` — clone with branch, enforce naming rules
 
@@ -73,17 +82,17 @@ The name `repo` (the bare repo name) is **reserved for the default branch**. Reg
 
 When a branch is specified, use `gh repo clone` followed by `git checkout <branch>` as a post-clone step. This preserves the existing `gh` auth mechanism instead of switching to `git clone -b` which uses different credentials.
 
-**Registry entry:** The branch is stored in `source.branch`.
+**Registry entry:** The location is stored as `owner/repo/branch` (e.g., `WiseTechGlobal/CargoWise.Shared/feat/v2`).
 
-#### 4. `updateMarketplace` — use stored branch
+#### 4. `updateMarketplace` — use branch from location
 
-When `source.branch` is set, checkout that branch before pulling:
+Extract the branch from `source.location` using `parseLocation()`. When a branch is present, checkout that branch before pulling:
 
 ```bash
 git checkout <branch> && git pull
 ```
 
-When `source.branch` is absent, use existing default-branch detection logic (unchanged).
+When no branch is present (only `owner/repo`), use existing default-branch detection logic (unchanged).
 
 #### 5. CLI — add `--branch` flag to `marketplace add`
 
@@ -95,11 +104,11 @@ The `--branch` flag provides an alternative to embedding the branch in the URL. 
 
 ### No changes to these
 
-- **`MarketplaceEntry`** — no structural changes (branch lives in `source`).
-- **`MarketplaceSource.location`** — stays as `owner/repo`. Same repo on different branches shares the same location.
+- **`MarketplaceSource` interface** — no schema changes. `location` is already a string.
+- **`MarketplaceEntry`** — no changes.
 - **`parsePluginSpec`** — no changes. Branch-pinned marketplaces are referenced by their registered `--name`, which is a simple marketplace name lookup.
 - **Sync** — no changes. Sync resolves marketplaces by name via the registry and never interprets branch info.
-- **`findMarketplace`** — no changes. Branch-pinned entries have distinct names, so no ambiguous lookups.
+- **`findMarketplace`** — no changes. Branch-pinned entries have distinct names, so no ambiguous lookups. The fallback by `source.location` would match on the full `owner/repo/branch` string, which is correct.
 
 ### Example workflows
 
@@ -108,6 +117,7 @@ The `--branch` flag provides an alternative to embedding the branch in the URL. 
 ```bash
 # Register a feature branch for testing
 allagents plugin marketplace add https://github.com/WiseTechGlobal/CargoWise.Shared/tree/feat/v2 --name cw-shared-v2
+# name: cw-shared-v2, location: WiseTechGlobal/CargoWise.Shared/feat/v2
 
 # In workspace.yaml:
 plugins:
@@ -122,13 +132,15 @@ allagents plugin marketplace update cw-shared-v2
 ```bash
 # Default branch — auto-named
 allagents plugin marketplace add https://github.com/WiseTechGlobal/CargoWise.Shared
-# name: CargoWise.Shared
+# name: CargoWise.Shared, location: WiseTechGlobal/CargoWise.Shared
 
 # Feature branch — must provide --name
 allagents plugin marketplace add https://github.com/WiseTechGlobal/CargoWise.Shared/tree/feat/v2 --name cw-shared-v2
+# name: cw-shared-v2, location: WiseTechGlobal/CargoWise.Shared/feat/v2
 
 # Shorthand with --branch flag
 allagents plugin marketplace add WiseTechGlobal/CargoWise.Shared --branch feat/v3 --name cw-shared-v3
+# name: cw-shared-v3, location: WiseTechGlobal/CargoWise.Shared/feat/v3
 
 # In workspace.yaml:
 plugins:
