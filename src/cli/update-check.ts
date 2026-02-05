@@ -1,6 +1,6 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import https from 'node:https';
+import { spawn } from 'node:child_process';
 import { getHomeDir, CONFIG_DIR } from '../constants.js';
 
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -72,62 +72,43 @@ export function buildNotice(
 }
 
 /**
- * Fetch the latest version from the npm registry.
- * Uses raw https to avoid adding dependencies.
- */
-function fetchLatestVersion(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const req = https.get(NPM_REGISTRY_URL, { timeout: 5000 }, (res) => {
-      if (res.statusCode !== 200) {
-        res.resume(); // drain
-        resolve(null);
-        return;
-      }
-      let body = '';
-      res.on('data', (chunk: Buffer) => {
-        body += chunk.toString();
-      });
-      res.on('end', () => {
-        try {
-          const data = JSON.parse(body);
-          resolve(typeof data.version === 'string' ? data.version : null);
-        } catch {
-          resolve(null);
-        }
-      });
-    });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(null);
-    });
-  });
-}
-
-/**
- * Write the cache file.
- */
-async function writeCache(cache: UpdateCache): Promise<void> {
-  const dir = join(getHomeDir(), CONFIG_DIR);
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, CACHE_FILE), JSON.stringify(cache, null, 2));
-}
-
-/**
- * Fire-and-forget background check. Fetches latest version from npm and
- * updates the cache file. Errors are silently swallowed.
+ * Fire-and-forget background check. Spawns a detached child process that
+ * fetches latest version from npm and updates the cache file. The child
+ * survives even if the parent calls process.exit().
  */
 export function backgroundUpdateCheck(): void {
-  fetchLatestVersion()
-    .then(async (version) => {
-      if (version) {
-        await writeCache({
-          latestVersion: version,
-          lastCheckedAt: new Date().toISOString(),
-        });
-      }
-    })
-    .catch(() => {});
+  const dir = join(getHomeDir(), CONFIG_DIR);
+  const filePath = join(dir, CACHE_FILE);
+
+  const script = `
+    const https = require('https');
+    const fs = require('fs');
+    const dir = ${JSON.stringify(dir)};
+    const filePath = ${JSON.stringify(filePath)};
+    https.get(${JSON.stringify(NPM_REGISTRY_URL)}, { timeout: 5000 }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); process.exit(); }
+      let body = '';
+      res.on('data', (c) => body += c);
+      res.on('end', () => {
+        try {
+          const v = JSON.parse(body).version;
+          if (typeof v === 'string') {
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(filePath, JSON.stringify({ latestVersion: v, lastCheckedAt: new Date().toISOString() }, null, 2));
+          }
+        } catch {}
+        process.exit();
+      });
+    }).on('error', () => process.exit()).on('timeout', function() { this.destroy(); process.exit(); });
+  `;
+
+  try {
+    const child = spawn(process.execPath, ['-e', script], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+  } catch {}
 }
 
 /**
