@@ -8,6 +8,7 @@ export const initMeta: AgentCommandMeta = {
     'allagents workspace init',
     'allagents workspace init ./my-project',
     'allagents workspace init --from ../template-workspace/.allagents/workspace.yaml',
+    'allagents workspace init --client claude,copilot,cursor',
   ],
   expectedOutput:
     'Creates .allagents/workspace.yaml and syncs plugins. Shows sync results per plugin. Exit 0 on success, exit 1 on failure.',
@@ -16,6 +17,7 @@ export const initMeta: AgentCommandMeta = {
   ],
   options: [
     { flag: '--from', type: 'string', description: 'Copy workspace.yaml from existing template/workspace' },
+    { flag: '--client', type: 'string', description: 'Comma-separated list of clients (e.g., claude,copilot,cursor)' },
   ],
   outputSchema: {
     path: 'string',
