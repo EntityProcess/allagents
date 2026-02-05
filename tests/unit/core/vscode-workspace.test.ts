@@ -25,8 +25,8 @@ describe('generateVscodeWorkspace', () => {
 
     expect(result.folders).toEqual([
       { path: '.' },
-      { path: resolve(workspacePath, '../backend') },
-      { path: resolve(workspacePath, '../frontend') },
+      { path: resolve(workspacePath, '../backend').replace(/\\/g, '/') },
+      { path: resolve(workspacePath, '../frontend').replace(/\\/g, '/') },
     ]);
   });
 
@@ -44,8 +44,8 @@ describe('generateVscodeWorkspace', () => {
 
   test('merges template folders after repo folders, deduplicating by path', () => {
     const workspacePath = join(testBase, 'myapp');
-    const sharedPath = resolve(workspacePath, '../shared');
-    const extraPath = join(testBase, 'extra');
+    const sharedPath = resolve(workspacePath, '../shared').replace(/\\/g, '/');
+    const extraPath = join(testBase, 'extra').replace(/\\/g, '/');
 
     const result = generateVscodeWorkspace({
       workspacePath,
@@ -65,7 +65,7 @@ describe('generateVscodeWorkspace', () => {
     // extra is not a duplicate, so it's kept with its name
     expect(result.folders).toEqual([
       { path: '.' },
-      { path: resolve(workspacePath, '../backend') },
+      { path: resolve(workspacePath, '../backend').replace(/\\/g, '/') },
       { path: sharedPath },
       { path: extraPath, name: 'ExtraLib' },
     ]);
@@ -114,9 +114,9 @@ describe('generateVscodeWorkspace', () => {
 });
 
 describe('substitutePathPlaceholders', () => {
-  // Use resolved paths for the map values
-  const glowPath = resolve(testBase, 'Glow');
-  const glowSharedPath = resolve(testBase, 'Glow.Shared');
+  // Use resolved paths for the map values (with forward slashes for consistency)
+  const glowPath = resolve(testBase, 'Glow').replace(/\\/g, '/');
+  const glowSharedPath = resolve(testBase, 'Glow.Shared').replace(/\\/g, '/');
   const pathMap = new Map<string, string>([
     ['../Glow', glowPath],
     ['../Glow.Shared', glowSharedPath],
