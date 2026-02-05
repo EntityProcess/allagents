@@ -36,10 +36,10 @@ vscode:
     );
 
     writeFileSync(
-      join(testDir, '.allagents', 'vscode-template.json'),
+      join(testDir, '.allagents', 'template.code-workspace'),
       JSON.stringify({
         folders: [
-          { path: '{repo:../Glow.Shared}', name: 'Glow.Shared' },
+          { path: '{path:../Glow.Shared}', name: 'Glow.Shared' },
           { path: '/some/other/path', name: 'Extra' },
         ],
         settings: {
@@ -56,11 +56,12 @@ vscode:
               type: 'node',
               request: 'launch',
               name: 'watch-dsk',
-              cwd: '{repo:../Glow}/DotNet/HTML/Client/Client',
+              cwd: '{path:../Glow}/DotNet/HTML/Client/Client',
               runtimeExecutable: 'npm',
               runtimeArgs: ['run', 'watch-dsk'],
             },
           ],
+        },
         },
         extensions: {
           recommendations: ['dbaeumer.vscode-eslint', 'esbenp.prettier-vscode'],
@@ -70,7 +71,7 @@ vscode:
 
     const config = await parseWorkspaceConfig(join(testDir, '.allagents', 'workspace.yaml'));
     const template = JSON.parse(
-      readFileSync(join(testDir, '.allagents', 'vscode-template.json'), 'utf-8'),
+      readFileSync(join(testDir, '.allagents', 'template.code-workspace'), 'utf-8'),
     );
 
     const content = generateVscodeWorkspace({

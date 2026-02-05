@@ -1,14 +1,21 @@
 import { describe, expect, test } from 'bun:test';
+import { resolve, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
+  buildPathPlaceholderMap,
   generateVscodeWorkspace,
   getWorkspaceOutputPath,
-  substituteRepoPlaceholders,
+  substitutePathPlaceholders,
 } from '../../../src/core/vscode-workspace.js';
+
+// Use tmpdir for cross-platform test paths
+const testBase = join(tmpdir(), 'allagents-test');
 
 describe('generateVscodeWorkspace', () => {
   test('generates workspace with repository folders resolved to absolute paths', () => {
+    const workspacePath = join(testBase, 'myapp');
     const result = generateVscodeWorkspace({
-      workspacePath: '/home/user/projects/myapp',
+      workspacePath,
       repositories: [
         { path: '../backend' },
         { path: '../frontend' },
@@ -18,14 +25,14 @@ describe('generateVscodeWorkspace', () => {
 
     expect(result.folders).toEqual([
       { path: '.' },
-      { path: '/home/user/projects/backend' },
-      { path: '/home/user/projects/frontend' },
+      { path: resolve(workspacePath, '../backend') },
+      { path: resolve(workspacePath, '../frontend') },
     ]);
   });
 
   test('applies default settings when no template', () => {
     const result = generateVscodeWorkspace({
-      workspacePath: '/home/user/projects/myapp',
+      workspacePath: join(testBase, 'myapp'),
       repositories: [],
       template: undefined,
     });
@@ -36,33 +43,37 @@ describe('generateVscodeWorkspace', () => {
   });
 
   test('merges template folders after repo folders, deduplicating by path', () => {
+    const workspacePath = join(testBase, 'myapp');
+    const sharedPath = resolve(workspacePath, '../shared');
+    const extraPath = join(testBase, 'extra');
+
     const result = generateVscodeWorkspace({
-      workspacePath: '/home/user/projects/myapp',
+      workspacePath,
       repositories: [
         { path: '../backend' },
         { path: '../shared' },
       ],
       template: {
         folders: [
-          { path: '/home/user/projects/shared', name: 'SharedLib' },
-          { path: '/home/user/projects/extra', name: 'ExtraLib' },
+          { path: sharedPath, name: 'SharedLib' }, // duplicate of ../shared
+          { path: extraPath, name: 'ExtraLib' },
         ],
       },
     });
 
-    // ../shared resolves to /home/user/projects/shared — template duplicate removed
-    // /extra is not a duplicate, so it's kept with its name
+    // ../shared resolves to sharedPath — template duplicate removed
+    // extra is not a duplicate, so it's kept with its name
     expect(result.folders).toEqual([
       { path: '.' },
-      { path: '/home/user/projects/backend' },
-      { path: '/home/user/projects/shared' },
-      { path: '/home/user/projects/extra', name: 'ExtraLib' },
+      { path: resolve(workspacePath, '../backend') },
+      { path: sharedPath },
+      { path: extraPath, name: 'ExtraLib' },
     ]);
   });
 
   test('uses template settings verbatim, no defaults injected', () => {
     const result = generateVscodeWorkspace({
-      workspacePath: '/home/user/projects/myapp',
+      workspacePath: join(testBase, 'myapp'),
       repositories: [],
       template: {
         settings: {
@@ -92,7 +103,7 @@ describe('generateVscodeWorkspace', () => {
     };
 
     const result = generateVscodeWorkspace({
-      workspacePath: '/home/user/projects/myapp',
+      workspacePath: join(testBase, 'myapp'),
       repositories: [],
       template,
     });
@@ -102,67 +113,99 @@ describe('generateVscodeWorkspace', () => {
   });
 });
 
-describe('substituteRepoPlaceholders', () => {
-  const repoMap = new Map<string, string>([
-    ['../Glow', '/home/user/projects/Glow'],
-    ['../Glow.Shared', '/home/user/projects/Glow.Shared'],
+describe('substitutePathPlaceholders', () => {
+  // Use resolved paths for the map values
+  const glowPath = resolve(testBase, 'Glow');
+  const glowSharedPath = resolve(testBase, 'Glow.Shared');
+  const pathMap = new Map<string, string>([
+    ['../Glow', glowPath],
+    ['../Glow.Shared', glowSharedPath],
   ]);
 
-  test('substitutes {repo:..} in string values', () => {
-    const input = { cwd: '{repo:../Glow}/DotNet/Client' };
-    const result = substituteRepoPlaceholders(input, repoMap);
-    expect(result.cwd).toBe('/home/user/projects/Glow/DotNet/Client');
+  test('substitutes {path:..} in string values', () => {
+    const input = { cwd: '{path:../Glow}/DotNet/Client' };
+    const result = substitutePathPlaceholders(input, pathMap);
+    expect(result.cwd).toBe(`${glowPath}/DotNet/Client`);
   });
 
   test('substitutes in nested objects', () => {
     const input = {
       launch: {
         configurations: [
-          { cwd: '{repo:../Glow}/src', name: 'dev' },
+          { cwd: '{path:../Glow}/src', name: 'dev' },
         ],
       },
     };
-    const result = substituteRepoPlaceholders(input, repoMap);
-    expect(result.launch.configurations[0].cwd).toBe('/home/user/projects/Glow/src');
+    const result = substitutePathPlaceholders(input, pathMap);
+    expect(result.launch.configurations[0].cwd).toBe(`${glowPath}/src`);
     expect(result.launch.configurations[0].name).toBe('dev');
   });
 
   test('substitutes in folder path entries', () => {
     const input = {
       folders: [
-        { path: '{repo:../Glow.Shared}', name: 'Shared' },
+        { path: '{path:../Glow.Shared}', name: 'Shared' },
       ],
     };
-    const result = substituteRepoPlaceholders(input, repoMap);
-    expect(result.folders[0].path).toBe('/home/user/projects/Glow.Shared');
+    const result = substitutePathPlaceholders(input, pathMap);
+    expect(result.folders[0].path).toBe(glowSharedPath);
   });
 
   test('leaves strings without placeholders unchanged', () => {
     const input = { name: 'no placeholders here' };
-    const result = substituteRepoPlaceholders(input, repoMap);
+    const result = substitutePathPlaceholders(input, pathMap);
     expect(result.name).toBe('no placeholders here');
   });
 
   test('leaves non-string values unchanged', () => {
     const input = { count: 999, enabled: true, items: [1, 2, 3] };
-    const result = substituteRepoPlaceholders(input, repoMap);
+    const result = substitutePathPlaceholders(input, pathMap);
     expect(result).toEqual(input);
+  });
+});
+
+describe('buildPathPlaceholderMap', () => {
+  test('registers repositories by relative path', () => {
+    const workspacePath = join(testBase, 'workspace');
+    const map = buildPathPlaceholderMap(
+      [{ path: '../Glow' }, { path: '../Glow.Shared' }],
+      workspacePath,
+    );
+
+    expect(map.get('../Glow')).toBe(resolve(workspacePath, '../Glow'));
+    expect(map.get('../Glow.Shared')).toBe(resolve(workspacePath, '../Glow.Shared'));
+  });
+
+  test('resolves paths to absolute paths', () => {
+    const workspacePath = join(testBase, 'workspace');
+    const map = buildPathPlaceholderMap(
+      [{ path: '../Glow', repo: 'WiseTechGlobal/Glow' }],
+      workspacePath,
+    );
+
+    // Path should be absolute (not relative)
+    const resolved = map.get('../Glow');
+    expect(resolved).toBeDefined();
+    expect(resolved).not.toContain('..');
   });
 });
 
 describe('getWorkspaceOutputPath', () => {
   test('uses vscode.output from config', () => {
-    const result = getWorkspaceOutputPath('/home/user/myapp', { output: 'glow' });
-    expect(result).toBe('/home/user/myapp/glow.code-workspace');
+    const workspacePath = join(testBase, 'myapp');
+    const result = getWorkspaceOutputPath(workspacePath, { output: 'glow' });
+    expect(result).toBe(join(workspacePath, 'glow.code-workspace'));
   });
 
   test('defaults to dirname when no config', () => {
-    const result = getWorkspaceOutputPath('/home/user/myapp', undefined);
-    expect(result).toBe('/home/user/myapp/myapp.code-workspace');
+    const workspacePath = join(testBase, 'myapp');
+    const result = getWorkspaceOutputPath(workspacePath, undefined);
+    expect(result).toBe(join(workspacePath, 'myapp.code-workspace'));
   });
 
   test('does not double-add .code-workspace extension', () => {
-    const result = getWorkspaceOutputPath('/home/user/myapp', { output: 'test.code-workspace' });
-    expect(result).toBe('/home/user/myapp/test.code-workspace');
+    const workspacePath = join(testBase, 'myapp');
+    const result = getWorkspaceOutputPath(workspacePath, { output: 'test.code-workspace' });
+    expect(result).toBe(join(workspacePath, 'test.code-workspace'));
   });
 });

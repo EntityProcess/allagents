@@ -815,7 +815,7 @@ function buildPluginSkillNameMaps(
   return pluginMaps;
 }
 
-const VSCODE_TEMPLATE_FILE = 'vscode-template.json';
+const VSCODE_TEMPLATE_FILE = 'template.code-workspace';
 
 /**
  * Generate a VSCode .code-workspace file from workspace config.
