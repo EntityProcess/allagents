@@ -201,6 +201,7 @@ export function parseMarketplaceSource(source: string): {
 export async function addMarketplace(
   source: string,
   customName?: string,
+  branch?: string,
 ): Promise<MarketplaceResult> {
   const parsed = parseMarketplaceSource(source);
 
@@ -209,6 +210,25 @@ export async function addMarketplace(
       success: false,
       error: `Invalid marketplace source: ${source}\n  Use: GitHub URL, owner/repo, local path, or well-known name`,
     };
+  }
+
+  // Resolve branch: explicit --branch flag wins over URL-parsed branch
+  const effectiveBranch = branch || parsed.branch;
+
+  // Naming rules for non-default branches
+  if (effectiveBranch) {
+    if (!customName) {
+      return {
+        success: false,
+        error: `--name is required when registering a non-default branch.\n  Example: allagents plugin marketplace add ${source} --name <custom-name>`,
+      };
+    }
+    if (customName === parsed.name) {
+      return {
+        success: false,
+        error: `Name '${customName}' is reserved for the default branch of ${parsed.location}.\n  Choose a different --name for branch '${effectiveBranch}'.`,
+      };
+    }
   }
 
   let name = customName || parsed.name;
@@ -250,21 +270,40 @@ export async function addMarketplace(
         await mkdir(parentDir, { recursive: true });
       }
 
+      // Extract owner/repo for GitHub operations (strip branch from location if present)
+      const { owner, repo } = parseLocation(parsed.location);
+
       // Clone repository
       try {
-        await execa('gh', ['repo', 'clone', parsed.location, marketplacePath], { stdin: 'ignore' });
+        await execa('gh', ['repo', 'clone', `${owner}/${repo}`, marketplacePath], { stdin: 'ignore' });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
           return {
             success: false,
-            error: `Repository not found: ${parsed.location}`,
+            error: `Repository not found: ${owner}/${repo}`,
           };
         }
         return {
           success: false,
           error: `Failed to clone marketplace: ${msg}`,
         };
+      }
+
+      // If a branch was specified, checkout that branch after cloning
+      if (effectiveBranch) {
+        try {
+          await execa('git', ['checkout', effectiveBranch], {
+            cwd: marketplacePath,
+            stdin: 'ignore',
+          });
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          return {
+            success: false,
+            error: `Failed to checkout branch '${effectiveBranch}': ${msg}`,
+          };
+        }
       }
     }
   } else {
@@ -297,12 +336,23 @@ export async function addMarketplace(
     }
   }
 
+  // Build location: for GitHub, use owner/repo for default branch, owner/repo/branch for non-default
+  let entryLocation: string;
+  if (parsed.type === 'github') {
+    const { owner, repo } = parseLocation(parsed.location);
+    entryLocation = effectiveBranch
+      ? `${owner}/${repo}/${effectiveBranch}`
+      : `${owner}/${repo}`;
+  } else {
+    entryLocation = parsed.location;
+  }
+
   // Create entry
   const entry: MarketplaceEntry = {
     name,
     source: {
       type: parsed.type,
-      location: parsed.location,
+      location: entryLocation,
     },
     path: marketplacePath,
     lastUpdated: new Date().toISOString(),
