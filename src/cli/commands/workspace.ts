@@ -53,8 +53,8 @@ const initCmd = command({
       const targetPath = path ?? '.';
       const clients = client ? client.split(',').map((c) => c.trim()) : undefined;
       if (clients) {
-        const validClients = ClientTypeSchema.options;
-        const invalid = clients.filter((c) => !validClients.includes(c as any));
+        const validClients: readonly string[] = ClientTypeSchema.options;
+        const invalid = clients.filter((c) => !validClients.includes(c));
         if (invalid.length > 0) {
           throw new Error(`Invalid client(s): ${invalid.join(', ')}\n  Valid clients: ${validClients.join(', ')}`);
         }

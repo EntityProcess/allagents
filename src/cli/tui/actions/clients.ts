@@ -36,7 +36,7 @@ export async function runManageClients(context: TuiContext, cache?: TuiCache): P
         label: c,
         value: c,
       })),
-      initialValues: currentClients.filter((c): c is ClientType => allClients.includes(c as ClientType)),
+      initialValues: currentClients.filter((c): c is ClientType => (allClients as readonly string[]).includes(c)),
       required: false,
     });
 
