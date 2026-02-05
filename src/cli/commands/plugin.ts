@@ -255,14 +255,15 @@ const marketplaceAddCmd = command({
   args: {
     source: positional({ type: string, displayName: 'source' }),
     name: option({ type: optional(string), long: 'name', short: 'n', description: 'Custom name for the marketplace' }),
+    branch: option({ type: optional(string), long: 'branch', short: 'b', description: 'Branch to checkout after cloning' }),
   },
-  handler: async ({ source, name }) => {
+  handler: async ({ source, name, branch }) => {
     try {
       if (!isJsonMode()) {
         console.log(`Adding marketplace: ${source}...`);
       }
 
-      const result = await addMarketplace(source, name);
+      const result = await addMarketplace(source, name, branch);
 
       if (!result.success) {
         if (isJsonMode()) {
