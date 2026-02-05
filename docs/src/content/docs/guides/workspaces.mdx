@@ -76,6 +76,7 @@ clients:
   - claude
   - copilot
   - cursor
+  - vscode
 ```
 
 ### Workspace Source
@@ -125,6 +126,62 @@ workspace:
 - **WORKSPACE-RULES injection**: AGENTS.md and CLAUDE.md automatically get workspace discovery rules
 
 When using `--from` during init, relative paths are automatically converted to absolute paths so that `workspace sync` can pull updates from the original source.
+
+## VSCode Workspace Generation
+
+When `vscode` is included in the `clients` list, `workspace sync` automatically generates a `.code-workspace` file. Repository paths are resolved to absolute paths.
+
+```yaml
+# workspace.yaml
+clients:
+  - vscode
+  - claude
+```
+
+### Output Filename
+
+The output filename defaults to `<dirname>.code-workspace`. Override with `vscode.output`:
+
+```yaml
+vscode:
+  output: my-project
+```
+
+### Template File
+
+Create `.allagents/vscode-template.json` for VSCode-specific settings, launch configurations, extensions, and extra folders. The template supports `{repo:../path}` placeholders that resolve to absolute paths using repository paths from workspace.yaml.
+
+```json
+{
+  "folders": [
+    { "path": "{repo:../Shared}", "name": "SharedLib" }
+  ],
+  "settings": {
+    "cSpell.words": ["myterm"],
+    "chat.agent.maxRequests": 999
+  },
+  "launch": {
+    "configurations": [
+      {
+        "type": "node",
+        "name": "dev",
+        "cwd": "{repo:../myapp}/src",
+        "runtimeExecutable": "npm",
+        "runtimeArgs": ["run", "dev"]
+      }
+    ]
+  },
+  "extensions": {
+    "recommendations": ["dbaeumer.vscode-eslint"]
+  }
+}
+```
+
+The generated workspace includes:
+- Workspace root folder (`.`) listed first
+- Repository folders (resolved to absolute paths)
+- Template folders (deduplicated against repository folders)
+- All template content (settings, launch, extensions) with `{repo:..}` placeholders resolved
 
 ## Syncing Plugins
 

@@ -15,7 +15,12 @@ description: AI coding assistant clients supported by AllAgents.
 | Gemini | `.gemini/skills/` | `GEMINI.md` | No | No |
 | Factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
 | Amp Code | No | `AGENTS.md` | No | No |
+| VSCode | No | No | No | No |
 
 :::note
 Commands are a Claude-specific feature. Skills are the cross-client way to share reusable prompts.
 :::
+
+### VSCode
+
+VSCode is a special client type. Instead of syncing skills or agent files, adding `vscode` to `clients` triggers automatic `.code-workspace` file generation during `workspace sync`. See the [Workspaces guide](/guides/workspaces/#vscode-workspace-generation) for details.

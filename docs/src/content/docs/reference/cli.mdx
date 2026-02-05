@@ -48,6 +48,8 @@ When `--scope user` is used, sync targets the user-level workspace at `~/.allage
 
 Sync state is tracked in `.allagents/sync-state.json`.
 
+When `vscode` is in the `clients` list, sync also generates a `.code-workspace` file with repository paths resolved to absolute paths. See the [Workspaces guide](/guides/workspaces/#vscode-workspace-generation) for details.
+
 ### workspace plugin install / remove
 
 | Flag | Description |
@@ -91,7 +93,7 @@ The check runs at most once every 24 hours and never blocks startup. Results are
 ```bash
 allagents plugin list [marketplace]
 allagents plugin validate <path>
-allagents plugin marketplace add <source>
+allagents plugin marketplace add <source> [--name <name>] [--branch <branch>]
 allagents plugin marketplace list
 allagents plugin marketplace remove <name>
 allagents plugin marketplace update [name]

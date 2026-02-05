@@ -66,6 +66,36 @@ The `workspace` section enables syncing files from external sources to your work
 - Deleted local files are restored on next sync
 - AGENTS.md and CLAUDE.md automatically receive WORKSPACE-RULES injection
 
+## VSCode Configuration
+
+The optional `vscode` section controls `.code-workspace` file generation when `vscode` is in the `clients` list.
+
+```yaml
+vscode:
+  output: my-project    # Output filename (without .code-workspace extension)
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `output` | No | Custom filename for the generated `.code-workspace` file. Defaults to the workspace directory name. |
+
+### Template File
+
+Place a `vscode-template.json` in `.allagents/` to customize the generated workspace:
+
+```json
+{
+  "folders": [
+    { "path": "{repo:../Shared}", "name": "SharedLib" }
+  ],
+  "settings": { "editor.formatOnSave": true },
+  "launch": { "configurations": [] },
+  "extensions": { "recommendations": ["dbaeumer.vscode-eslint"] }
+}
+```
+
+The `{repo:../path}` placeholder syntax resolves to absolute paths using repository paths from workspace.yaml. It works in any string value within the template (folders, settings, launch configs).
+
 ## User-Level workspace.yaml
 
 When using `--scope user`, AllAgents stores a separate config at `~/.allagents/workspace.yaml`:

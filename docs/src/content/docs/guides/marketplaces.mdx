@@ -12,6 +12,20 @@ allagents plugin marketplace add anthropics/claude-plugins-official
 allagents plugin marketplace list
 ```
 
+### Branch Selection
+
+To register a marketplace from a non-default branch, use a full GitHub URL with the branch path or the `--branch` flag. A custom `--name` is required for non-default branches:
+
+```bash
+# Full GitHub URL with branch
+allagents plugin marketplace add https://github.com/owner/repo/tree/feat/v2 --name repo-v2
+
+# Shorthand with --branch flag
+allagents plugin marketplace add owner/repo --branch feat/v2 --name repo-v2
+```
+
+The bare repo name (e.g., `repo`) is reserved for the default branch. Updates automatically pull the correct branch.
+
 ## Creating a Marketplace
 
 ```
