@@ -139,6 +139,7 @@ export function parseMarketplaceSource(source: string): {
   type: MarketplaceSourceType;
   location: string;
   name: string;
+  branch?: string;
 } | null {
   // Well-known marketplace names
   if (WELL_KNOWN_MARKETPLACES[source]) {
@@ -151,14 +152,16 @@ export function parseMarketplaceSource(source: string): {
 
   // GitHub URL
   if (source.startsWith('https://github.com/')) {
-    const match = source.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)/);
+    const match = source.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/tree\/(.+))?$/);
     if (match) {
-      const [, owner, repo] = match;
+      const [, owner, repo, branch] = match;
       if (!repo) return null;
+      const location = branch ? `${owner}/${repo}/${branch}` : `${owner}/${repo}`;
       return {
         type: 'github',
-        location: `${owner}/${repo}`,
-        name: repo.replace(/\.git$/, ''),
+        location,
+        name: repo,
+        ...(branch && { branch }),
       };
     }
     return null;
