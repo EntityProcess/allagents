@@ -88,6 +88,11 @@ describe('buildMenuOptions', () => {
       const syncOption = options.find((o) => o.value === 'sync');
       expect(syncOption?.hint).toBe('sync needed');
     });
+
+    it('should include manage-clients', () => {
+      const values = actionValues(context);
+      expect(values).toContain('manage-clients');
+    });
   });
 
   describe('State 3: All synced', () => {
@@ -115,6 +120,11 @@ describe('buildMenuOptions', () => {
       const values = actionValues(context);
       expect(values).not.toContain('init');
       expect(values).not.toContain('sync');
+    });
+
+    it('should include manage-clients', () => {
+      const values = actionValues(context);
+      expect(values).toContain('manage-clients');
     });
 
     it('should have "exit" as the last option', () => {
