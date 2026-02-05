@@ -33,14 +33,12 @@ setJsonMode(json);
 // The notice is printed on process exit so it appears after command output,
 // even if the command calls process.exit() directly.
 const isWizard = finalArgs.length === 0 && process.stdout.isTTY && !json;
+let updateNotice: string | null = null;
 if (!agentHelp && !json && !isWizard) {
-  getUpdateNotice(packageJson.version).then((notice) => {
-    if (notice) {
-      process.on('exit', () => {
-        process.stderr.write(`\n${notice}\n`);
-      });
-    }
+  process.on('exit', () => {
+    if (updateNotice) process.stderr.write(`\n${updateNotice}\n`);
   });
+  getUpdateNotice(packageJson.version).then((n) => { updateNotice = n; });
 }
 
 if (agentHelp) {

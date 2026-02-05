@@ -103,7 +103,7 @@ export function backgroundUpdateCheck(): void {
   `;
 
   try {
-    const child = spawn(process.execPath, ['-e', script], {
+    const child = spawn(process.execPath, ['--input-type=commonjs', '-e', script], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
