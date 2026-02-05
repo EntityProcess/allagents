@@ -122,7 +122,7 @@ export function generateVscodeWorkspace(
 
   // 1. Repository folders (from workspace.yaml)
   for (const repo of repositories) {
-    const absolutePath = resolve(workspacePath, repo.path);
+    const absolutePath = resolve(workspacePath, repo.path).replace(/\\/g, '/');
     folders.push({ path: absolutePath });
     seenPaths.add(absolutePath);
   }
@@ -131,9 +131,9 @@ export function generateVscodeWorkspace(
   if (resolvedTemplate && Array.isArray(resolvedTemplate.folders)) {
     for (const folder of resolvedTemplate.folders as WorkspaceFolder[]) {
       const rawPath = folder.path as string;
-      const normalizedPath = typeof rawPath === 'string' && !isAbsolute(rawPath)
+      const normalizedPath = (typeof rawPath === 'string' && !isAbsolute(rawPath)
         ? resolve(workspacePath, rawPath)
-        : rawPath;
+        : rawPath).replace(/\\/g, '/');
       if (!seenPaths.has(normalizedPath)) {
         const entry: WorkspaceFolder = { path: normalizedPath };
         if (folder.name) entry.name = folder.name;
