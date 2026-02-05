@@ -32,6 +32,38 @@ export interface ModifyResult {
 }
 
 /**
+ * Update the clients list in .allagents/workspace.yaml
+ * @param clients - New list of client types
+ * @param workspacePath - Path to workspace directory (default: cwd)
+ */
+export async function setClients(
+  clients: ClientType[],
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
+    };
+  }
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    config.clients = clients;
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
  * Ensure .allagents/workspace.yaml exists with default config.
  * Creates it if missing, does not overwrite existing.
  */
