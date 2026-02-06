@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, lstatSync } from 'node:fs';
 import { rm, unlink, rmdir, copyFile } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
 import JSON5 from 'json5';
@@ -8,6 +8,7 @@ import type {
   WorkspaceConfig,
   ClientType,
   WorkspaceFile,
+  SyncMode,
 } from '../models/workspace-config.js';
 import {
   isGitHubUrl,
@@ -22,7 +23,7 @@ import {
   type CopyResult,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
-import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../models/client-mapping.js';
+import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import {
   resolveSkillNames,
@@ -335,10 +336,17 @@ export async function selectivePurgeWorkspace(
       }
 
       try {
-        // Check if it's a directory (skill directories end with /)
-        if (filePath.endsWith('/')) {
+        // Check if it's a symlink - these need special handling
+        // (rm with trailing slash on a symlink fails with ENOTDIR)
+        const stats = lstatSync(fullPath.replace(/\/$/, ''));
+        if (stats.isSymbolicLink()) {
+          // Remove symlink (works without trailing slash)
+          await unlink(fullPath.replace(/\/$/, ''));
+        } else if (filePath.endsWith('/')) {
+          // Regular directory - remove recursively
           await rm(fullPath, { recursive: true, force: true });
         } else {
+          // Regular file
           await unlink(fullPath);
         }
         purgedPaths.push(filePath);
@@ -644,6 +652,7 @@ export function collectSyncedPaths(
         }
       }
 
+
       // Check if file belongs to this client's paths
       if (
         (mapping.commandsPath && relativePath.startsWith(mapping.commandsPath)) ||
@@ -762,12 +771,17 @@ async function validateAllPlugins(
  * the same skillsPath. For example, if copilot, codex, and opencode all use
  * `.agents/skills/`, skills will only be copied once.
  *
+ * When syncMode is 'symlink':
+ * 1. First copy skills to canonical .agents/skills/ location
+ * 2. For non-universal clients, create symlinks from their paths to canonical
+ *
  * @param validatedPlugin - Already validated plugin with resolved path
  * @param workspacePath - Path to workspace directory
  * @param clients - List of clients to sync for
  * @param dryRun - Simulate without making changes
  * @param skillNameMap - Optional map of skill folder names to resolved names
  * @param clientMappings - Optional client path mappings (defaults to CLIENT_MAPPINGS)
+ * @param syncMode - Sync mode ('symlink' or 'copy', defaults to 'symlink')
  * @returns Plugin sync result
  */
 async function copyValidatedPlugin(
@@ -777,26 +791,101 @@ async function copyValidatedPlugin(
   dryRun: boolean,
   skillNameMap?: Map<string, string>,
   clientMappings?: Record<string, ClientMapping>,
+  syncMode: SyncMode = 'symlink',
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
   const mappings = clientMappings ?? CLIENT_MAPPINGS;
+  const clientList = clients as ClientType[];
 
-  // Deduplicate clients by skillsPath to avoid copying skills multiple times
-  // to the same directory when multiple clients share the same path
-  const { representativeClients } = deduplicateClientsByPath(
-    clients as ClientType[],
-    mappings,
-  );
+  if (syncMode === 'symlink') {
+    // Symlink mode: copy to canonical .agents/skills/, symlink from client paths
+    //
+    // Phase 1: Copy skills to canonical location using deduplication
+    // This ensures canonical is only copied once, and tracked under universal clients
+    const { representativeClients, clientGroups } = deduplicateClientsByPath(clientList, mappings);
 
-  // Copy plugin content only for representative clients (one per unique path)
-  for (const client of representativeClients) {
-    const results = await copyPluginToWorkspace(
-      validatedPlugin.resolved,
-      workspacePath,
-      client,
-      { dryRun, ...(skillNameMap && { skillNameMap }), ...(clientMappings && { clientMappings }) },
+    // Find which representative handles canonical (.agents/skills/)
+    const canonicalRepresentative = representativeClients.find(
+      (c) => mappings[c]?.skillsPath === CANONICAL_SKILLS_PATH,
     );
-    copyResults.push(...results);
+
+    // If no configured client uses canonical directly, we need to add one
+    // to ensure canonical gets copied and tracked
+    let needsCanonicalCopy = !canonicalRepresentative;
+    const nonUniversalClients = clientList.filter((c) => !isUniversalClient(c));
+
+    // Copy to canonical using representative or 'copilot' if needed
+    if (needsCanonicalCopy && nonUniversalClients.length > 0) {
+      const canonicalResults = await copyPluginToWorkspace(
+        validatedPlugin.resolved,
+        workspacePath,
+        'copilot', // Use copilot as canonical representative
+        {
+          dryRun,
+          ...(skillNameMap && { skillNameMap }),
+          // Don't pass clientMappings - use default CLIENT_MAPPINGS for copilot
+          syncMode: 'copy',
+        },
+      );
+      // Filter to only skill results and add to copyResults
+      // These get tracked for ALL non-universal clients
+      const skillResults = canonicalResults.filter(
+        (r) => r.destination.includes(CANONICAL_SKILLS_PATH) && r.action === 'copied',
+      );
+      copyResults.push(...skillResults);
+    }
+
+    // Phase 2: Copy for each representative client
+    for (const representative of representativeClients) {
+      if (isUniversalClient(representative)) {
+        // Universal client: copy directly to canonical
+        const results = await copyPluginToWorkspace(
+          validatedPlugin.resolved,
+          workspacePath,
+          representative,
+          {
+            dryRun,
+            ...(skillNameMap && { skillNameMap }),
+            ...(clientMappings && { clientMappings }),
+            syncMode: 'copy',
+          },
+        );
+        copyResults.push(...results);
+      } else {
+        // Non-universal client: create symlinks to canonical
+        const results = await copyPluginToWorkspace(
+          validatedPlugin.resolved,
+          workspacePath,
+          representative,
+          {
+            dryRun,
+            ...(skillNameMap && { skillNameMap }),
+            ...(clientMappings && { clientMappings }),
+            syncMode: 'symlink',
+            canonicalSkillsPath: CANONICAL_SKILLS_PATH,
+          },
+        );
+        copyResults.push(...results);
+      }
+    }
+  } else {
+    // Legacy copy mode: deduplicate and copy directly
+    const { representativeClients } = deduplicateClientsByPath(clientList, mappings);
+
+    for (const client of representativeClients) {
+      const results = await copyPluginToWorkspace(
+        validatedPlugin.resolved,
+        workspacePath,
+        client,
+        {
+          dryRun,
+          ...(skillNameMap && { skillNameMap }),
+          ...(clientMappings && { clientMappings }),
+          syncMode: 'copy',
+        },
+      );
+      copyResults.push(...results);
+    }
   }
 
   const hasFailures = copyResults.some((r) => r.action === 'failed');
@@ -1088,6 +1177,8 @@ export async function syncWorkspace(
 
   // Step 4: Copy fresh from all validated plugins
   // Pass 2: Copy skills using resolved names
+  // Use syncMode from config (defaults to 'symlink')
+  const syncMode = config.syncMode ?? 'symlink';
   const pluginResults = await Promise.all(
     validPlugins.map((validatedPlugin) => {
       const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
@@ -1097,6 +1188,8 @@ export async function syncWorkspace(
         clients,
         dryRun,
         skillNameMap,
+        undefined, // clientMappings
+        syncMode,
       );
     }),
   );
@@ -1331,10 +1424,12 @@ export async function syncUserWorkspace(
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
 
   // Copy plugins using USER_CLIENT_MAPPINGS
+  // Use syncMode from config (defaults to 'symlink')
+  const syncMode = config.syncMode ?? 'symlink';
   const pluginResults = await Promise.all(
     validPlugins.map((vp) => {
       const skillNameMap = pluginSkillMaps.get(vp.resolved);
-      return copyValidatedPlugin(vp, homeDir, clients, dryRun, skillNameMap, USER_CLIENT_MAPPINGS);
+      return copyValidatedPlugin(vp, homeDir, clients, dryRun, skillNameMap, USER_CLIENT_MAPPINGS, syncMode);
     }),
   );
 

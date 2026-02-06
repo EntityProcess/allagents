@@ -87,6 +87,15 @@ export const VscodeConfigSchema = z.object({
 export type VscodeConfig = z.infer<typeof VscodeConfigSchema>;
 
 /**
+ * Sync mode for skills
+ * - 'symlink': Copy to canonical .agents/skills/, symlink from client paths (default)
+ * - 'copy': Copy directly to each client path (fallback for environments without symlink support)
+ */
+export const SyncModeSchema = z.enum(['symlink', 'copy']);
+
+export type SyncMode = z.infer<typeof SyncModeSchema>;
+
+/**
  * Complete workspace configuration (workspace.yaml)
  */
 export const WorkspaceConfigSchema = z.object({
@@ -95,6 +104,7 @@ export const WorkspaceConfigSchema = z.object({
   plugins: z.array(PluginSourceSchema),
   clients: z.array(ClientTypeSchema),
   vscode: VscodeConfigSchema.optional(),
+  syncMode: SyncModeSchema.optional(),
 });
 
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;

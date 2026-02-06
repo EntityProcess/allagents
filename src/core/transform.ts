@@ -2,12 +2,13 @@ import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
-import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
+import { CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
-import type { ClientType, WorkspaceFile } from '../models/workspace-config.js';
+import type { ClientType, WorkspaceFile, SyncMode } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
 import { WORKSPACE_RULES } from '../constants.js';
 import { parseFileSource } from '../utils/plugin-path.js';
+import { createSymlink } from '../utils/symlink.js';
 
 /**
  * Agent instruction files that receive WORKSPACE-RULES injection
@@ -84,6 +85,17 @@ export interface SkillCopyOptions extends CopyOptions {
    * Value: resolved name to use for the destination
    */
   skillNameMap?: Map<string, string>;
+  /**
+   * Sync mode for skills.
+   * - 'symlink': Create symlinks from client paths to canonical location
+   * - 'copy': Copy files directly (default for backward compatibility)
+   */
+  syncMode?: SyncMode;
+  /**
+   * Path to canonical skills location (e.g., '.agents/skills/').
+   * Required when syncMode is 'symlink' and client is non-universal.
+   */
+  canonicalSkillsPath?: string;
 }
 
 /**
@@ -174,12 +186,18 @@ export async function copyCommands(
 }
 
 /**
- * Copy skills from plugin to workspace for a specific client
- * Validates each skill before copying
+ * Copy skills from plugin to workspace for a specific client.
+ * Validates each skill before copying.
+ *
+ * When syncMode is 'symlink' and client is non-universal:
+ * - Skills should already be copied to canonical location
+ * - Creates symlinks from client path to canonical location
+ * - Falls back to copy if symlink creation fails
+ *
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
- * @param options - Copy options (dryRun, skillNameMap)
+ * @param options - Copy options (dryRun, skillNameMap, syncMode, canonicalSkillsPath)
  * @returns Array of copy results
  */
 export async function copySkills(
@@ -188,7 +206,7 @@ export async function copySkills(
   client: ClientType,
   options: SkillCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false, skillNameMap } = options;
+  const { dryRun = false, skillNameMap, syncMode = 'copy', canonicalSkillsPath } = options;
   const mapping = getMapping(client, options);
   const results: CopyResult[] = [];
 
@@ -209,6 +227,9 @@ export async function copySkills(
 
   const entries = await readdir(sourceDir, { withFileTypes: true });
   const skillDirs = entries.filter((e) => e.isDirectory());
+
+  // Determine if we should use symlinks for this client
+  const useSymlinks = syncMode === 'symlink' && !isUniversalClient(client) && canonicalSkillsPath;
 
   // Process skill directories in parallel for better performance
   const copyPromises = skillDirs.map(async (entry): Promise<CopyResult> => {
@@ -234,6 +255,22 @@ export async function copySkills(
         destination: skillDestPath,
         action: 'copied',
       };
+    }
+
+    // If using symlinks, create symlink from client path to canonical location
+    if (useSymlinks) {
+      const canonicalSkillPath = join(workspacePath, canonicalSkillsPath, resolvedName);
+      const symlinkCreated = await createSymlink(canonicalSkillPath, skillDestPath);
+
+      if (symlinkCreated) {
+        return {
+          source: canonicalSkillPath,
+          destination: skillDestPath,
+          action: 'copied', // Report as copied for consistency
+        };
+      }
+      // Symlink failed, fall back to copy
+      // Log warning? For now, just fall through to copy
     }
 
     try {
@@ -423,6 +460,17 @@ export interface PluginCopyOptions extends CopyOptions {
    * When provided, skills will be copied using the resolved name instead of folder name.
    */
   skillNameMap?: Map<string, string>;
+  /**
+   * Sync mode for skills.
+   * - 'symlink': Create symlinks from client paths to canonical location
+   * - 'copy': Copy files directly (default for backward compatibility)
+   */
+  syncMode?: SyncMode;
+  /**
+   * Path to canonical skills location (e.g., '.agents/skills/').
+   * Required when syncMode is 'symlink' and client is non-universal.
+   */
+  canonicalSkillsPath?: string;
 }
 
 /**
@@ -431,7 +479,7 @@ export interface PluginCopyOptions extends CopyOptions {
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
- * @param options - Copy options (dryRun, skillNameMap)
+ * @param options - Copy options (dryRun, skillNameMap, syncMode, canonicalSkillsPath)
  * @returns All copy results
  */
 export async function copyPluginToWorkspace(
@@ -440,12 +488,17 @@ export async function copyPluginToWorkspace(
   client: ClientType,
   options: PluginCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { skillNameMap, ...baseOptions } = options;
+  const { skillNameMap, syncMode, canonicalSkillsPath, ...baseOptions } = options;
 
   // Run copy operations in parallel for better performance
   const [commandResults, skillResults, hookResults, agentResults] = await Promise.all([
     copyCommands(pluginPath, workspacePath, client, baseOptions),
-    copySkills(pluginPath, workspacePath, client, { ...baseOptions, ...(skillNameMap && { skillNameMap }) }),
+    copySkills(pluginPath, workspacePath, client, {
+      ...baseOptions,
+      ...(skillNameMap && { skillNameMap }),
+      ...(syncMode && { syncMode }),
+      ...(canonicalSkillsPath && { canonicalSkillsPath }),
+    }),
     copyHooks(pluginPath, workspacePath, client, baseOptions),
     copyAgents(pluginPath, workspacePath, client, baseOptions),
   ]);
