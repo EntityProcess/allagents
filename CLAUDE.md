@@ -14,6 +14,8 @@ Follow conventional commits: `type(scope): description`
 
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 
+Do NOT add `Co-Authored-By` attribution to commit messages.
+
 ### Issue Workflow
 
 When working on a GitHub issue or creating an OpenSpec proposal, **ALWAYS** follow this workflow:
@@ -47,10 +49,7 @@ When working on a GitHub issue or creating an OpenSpec proposal, **ALWAYS** foll
 
 ```bash
 # Using GitHub CLI to squash merge a PR
-gh pr merge <PR_NUMBER> --squash --delete-branch
-
-# Or with auto-merge enabled
-gh pr merge <PR_NUMBER> --squash --auto
+gh pr merge <PR_NUMBER> --squash --delete-branch --admin
 ```
 
 Do NOT use regular merge or rebase merge, as these create noisy commit history with intermediate commits.
