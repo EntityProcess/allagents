@@ -59,7 +59,7 @@ describe('updateMarketplace', () => {
     process.env.HOME = testHome;
 
     // Create marketplace directory
-    marketplacePath = join(testHome, '.allagents', 'marketplaces', 'test-mp');
+    marketplacePath = join(testHome, '.allagents', 'plugins', 'marketplaces', 'test-mp');
     mkdirSync(marketplacePath, { recursive: true });
 
     // Write registry with a github marketplace entry

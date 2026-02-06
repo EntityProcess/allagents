@@ -84,7 +84,7 @@ export function getAllagentsDir(): string {
  * Get the marketplaces directory
  */
 export function getMarketplacesDir(): string {
-  return join(getAllagentsDir(), 'marketplaces');
+  return join(getAllagentsDir(), 'plugins', 'marketplaces');
 }
 
 /**

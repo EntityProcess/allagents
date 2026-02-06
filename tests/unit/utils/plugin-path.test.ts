@@ -233,8 +233,8 @@ describe('getPluginCachePath', () => {
 
   it('should use home directory', () => {
     const result = getPluginCachePath('owner', 'repo');
-    const homeDir = process.env.HOME || process.env.USERPROFILE;
-    expect(result.startsWith(homeDir || '')).toBe(true);
+    const homeDir = resolve(process.env.HOME || process.env.USERPROFILE || '~');
+    expect(result.startsWith(homeDir)).toBe(true);
   });
 });
 
