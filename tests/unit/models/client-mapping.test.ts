@@ -71,20 +71,37 @@ describe('USER_CLIENT_MAPPINGS', () => {
     expect(USER_CLIENT_MAPPINGS.claude.agentsPath).toBe('.claude/agents/');
   });
 
-  test('copilot uses ~/.copilot/ paths', () => {
-    expect(USER_CLIENT_MAPPINGS.copilot.skillsPath).toBe('.copilot/skills/');
+  test('cursor uses provider-specific ~/.cursor/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.cursor.skillsPath).toBe('.cursor/skills/');
   });
 
-  test('codex uses ~/.codex/ paths', () => {
-    expect(USER_CLIENT_MAPPINGS.codex.skillsPath).toBe('.codex/skills/');
+  test('factory uses provider-specific ~/.factory/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.factory.skillsPath).toBe('.factory/skills/');
+    expect(USER_CLIENT_MAPPINGS.factory.hooksPath).toBe('.factory/hooks/');
   });
 
-  test('opencode uses .config/opencode/ paths', () => {
-    expect(USER_CLIENT_MAPPINGS.opencode.skillsPath).toBe('.config/opencode/skills/');
+  test('copilot uses universal ~/.agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.copilot.skillsPath).toBe('.agents/skills/');
   });
 
-  test('ampcode uses .config/amp/ paths', () => {
-    expect(USER_CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.config/amp/skills/');
+  test('codex uses universal ~/.agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.codex.skillsPath).toBe('.agents/skills/');
+  });
+
+  test('opencode uses universal ~/.agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.opencode.skillsPath).toBe('.agents/skills/');
+  });
+
+  test('gemini uses universal ~/.agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.gemini.skillsPath).toBe('.agents/skills/');
+  });
+
+  test('ampcode uses universal ~/.agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.agents/skills/');
+  });
+
+  test('vscode has empty skillsPath (not applicable)', () => {
+    expect(USER_CLIENT_MAPPINGS.vscode.skillsPath).toBe('');
   });
 
   test('user paths are relative to home directory (no leading /)', () => {

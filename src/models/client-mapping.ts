@@ -80,11 +80,11 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     hooksPath: '.claude/hooks/',
   },
   copilot: {
-    skillsPath: '.copilot/skills/',
+    skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
   },
   codex: {
-    skillsPath: '.codex/skills/',
+    skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
   },
   cursor: {
@@ -92,11 +92,11 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
   opencode: {
-    skillsPath: '.config/opencode/skills/',
+    skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
   },
   gemini: {
-    skillsPath: '.gemini/skills/',
+    skillsPath: '.agents/skills/',
     agentFile: 'GEMINI.md',
     agentFileFallback: 'AGENTS.md',
   },
@@ -106,7 +106,7 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     hooksPath: '.factory/hooks/',
   },
   ampcode: {
-    skillsPath: '.config/amp/skills/',
+    skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
   },
   vscode: {
