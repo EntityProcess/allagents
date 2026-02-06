@@ -176,15 +176,39 @@ export async function runManagePlugins(context: TuiContext, cache?: TuiCache): P
       cache?.setStatus(status);
     }
 
-    if (!status.success || status.plugins.length === 0) {
-      p.note('No plugins installed in this workspace.', 'Plugins');
+    if (!status.success) {
+      p.note('Failed to get workspace status.', 'Error');
       return;
     }
 
-    const options = status.plugins.map((plugin) => ({
-      label: `${plugin.available ? '\u2713' : '\u2717'} ${plugin.source} (${plugin.type})`,
-      value: plugin.source,
-    }));
+    // Build options from both project and user plugins, tracking scope
+    const pluginsByScope = new Map<string, 'project' | 'user'>();
+    const options: Array<{ label: string; value: string }> = [];
+
+    // Add project-level plugins
+    for (const plugin of status.plugins) {
+      const key = `project:${plugin.source}`;
+      pluginsByScope.set(key, 'project');
+      options.push({
+        label: `${plugin.available ? '\u2713' : '\u2717'} ${plugin.source} (${plugin.type}) [project]`,
+        value: key,
+      });
+    }
+
+    // Add user-level plugins
+    for (const plugin of status.userPlugins ?? []) {
+      const key = `user:${plugin.source}`;
+      pluginsByScope.set(key, 'user');
+      options.push({
+        label: `${plugin.available ? '\u2713' : '\u2717'} ${plugin.source} (${plugin.type}) [user]`,
+        value: key,
+      });
+    }
+
+    if (options.length === 0) {
+      p.note('No plugins installed.', 'Plugins');
+      return;
+    }
 
     const selected = await multiselect({
       message: 'Select plugins to remove (submit empty to go back)',
@@ -201,46 +225,37 @@ export async function runManagePlugins(context: TuiContext, cache?: TuiCache): P
       return;
     }
 
-    // Determine scope
-    let scope: 'project' | 'user' = context.hasWorkspace ? 'project' : 'user';
-    if (context.hasWorkspace) {
-      const scopeChoice = await select({
-        message: 'Remove from which scope?',
-        options: [
-          { label: 'Project (this workspace)', value: 'project' as const },
-          { label: 'User (global)', value: 'user' as const },
-        ],
-      });
-
-      if (p.isCancel(scopeChoice)) {
-        return;
-      }
-
-      scope = scopeChoice;
-    }
-
     const s = p.spinner();
     s.start('Removing plugins...');
 
     const results: string[] = [];
-    for (const plugin of selected) {
+    let removedFromProject = false;
+    let removedFromUser = false;
+
+    for (const key of selected) {
+      const scope = pluginsByScope.get(key);
+      const pluginSource = key.replace(/^(project|user):/, '');
+
       if (scope === 'project' && context.workspacePath) {
-        const result = await removePlugin(plugin, context.workspacePath);
-        results.push(`${result.success ? '\u2713' : '\u2717'} ${plugin}`);
+        const result = await removePlugin(pluginSource, context.workspacePath);
+        results.push(`${result.success ? '\u2713' : '\u2717'} ${pluginSource} [project]`);
+        if (result.success) removedFromProject = true;
       } else {
-        const result = await removeUserPlugin(plugin);
-        results.push(`${result.success ? '\u2713' : '\u2717'} ${plugin}`);
+        const result = await removeUserPlugin(pluginSource);
+        results.push(`${result.success ? '\u2713' : '\u2717'} ${pluginSource} [user]`);
+        if (result.success) removedFromUser = true;
       }
     }
 
     s.stop('Plugins removed');
 
-    // Auto-sync
+    // Auto-sync affected scopes
     const syncS = p.spinner();
     syncS.start('Syncing...');
-    if (scope === 'project' && context.workspacePath) {
+    if (removedFromProject && context.workspacePath) {
       await syncWorkspace(context.workspacePath);
-    } else {
+    }
+    if (removedFromUser) {
       await syncUserWorkspace();
     }
     syncS.stop('Sync complete');
