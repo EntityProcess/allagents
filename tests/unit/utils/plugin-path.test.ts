@@ -1,6 +1,33 @@
-import { describe, it, expect, mock, spyOn, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, mock, beforeEach } from 'bun:test';
 import { join, resolve, sep } from 'node:path';
-import {
+import { mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+
+// Mock the git module for verifyGitHubUrlExists tests
+const repoExistsMock = mock(() => Promise.resolve(true));
+const cloneToTempMock = mock(() => Promise.resolve(''));
+const cleanupTempDirMock = mock(() => Promise.resolve());
+
+mock.module('../../../src/core/git.js', () => ({
+  repoExists: repoExistsMock,
+  cloneToTemp: cloneToTempMock,
+  cleanupTempDir: cleanupTempDirMock,
+  gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
+  GitCloneError: class GitCloneError extends Error {
+    url: string;
+    isTimeout: boolean;
+    isAuthError: boolean;
+    constructor(message: string, url: string, isTimeout = false, isAuthError = false) {
+      super(message);
+      this.name = 'GitCloneError';
+      this.url = url;
+      this.isTimeout = isTimeout;
+      this.isAuthError = isAuthError;
+    }
+  },
+}));
+
+const {
   isGitHubUrl,
   parseGitHubUrl,
   normalizePluginPath,
@@ -8,8 +35,7 @@ import {
   getPluginCachePath,
   validatePluginSource,
   verifyGitHubUrlExists,
-} from '../../../src/utils/plugin-path.js';
-import * as execa from 'execa';
+} = await import('../../../src/utils/plugin-path.js');
 
 describe('isGitHubUrl', () => {
   it('should detect standard GitHub HTTPS URLs', () => {
@@ -243,18 +269,14 @@ describe('validatePluginSource', () => {
 });
 
 describe('verifyGitHubUrlExists', () => {
-  let execaSpy: ReturnType<typeof spyOn>;
-
   beforeEach(() => {
-    execaSpy = spyOn(execa, 'execa');
-  });
-
-  afterEach(() => {
-    execaSpy.mockRestore();
+    repoExistsMock.mockClear();
+    cloneToTempMock.mockClear();
+    cleanupTempDirMock.mockClear();
   });
 
   it('should return exists=true for valid repo', async () => {
-    execaSpy.mockResolvedValue({ stdout: '', stderr: '' } as never);
+    repoExistsMock.mockResolvedValueOnce(true);
 
     const result = await verifyGitHubUrlExists('owner/repo');
     expect(result.exists).toBe(true);
@@ -262,11 +284,18 @@ describe('verifyGitHubUrlExists', () => {
   });
 
   it('should return exists=true for valid repo with subpath', async () => {
-    execaSpy.mockResolvedValue({ stdout: '', stderr: '' } as never);
+    repoExistsMock.mockResolvedValueOnce(true);
+
+    // Create temp dir with the subpath
+    const tempDir = join(tmpdir(), `test-verify-${Date.now()}`);
+    mkdirSync(join(tempDir, 'plugins', 'myplugin'), { recursive: true });
+    cloneToTempMock.mockResolvedValueOnce(tempDir);
 
     const result = await verifyGitHubUrlExists('owner/repo/plugins/myplugin');
     expect(result.exists).toBe(true);
     expect(result.error).toBeUndefined();
+
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('should return error for invalid URL format', async () => {
@@ -275,46 +304,26 @@ describe('verifyGitHubUrlExists', () => {
     expect(result.error).toContain('Invalid GitHub URL format');
   });
 
-  it('should return error when gh CLI is not installed', async () => {
-    execaSpy.mockRejectedValue(new Error('Command not found: gh') as never);
-
-    const result = await verifyGitHubUrlExists('owner/repo');
-    expect(result.exists).toBe(false);
-    expect(result.error).toContain('gh CLI not installed');
-  });
-
   it('should return error when repository not found', async () => {
-    // First call (gh --version) succeeds
-    execaSpy.mockResolvedValueOnce({ stdout: '', stderr: '' } as never);
-    // Second call (gh repo view) fails with 404
-    execaSpy.mockRejectedValueOnce(new Error('HTTP 404: Not Found') as never);
+    repoExistsMock.mockResolvedValueOnce(false);
 
     const result = await verifyGitHubUrlExists('owner/nonexistent-repo');
     expect(result.exists).toBe(false);
-    expect(result.error).toContain('Repository not found');
+    expect(result.error).toContain('not found or not accessible');
   });
 
   it('should return error when path not found in repo', async () => {
-    // gh --version succeeds
-    execaSpy.mockResolvedValueOnce({ stdout: '', stderr: '' } as never);
-    // gh repo view succeeds
-    execaSpy.mockResolvedValueOnce({ stdout: '{}', stderr: '' } as never);
-    // gh api for contents fails with 404
-    execaSpy.mockRejectedValueOnce(new Error('HTTP 404: Not Found') as never);
+    repoExistsMock.mockResolvedValueOnce(true);
+
+    // Create temp dir WITHOUT the subpath
+    const tempDir = join(tmpdir(), `test-verify-nopath-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    cloneToTempMock.mockResolvedValueOnce(tempDir);
 
     const result = await verifyGitHubUrlExists('owner/repo/nonexistent/path');
     expect(result.exists).toBe(false);
     expect(result.error).toContain('Path not found in repository');
-  });
 
-  it('should return error when authentication required', async () => {
-    // gh --version succeeds
-    execaSpy.mockResolvedValueOnce({ stdout: '', stderr: '' } as never);
-    // gh repo view fails with auth error
-    execaSpy.mockRejectedValueOnce(new Error('authentication required') as never);
-
-    const result = await verifyGitHubUrlExists('owner/private-repo');
-    expect(result.exists).toBe(false);
-    expect(result.error).toContain('GitHub authentication required');
+    rmSync(tempDir, { recursive: true, force: true });
   });
 });

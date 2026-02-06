@@ -1,18 +1,49 @@
-import { execa } from 'execa';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseGitHubUrl } from '../utils/plugin-path.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import {
+  cloneToTemp,
+  cleanupTempDir,
+  gitHubUrl,
+  refExists,
+  GitCloneError,
+} from './git.js';
 
 /**
- * Resolve branch/subpath combination by checking which refs exist
- * Handles branch names with slashes by trying different split points
- * @param owner - Repository owner
- * @param repo - Repository name
- * @param pathAfterTree - Full path after /tree/ (e.g., "feat/my-feature/plugins/cargowise")
- * @returns Object with resolved branch and subpath, or null if no valid branch found
+ * Result of fetching workspace from GitHub
+ */
+export interface FetchWorkspaceResult {
+  success: boolean;
+  content?: string;
+  error?: string;
+  /** Temp directory containing the cloned repo. Caller must call cleanupTempDir() when done. */
+  tempDir?: string;
+}
+
+/**
+ * Read a file from an already-cloned temp directory.
+ * @param tempDir - Path to the cloned repository
+ * @param filePath - Relative file path within the repository
+ * @returns File content or null if not found
+ */
+export function readFileFromClone(
+  tempDir: string,
+  filePath: string,
+): string | null {
+  const fullPath = join(tempDir, filePath);
+  if (existsSync(fullPath)) {
+    return readFileSync(fullPath, 'utf-8');
+  }
+  return null;
+}
+
+/**
+ * Resolve branch/subpath combination by checking which refs exist on the remote.
+ * Handles branch names with slashes by trying different split points.
  */
 async function resolveBranchAndSubpath(
-  owner: string,
-  repo: string,
+  repoUrl: string,
   pathAfterTree: string,
 ): Promise<{ branch: string; subpath?: string } | null> {
   const parts = pathAfterTree.split('/');
@@ -22,73 +53,12 @@ async function resolveBranchAndSubpath(
     const branch = parts.slice(0, i).join('/');
     const subpath = parts.slice(i).join('/');
 
-    // Check if this branch ref exists
-    try {
-      await execa('gh', [
-        'api',
-        `repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`,
-        '--silent',
-      ]);
-      // If successful, this is a valid ref
+    if (await refExists(repoUrl, branch)) {
       return { branch, ...(subpath && { subpath }) };
-    } catch {
-      // This ref doesn't exist, try the next split point
     }
   }
 
-  // No valid branch found
   return null;
-}
-
-/**
- * Result of fetching workspace from GitHub
- */
-export interface FetchWorkspaceResult {
-  success: boolean;
-  content?: string;
-  error?: string;
-}
-
-/**
- * Fetch a single file from GitHub using the gh CLI
- * @param owner - Repository owner
- * @param repo - Repository name
- * @param path - File path within the repository
- * @param branch - Optional branch name (defaults to default branch if not specified)
- * @returns File content or null if not found
- */
-export async function fetchFileFromGitHub(
-  owner: string,
-  repo: string,
-  path: string,
-  branch?: string,
-): Promise<string | null> {
-  try {
-    // Use gh api to fetch file contents
-    // The API returns base64 encoded content
-    let endpoint = `repos/${owner}/${repo}/contents/${path}`;
-
-    // Add ref parameter as query string to specify branch if provided
-    if (branch) {
-      endpoint += `?ref=${encodeURIComponent(branch)}`;
-    }
-
-    const result = await execa('gh', [
-      'api',
-      endpoint,
-      '--jq',
-      '.content',
-    ]);
-
-    if (result.stdout) {
-      // Decode base64 content
-      const content = Buffer.from(result.stdout, 'base64').toString('utf-8');
-      return content;
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -102,8 +72,11 @@ export async function fetchFileFromGitHub(
  *
  * Intelligently resolves branch names with slashes by checking which refs exist.
  *
+ * Returns a tempDir if successful — caller must call cleanupTempDir() when done
+ * reading additional files from the clone.
+ *
  * @param url - GitHub URL or shorthand
- * @returns Result with workspace.yaml content or error
+ * @returns Result with workspace.yaml content, tempDir, or error
  */
 export async function fetchWorkspaceFromGitHub(
   url: string,
@@ -116,41 +89,43 @@ export async function fetchWorkspaceFromGitHub(
     };
   }
 
-  const { owner, repo, branch, subpath } = parsed;
+  const { owner, repo, branch } = parsed;
+  // Normalize subpath to remove trailing slashes
+  const subpath = parsed.subpath?.replace(/\/+$/, '');
+  const repoUrl = gitHubUrl(owner, repo);
 
-  // Check if gh CLI is available
-  try {
-    await execa('gh', ['--version']);
-  } catch {
-    return {
-      success: false,
-      error: 'gh CLI not installed. Install from: https://cli.github.com',
-    };
+  // If we have both branch and subpath and the branch might have slashes,
+  // try to resolve the correct split before cloning
+  let effectiveBranch = branch;
+  let effectiveSubpath = subpath;
+
+  if (branch && subpath && !branch.includes('/')) {
+    const resolved = await resolveBranchAndSubpath(
+      repoUrl,
+      `${branch}/${subpath}`,
+    );
+    if (resolved && resolved.branch !== branch) {
+      effectiveBranch = resolved.branch;
+      effectiveSubpath = resolved.subpath;
+    }
   }
 
-  // Check if repository exists
+  // Clone the repository to a temp directory
+  let tempDir: string;
   try {
-    await execa('gh', ['repo', 'view', `${owner}/${repo}`, '--json', 'name']);
+    tempDir = await cloneToTemp(repoUrl, effectiveBranch);
   } catch (error) {
-    if (error instanceof Error) {
-      const errorMessage = error.message.toLowerCase();
-      if (
-        errorMessage.includes('not found') ||
-        errorMessage.includes('404') ||
-        errorMessage.includes('could not resolve to a repository')
-      ) {
+    if (error instanceof GitCloneError) {
+      if (error.isAuthError) {
         return {
           success: false,
-          error: `Repository not found: ${owner}/${repo}`,
+          error: `Authentication failed for ${owner}/${repo}.\n  Check your SSH keys or git credentials.`,
         };
       }
-      if (
-        errorMessage.includes('auth') ||
-        errorMessage.includes('authentication')
-      ) {
+      if (error.isTimeout) {
         return {
           success: false,
-          error: 'GitHub authentication required. Run: gh auth login',
+          error: `Clone timed out for ${owner}/${repo}.\n  Check your network connection.`,
         };
       }
     }
@@ -161,7 +136,7 @@ export async function fetchWorkspaceFromGitHub(
   }
 
   // Determine the base path to look for workspace.yaml
-  const basePath = subpath || '';
+  const basePath = effectiveSubpath || '';
 
   // Try to find workspace.yaml in order of preference:
   // 1. {basePath}/.allagents/workspace.yaml
@@ -176,57 +151,22 @@ export async function fetchWorkspaceFromGitHub(
         WORKSPACE_CONFIG_FILE,
       ];
 
-  for (const path of pathsToTry) {
-    const content = await fetchFileFromGitHub(owner, repo, path, branch);
+  for (const filePath of pathsToTry) {
+    const content = readFileFromClone(tempDir, filePath);
     if (content) {
       return {
         success: true,
         content,
+        tempDir,
       };
     }
   }
 
-  // If we have both branch and subpath and the simple approach failed,
-  // try to intelligently resolve in case the branch name has slashes
-  // (e.g., feat/my-feature was parsed as branch:feat, subpath:my-feature/...)
-  if (branch && subpath && !branch.includes('/')) {
-    const resolved = await resolveBranchAndSubpath(
-      owner,
-      repo,
-      `${branch}/${subpath}`,
-    );
-    if (resolved && resolved.branch !== branch) {
-      // Found a different branch, try fetching with the new split
-      const newBasePath = resolved.subpath || '';
-      const newPathsToTry = newBasePath
-        ? [
-            `${newBasePath}/${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
-            `${newBasePath}/${WORKSPACE_CONFIG_FILE}`,
-          ]
-        : [
-            `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
-            WORKSPACE_CONFIG_FILE,
-          ];
-
-      for (const path of newPathsToTry) {
-        const content = await fetchFileFromGitHub(
-          owner,
-          repo,
-          path,
-          resolved.branch,
-        );
-        if (content) {
-          return {
-            success: true,
-            content,
-          };
-        }
-      }
-    }
-  }
+  // No workspace.yaml found — clean up and return error
+  await cleanupTempDir(tempDir);
 
   return {
     success: false,
-    error: `No workspace.yaml found in: ${owner}/${repo}${branch ? `@${branch}` : ''}${subpath ? `/${subpath}` : ''}\n  Expected at: ${pathsToTry.join(' or ')}`,
+    error: `No workspace.yaml found in: ${owner}/${repo}${effectiveBranch ? `@${effectiveBranch}` : ''}${effectiveSubpath ? `/${effectiveSubpath}` : ''}\n  Expected at: ${pathsToTry.join(' or ')}`,
   };
 }

@@ -1,5 +1,12 @@
-import { resolve, isAbsolute } from 'node:path';
-import { execa } from 'execa';
+import { existsSync } from 'node:fs';
+import { join, resolve, isAbsolute } from 'node:path';
+import {
+  repoExists,
+  cloneToTemp,
+  cleanupTempDir,
+  gitHubUrl,
+  GitCloneError,
+} from '../core/git.js';
 import { getHomeDir } from '../constants.js';
 
 /**
@@ -383,7 +390,7 @@ export interface VerifyGitHubResult {
 
 /**
  * Verify that a GitHub URL exists (repo and optional subpath)
- * Uses gh CLI to check repository and path existence
+ * Uses git ls-remote to check repository existence, and clone + path check for subpaths
  * @param source - GitHub URL or shorthand
  * @returns Verification result
  */
@@ -399,72 +406,44 @@ export async function verifyGitHubUrlExists(
   }
 
   const { owner, repo, subpath } = parsed;
+  const repoUrl = gitHubUrl(owner, repo);
 
-  // Check if gh CLI is available
-  try {
-    await execa('gh', ['--version']);
-  } catch {
+  // Check if repository exists using git ls-remote
+  const exists = await repoExists(repoUrl);
+  if (!exists) {
     return {
       exists: false,
-      error: 'gh CLI not installed. Install from: https://cli.github.com',
+      error: `Repository not found or not accessible: ${owner}/${repo}`,
     };
   }
 
-  // Check if repository exists
-  try {
-    await execa('gh', ['repo', 'view', `${owner}/${repo}`, '--json', 'name']);
-  } catch (error) {
-    if (error instanceof Error) {
-      const errorMessage = error.message.toLowerCase();
-      if (
-        errorMessage.includes('not found') ||
-        errorMessage.includes('404') ||
-        errorMessage.includes('could not resolve to a repository')
-      ) {
-        return {
-          exists: false,
-          error: `Repository not found: ${owner}/${repo}`,
-        };
-      }
-      if (
-        errorMessage.includes('auth') ||
-        errorMessage.includes('authentication')
-      ) {
-        return {
-          exists: false,
-          error: 'GitHub authentication required. Run: gh auth login',
-        };
-      }
-    }
-    return {
-      exists: false,
-      error: `Failed to verify repository: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-
-  // If subpath specified, verify it exists in the repo
+  // If subpath specified, verify it exists by cloning and checking
   if (subpath) {
+    let tempDir: string | undefined;
     try {
-      // Use gh api to check if the path exists in the default branch
-      await execa('gh', [
-        'api',
-        `repos/${owner}/${repo}/contents/${subpath}`,
-        '--silent',
-      ]);
+      tempDir = await cloneToTemp(repoUrl);
+      const fullPath = join(tempDir, subpath);
+      if (!existsSync(fullPath)) {
+        return {
+          exists: false,
+          error: `Path not found in repository: ${owner}/${repo}/${subpath}`,
+        };
+      }
     } catch (error) {
-      if (error instanceof Error) {
-        const errorMessage = error.message.toLowerCase();
-        if (errorMessage.includes('not found') || errorMessage.includes('404')) {
-          return {
-            exists: false,
-            error: `Path not found in repository: ${owner}/${repo}/${subpath}`,
-          };
-        }
+      if (error instanceof GitCloneError && error.isAuthError) {
+        return {
+          exists: false,
+          error: `Authentication failed for ${owner}/${repo}.\n  Check your SSH keys or git credentials.`,
+        };
       }
       return {
         exists: false,
         error: `Failed to verify path: ${error instanceof Error ? error.message : String(error)}`,
       };
+    } finally {
+      if (tempDir) {
+        await cleanupTempDir(tempDir);
+      }
     }
   }
 

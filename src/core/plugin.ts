@@ -1,7 +1,6 @@
 import { mkdir, readdir, stat, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { execa } from 'execa';
 import {
   parseGitHubUrl,
   getPluginCachePath,
@@ -9,6 +8,7 @@ import {
 } from '../utils/plugin-path.js';
 import { PluginManifestSchema } from '../models/plugin-config.js';
 import { getHomeDir } from '../constants.js';
+import { cloneTo, gitHubUrl, GitCloneError, pull } from './git.js';
 
 /**
  * Information about a cached plugin
@@ -43,9 +43,10 @@ export interface FetchOptions {
  * Dependencies for fetchPlugin (for testing)
  */
 export interface FetchDeps {
-  execa?: typeof execa;
   existsSync?: typeof existsSync;
   mkdir?: typeof mkdir;
+  cloneTo?: typeof cloneTo;
+  pull?: typeof pull;
 }
 
 /**
@@ -62,9 +63,10 @@ export async function fetchPlugin(
 ): Promise<FetchResult> {
   const { offline = false, branch } = options;
   const {
-    execa: execaFn = execa,
     existsSync: existsSyncFn = existsSync,
     mkdir: mkdirFn = mkdir,
+    cloneTo: cloneToFn = cloneTo,
+    pull: pullFn = pull,
   } = deps;
 
   // Validate plugin source
@@ -94,18 +96,6 @@ export async function fetchPlugin(
   // Use branch-specific cache path if branch is specified
   const cachePath = getPluginCachePath(owner, repo, branch);
 
-  // Check if gh CLI is available
-  try {
-    await execaFn('gh', ['--version'], { stdin: 'ignore' });
-  } catch {
-    return {
-      success: false,
-      action: 'skipped',
-      cachePath,
-      error: 'gh CLI not installed\n  Install: https://cli.github.com',
-    };
-  }
-
   // Check if plugin is already cached
   const isCached = existsSyncFn(cachePath);
 
@@ -118,10 +108,12 @@ export async function fetchPlugin(
     };
   }
 
+  const repoUrl = gitHubUrl(owner, repo);
+
   try {
     if (isCached) {
       // Default: pull latest changes
-      await execaFn('git', ['pull'], { cwd: cachePath, stdin: 'ignore' });
+      await pullFn(cachePath);
 
       return {
         success: true,
@@ -134,12 +126,7 @@ export async function fetchPlugin(
     const parentDir = dirname(cachePath);
     await mkdirFn(parentDir, { recursive: true });
 
-    // Clone repository with specific branch if provided
-    if (branch) {
-      await execaFn('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath, '--', '--branch', branch], { stdin: 'ignore' });
-    } else {
-      await execaFn('gh', ['repo', 'clone', `${owner}/${repo}`, cachePath], { stdin: 'ignore' });
-    }
+    await cloneToFn(repoUrl, cachePath, branch);
 
     return {
       success: true,
@@ -147,60 +134,30 @@ export async function fetchPlugin(
       cachePath,
     };
   } catch (error) {
-    // Handle specific errors
-    if (error instanceof Error) {
-      const errorMessage = error.message.toLowerCase();
-
-      // Authentication errors
-      if (
-        errorMessage.includes('auth') ||
-        errorMessage.includes('authentication')
-      ) {
+    if (error instanceof GitCloneError) {
+      if (error.isAuthError) {
         return {
           success: false,
           action: 'skipped',
           cachePath,
-          error: 'GitHub authentication required\n  Run: gh auth login',
+          error: `Authentication failed for ${owner}/${repo}.\n  Check your SSH keys or git credentials.`,
         };
       }
-
-      // Repository not found
-      if (errorMessage.includes('not found') || errorMessage.includes('404')) {
+      if (error.isTimeout) {
         return {
           success: false,
           action: 'skipped',
           cachePath,
-          error: `Repository not found: ${owner}/${repo}`,
+          error: `Clone timed out for ${owner}/${repo}.\n  Check your network connection.`,
         };
       }
-
-      // Network errors
-      if (
-        errorMessage.includes('network') ||
-        errorMessage.includes('timeout')
-      ) {
-        return {
-          success: false,
-          action: 'skipped',
-          cachePath,
-          error: `Network error: ${error.message}`,
-        };
-      }
-
-      // Generic error
-      return {
-        success: false,
-        action: 'skipped',
-        cachePath,
-        error: `Failed to fetch plugin: ${error.message}`,
-      };
     }
 
     return {
       success: false,
       action: 'skipped',
       cachePath,
-      error: `Unknown error: ${String(error)}`,
+      error: `Failed to fetch plugin: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
@@ -281,7 +238,7 @@ export async function updateCachedPlugins(
 
   for (const plugin of toUpdate) {
     try {
-      await execa('git', ['pull'], { cwd: plugin.path, stdin: 'ignore' });
+      await pull(plugin.path);
       results.push({ name: plugin.name, success: true });
     } catch (error) {
       results.push({

@@ -1,7 +1,8 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { execa } from 'execa';
+import simpleGit from 'simple-git';
+import { cloneTo, gitHubUrl, GitCloneError, pull } from './git.js';
 import {
   parseMarketplaceManifest,
   resolvePluginSourcePath,
@@ -252,16 +253,6 @@ export async function addMarketplace(
       // Directory exists - just register it without cloning
       // This handles the case where clone succeeded but registry wasn't updated
     } else {
-      // Check if gh CLI is available
-      try {
-        await execa('gh', ['--version'], { stdin: 'ignore' });
-      } catch {
-        return {
-          success: false,
-          error: 'gh CLI not installed\n  Install: https://cli.github.com',
-        };
-      }
-
       // Ensure parent directory exists
       const parentDir = getMarketplacesDir();
       if (!existsSync(parentDir)) {
@@ -270,11 +261,20 @@ export async function addMarketplace(
 
       // Extract owner/repo for GitHub operations (strip branch from location if present)
       const { owner, repo } = parseLocation(parsed.location);
+      const repoUrl = gitHubUrl(owner, repo);
 
-      // Clone repository
+      // Clone repository (with branch if specified)
       try {
-        await execa('gh', ['repo', 'clone', `${owner}/${repo}`, marketplacePath], { stdin: 'ignore' });
+        await cloneTo(repoUrl, marketplacePath, effectiveBranch);
       } catch (error) {
+        if (error instanceof GitCloneError) {
+          if (error.isAuthError) {
+            return {
+              success: false,
+              error: `Authentication failed for ${owner}/${repo}.\n  Check your SSH keys or git credentials.`,
+            };
+          }
+        }
         const msg = error instanceof Error ? error.message : String(error);
         if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
           return {
@@ -286,22 +286,6 @@ export async function addMarketplace(
           success: false,
           error: `Failed to clone marketplace: ${msg}`,
         };
-      }
-
-      // If a branch was specified, checkout that branch after cloning
-      if (effectiveBranch) {
-        try {
-          await execa('git', ['checkout', effectiveBranch], {
-            cwd: marketplacePath,
-            stdin: 'ignore',
-          });
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          return {
-            success: false,
-            error: `Failed to checkout branch '${effectiveBranch}': ${msg}`,
-          };
-        }
       }
     }
   } else {
@@ -478,32 +462,25 @@ export async function updateMarketplace(
     try {
       // Check if location includes a branch
       const { branch: storedBranch } = parseLocation(marketplace.source.location);
+      const git = simpleGit(marketplace.path);
 
       let targetBranch: string;
       if (storedBranch) {
         // Branch-pinned marketplace: use stored branch directly
         targetBranch = storedBranch;
       } else {
-        // Default branch marketplace: detect default branch (existing logic)
+        // Default branch marketplace: detect default branch
         targetBranch = 'main';
         try {
-          const { stdout } = await execa(
-            'git',
-            ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
-            { cwd: marketplace.path, stdin: 'ignore' },
-          );
-          const ref = stdout.trim();
-          targetBranch = ref.startsWith('origin/')
-            ? ref.slice('origin/'.length)
-            : ref;
+          const ref = await git.raw(['symbolic-ref', 'refs/remotes/origin/HEAD', '--short']);
+          const trimmed = ref.trim();
+          targetBranch = trimmed.startsWith('origin/')
+            ? trimmed.slice('origin/'.length)
+            : trimmed;
         } catch {
           try {
-            const { stdout } = await execa(
-              'git',
-              ['remote', 'show', 'origin'],
-              { cwd: marketplace.path, stdin: 'ignore' },
-            );
-            const match = stdout.match(/HEAD branch:\s*(\S+)/);
+            const showOutput = await git.raw(['remote', 'show', 'origin']);
+            const match = showOutput.match(/HEAD branch:\s*(\S+)/);
             if (match?.[1]) {
               targetBranch = match[1];
             }
@@ -513,11 +490,8 @@ export async function updateMarketplace(
         }
       }
 
-      await execa('git', ['checkout', targetBranch], {
-        cwd: marketplace.path,
-        stdin: 'ignore',
-      });
-      await execa('git', ['pull'], { cwd: marketplace.path, stdin: 'ignore' });
+      await git.checkout(targetBranch);
+      await pull(marketplace.path);
 
       // Update lastUpdated in registry
       marketplace.lastUpdated = new Date().toISOString();
