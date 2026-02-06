@@ -847,7 +847,7 @@ export async function resolvePluginSpecWithAutoRegister(
   if (!resolved) {
     return {
       success: false,
-      error: `Plugin '${pluginName}' not found in marketplace '${marketplaceName}'\n  Expected at: ${marketplace.path}/${expectedSubpath}/${pluginName}/`,
+      error: `Plugin '${pluginName}' not found in marketplace '${marketplaceName}'\n  Expected at: ${join(marketplace.path, expectedSubpath, pluginName)}`,
     };
   }
 
