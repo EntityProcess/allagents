@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
-import { CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient } from '../models/client-mapping.js';
+import { CLIENT_MAPPINGS, isUniversalClient } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import type { ClientType, WorkspaceFile, SyncMode } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';

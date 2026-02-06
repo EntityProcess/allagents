@@ -802,7 +802,7 @@ async function copyValidatedPlugin(
     //
     // Phase 1: Copy skills to canonical location using deduplication
     // This ensures canonical is only copied once, and tracked under universal clients
-    const { representativeClients, clientGroups } = deduplicateClientsByPath(clientList, mappings);
+    const { representativeClients } = deduplicateClientsByPath(clientList, mappings);
 
     // Find which representative handles canonical (.agents/skills/)
     const canonicalRepresentative = representativeClients.find(
@@ -811,7 +811,7 @@ async function copyValidatedPlugin(
 
     // If no configured client uses canonical directly, we need to add one
     // to ensure canonical gets copied and tracked
-    let needsCanonicalCopy = !canonicalRepresentative;
+    const needsCanonicalCopy = !canonicalRepresentative;
     const nonUniversalClients = clientList.filter((c) => !isUniversalClient(c));
 
     // Copy to canonical using representative or 'copilot' if needed
