@@ -93,4 +93,32 @@ describe('fetchPlugin', () => {
       expect(result.success).toBe(true);
     }
   });
+
+  it('should treat pull failure as non-fatal when cached', async () => {
+    existsSyncMock.mockReturnValueOnce(true);
+    pullMock.mockRejectedValueOnce(new Error('not something we can merge'));
+
+    const result = await fetchPlugin('https://github.com/owner/repo', {}, deps);
+    expect(result.success).toBe(true);
+    expect(result.action).toBe('skipped');
+    expect(result.cachePath).toContain('owner-repo');
+  });
+
+  it('should coalesce concurrent fetches for the same repo', async () => {
+    existsSyncMock.mockReturnValue(true);
+    pullMock.mockImplementation(
+      () => new Promise((resolve) => setTimeout(resolve, 10)),
+    );
+
+    const [result1, result2] = await Promise.all([
+      fetchPlugin('https://github.com/owner/repo', {}, deps),
+      fetchPlugin('https://github.com/owner/repo', {}, deps),
+    ]);
+
+    // Both callers get the exact same result object
+    expect(result1).toBe(result2);
+    expect(result1.success).toBe(true);
+    // Only one pull should have occurred despite two concurrent calls
+    expect(pullMock).toHaveBeenCalledTimes(1);
+  });
 });

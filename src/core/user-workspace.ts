@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { load, dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type { WorkspaceConfig, ClientType } from '../models/workspace-config.js';
-import { getAllagentsDir } from './marketplace.js';
+import { getAllagentsDir, getMarketplace } from './marketplace.js';
 import {
   isPluginSpec,
   parsePluginSpec,
@@ -13,8 +13,10 @@ import {
 import {
   validatePluginSource,
   isGitHubUrl,
+  parseGitHubUrl,
   verifyGitHubUrlExists,
 } from '../utils/plugin-path.js';
+import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import type { ModifyResult } from './workspace-modify.js';
 
 /**
@@ -163,6 +165,22 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
       );
     }
 
+    // Semantic match: same GitHub repo under a different format
+    if (index === -1) {
+      const identity = await resolveGitHubIdentity(plugin);
+      if (identity) {
+        for (let i = 0; i < config.plugins.length; i++) {
+          const p = config.plugins[i];
+          if (!p) continue;
+          const existing = await resolveGitHubIdentity(p);
+          if (existing === identity) {
+            index = i;
+            break;
+          }
+        }
+      }
+    }
+
     if (index === -1) {
       return { success: false, error: `Plugin not found in user config: ${plugin}` };
     }
@@ -213,6 +231,43 @@ export async function removeUserPluginsForMarketplace(marketplaceName: string): 
 }
 
 /**
+ * Resolve a plugin source to its GitHub owner/repo identity, if it points to
+ * a GitHub repo (directly or via a marketplace URL source). Returns null for
+ * local-path plugins.
+ */
+export async function resolveGitHubIdentity(
+  pluginSource: string,
+): Promise<string | null> {
+  if (isGitHubUrl(pluginSource)) {
+    const parsed = parseGitHubUrl(pluginSource);
+    return parsed ? `${parsed.owner}/${parsed.repo}`.toLowerCase() : null;
+  }
+
+  if (isPluginSpec(pluginSource)) {
+    const parsed = parsePluginSpec(pluginSource);
+    if (!parsed) return null;
+
+    const marketplace = await getMarketplace(parsed.marketplaceName);
+    if (!marketplace) return null;
+
+    const manifestResult = await parseMarketplaceManifest(marketplace.path);
+    if (!manifestResult.success) return null;
+
+    const entry = manifestResult.data.plugins.find(
+      (p) => p.name === parsed.plugin,
+    );
+    if (!entry || typeof entry.source === 'string') return null;
+
+    const parsedUrl = parseGitHubUrl(entry.source.url);
+    return parsedUrl
+      ? `${parsedUrl.owner}/${parsedUrl.repo}`.toLowerCase()
+      : null;
+  }
+
+  return null;
+}
+
+/**
  * Add plugin entry to the user-level config file.
  */
 async function addPluginToUserConfig(
@@ -226,6 +281,20 @@ async function addPluginToUserConfig(
 
     if (config.plugins.includes(plugin)) {
       return { success: false, error: `Plugin already exists in user config: ${plugin}` };
+    }
+
+    // Check for semantic duplicates (different strings resolving to same repo)
+    const newIdentity = await resolveGitHubIdentity(plugin);
+    if (newIdentity) {
+      for (const existing of config.plugins) {
+        const existingIdentity = await resolveGitHubIdentity(existing);
+        if (existingIdentity === newIdentity) {
+          return {
+            success: false,
+            error: `Plugin duplicates existing entry '${existing}': both resolve to ${newIdentity}`,
+          };
+        }
+      }
     }
 
     config.plugins.push(plugin);
