@@ -1,47 +1,52 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execSync } from 'node:child_process';
 
-// Mock execa to track git commands
-const execaCalls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
-const execaMock = mock(
-  (cmd: string, args: string[], opts?: { cwd?: string }) => {
-    execaCalls.push({ cmd, args, cwd: opts?.cwd });
+// Track calls for assertions
+const simpleGitCalls: Array<{ method: string; args: unknown[] }> = [];
+const pullCalls: Array<{ path: string }> = [];
 
-    // Mock git symbolic-ref to return default branch
-    if (
-      args[0] === 'symbolic-ref' &&
-      args[1] === 'refs/remotes/origin/HEAD'
-    ) {
-      return Promise.resolve({
-        stdout: 'origin/main',
-        stderr: '',
-      });
-    }
+// Create a mock simple-git instance
+function createMockGit(overrides: Record<string, (...args: unknown[]) => unknown> = {}) {
+  return {
+    raw: mock((...args: unknown[]) => {
+      simpleGitCalls.push({ method: 'raw', args });
+      if (overrides.raw) return overrides.raw(...args);
+      // Default: symbolic-ref returns origin/main
+      const rawArgs = args[0] as string[];
+      if (rawArgs?.[0] === 'symbolic-ref') {
+        return Promise.resolve('origin/main');
+      }
+      return Promise.resolve('');
+    }),
+    checkout: mock((...args: unknown[]) => {
+      simpleGitCalls.push({ method: 'checkout', args });
+      if (overrides.checkout) return overrides.checkout(...args);
+      return Promise.resolve();
+    }),
+  };
+}
 
-    // Mock git checkout
-    if (args[0] === 'checkout') {
-      return Promise.resolve({ stdout: '', stderr: '' });
-    }
+let currentMockGit = createMockGit();
 
-    // Mock git pull
-    if (args[0] === 'pull') {
-      return Promise.resolve({ stdout: 'Already up to date.', stderr: '' });
-    }
+mock.module('simple-git', () => ({
+  default: () => currentMockGit,
+}));
 
-    return Promise.resolve({ stdout: '', stderr: '' });
-  },
-);
-
-mock.module('execa', () => ({
-  execa: execaMock,
+// Mock the git module's pull function
+mock.module('../../../src/core/git.js', () => ({
+  pull: mock((path: string) => {
+    pullCalls.push({ path });
+    return Promise.resolve();
+  }),
+  cloneTo: mock(() => Promise.resolve()),
+  gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
+  GitCloneError: class extends Error {},
 }));
 
 // Must import after mock.module
-const { updateMarketplace, saveRegistry, getRegistryPath, getAllagentsDir } =
-  await import('../../../src/core/marketplace.js');
+const { updateMarketplace } = await import('../../../src/core/marketplace.js');
 
 describe('updateMarketplace', () => {
   let originalHome: string | undefined;
@@ -76,8 +81,9 @@ describe('updateMarketplace', () => {
       JSON.stringify(registry, null, 2),
     );
 
-    execaCalls.length = 0;
-    execaMock.mockClear();
+    simpleGitCalls.length = 0;
+    pullCalls.length = 0;
+    currentMockGit = createMockGit();
   });
 
   afterEach(() => {
@@ -91,94 +97,65 @@ describe('updateMarketplace', () => {
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
 
-    // Verify git commands were called in correct order:
-    // 1. git symbolic-ref to get default branch
-    // 2. git checkout <default-branch>
-    // 3. git pull
-    const gitCalls = execaCalls.filter((c) => c.cmd === 'git');
+    // Verify calls: symbolic-ref -> checkout -> pull
+    const symbolicRefCall = simpleGitCalls.find(
+      (c) => c.method === 'raw' && (c.args[0] as string[])?.[0] === 'symbolic-ref',
+    );
+    expect(symbolicRefCall).toBeDefined();
 
-    expect(gitCalls.length).toBeGreaterThanOrEqual(3);
-    expect(gitCalls[0].args).toEqual([
-      'symbolic-ref',
-      'refs/remotes/origin/HEAD',
-      '--short',
-    ]);
-    expect(gitCalls[1].args[0]).toBe('checkout');
-    expect(gitCalls[1].args[1]).toBe('main');
-    expect(gitCalls[2].args[0]).toBe('pull');
+    const checkoutCall = simpleGitCalls.find((c) => c.method === 'checkout');
+    expect(checkoutCall).toBeDefined();
+    expect(checkoutCall!.args[0]).toBe('main');
+
+    expect(pullCalls.length).toBe(1);
   });
 
   it('should use remote show origin to detect master branch when symbolic-ref fails', async () => {
-    execaMock.mockImplementation(
-      (cmd: string, args: string[], opts?: { cwd?: string }) => {
-        execaCalls.push({ cmd, args, cwd: opts?.cwd });
-
-        if (args[0] === 'symbolic-ref') {
+    currentMockGit = createMockGit({
+      raw: (...args: unknown[]) => {
+        const rawArgs = args[0] as string[];
+        if (rawArgs?.[0] === 'symbolic-ref') {
           return Promise.reject(new Error('fatal: ref not found'));
         }
-        if (args[0] === 'remote' && args[1] === 'show') {
-          return Promise.resolve({
-            stdout: '  HEAD branch: master\n  Remote branches:\n',
-            stderr: '',
-          });
+        if (rawArgs?.[0] === 'remote' && rawArgs?.[1] === 'show') {
+          return Promise.resolve('  HEAD branch: master\n  Remote branches:\n');
         }
-        if (args[0] === 'checkout') {
-          return Promise.resolve({ stdout: '', stderr: '' });
-        }
-        if (args[0] === 'pull') {
-          return Promise.resolve({
-            stdout: 'Already up to date.',
-            stderr: '',
-          });
-        }
-        return Promise.resolve({ stdout: '', stderr: '' });
+        return Promise.resolve('');
       },
-    );
+    });
 
     const results = await updateMarketplace('test-mp');
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
 
-    const gitCalls = execaCalls.filter((c) => c.cmd === 'git');
-    const checkoutCall = gitCalls.find((c) => c.args[0] === 'checkout');
+    const checkoutCall = simpleGitCalls.find((c) => c.method === 'checkout');
     expect(checkoutCall).toBeDefined();
-    expect(checkoutCall!.args[1]).toBe('master');
+    expect(checkoutCall!.args[0]).toBe('master');
   });
 
   it('should fallback to main when both symbolic-ref and remote show fail', async () => {
-    execaMock.mockImplementation(
-      (cmd: string, args: string[], opts?: { cwd?: string }) => {
-        execaCalls.push({ cmd, args, cwd: opts?.cwd });
-
-        if (args[0] === 'symbolic-ref') {
+    currentMockGit = createMockGit({
+      raw: (...args: unknown[]) => {
+        const rawArgs = args[0] as string[];
+        if (rawArgs?.[0] === 'symbolic-ref') {
           return Promise.reject(new Error('fatal: ref not found'));
         }
-        if (args[0] === 'remote' && args[1] === 'show') {
+        if (rawArgs?.[0] === 'remote') {
           return Promise.reject(new Error('fatal: unable to access'));
         }
-        if (args[0] === 'checkout') {
-          return Promise.resolve({ stdout: '', stderr: '' });
-        }
-        if (args[0] === 'pull') {
-          return Promise.resolve({
-            stdout: 'Already up to date.',
-            stderr: '',
-          });
-        }
-        return Promise.resolve({ stdout: '', stderr: '' });
+        return Promise.resolve('');
       },
-    );
+    });
 
     const results = await updateMarketplace('test-mp');
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
 
-    const gitCalls = execaCalls.filter((c) => c.cmd === 'git');
-    const checkoutCall = gitCalls.find((c) => c.args[0] === 'checkout');
+    const checkoutCall = simpleGitCalls.find((c) => c.method === 'checkout');
     expect(checkoutCall).toBeDefined();
-    expect(checkoutCall!.args[1]).toBe('main');
+    expect(checkoutCall!.args[0]).toBe('main');
   });
 
   it('should checkout stored branch instead of detecting default branch', async () => {
@@ -200,26 +177,25 @@ describe('updateMarketplace', () => {
       JSON.stringify(registry, null, 2),
     );
 
-    execaCalls.length = 0;
+    simpleGitCalls.length = 0;
 
     const results = await updateMarketplace('test-mp-branch');
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
 
-    const gitCalls = execaCalls.filter((c) => c.cmd === 'git');
-
     // Should NOT call symbolic-ref (no default branch detection)
-    const symbolicRefCall = gitCalls.find((c) => c.args[0] === 'symbolic-ref');
+    const symbolicRefCall = simpleGitCalls.find(
+      (c) => c.method === 'raw' && (c.args[0] as string[])?.[0] === 'symbolic-ref',
+    );
     expect(symbolicRefCall).toBeUndefined();
 
     // Should checkout feat/v2 directly
-    const checkoutCall = gitCalls.find((c) => c.args[0] === 'checkout');
+    const checkoutCall = simpleGitCalls.find((c) => c.method === 'checkout');
     expect(checkoutCall).toBeDefined();
-    expect(checkoutCall!.args[1]).toBe('feat/v2');
+    expect(checkoutCall!.args[0]).toBe('feat/v2');
 
     // Should pull
-    const pullCall = gitCalls.find((c) => c.args[0] === 'pull');
-    expect(pullCall).toBeDefined();
+    expect(pullCalls.length).toBe(1);
   });
 });

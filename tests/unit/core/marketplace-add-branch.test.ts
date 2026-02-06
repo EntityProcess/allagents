@@ -3,34 +3,38 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const execaCalls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
-const execaMock = mock(
-  (cmd: string, args: string[], opts?: { cwd?: string; stdin?: string }) => {
-    execaCalls.push({ cmd, args, cwd: opts?.cwd });
+// Track clone calls to verify arguments
+const cloneCalls: Array<{ url: string; dest: string; ref?: string }> = [];
 
-    // Mock gh --version
-    if (cmd === 'gh' && args[0] === '--version') {
-      return Promise.resolve({ stdout: 'gh version 2.0.0', stderr: '' });
+// Mock the git module
+mock.module('../../../src/core/git.js', () => ({
+  cloneTo: mock((url: string, dest: string, ref?: string) => {
+    cloneCalls.push({ url, dest, ref });
+    // Create the directory to simulate clone
+    mkdirSync(dest, { recursive: true });
+    return Promise.resolve();
+  }),
+  gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
+  GitCloneError: class GitCloneError extends Error {
+    url: string;
+    isTimeout: boolean;
+    isAuthError: boolean;
+    constructor(message: string, url: string, isTimeout = false, isAuthError = false) {
+      super(message);
+      this.url = url;
+      this.isTimeout = isTimeout;
+      this.isAuthError = isAuthError;
     }
-
-    // Mock gh repo clone — create the directory to simulate clone
-    if (cmd === 'gh' && args[0] === 'repo' && args[1] === 'clone') {
-      const clonePath = args[3];
-      if (clonePath) mkdirSync(clonePath, { recursive: true });
-      return Promise.resolve({ stdout: '', stderr: '' });
-    }
-
-    // Mock git checkout
-    if (cmd === 'git' && args[0] === 'checkout') {
-      return Promise.resolve({ stdout: '', stderr: '' });
-    }
-
-    return Promise.resolve({ stdout: '', stderr: '' });
   },
-);
+  pull: mock(() => Promise.resolve()),
+}));
 
-mock.module('execa', () => ({
-  execa: execaMock,
+// Mock simple-git for updateMarketplace (it uses simpleGit directly)
+mock.module('simple-git', () => ({
+  default: () => ({
+    raw: mock(() => Promise.resolve('')),
+    checkout: mock(() => Promise.resolve()),
+  }),
 }));
 
 const { addMarketplace, loadRegistry } = await import('../../../src/core/marketplace.js');
@@ -44,8 +48,7 @@ describe('addMarketplace branch support', () => {
     testHome = join(tmpdir(), `marketplace-add-branch-test-${Date.now()}`);
     process.env.HOME = testHome;
     mkdirSync(join(testHome, '.allagents'), { recursive: true });
-    execaCalls.length = 0;
-    execaMock.mockClear();
+    cloneCalls.length = 0;
   });
 
   afterEach(() => {
@@ -70,7 +73,7 @@ describe('addMarketplace branch support', () => {
     expect(result.error).toContain('reserved for the default branch');
   });
 
-  it('should clone and checkout branch when --name is provided', async () => {
+  it('should clone with branch when --name is provided', async () => {
     const result = await addMarketplace(
       'https://github.com/owner/repo/tree/feat/v2',
       'repo-v2',
@@ -79,19 +82,11 @@ describe('addMarketplace branch support', () => {
     expect(result.marketplace?.name).toBe('repo-v2');
     expect(result.marketplace?.source.location).toBe('owner/repo/feat/v2');
 
-    // Verify gh repo clone was called with owner/repo (not owner/repo/feat/v2)
-    const cloneCall = execaCalls.find(
-      (c) => c.cmd === 'gh' && c.args[1] === 'clone',
-    );
+    // Verify cloneTo was called with the correct URL and branch
+    const cloneCall = cloneCalls.find((c) => c.url.includes('owner/repo'));
     expect(cloneCall).toBeDefined();
-    expect(cloneCall!.args[2]).toBe('owner/repo');
-
-    // Verify git checkout was called with the branch
-    const checkoutCall = execaCalls.find(
-      (c) => c.cmd === 'git' && c.args[0] === 'checkout',
-    );
-    expect(checkoutCall).toBeDefined();
-    expect(checkoutCall!.args[1]).toBe('feat/v2');
+    expect(cloneCall!.url).toBe('https://github.com/owner/repo.git');
+    expect(cloneCall!.ref).toBe('feat/v2');
   });
 
   it('should store branch in location in registry', async () => {
@@ -119,13 +114,13 @@ describe('addMarketplace branch support', () => {
     expect(result.marketplace?.source.location).toBe('owner/repo/feat/v3');
   });
 
-  it('should clone default branch without checkout when no branch specified', async () => {
+  it('should clone without branch when no branch specified', async () => {
     const result = await addMarketplace('https://github.com/owner/repo');
     expect(result.success).toBe(true);
 
-    const checkoutCall = execaCalls.find(
-      (c) => c.cmd === 'git' && c.args[0] === 'checkout',
-    );
-    expect(checkoutCall).toBeUndefined();
+    // Verify cloneTo was called without a branch ref
+    const cloneCall = cloneCalls.find((c) => c.url.includes('owner/repo'));
+    expect(cloneCall).toBeDefined();
+    expect(cloneCall!.ref).toBeUndefined();
   });
 });

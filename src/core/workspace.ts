@@ -7,7 +7,8 @@ import { syncWorkspace, type SyncResult } from './sync.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
 import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
-import { fetchWorkspaceFromGitHub, fetchFileFromGitHub } from './github-fetch.js';
+import { fetchWorkspaceFromGitHub, readFileFromClone } from './github-fetch.js';
+import { cleanupTempDir } from './git.js';
 
 /**
  * Options for workspace initialization
@@ -58,6 +59,9 @@ export async function initWorkspace(
     ? join(currentFileDir, 'templates', 'default')
     : join(currentFileDir, '..', 'templates', 'default');
 
+  // Temp dir from GitHub clone — must be cleaned up at the end
+  let githubTempDir: string | undefined;
+
   try {
     // Create target directory if it doesn't exist
     await mkdir(absoluteTarget, { recursive: true });
@@ -74,8 +78,12 @@ export async function initWorkspace(
       if (isGitHubUrl(options.from)) {
         const fetchResult = await fetchWorkspaceFromGitHub(options.from);
         if (!fetchResult.success || !fetchResult.content) {
+          if (fetchResult.tempDir) {
+            await cleanupTempDir(fetchResult.tempDir);
+          }
           throw new Error(fetchResult.error || 'Failed to fetch workspace from GitHub');
         }
+        githubTempDir = fetchResult.tempDir;
         workspaceYamlContent = fetchResult.content;
         // For GitHub sources, keep workspace.source as-is (it's already a URL or relative to the repo)
         // We need to rewrite relative workspace.source to the full GitHub URL
@@ -191,23 +199,17 @@ export async function initWorkspace(
     if (clients.includes('vscode') && options.from) {
       const targetTemplatePath = join(configDir, VSCODE_TEMPLATE_FILE);
       if (!existsSync(targetTemplatePath)) {
-        if (isGitHubUrl(options.from)) {
-          // Fetch template from GitHub
+        if (isGitHubUrl(options.from) && githubTempDir) {
+          // Read template from cloned repo
           const parsedUrl = parseGitHubUrl(options.from);
           if (parsedUrl) {
             const basePath = parsedUrl.subpath || '';
-            // Remove workspace.yaml from the base path if present
             const baseDir = basePath.replace(/\/?\.allagents\/workspace\.yaml$/, '')
                                      .replace(/\/?workspace\.yaml$/, '');
             const templatePath = baseDir
               ? `${baseDir}/${CONFIG_DIR}/${VSCODE_TEMPLATE_FILE}`
               : `${CONFIG_DIR}/${VSCODE_TEMPLATE_FILE}`;
-            const templateContent = await fetchFileFromGitHub(
-              parsedUrl.owner,
-              parsedUrl.repo,
-              templatePath,
-              parsedUrl.branch,
-            );
+            const templateContent = readFileFromClone(githubTempDir, templatePath);
             if (templateContent) {
               await writeFile(targetTemplatePath, templateContent, 'utf-8');
             }
@@ -232,8 +234,8 @@ export async function initWorkspace(
       // Auto-copy agent files (AGENTS.md, CLAUDE.md) from source if they exist
       const copiedAgentFiles: string[] = [];
 
-      if (options.from && isGitHubUrl(options.from)) {
-        // Fetch agent files from GitHub
+      if (options.from && isGitHubUrl(options.from) && githubTempDir) {
+        // Read agent files from cloned repo
         const parsedUrl = parseGitHubUrl(options.from);
         if (parsedUrl) {
           const basePath = parsedUrl.subpath || '';
@@ -245,12 +247,7 @@ export async function initWorkspace(
               continue;
             }
             const filePath = basePath ? `${basePath}/${agentFile}` : agentFile;
-            const content = await fetchFileFromGitHub(
-              parsedUrl.owner,
-              parsedUrl.repo,
-              filePath,
-              parsedUrl.branch,
-            );
+            const content = readFileFromClone(githubTempDir, filePath);
             if (content) {
               await writeFile(targetFilePath, content, 'utf-8');
               copiedAgentFiles.push(agentFile);
@@ -299,6 +296,11 @@ export async function initWorkspace(
       }
     }
 
+    // Clean up GitHub temp clone now that we've read all needed files
+    if (githubTempDir) {
+      await cleanupTempDir(githubTempDir);
+    }
+
     console.log(`✓ Workspace created at: ${absoluteTarget}`);
 
     // Auto-sync plugins
@@ -329,6 +331,10 @@ export async function initWorkspace(
       syncResult,
     };
   } catch (error) {
+    // Clean up GitHub temp clone on error
+    if (githubTempDir) {
+      await cleanupTempDir(githubTempDir).catch(() => {});
+    }
     if (error instanceof Error) {
       throw new Error(`Failed to initialize workspace: ${error.message}`);
     }
