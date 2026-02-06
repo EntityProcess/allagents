@@ -2,8 +2,6 @@
 
 CLI tool for managing multi-repo AI agent workspaces with plugin synchronization across multiple AI clients.
 
-> **Attribution:** AllAgents is inspired by [dotagents](https://github.com/iannuttall/dotagents) by Ian Nuttall. While rewritten from scratch, we share the vision of unified AI agent configuration management. Thank you Ian for the inspiration!
-
 ## Why AllAgents?
 
 **The Problem:** AI coding assistants (Claude, Copilot, Cursor, Codex, etc.) each have their own configuration formats and directory structures. If you want to share skills across multiple projects or use multiple AI clients, you need to manually copy and transform files.
@@ -40,7 +38,7 @@ CLI tool for managing multi-repo AI agent workspaces with plugin synchronization
          │
     ┌────┴────┬────────┬─────────┐
     ▼         ▼        ▼         ▼
-.claude/  .github/  .cursor/  .codex/   (client-specific paths)
+.claude/  .agents/  .cursor/  .factory/   (client paths)
 ```
 
 ## Installation
@@ -303,15 +301,15 @@ These marketplace names auto-resolve to their GitHub repos:
 | Client | Skills | Agent File | Hooks | Commands |
 |--------|--------|------------|-------|----------|
 | claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
-| copilot | `.github/skills/` | `AGENTS.md` | No | No |
-| codex | `.codex/skills/` | `AGENTS.md` | No | No |
+| copilot | `.agents/skills/` | `AGENTS.md` | No | No |
+| codex | `.agents/skills/` | `AGENTS.md` | No | No |
 | cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
-| opencode | `.opencode/skills/` | `AGENTS.md` | No | No |
-| gemini | `.gemini/skills/` | `GEMINI.md` | No | No |
+| opencode | `.agents/skills/` | `AGENTS.md` | No | No |
+| gemini | `.agents/skills/` | `GEMINI.md` | No | No |
 | factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
-| ampcode | No | `AGENTS.md` | No | No |
+| ampcode | `.agents/skills/` | `AGENTS.md` | No | No |
 
-> **Note:** Commands are a Claude-specific feature. Skills are the cross-client way to share reusable prompts.
+> **Note:** Clients supporting the universal `.agents/` folder (copilot, codex, opencode, gemini, ampcode) share the same skills directory. Commands are a Claude-specific feature.
 
 ## Marketplace Structure
 
@@ -408,6 +406,11 @@ bun run typecheck
 # Build
 bun run build
 ```
+
+## Related Projects
+
+- [dotagents](https://github.com/iannuttall/dotagents) - Unified AI agent configuration management
+- [vercel-labs/skills](https://github.com/vercel-labs/skills) - Universal skills for AI coding assistants
 
 ## License
 

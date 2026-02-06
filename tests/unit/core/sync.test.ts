@@ -61,8 +61,9 @@ describe('sync', () => {
 
     it('should purge multiple clients', async () => {
       // Setup: Create directories for multiple clients
+      // Note: copilot now uses .agents/skills/ (universal agents folder)
       await mkdir(join(testDir, '.claude', 'commands'), { recursive: true });
-      await mkdir(join(testDir, '.github', 'skills'), { recursive: true });
+      await mkdir(join(testDir, '.agents', 'skills'), { recursive: true });
       await writeFile(join(testDir, 'CLAUDE.md'), '# Claude');
       await writeFile(join(testDir, 'AGENTS.md'), '# Agents');
 
@@ -71,7 +72,7 @@ describe('sync', () => {
 
       // Verify both are purged
       expect(existsSync(join(testDir, '.claude', 'commands'))).toBe(false);
-      expect(existsSync(join(testDir, '.github', 'skills'))).toBe(false);
+      expect(existsSync(join(testDir, '.agents', 'skills'))).toBe(false);
       expect(existsSync(join(testDir, 'CLAUDE.md'))).toBe(false);
       expect(existsSync(join(testDir, 'AGENTS.md'))).toBe(false);
 
@@ -722,7 +723,9 @@ clients:
 
   describe('syncWorkspace - client removal cleanup', () => {
     it('should purge files when client is removed from workspace.yaml', async () => {
-      // Setup: Create a plugin with a skill (skills work for both claude and copilot)
+      // Setup: Create a plugin with a skill
+      // Use claude and cursor (different paths) to test removal cleanup
+      // Note: copilot uses .agents/skills/ (universal) while claude uses .claude/skills/
       const pluginDir = join(testDir, 'my-plugin');
       const skillDir = join(pluginDir, 'skills', 'my-skill');
       await mkdir(skillDir, { recursive: true });
@@ -736,7 +739,7 @@ description: A test skill
 # My Skill`,
       );
 
-      // Setup: Create workspace config with both claude and copilot clients
+      // Setup: Create workspace config with claude and cursor clients (different skill paths)
       await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
       await writeFile(
         join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
@@ -746,7 +749,7 @@ plugins:
   - ./my-plugin
 clients:
   - claude
-  - copilot
+  - cursor
 `,
       );
 
@@ -754,15 +757,15 @@ clients:
       const result1 = await syncWorkspace(testDir);
       expect(result1.success).toBe(true);
       expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
-      expect(existsSync(join(testDir, '.github', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.cursor', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
 
       // Verify state has both clients
       const statePath = join(testDir, CONFIG_DIR, 'sync-state.json');
       const state1 = JSON.parse(await readFile(statePath, 'utf-8'));
       expect(state1.files.claude).toBeDefined();
-      expect(state1.files.copilot).toBeDefined();
+      expect(state1.files.cursor).toBeDefined();
 
-      // Remove copilot from workspace config
+      // Remove cursor from workspace config
       await writeFile(
         join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
         `
@@ -774,20 +777,20 @@ clients:
 `,
       );
 
-      // Second sync - should purge copilot files
+      // Second sync - should purge cursor files
       const result2 = await syncWorkspace(testDir);
       expect(result2.success).toBe(true);
 
       // Claude files should still exist
       expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
 
-      // Copilot files should be purged
-      expect(existsSync(join(testDir, '.github', 'skills', 'my-skill'))).toBe(false);
+      // Cursor files should be purged
+      expect(existsSync(join(testDir, '.cursor', 'skills', 'my-skill'))).toBe(false);
 
       // State should only have claude now
       const state2 = JSON.parse(await readFile(statePath, 'utf-8'));
       expect(state2.files.claude).toBeDefined();
-      expect(state2.files.copilot).toBeUndefined();
+      expect(state2.files.cursor).toBeUndefined();
     });
   });
 
@@ -942,20 +945,21 @@ clients:
         '---\nname: test-skill\ndescription: A test skill\n---\n# Test Skill\n',
       );
 
-      // Setup workspace config with two clients
+      // Setup workspace config with two clients (use claude and cursor for different paths)
+      // Note: opencode uses .agents/skills/ (universal), cursor uses .cursor/skills/
       const configDir = join(testDir, '.allagents');
       await mkdir(configDir, { recursive: true });
       await writeFile(
         join(configDir, 'workspace.yaml'),
-        `repositories: []\nplugins:\n  - ./my-plugin\nclients:\n  - claude\n  - opencode\n`,
+        `repositories: []\nplugins:\n  - ./my-plugin\nclients:\n  - claude\n  - cursor\n`,
       );
 
-      // Sync with only opencode
-      const result = await syncWorkspace(testDir, { clients: ['opencode'] });
+      // Sync with only cursor
+      const result = await syncWorkspace(testDir, { clients: ['cursor'] });
 
       expect(result.success).toBe(true);
-      // opencode files should exist
-      expect(existsSync(join(testDir, '.opencode', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+      // cursor files should exist
+      expect(existsSync(join(testDir, '.cursor', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
       // claude files should NOT exist
       expect(existsSync(join(testDir, '.claude', 'skills'))).toBe(false);
     });
@@ -969,12 +973,13 @@ clients:
         '---\nname: test-skill\ndescription: A test skill\n---\n# Test Skill\n',
       );
 
-      // Setup workspace config with two clients
+      // Setup workspace config with two clients (use claude and cursor for different paths)
+      // Note: opencode uses .agents/skills/ (universal), cursor uses .cursor/skills/
       const configDir = join(testDir, '.allagents');
       await mkdir(configDir, { recursive: true });
       await writeFile(
         join(configDir, 'workspace.yaml'),
-        `repositories: []\nplugins:\n  - ./my-plugin\nclients:\n  - claude\n  - opencode\n`,
+        `repositories: []\nplugins:\n  - ./my-plugin\nclients:\n  - claude\n  - cursor\n`,
       );
 
       // First: full sync (both clients)
@@ -983,24 +988,24 @@ clients:
 
       // Verify both clients synced
       expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
-      expect(existsSync(join(testDir, '.opencode', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(testDir, '.cursor', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
 
-      // Second: sync only opencode
-      const result2 = await syncWorkspace(testDir, { clients: ['opencode'] });
+      // Second: sync only cursor
+      const result2 = await syncWorkspace(testDir, { clients: ['cursor'] });
       expect(result2.success).toBe(true);
 
       // Claude files should still be on disk (not purged)
       expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
-      // opencode files should still exist (re-synced)
-      expect(existsSync(join(testDir, '.opencode', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+      // cursor files should still exist (re-synced)
+      expect(existsSync(join(testDir, '.cursor', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
 
       // Verify sync state preserves both clients' files
       const stateFile = join(testDir, '.allagents', 'sync-state.json');
       const state = JSON.parse(await readFile(stateFile, 'utf-8'));
       expect(state.files.claude).toBeDefined();
       expect(state.files.claude.length).toBeGreaterThan(0);
-      expect(state.files.opencode).toBeDefined();
-      expect(state.files.opencode.length).toBeGreaterThan(0);
+      expect(state.files.cursor).toBeDefined();
+      expect(state.files.cursor.length).toBeGreaterThan(0);
     });
   });
 

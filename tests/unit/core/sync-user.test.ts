@@ -213,4 +213,60 @@ describe('syncUserWorkspace', () => {
     expect(result.totalFailed).toBeGreaterThan(0);
     expect(result.error).toBeDefined();
   });
+
+  it('deduplicates universal clients when syncing to user home', async () => {
+    // copilot, codex, opencode all use ~/.agents/skills/ (universal path)
+    const pluginDir = await createLocalPlugin('my-plugin', 'my-skill');
+
+    await writeUserConfig({
+      repositories: [],
+      plugins: [pluginDir],
+      clients: ['copilot', 'codex', 'opencode'],
+    });
+
+    const result = await syncUserWorkspace();
+
+    expect(result.success).toBe(true);
+    // Should only copy once (not 3 times) since all use the same path
+    expect(result.totalCopied).toBe(1);
+
+    // Skill should exist in ~/.agents/skills/
+    const skillDest = join(testDir, '.agents', 'skills', 'my-skill', 'SKILL.md');
+    expect(existsSync(skillDest)).toBe(true);
+
+    // Verify sync state tracks the skill for all clients
+    const statePath = join(testDir, '.allagents', 'sync-state.json');
+    const stateContent = JSON.parse(await readFile(statePath, 'utf-8'));
+    expect(stateContent.files.copilot).toContain('.agents/skills/my-skill/');
+    expect(stateContent.files.codex).toContain('.agents/skills/my-skill/');
+    expect(stateContent.files.opencode).toContain('.agents/skills/my-skill/');
+  });
+
+  it('syncs to different paths for mixed universal and unique clients', async () => {
+    // claude uses ~/.claude/skills/, copilot/codex use ~/.agents/skills/
+    const pluginDir = await createLocalPlugin('my-plugin', 'my-skill');
+
+    await writeUserConfig({
+      repositories: [],
+      plugins: [pluginDir],
+      clients: ['claude', 'copilot', 'codex'],
+    });
+
+    const result = await syncUserWorkspace();
+
+    expect(result.success).toBe(true);
+    // Should copy twice: once to ~/.claude/skills/, once to ~/.agents/skills/
+    expect(result.totalCopied).toBe(2);
+
+    // Skill should exist in both locations
+    expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(testDir, '.agents', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+
+    // Verify sync state tracks correctly
+    const statePath = join(testDir, '.allagents', 'sync-state.json');
+    const stateContent = JSON.parse(await readFile(statePath, 'utf-8'));
+    expect(stateContent.files.claude).toContain('.claude/skills/my-skill/');
+    expect(stateContent.files.copilot).toContain('.agents/skills/my-skill/');
+    expect(stateContent.files.codex).toContain('.agents/skills/my-skill/');
+  });
 });

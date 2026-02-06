@@ -46,6 +46,59 @@ import {
 } from './vscode-workspace.js';
 
 /**
+ * Result of deduplicating clients by skillsPath
+ */
+interface DeduplicatedClients {
+  /** Representative client for each unique path (used for copying) */
+  representativeClients: ClientType[];
+  /** Map from representative client to all clients sharing that path */
+  clientGroups: Map<ClientType, ClientType[]>;
+}
+
+/**
+ * Deduplicate clients by their skillsPath to avoid copying skills multiple times
+ * to the same directory when multiple clients share the same path.
+ *
+ * For example, copilot, codex, opencode, gemini, ampcode all use `.agents/skills/`,
+ * so we only need to copy skills once but track files for all these clients.
+ *
+ * @param clients - List of clients to deduplicate
+ * @param clientMappings - Client path mappings to use (defaults to CLIENT_MAPPINGS)
+ * @returns Deduplicated result with representative clients and their groups
+ */
+export function deduplicateClientsByPath(
+  clients: ClientType[],
+  clientMappings: Record<string, ClientMapping> = CLIENT_MAPPINGS,
+): DeduplicatedClients {
+  // Group clients by their skillsPath
+  const pathToClients = new Map<string, ClientType[]>();
+
+  for (const client of clients) {
+    const mapping = clientMappings[client];
+    // Use skillsPath as the grouping key, or a unique key for clients without skillsPath
+    const pathKey = mapping?.skillsPath || `__no_skills_${client}__`;
+
+    const existing = pathToClients.get(pathKey) || [];
+    existing.push(client);
+    pathToClients.set(pathKey, existing);
+  }
+
+  // Build result: use first client in each group as representative
+  const representativeClients: ClientType[] = [];
+  const clientGroups = new Map<ClientType, ClientType[]>();
+
+  for (const clientsInGroup of pathToClients.values()) {
+    const representative = clientsInGroup[0];
+    if (representative) {
+      representativeClients.push(representative);
+      clientGroups.set(representative, clientsInGroup);
+    }
+  }
+
+  return { representativeClients, clientGroups };
+}
+
+/**
  * Result of a sync operation
  */
 export interface SyncResult {
@@ -541,9 +594,15 @@ function validateFileSources(
 
 /**
  * Collect synced file paths from copy results, grouped by client
+ *
+ * When multiple clients share the same skillsPath (e.g., copilot, codex, opencode
+ * all use `.agents/skills/`), the file is tracked for ALL clients that share that path.
+ * This ensures proper cleanup when any of those clients is removed from the config.
+ *
  * @param copyResults - Array of copy results from plugins
  * @param workspacePath - Path to workspace directory
  * @param clients - List of clients to track
+ * @param clientMappings - Optional client path mappings (defaults to CLIENT_MAPPINGS)
  * @returns Per-client file lists
  */
 export function collectSyncedPaths(
@@ -553,6 +612,7 @@ export function collectSyncedPaths(
   clientMappings?: Record<string, ClientMapping>,
 ): Partial<Record<ClientType, string[]>> {
   const result: Partial<Record<ClientType, string[]>> = {};
+  const mappings = clientMappings ?? CLIENT_MAPPINGS;
 
   // Initialize arrays for each client
   for (const client of clients) {
@@ -567,19 +627,20 @@ export function collectSyncedPaths(
     // Get relative path from workspace (normalize to forward slashes for cross-platform consistency)
     const relativePath = relative(workspacePath, copyResult.destination).replace(/\\/g, '/');
 
-    // Determine which client this file belongs to
+    // Track file for ALL clients whose paths match (not just the first one)
+    // This is important when multiple clients share the same skillsPath
     for (const client of clients) {
-      const mapping = clientMappings?.[client] ?? CLIENT_MAPPINGS[client];
+      const mapping = mappings[client];
 
       // Check if this is a skill directory (copy results for skills point to the dir)
-      // e.g., relativePath = '.claude/skills/my-skill', skillsPath = '.claude/skills/'
+      // e.g., relativePath = '.agents/skills/my-skill', skillsPath = '.agents/skills/'
       if (mapping.skillsPath && relativePath.startsWith(mapping.skillsPath)) {
         const skillName = relativePath.slice(mapping.skillsPath.length);
         // If skillName has no '/', this is a skill directory (not a file inside)
         if (!skillName.includes('/')) {
           // Track skill directory with trailing / for efficient rm -rf
           result[client]?.push(`${relativePath}/`);
-          break;
+          continue; // Don't break - check other clients too
         }
       }
 
@@ -593,7 +654,7 @@ export function collectSyncedPaths(
         (mapping.agentFileFallback && relativePath === mapping.agentFileFallback)
       ) {
         result[client]?.push(relativePath);
-        break;
+        // Don't break - continue checking other clients that might share this path
       }
     }
   }
@@ -696,11 +757,17 @@ async function validateAllPlugins(
 
 /**
  * Copy content from a validated plugin to workspace
+ *
+ * Uses deduplication to avoid copying skills multiple times when clients share
+ * the same skillsPath. For example, if copilot, codex, and opencode all use
+ * `.agents/skills/`, skills will only be copied once.
+ *
  * @param validatedPlugin - Already validated plugin with resolved path
  * @param workspacePath - Path to workspace directory
  * @param clients - List of clients to sync for
  * @param dryRun - Simulate without making changes
  * @param skillNameMap - Optional map of skill folder names to resolved names
+ * @param clientMappings - Optional client path mappings (defaults to CLIENT_MAPPINGS)
  * @returns Plugin sync result
  */
 async function copyValidatedPlugin(
@@ -712,13 +779,21 @@ async function copyValidatedPlugin(
   clientMappings?: Record<string, ClientMapping>,
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
+  const mappings = clientMappings ?? CLIENT_MAPPINGS;
 
-  // Copy plugin content for each client
-  for (const client of clients) {
+  // Deduplicate clients by skillsPath to avoid copying skills multiple times
+  // to the same directory when multiple clients share the same path
+  const { representativeClients } = deduplicateClientsByPath(
+    clients as ClientType[],
+    mappings,
+  );
+
+  // Copy plugin content only for representative clients (one per unique path)
+  for (const client of representativeClients) {
     const results = await copyPluginToWorkspace(
       validatedPlugin.resolved,
       workspacePath,
-      client as ClientType,
+      client,
       { dryRun, ...(skillNameMap && { skillNameMap }), ...(clientMappings && { clientMappings }) },
     );
     copyResults.push(...results);
