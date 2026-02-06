@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import simpleGit from 'simple-git';
@@ -785,6 +785,34 @@ export interface ResolvePluginSpecResult {
 }
 
 /**
+ * Refresh a GitHub marketplace by removing it from registry, deleting the
+ * cached directory, and re-adding it (fresh clone).
+ * Unlike removeMarketplace, this does NOT cascade-remove user plugins.
+ */
+async function refreshMarketplace(
+  marketplace: MarketplaceEntry,
+): Promise<MarketplaceResult> {
+  if (marketplace.source.type !== 'github') {
+    return { success: true, marketplace };
+  }
+
+  const { owner, repo, branch } = parseLocation(marketplace.source.location);
+
+  // Remove from registry without cascade
+  const registry = await loadRegistry();
+  delete registry.marketplaces[marketplace.name];
+  await saveRegistry(registry);
+
+  // Delete the cached directory
+  if (existsSync(marketplace.path)) {
+    await rm(marketplace.path, { recursive: true, force: true });
+  }
+
+  // Re-add with original source (will clone fresh)
+  return addMarketplace(`${owner}/${repo}`, marketplace.name, branch);
+}
+
+/**
  * Resolve a plugin@marketplace spec with auto-registration support
  *
  * Auto-registration rules:
@@ -839,11 +867,29 @@ export async function resolvePluginSpecWithAutoRegister(
 
   // Now resolve the plugin within the marketplace
   // Pass the actual marketplace name (may differ from spec if manifest overrode it)
-  const resolved = await resolvePluginSpec(spec, {
+  const resolveOpts = {
     ...(subpath && { subpath }),
     marketplaceNameOverride: marketplace.name,
     ...(options.offline != null && { offline: options.offline }),
-  });
+  };
+
+  let resolved = await resolvePluginSpec(spec, resolveOpts);
+
+  // If not found and online, refresh the marketplace (re-clone) and retry
+  if (!resolved && !options.offline && marketplace.source.type === 'github') {
+    console.log(
+      `Plugin not found in cached marketplace, refreshing '${marketplace.name}'...`,
+    );
+    const refreshResult = await refreshMarketplace(marketplace);
+    if (refreshResult.success && refreshResult.marketplace) {
+      marketplace = refreshResult.marketplace;
+      resolved = await resolvePluginSpec(spec, {
+        ...(subpath && { subpath }),
+        marketplaceNameOverride: marketplace.name,
+      });
+    }
+  }
+
   if (!resolved) {
     return {
       success: false,
