@@ -91,6 +91,7 @@ describe('syncUserWorkspace', () => {
       repositories: [],
       plugins: [pluginDir],
       clients: ['claude'],
+      syncMode: 'copy', // Use copy mode for predictable counts
     });
 
     const result = await syncUserWorkspace();
@@ -113,6 +114,7 @@ describe('syncUserWorkspace', () => {
       repositories: [],
       plugins: [pluginDir],
       clients: ['claude', 'cursor'],
+      syncMode: 'copy', // Use copy mode for predictable counts
     });
 
     const result = await syncUserWorkspace();
@@ -135,6 +137,7 @@ describe('syncUserWorkspace', () => {
       repositories: [],
       plugins: [pluginDir],
       clients: ['claude'],
+      syncMode: 'copy', // Use copy mode for predictable counts
     });
 
     const result1 = await syncUserWorkspace();
@@ -150,6 +153,7 @@ describe('syncUserWorkspace', () => {
       repositories: [],
       plugins: [],
       clients: ['claude'],
+      syncMode: 'copy', // Use copy mode for predictable counts
     });
 
     const result2 = await syncUserWorkspace();
@@ -188,6 +192,7 @@ describe('syncUserWorkspace', () => {
       repositories: [],
       plugins: [pluginDir],
       clients: ['claude'],
+      syncMode: 'copy', // Use copy mode for predictable counts
     });
 
     const result = await syncUserWorkspace({ dryRun: true });

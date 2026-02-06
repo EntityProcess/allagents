@@ -307,7 +307,7 @@ clients:
   it('should purge shared path when all clients using it are removed', async () => {
     const pluginDir = await createPluginWithSkill('my-plugin', 'test-skill');
 
-    // First sync with copilot and codex
+    // First sync with copilot and codex (using copy mode for predictable behavior)
     await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
     await writeFile(
       join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
@@ -318,6 +318,7 @@ plugins:
 clients:
   - copilot
   - codex
+syncMode: copy
 `,
     );
 
@@ -333,6 +334,7 @@ plugins:
   - ${pluginDir}
 clients:
   - claude
+syncMode: copy
 `,
     );
 

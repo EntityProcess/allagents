@@ -70,6 +70,25 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
  * Paths are relative to the user's home directory (~/).
  * Used when plugins are installed with --scope user.
  */
+/**
+ * The canonical skills path used by universal clients.
+ * Skills are copied here first, then symlinked from non-universal client paths.
+ */
+export const CANONICAL_SKILLS_PATH = '.agents/skills/';
+
+/**
+ * Check if a client uses the canonical .agents/skills/ path.
+ * Universal clients don't need symlinks since they read from canonical directly.
+ */
+export function isUniversalClient(client: ClientType): boolean {
+  return CLIENT_MAPPINGS[client].skillsPath === CANONICAL_SKILLS_PATH;
+}
+
+/**
+ * User-level client path mappings for all supported AI clients.
+ * Paths are relative to the user's home directory (~/).
+ * Used when plugins are installed with --scope user.
+ */
 export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   claude: {
     commandsPath: '.claude/commands/',
