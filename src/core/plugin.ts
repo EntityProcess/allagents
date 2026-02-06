@@ -49,8 +49,18 @@ export interface FetchDeps {
   pull?: typeof pull;
 }
 
+// Coalesces concurrent fetches targeting the same cache directory.
+// When multiple callers request the same repo concurrently (e.g. a direct
+// GitHub URL and a marketplace spec both resolving to the same repo), only
+// the first caller performs the git operation; others await its result.
+const inflight = new Map<string, Promise<FetchResult>>();
+
 /**
- * Fetch a plugin from GitHub to local cache
+ * Fetch a plugin from GitHub to local cache.
+ *
+ * Concurrent calls for the same cache path are coalesced into a single git
+ * operation to avoid racing pulls/clones on the same directory.
+ *
  * @param url - GitHub URL of the plugin
  * @param options - Fetch options (force update)
  * @param deps - Optional dependencies for testing
@@ -62,12 +72,6 @@ export async function fetchPlugin(
   deps: FetchDeps = {},
 ): Promise<FetchResult> {
   const { offline = false, branch } = options;
-  const {
-    existsSync: existsSyncFn = existsSync,
-    mkdir: mkdirFn = mkdir,
-    cloneTo: cloneToFn = cloneTo,
-    pull: pullFn = pull,
-  } = deps;
 
   // Validate plugin source
   const validation = validatePluginSource(url);
@@ -93,8 +97,47 @@ export async function fetchPlugin(
   }
 
   const { owner, repo } = parsed;
-  // Use branch-specific cache path if branch is specified
   const cachePath = getPluginCachePath(owner, repo, branch);
+
+  // Coalesce concurrent fetches for the same cache path
+  const existing = inflight.get(cachePath);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = doFetchPlugin(
+    cachePath,
+    owner,
+    repo,
+    offline,
+    branch,
+    deps,
+  );
+  inflight.set(cachePath, promise);
+  try {
+    return await promise;
+  } finally {
+    inflight.delete(cachePath);
+  }
+}
+
+/**
+ * Internal: performs the actual git fetch/pull/clone for a plugin.
+ */
+async function doFetchPlugin(
+  cachePath: string,
+  owner: string,
+  repo: string,
+  offline: boolean,
+  branch: string | undefined,
+  deps: FetchDeps,
+): Promise<FetchResult> {
+  const {
+    existsSync: existsSyncFn = existsSync,
+    mkdir: mkdirFn = mkdir,
+    cloneTo: cloneToFn = cloneTo,
+    pull: pullFn = pull,
+  } = deps;
 
   // Check if plugin is already cached
   const isCached = existsSyncFn(cachePath);
@@ -110,17 +153,19 @@ export async function fetchPlugin(
 
   const repoUrl = gitHubUrl(owner, repo);
 
-  try {
-    if (isCached) {
-      // Default: pull latest changes
+  if (isCached) {
+    // Pull latest changes, but treat failures as non-fatal since the
+    // cached version is still usable (e.g. concurrent pulls on the same
+    // shallow clone can fail with "not something we can merge").
+    try {
       await pullFn(cachePath);
-
-      return {
-        success: true,
-        action: 'updated',
-        cachePath,
-      };
+      return { success: true, action: 'updated', cachePath };
+    } catch {
+      return { success: true, action: 'skipped', cachePath };
     }
+  }
+
+  try {
     // Clone new plugin
     // Ensure parent directory exists
     const parentDir = dirname(cachePath);
