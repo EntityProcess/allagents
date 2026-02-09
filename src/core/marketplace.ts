@@ -966,3 +966,21 @@ export function isPluginSpec(spec: string): boolean {
 export function getWellKnownMarketplaces(): Record<string, string> {
   return { ...WELL_KNOWN_MARKETPLACES };
 }
+
+/**
+ * Get the short git commit hash for a marketplace directory.
+ * Returns null if the marketplace is not a git repo or has no commits.
+ */
+export async function getMarketplaceVersion(marketplacePath: string): Promise<string | null> {
+  if (!existsSync(marketplacePath)) {
+    return null;
+  }
+
+  try {
+    const git = simpleGit(marketplacePath);
+    const log = await git.log({ maxCount: 1, format: { hash: '%h' } });
+    return log.latest?.hash || null;
+  } catch {
+    return null;
+  }
+}
