@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import chalk from 'chalk';
 import { command, positional, option, string, optional } from 'cmd-ts';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import {
@@ -17,7 +20,24 @@ import {
   skillsRemoveMeta,
   skillsAddMeta,
 } from '../metadata/plugin-skills.js';
-import { getHomeDir } from '../../constants.js';
+import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
+
+/**
+ * Check if a directory has a project-level .allagents config
+ */
+function hasProjectConfig(dir: string): boolean {
+  return existsSync(join(dir, CONFIG_DIR, WORKSPACE_CONFIG_FILE));
+}
+
+/**
+ * Determine effective scope when no --scope flag is provided.
+ * Defaults to user scope unless cwd has a project config.
+ */
+function resolveScope(cwd: string): 'user' | 'project' {
+  if (isUserConfigPath(cwd)) return 'user';
+  if (hasProjectConfig(cwd)) return 'project';
+  return 'user';
+}
 
 /**
  * Group skills by plugin for display
@@ -59,18 +79,31 @@ const listCmd = command({
   },
   handler: async ({ scope }) => {
     try {
-      const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
-      const workspacePath = isUser ? getHomeDir() : process.cwd();
+      const cwd = process.cwd();
+      const inProjectDir = !isUserConfigPath(cwd) && hasProjectConfig(cwd);
 
-      const skills = await getAllSkillsFromPlugins(workspacePath);
+      // Resolve which scopes to display
+      const showUser = scope !== 'project';
+      const showProject = scope === 'project' || (!scope && inProjectDir);
+
+      const userSkills = showUser ? await getAllSkillsFromPlugins(getHomeDir()) : [];
+      const projectSkills = showProject ? await getAllSkillsFromPlugins(cwd) : [];
+
+      // For dedup: if same plugin:skill exists in both, only show in user
+      const userKeys = new Set(userSkills.map((s) => `${s.pluginName}:${s.name}`));
+      const dedupedProjectSkills = projectSkills.filter(
+        (s) => !userKeys.has(`${s.pluginName}:${s.name}`),
+      );
 
       if (isJsonMode()) {
+        const effectiveScope = scope === 'user' ? 'user' : scope === 'project' ? 'project' : 'all';
+        const allSkills = [...userSkills, ...dedupedProjectSkills];
         jsonOutput({
           success: true,
           command: 'plugin skills list',
           data: {
-            scope: isUser ? 'user' : 'project',
-            skills: skills.map((s) => ({
+            scope: effectiveScope,
+            skills: allSkills.map((s) => ({
               name: s.name,
               plugin: s.pluginName,
               disabled: s.disabled,
@@ -80,20 +113,37 @@ const listCmd = command({
         return;
       }
 
-      if (skills.length === 0) {
+      if (userSkills.length === 0 && dedupedProjectSkills.length === 0) {
         console.log('No skills found. Install a plugin first with:');
         console.log('  allagents plugin install <plugin>');
         return;
       }
 
-      const grouped = groupSkillsByPlugin(skills);
+      // Display user skills
+      if (userSkills.length > 0 && scope !== 'project') {
+        console.log(`\n${chalk.whiteBright('User Skills:')}`);
+        const grouped = groupSkillsByPlugin(userSkills);
+        for (const [pluginName, data] of grouped) {
+          console.log(`\n${chalk.hex("#89b4fa")(pluginName)} (${data.source}):`);
+          for (const skill of data.skills) {
+            const icon = skill.disabled ? '\u2717' : '\u2713';
+            const status = skill.disabled ? ' (disabled)' : '';
+            console.log(`  ${icon} ${skill.name}${status}`);
+          }
+        }
+      }
 
-      for (const [pluginName, data] of grouped) {
-        console.log(`\n${pluginName} (${data.source}):`);
-        for (const skill of data.skills) {
-          const icon = skill.disabled ? '\u2717' : '\u2713';
-          const status = skill.disabled ? ' (disabled)' : '';
-          console.log(`  ${icon} ${skill.name}${status}`);
+      // Display project skills
+      if (dedupedProjectSkills.length > 0) {
+        console.log(`\n${chalk.whiteBright('Project Skills:')}`);
+        const grouped = groupSkillsByPlugin(dedupedProjectSkills);
+        for (const [pluginName, data] of grouped) {
+          console.log(`\n${chalk.hex("#89b4fa")(pluginName)} (${data.source}):`);
+          for (const skill of data.skills) {
+            const icon = skill.disabled ? '\u2717' : '\u2713';
+            const status = skill.disabled ? ' (disabled)' : '';
+            console.log(`  ${icon} ${skill.name}${status}`);
+          }
         }
       }
       console.log();
@@ -135,7 +185,7 @@ const removeCmd = command({
   },
   handler: async ({ skill, scope, plugin }) => {
     try {
-      const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
+      const isUser = scope === 'user' || (!scope && resolveScope(process.cwd()) === 'user');
       const workspacePath = isUser ? getHomeDir() : process.cwd();
 
       // Find the skill
@@ -273,7 +323,7 @@ const addCmd = command({
   },
   handler: async ({ skill, scope, plugin }) => {
     try {
-      const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
+      const isUser = scope === 'user' || (!scope && resolveScope(process.cwd()) === 'user');
       const workspacePath = isUser ? getHomeDir() : process.cwd();
 
       // Find the skill
