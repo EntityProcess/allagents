@@ -367,7 +367,7 @@ export async function removeUserDisabledSkill(skillKey: string): Promise<ModifyR
 
     config.disabledSkills = disabledSkills.filter((s) => s !== skillKey);
     if (config.disabledSkills.length === 0) {
-      delete config.disabledSkills;
+      config.disabledSkills = undefined;
     }
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };

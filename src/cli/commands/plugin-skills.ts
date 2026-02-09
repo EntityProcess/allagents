@@ -154,7 +154,11 @@ const removeCmd = command({
       }
 
       // Handle ambiguity
-      let targetSkill = matches[0]!;
+      let targetSkill = matches[0];
+      if (!targetSkill) {
+        // This should never happen since we checked matches.length === 0 above
+        throw new Error('Unexpected empty matches array');
+      }
       if (matches.length > 1) {
         if (!plugin) {
           const pluginList = matches.map((m) => `  - ${m.pluginName} (${m.pluginSource})`).join('\n');
@@ -288,7 +292,11 @@ const addCmd = command({
       }
 
       // Handle ambiguity
-      let targetSkill = matches[0]!;
+      let targetSkill = matches[0];
+      if (!targetSkill) {
+        // This should never happen since we checked matches.length === 0 above
+        throw new Error('Unexpected empty matches array');
+      }
       if (matches.length > 1) {
         if (!plugin) {
           const pluginList = matches.map((m) => `  - ${m.pluginName} (${m.pluginSource})`).join('\n');

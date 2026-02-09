@@ -384,7 +384,7 @@ export async function removeDisabledSkill(
     config.disabledSkills = disabledSkills.filter((s) => s !== skillKey);
     // Remove empty array from config
     if (config.disabledSkills.length === 0) {
-      delete config.disabledSkills;
+      config.disabledSkills = undefined;
     }
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
