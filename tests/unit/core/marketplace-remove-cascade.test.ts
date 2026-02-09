@@ -126,4 +126,25 @@ describe('removeMarketplace cascade', () => {
     expect(result.success).toBe(true);
     expect(result.removedUserPlugins).toEqual([]);
   });
+
+  it('should delete the marketplace directory when it exists', async () => {
+    const marketplacePath = join(testDir, '.allagents', 'plugins', 'marketplaces', 'my-marketplace');
+    await mkdir(marketplacePath, { recursive: true });
+    await writeFile(join(marketplacePath, 'manifest.yaml'), 'name: my-marketplace', 'utf-8');
+
+    await writeRegistry({
+      'my-marketplace': {
+        name: 'my-marketplace',
+        source: { type: 'github', location: 'owner/repo' },
+        path: marketplacePath,
+      },
+    });
+
+    const { existsSync } = await import('node:fs');
+    expect(existsSync(marketplacePath)).toBe(true);
+
+    const result = await removeMarketplace('my-marketplace');
+    expect(result.success).toBe(true);
+    expect(existsSync(marketplacePath)).toBe(false);
+  });
 });
