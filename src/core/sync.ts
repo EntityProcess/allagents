@@ -33,6 +33,7 @@ import {
 import {
   isPluginSpec,
   resolvePluginSpecWithAutoRegister,
+  ensureMarketplacesRegistered,
 } from './marketplace.js';
 import {
   loadSyncState,
@@ -1095,6 +1096,9 @@ export async function syncWorkspace(
     }
   }
 
+  // Step 0: Pre-register unique marketplaces to avoid race conditions during parallel validation
+  await ensureMarketplacesRegistered(config.plugins);
+
   // Step 1: Validate all plugins before any destructive action
   const validatedPlugins = await validateAllPlugins(
     config.plugins,
@@ -1388,6 +1392,9 @@ export async function syncUserWorkspace(
 
   const clients = config.clients;
   const { offline = false, dryRun = false } = options;
+
+  // Pre-register unique marketplaces to avoid race conditions during parallel validation
+  await ensureMarketplacesRegistered(config.plugins);
 
   // Validate all plugins
   const validatedPlugins = await validateAllPlugins(config.plugins, homeDir, offline);

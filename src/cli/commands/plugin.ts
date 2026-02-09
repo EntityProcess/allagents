@@ -5,7 +5,6 @@ import {
   removeMarketplace,
   updateMarketplace,
   listMarketplacePlugins,
-  getWellKnownMarketplaces,
   getMarketplaceVersion,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
@@ -213,11 +212,9 @@ const marketplaceListCmd = command({
         console.log('No marketplaces registered.\n');
         console.log('Add a marketplace with:');
         console.log('  allagents plugin marketplace add <source>\n');
-        console.log('Well-known marketplaces:');
-        const wellKnown = getWellKnownMarketplaces();
-        for (const [name, repo] of Object.entries(wellKnown)) {
-          console.log(`  ${name} \u2192 ${repo}`);
-        }
+        console.log('Examples:');
+        console.log('  allagents plugin marketplace add owner/repo');
+        console.log('  allagents plugin marketplace add https://github.com/owner/repo');
         return;
       }
 
