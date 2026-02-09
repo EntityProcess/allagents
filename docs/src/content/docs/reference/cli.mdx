@@ -93,8 +93,43 @@ The check runs at most once every 24 hours and never blocks startup. Results are
 ```bash
 allagents plugin list [marketplace]
 allagents plugin validate <path>
+allagents plugin install <plugin> [--scope <scope>]
+allagents plugin uninstall <plugin> [--scope <scope>]
 allagents plugin marketplace add <source> [--name <name>] [--branch <branch>]
 allagents plugin marketplace list
 allagents plugin marketplace remove <name>
 allagents plugin marketplace update [name]
+allagents plugin skills list [--scope <scope>]
+allagents plugin skills remove <skill> [--plugin <plugin>] [--scope <scope>]
+allagents plugin skills add <skill> [--plugin <plugin>] [--scope <scope>]
 ```
+
+### plugin skills list
+
+List all skills from installed plugins with their enabled/disabled status.
+
+| Flag | Description |
+|------|-------------|
+| `-s, --scope <scope>` | Scope: `project` (default) or `user` |
+
+### plugin skills remove
+
+Disable a skill, preventing it from being synced to the workspace.
+
+| Flag | Description |
+|------|-------------|
+| `-p, --plugin <plugin>` | Plugin name (required if skill exists in multiple plugins) |
+| `-s, --scope <scope>` | Scope: `project` (default) or `user` |
+
+After disabling, the skill is added to `disabledSkills` in workspace.yaml and sync is run to remove it.
+
+### plugin skills add
+
+Re-enable a previously disabled skill.
+
+| Flag | Description |
+|------|-------------|
+| `-p, --plugin <plugin>` | Plugin name (required if skill exists in multiple plugins) |
+| `-s, --scope <scope>` | Scope: `project` (default) or `user` |
+
+After enabling, the skill is removed from `disabledSkills` and sync is run to restore it.

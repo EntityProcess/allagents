@@ -33,7 +33,27 @@ clients:
   - claude
   - copilot
   - cursor
+
+# Disabled skills (optional)
+disabledSkills:
+  - superpowers:brainstorming
+  - my-plugin:verbose-logging
 ```
+
+### Disabled Skills
+
+The `disabledSkills` array lists skills that should be excluded from sync. Each entry uses the format `plugin:skill` where `plugin` is the plugin name and `skill` is the skill folder name.
+
+```yaml
+disabledSkills:
+  - superpowers:brainstorming    # Disable brainstorming from superpowers plugin
+  - my-plugin:verbose-logging    # Disable verbose-logging from my-plugin
+```
+
+Disabled skills are managed via the CLI:
+- `allagents plugin skills remove <skill>` - Add to disabledSkills
+- `allagents plugin skills add <skill>` - Remove from disabledSkills
+- `allagents plugin skills list` - View all skills with status
 
 ### Workspace File Sync
 
