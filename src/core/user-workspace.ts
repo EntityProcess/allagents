@@ -302,7 +302,7 @@ async function addPluginToUserConfig(
 
     config.plugins.push(plugin);
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
-    return { success: true, ...(autoRegistered && { autoRegistered }) };
+    return { success: true, ...(autoRegistered && { autoRegistered }), normalizedPlugin: plugin };
   } catch (error) {
     return {
       success: false,

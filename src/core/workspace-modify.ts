@@ -29,6 +29,7 @@ export interface ModifyResult {
   success: boolean;
   error?: string;
   autoRegistered?: string; // marketplace name if auto-registered
+  normalizedPlugin?: string; // plugin spec after normalization (e.g., plugin@manifest-name)
 }
 
 /**
@@ -190,6 +191,7 @@ async function addPluginToConfig(
     return {
       success: true,
       ...(autoRegistered && { autoRegistered }),
+      normalizedPlugin: plugin,
     };
   } catch (error) {
     return {

@@ -506,13 +506,33 @@ const pluginListCmd = command({
       const projectPlugins = await getInstalledProjectPlugins(process.cwd());
       const installedMap = new Map<string, InstalledPluginInfo>();
 
-      // Build lookup map: key is "plugin@marketplace"
+      // Build reverse lookup: repo name -> marketplace name
+      // This handles the case where plugins are stored as "plugin@owner/repo"
+      // but the marketplace is registered with a different name (from manifest)
+      const repoToMarketplace = new Map<string, string>();
+      for (const mp of marketplaces) {
+        if (mp.source.type === 'github') {
+          const parts = mp.source.location.split('/');
+          if (parts.length >= 2 && parts[1]) {
+            repoToMarketplace.set(parts[1], mp.name);
+          }
+        }
+      }
+
+      // Helper to resolve marketplace name
+      const resolveMarketplaceName = (name: string): string => {
+        return repoToMarketplace.get(name) ?? name;
+      };
+
+      // Build lookup map: key is "plugin@marketplace" using resolved names
       for (const p of userPlugins) {
-        installedMap.set(`${p.name}@${p.marketplace}`, p);
+        const mpName = resolveMarketplaceName(p.marketplace);
+        installedMap.set(`${p.name}@${mpName}`, p);
       }
       // Project scope overrides user scope if same plugin is in both
       for (const p of projectPlugins) {
-        installedMap.set(`${p.name}@${p.marketplace}`, p);
+        const mpName = resolveMarketplaceName(p.marketplace);
+        installedMap.set(`${p.name}@${mpName}`, p);
       }
 
       // Get version (commit hash) for each marketplace
@@ -694,11 +714,12 @@ const pluginInstallCmd = command({
         const { ok, syncData } = isUser
           ? await runUserSyncAndPrint()
           : await runSyncAndPrint();
+        const displayPlugin = result.normalizedPlugin ?? plugin;
         jsonOutput({
           success: ok,
           command: 'plugin install',
           data: {
-            plugin,
+            plugin: displayPlugin,
             scope: isUser ? 'user' : 'project',
             autoRegistered: result.autoRegistered ?? null,
             syncResult: syncData,
@@ -711,10 +732,11 @@ const pluginInstallCmd = command({
         return;
       }
 
+      const displayPlugin = result.normalizedPlugin ?? plugin;
       if (result.autoRegistered) {
         console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
       }
-      console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${plugin}`);
+      console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${displayPlugin}`);
 
       const { ok: syncOk } = isUser
         ? await runUserSyncAndPrint()
