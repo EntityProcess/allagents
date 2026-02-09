@@ -858,6 +858,7 @@ export async function resolvePluginSpecWithAutoRegister(
   // Check if marketplace is already registered (by name, then by source location)
   const sourceLocation = owner && repo ? `${owner}/${repo}` : undefined;
   let marketplace = await findMarketplace(marketplaceName, sourceLocation);
+  let didAutoRegister = false;
 
   // If not registered, try auto-registration
   if (!marketplace) {
@@ -870,6 +871,7 @@ export async function resolvePluginSpecWithAutoRegister(
       };
     }
     marketplace = await getMarketplace(autoRegResult.name ?? marketplaceName);
+    didAutoRegister = true;
   }
 
   if (!marketplace) {
@@ -914,11 +916,15 @@ export async function resolvePluginSpecWithAutoRegister(
     };
   }
 
+  // Return registeredAs when we auto-registered OR when the canonical name differs
+  const shouldReturnRegisteredAs =
+    didAutoRegister || marketplace.name !== marketplaceName;
+
   return {
     success: true,
     path: resolved.path,
     pluginName: resolved.plugin,
-    ...(marketplace.name !== marketplaceName && { registeredAs: marketplace.name }),
+    ...(shouldReturnRegisteredAs && { registeredAs: marketplace.name }),
   };
 }
 
