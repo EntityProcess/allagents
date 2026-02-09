@@ -714,11 +714,12 @@ const pluginInstallCmd = command({
         const { ok, syncData } = isUser
           ? await runUserSyncAndPrint()
           : await runSyncAndPrint();
+        const displayPlugin = result.normalizedPlugin ?? plugin;
         jsonOutput({
           success: ok,
           command: 'plugin install',
           data: {
-            plugin,
+            plugin: displayPlugin,
             scope: isUser ? 'user' : 'project',
             autoRegistered: result.autoRegistered ?? null,
             syncResult: syncData,
@@ -731,10 +732,11 @@ const pluginInstallCmd = command({
         return;
       }
 
+      const displayPlugin = result.normalizedPlugin ?? plugin;
       if (result.autoRegistered) {
         console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
       }
-      console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${plugin}`);
+      console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${displayPlugin}`);
 
       const { ok: syncOk } = isUser
         ? await runUserSyncAndPrint()
