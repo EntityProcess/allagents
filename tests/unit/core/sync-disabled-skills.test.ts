@@ -1,0 +1,71 @@
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { dump } from 'js-yaml';
+import { syncWorkspace } from '../../../src/core/sync.js';
+
+describe('sync with disabled skills', () => {
+  let tmpDir: string;
+  let pluginDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'allagents-sync-skills-test-'));
+    pluginDir = join(tmpDir, 'test-plugin');
+
+    // Create a mock plugin with skills
+    await mkdir(join(pluginDir, 'skills/skill-a'), { recursive: true });
+    await mkdir(join(pluginDir, 'skills/skill-b'), { recursive: true });
+    await writeFile(join(pluginDir, 'skills/skill-a/SKILL.md'), `---
+name: skill-a
+description: Test skill A
+---
+# Skill A
+`);
+    await writeFile(join(pluginDir, 'skills/skill-b/SKILL.md'), `---
+name: skill-b
+description: Test skill B
+---
+# Skill B
+`);
+    await writeFile(join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'test-plugin' }));
+
+    await mkdir(join(tmpDir, '.allagents'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('excludes disabled skills from sync', async () => {
+    const config = {
+      repositories: [],
+      plugins: [pluginDir],
+      clients: ['claude'],
+      disabledSkills: ['test-plugin:skill-a'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    await syncWorkspace(tmpDir);
+
+    // skill-a should NOT be synced (disabled)
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-a'))).toBe(false);
+    // skill-b should be synced
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-b'))).toBe(true);
+  });
+
+  it('syncs all skills when none disabled', async () => {
+    const config = {
+      repositories: [],
+      plugins: [pluginDir],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    await syncWorkspace(tmpDir);
+
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-a'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-b'))).toBe(true);
+  });
+});

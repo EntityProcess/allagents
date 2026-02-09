@@ -916,16 +916,23 @@ interface CollectedSkillEntry {
  * Collect all skills from all validated plugins
  * This is the first pass of two-pass name resolution
  * @param validatedPlugins - Array of validated plugins with resolved paths
+ * @param disabledSkills - Optional set of disabled skill keys
  * @returns Array of collected skill entries
  */
 async function collectAllSkills(
   validatedPlugins: ValidatedPlugin[],
+  disabledSkills?: Set<string>,
 ): Promise<CollectedSkillEntry[]> {
   const allSkills: CollectedSkillEntry[] = [];
 
   for (const plugin of validatedPlugins) {
     const pluginName = plugin.pluginName ?? await getPluginName(plugin.resolved);
-    const skills = await collectPluginSkills(plugin.resolved, plugin.plugin);
+    const skills = await collectPluginSkills(
+      plugin.resolved,
+      plugin.plugin,
+      disabledSkills,
+      pluginName,
+    );
 
     for (const skill of skills) {
       allSkills.push({
@@ -1169,8 +1176,9 @@ export async function syncWorkspace(
   }
 
   // Step 3b: Two-pass skill name resolution
-  // Pass 1: Collect all skills from all plugins
-  const allSkills = await collectAllSkills(validPlugins);
+  // Pass 1: Collect all skills from all plugins (excluding disabled skills)
+  const disabledSkillsSet = new Set(config.disabledSkills ?? []);
+  const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet);
 
   // Build per-plugin skill name maps (handles conflicts automatically)
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
@@ -1419,8 +1427,9 @@ export async function syncUserWorkspace(
     await selectivePurgeWorkspace(homeDir, previousState, clients);
   }
 
-  // Two-pass skill name resolution
-  const allSkills = await collectAllSkills(validPlugins);
+  // Two-pass skill name resolution (excluding disabled skills)
+  const disabledSkillsSet = new Set(config.disabledSkills ?? []);
+  const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet);
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
 
   // Copy plugins using USER_CLIENT_MAPPINGS
