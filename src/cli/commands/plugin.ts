@@ -646,6 +646,9 @@ const pluginListCmd = command({
 
       // Print available plugins
       if (availablePlugins.length > 0) {
+        if (installedPlugins.length > 0) {
+          console.log(); // Extra spacing between sections
+        }
         console.log('Available plugins:\n');
         for (const entry of availablePlugins) {
           console.log(`  ❯ ${entry.name}@${entry.marketplace}`);
