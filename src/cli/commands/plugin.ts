@@ -639,21 +639,16 @@ const pluginListCmd = command({
         for (const entry of installedPlugins) {
           console.log(`  ❯ ${entry.name}@${entry.marketplace}`);
           console.log(`    Version: ${entry.version ?? 'unknown'}`);
-          console.log(`    Scope: ${entry.installed?.scope}`);
-          console.log();
+          console.log(`    Scope: ${entry.installed?.scope}\n`);
         }
       }
 
       // Print available plugins
       if (availablePlugins.length > 0) {
-        if (installedPlugins.length > 0) {
-          console.log(); // Extra spacing between sections
-        }
         console.log('Available plugins:\n');
         for (const entry of availablePlugins) {
           console.log(`  ❯ ${entry.name}@${entry.marketplace}`);
-          console.log(`    Version: ${entry.version ?? 'unknown'}`);
-          console.log();
+          console.log(`    Version: ${entry.version ?? 'unknown'}\n`);
         }
       }
     } catch (error) {
