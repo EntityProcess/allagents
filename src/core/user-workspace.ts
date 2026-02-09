@@ -20,10 +20,13 @@ import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.j
 import type { ModifyResult } from './workspace-modify.js';
 
 /**
- * All supported client types for user-scope installations.
+ * Default clients for user-scope installations.
+ * Note: 'claude' is excluded because user-scope plugins should not modify
+ * project-level Claude config. Claude is only included for project-scoped
+ * (.allagents) installations.
  */
-const ALL_CLIENTS: ClientType[] = [
-  'claude', 'copilot', 'codex', 'cursor', 'opencode', 'gemini', 'factory', 'ampcode',
+const DEFAULT_USER_CLIENTS: ClientType[] = [
+  'copilot', 'codex', 'cursor', 'opencode', 'gemini', 'factory', 'ampcode',
 ];
 
 /**
@@ -56,7 +59,7 @@ export async function ensureUserWorkspace(): Promise<void> {
   const defaultConfig: WorkspaceConfig = {
     repositories: [],
     plugins: [],
-    clients: [...ALL_CLIENTS],
+    clients: [...DEFAULT_USER_CLIENTS],
   };
 
   await mkdir(getAllagentsDir(), { recursive: true });
