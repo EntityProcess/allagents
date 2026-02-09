@@ -5,6 +5,7 @@ bun.lockb
 # Build output
 dist/
 *.tsbuildinfo
+docs/.astro/
 
 # Test coverage
 coverage/
