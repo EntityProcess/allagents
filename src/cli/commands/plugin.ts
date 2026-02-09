@@ -623,25 +623,33 @@ const pluginListCmd = command({
         return;
       }
 
-      console.log('Installed plugins:\n');
+      // Separate plugins into installed and available
+      const installedPlugins = allPluginEntries.filter((e) => e.installed && !e.warning);
+      const availablePlugins = allPluginEntries.filter((e) => !e.installed && !e.warning);
+      const warnings = allPluginEntries.filter((e) => e.warning);
 
-      for (const entry of allPluginEntries) {
-        if (entry.warning) {
-          console.log(`  Warning: ${entry.warning}`);
-          continue;
+      // Print warnings first
+      for (const entry of warnings) {
+        console.log(`  Warning: ${entry.warning}`);
+      }
+
+      // Print installed plugins
+      if (installedPlugins.length > 0) {
+        console.log('Installed plugins:\n');
+        for (const entry of installedPlugins) {
+          console.log(`  ❯ ${entry.name}@${entry.marketplace}`);
+          console.log(`    Version: ${entry.version ?? 'unknown'}`);
+          console.log(`    Scope: ${entry.installed?.scope}\n`);
         }
+      }
 
-        const isEnabled = !!entry.installed;
-        const statusIcon = isEnabled ? '\u2713' : '\u2717';
-        const statusText = isEnabled ? 'enabled' : 'disabled';
-
-        console.log(`  \u276F ${entry.name}@${entry.marketplace}`);
-        console.log(`    Version: ${entry.version ?? 'unknown'}`);
-        if (entry.installed) {
-          console.log(`    Scope: ${entry.installed.scope}`);
+      // Print available plugins
+      if (availablePlugins.length > 0) {
+        console.log('Available plugins:\n');
+        for (const entry of availablePlugins) {
+          console.log(`  ❯ ${entry.name}@${entry.marketplace}`);
+          console.log(`    Version: ${entry.version ?? 'unknown'}\n`);
         }
-        console.log(`    Status: ${statusIcon} ${statusText}`);
-        console.log();
       }
     } catch (error) {
       if (error instanceof Error) {
