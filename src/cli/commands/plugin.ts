@@ -6,10 +6,19 @@ import {
   updateMarketplace,
   listMarketplacePlugins,
   getWellKnownMarketplaces,
+  getMarketplaceVersion,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { addPlugin, removePlugin, hasPlugin } from '../../core/workspace-modify.js';
-import { addUserPlugin, removeUserPlugin, hasUserPlugin, isUserConfigPath } from '../../core/user-workspace.js';
+import {
+  addUserPlugin,
+  removeUserPlugin,
+  hasUserPlugin,
+  isUserConfigPath,
+  getInstalledUserPlugins,
+  getInstalledProjectPlugins,
+  type InstalledPluginInfo,
+} from '../../core/user-workspace.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import {
@@ -495,13 +504,49 @@ const pluginListCmd = command({
         process.exit(1);
       }
 
+      // Get installed plugins for status/scope lookup
+      const userPlugins = await getInstalledUserPlugins();
+      const projectPlugins = await getInstalledProjectPlugins(process.cwd());
+      const installedMap = new Map<string, InstalledPluginInfo>();
+
+      // Build lookup map: key is "plugin@marketplace"
+      for (const p of userPlugins) {
+        installedMap.set(`${p.name}@${p.marketplace}`, p);
+      }
+      // Project scope overrides user scope if same plugin is in both
+      for (const p of projectPlugins) {
+        installedMap.set(`${p.name}@${p.marketplace}`, p);
+      }
+
+      // Get version (commit hash) for each marketplace
+      const versionMap = new Map<string, string | null>();
+      for (const mp of toList) {
+        const version = await getMarketplaceVersion(mp.path);
+        versionMap.set(mp.name, version);
+      }
+
       if (isJsonMode()) {
-        const allPlugins: Array<{ name: string; marketplace: string }> = [];
+        const allPlugins: Array<{
+          name: string;
+          marketplace: string;
+          version: string | null;
+          scope: string | null;
+          enabled: boolean;
+        }> = [];
         const allWarnings: string[] = [];
         for (const mp of toList) {
           const result = await listMarketplacePlugins(mp.name);
+          const version = versionMap.get(mp.name) ?? null;
           for (const plugin of result.plugins) {
-            allPlugins.push({ name: plugin.name, marketplace: mp.name });
+            const key = `${plugin.name}@${mp.name}`;
+            const installed = installedMap.get(key);
+            allPlugins.push({
+              name: plugin.name,
+              marketplace: mp.name,
+              version,
+              scope: installed?.scope ?? null,
+              enabled: !!installed,
+            });
           }
           for (const warning of result.warnings) {
             allWarnings.push(`${mp.name}: ${warning}`);
@@ -519,34 +564,67 @@ const pluginListCmd = command({
         return;
       }
 
+      // Text output matching Claude's format
       let totalPlugins = 0;
+      const allPluginEntries: Array<{
+        name: string;
+        marketplace: string;
+        version: string | null;
+        installed: InstalledPluginInfo | undefined;
+        warning?: string;
+      }> = [];
 
       for (const mp of toList) {
         const result = await listMarketplacePlugins(mp.name);
+        const version = versionMap.get(mp.name) ?? null;
 
-        if (result.plugins.length === 0 && result.warnings.length === 0) {
-          console.log(`${mp.name}: (no plugins found)`);
-          continue;
-        }
-
-        console.log(`${mp.name}:`);
         for (const warning of result.warnings) {
-          console.log(`  Warning: ${warning}`);
+          allPluginEntries.push({
+            name: '',
+            marketplace: mp.name,
+            version,
+            installed: undefined,
+            warning,
+          });
         }
-        if (result.plugins.length === 0) {
-          console.log('  (no plugins found)');
-        }
+
         for (const plugin of result.plugins) {
-          console.log(`  - ${plugin.name}@${mp.name}`);
+          const key = `${plugin.name}@${mp.name}`;
+          const installed = installedMap.get(key);
+          allPluginEntries.push({
+            name: plugin.name,
+            marketplace: mp.name,
+            version,
+            installed,
+          });
           totalPlugins++;
         }
-        console.log();
       }
 
       if (totalPlugins === 0) {
         console.log('No plugins found in registered marketplaces.');
-      } else {
-        console.log(`Total: ${totalPlugins} plugin(s)`);
+        return;
+      }
+
+      console.log('Installed plugins:\n');
+
+      for (const entry of allPluginEntries) {
+        if (entry.warning) {
+          console.log(`  Warning: ${entry.warning}`);
+          continue;
+        }
+
+        const isEnabled = !!entry.installed;
+        const statusIcon = isEnabled ? '\u2713' : '\u2717';
+        const statusText = isEnabled ? 'enabled' : 'disabled';
+
+        console.log(`  \u276F ${entry.name}@${entry.marketplace}`);
+        console.log(`    Version: ${entry.version ?? 'unknown'}`);
+        if (entry.installed) {
+          console.log(`    Scope: ${entry.installed.scope}`);
+        }
+        console.log(`    Status: ${statusIcon} ${statusText}`);
+        console.log();
       }
     } catch (error) {
       if (error instanceof Error) {

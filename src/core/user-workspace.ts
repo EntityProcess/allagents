@@ -310,3 +310,78 @@ async function addPluginToUserConfig(
     };
   }
 }
+
+/**
+ * Scope where a plugin is installed
+ */
+export type PluginScope = 'user' | 'project';
+
+/**
+ * Information about an installed plugin
+ */
+export interface InstalledPluginInfo {
+  /** Full plugin spec (e.g., "plugin@marketplace") */
+  spec: string;
+  /** Plugin name */
+  name: string;
+  /** Marketplace name */
+  marketplace: string;
+  /** Installation scope */
+  scope: PluginScope;
+}
+
+/**
+ * Get all installed plugins from user workspace config.
+ * Only returns plugin@marketplace format plugins.
+ */
+export async function getInstalledUserPlugins(): Promise<InstalledPluginInfo[]> {
+  const config = await getUserWorkspaceConfig();
+  if (!config) return [];
+
+  const result: InstalledPluginInfo[] = [];
+  for (const plugin of config.plugins) {
+    const parsed = parsePluginSpec(plugin);
+    if (parsed) {
+      result.push({
+        spec: plugin,
+        name: parsed.plugin,
+        marketplace: parsed.marketplaceName,
+        scope: 'user',
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * Get all installed plugins from project workspace config.
+ * Only returns plugin@marketplace format plugins.
+ */
+export async function getInstalledProjectPlugins(
+  workspacePath: string,
+): Promise<InstalledPluginInfo[]> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) return [];
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    if (!config?.plugins) return [];
+
+    const result: InstalledPluginInfo[] = [];
+    for (const plugin of config.plugins) {
+      const parsed = parsePluginSpec(plugin);
+      if (parsed) {
+        result.push({
+          spec: plugin,
+          name: parsed.plugin,
+          marketplace: parsed.marketplaceName,
+          scope: 'project',
+        });
+      }
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
