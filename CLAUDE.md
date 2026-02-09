@@ -85,3 +85,16 @@ When creating a git worktree, place it in a **sibling folder** using the naming 
 git worktree add ../allagents_docs-update docs/update-readme
 git worktree add ../allagents_feat-new-feature feat/new-feature
 ```
+
+## Troubleshooting
+
+### agent-browser
+
+If `agent-browser open` fails with "Missing X server or $DISPLAY" errors on Linux, the installed version may be outdated. Update to the latest version:
+
+```bash
+sudo npm update -g agent-browser
+agent-browser --version  # Verify update
+```
+
+The browser runs in headless mode by default and should not require X11.
