@@ -312,6 +312,74 @@ async function addPluginToUserConfig(
 }
 
 /**
+ * Get disabled skills from user workspace config
+ * @returns Array of disabled skill keys (plugin:skill format)
+ */
+export async function getUserDisabledSkills(): Promise<string[]> {
+  const config = await getUserWorkspaceConfig();
+  return config?.disabledSkills ?? [];
+}
+
+/**
+ * Add a skill to disabledSkills in user workspace config
+ * @param skillKey - Skill key in plugin:skill format
+ */
+export async function addUserDisabledSkill(skillKey: string): Promise<ModifyResult> {
+  await ensureUserWorkspace();
+  const configPath = getUserWorkspaceConfigPath();
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const disabledSkills = config.disabledSkills ?? [];
+
+    if (disabledSkills.includes(skillKey)) {
+      return { success: false, error: `Skill '${skillKey}' is already disabled` };
+    }
+
+    config.disabledSkills = [...disabledSkills, skillKey];
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Remove a skill from disabledSkills in user workspace config
+ * @param skillKey - Skill key in plugin:skill format
+ */
+export async function removeUserDisabledSkill(skillKey: string): Promise<ModifyResult> {
+  await ensureUserWorkspace();
+  const configPath = getUserWorkspaceConfigPath();
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const disabledSkills = config.disabledSkills ?? [];
+
+    if (!disabledSkills.includes(skillKey)) {
+      return { success: false, error: `Skill '${skillKey}' is already enabled` };
+    }
+
+    config.disabledSkills = disabledSkills.filter((s) => s !== skillKey);
+    if (config.disabledSkills.length === 0) {
+      delete config.disabledSkills;
+    }
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
  * Scope where a plugin is installed
  */
 export type PluginScope = 'user' | 'project';
