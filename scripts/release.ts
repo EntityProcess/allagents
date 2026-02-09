@@ -22,9 +22,12 @@ async function main() {
     process.exit(1);
   }
 
-  // Ensure working directory is clean
+  // Ensure working directory is clean (ignore untracked files)
   const status = (await $`git status --porcelain`.text()).trim();
-  if (status) {
+  const trackedChanges = status
+    .split("\n")
+    .filter((line) => line && !line.startsWith("??"));
+  if (trackedChanges.length > 0) {
     console.error("Error: Working directory has uncommitted changes");
     console.error("Please commit or stash changes before releasing");
     process.exit(1);
