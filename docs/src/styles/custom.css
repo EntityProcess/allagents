@@ -1,13 +1,39 @@
+/* Force dark mode */
 :root {
   --sl-color-accent: 99, 102, 241;
   --sl-color-accent-low: 30, 27, 75;
   --sl-color-accent-high: 199, 210, 254;
+  color-scheme: dark;
 }
 
+/* Hide theme toggle */
+starlight-theme-select {
+  display: none;
+}
+
+/* Override light theme to use dark colors */
 :root[data-theme='light'] {
-  --sl-color-accent: 79, 70, 229;
-  --sl-color-accent-low: 224, 231, 255;
-  --sl-color-accent-high: 49, 46, 129;
+  --sl-color-bg: #0f1117;
+  --sl-color-bg-nav: #0f1117;
+  --sl-color-bg-sidebar: #0f1117;
+  --sl-color-bg-inline-code: rgba(255, 255, 255, 0.1);
+  --sl-color-hairline-light: rgba(255, 255, 255, 0.08);
+  --sl-color-hairline: rgba(255, 255, 255, 0.12);
+  --sl-color-hairline-shade: rgba(255, 255, 255, 0.16);
+  --sl-color-gray-1: #e2e8f0;
+  --sl-color-gray-2: #cbd5e1;
+  --sl-color-gray-3: #94a3b8;
+  --sl-color-gray-4: #64748b;
+  --sl-color-gray-5: #475569;
+  --sl-color-gray-6: #1e293b;
+  --sl-color-gray-7: #0f172a;
+  --sl-color-white: #f8fafc;
+  --sl-color-black: #020617;
+  --sl-color-text: var(--sl-color-gray-1);
+  --sl-color-text-accent: var(--sl-color-accent-high);
+  --sl-color-accent: 99, 102, 241;
+  --sl-color-accent-low: 30, 27, 75;
+  --sl-color-accent-high: 199, 210, 254;
 }
 
 .expressive-code {
