@@ -112,11 +112,29 @@ const { data } = Astro.props;
             <p class="tier-desc">Packages containing AI tooling</p>
           </div>
         </div>
-        <div class="tier-content">
+        <div class="tier-content plugins-grid">
+          <a href="https://github.com/EveryInc/compound-engineering-plugin" class="node plugin featured" target="_blank" rel="noopener">
+            <div class="node-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
+              </svg>
+            </div>
+            <span class="node-label">compound-engineering</span>
+          </a>
           <div class="node plugin">
             <div class="node-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-                <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
+            </div>
+            <span class="node-label">superpowers</span>
+          </div>
+          <div class="node plugin">
+            <div class="node-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
               </svg>
             </div>
             <span class="node-label">code-review</span>
@@ -124,10 +142,12 @@ const { data } = Astro.props;
           <div class="node plugin">
             <div class="node-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-                <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="M21 15l-5-5L5 21" />
               </svg>
             </div>
-            <span class="node-label">superpowers</span>
+            <span class="node-label">frontend-design</span>
           </div>
         </div>
       </div>
@@ -188,7 +208,7 @@ const { data } = Astro.props;
                 <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
               </svg>
             </div>
-            <span class="content-label">mcp/</span>
+            <span class="content-label">.mcp.json</span>
             <span class="content-desc">MCP servers</span>
           </div>
         </div>
@@ -607,6 +627,38 @@ const { data } = Astro.props;
   .node.marketplace .node-icon { color: var(--color-cyan); }
   .node.plugin .node-icon { color: var(--color-accent-light); }
   .node.dim { opacity: 0.5; }
+
+  /* Plugins grid */
+  .plugins-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+    max-width: 500px;
+  }
+
+  @media (max-width: 500px) {
+    .plugins-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  a.node {
+    text-decoration: none;
+  }
+
+  .node.plugin.featured {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(99, 102, 241, 0.05));
+    border-color: rgba(99, 102, 241, 0.4);
+  }
+
+  .node.plugin.featured:hover {
+    border-color: rgba(99, 102, 241, 0.6);
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
+  }
+
+  .node.plugin.featured .node-icon {
+    color: var(--color-accent-light);
+  }
   .node.dim:hover { opacity: 0.8; }
 
   /* Connectors */
