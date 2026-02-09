@@ -16,6 +16,7 @@ import { runSync } from './actions/sync.js';
 import { runStatus } from './actions/status.js';
 import { runInstallPlugin, runManagePlugins, runBrowseMarketplaces } from './actions/plugins.js';
 import { runManageClients } from './actions/clients.js';
+import { runManageSkills } from './actions/skills.js';
 import { runUpdate } from './actions/update.js';
 import { getUpdateNotice } from '../update-check.js';
 
@@ -26,6 +27,7 @@ export type MenuAction =
   | 'install'
   | 'manage'
   | 'manage-clients'
+  | 'manage-skills'
   | 'marketplace'
   | 'update'
   | 'exit';
@@ -55,6 +57,7 @@ export function buildMenuOptions(context: TuiContext) {
     options.push({ label: 'Install plugin', value: 'install' });
     options.push({ label: 'Manage plugins', value: 'manage' });
     options.push({ label: 'Manage clients', value: 'manage-clients' });
+    options.push({ label: 'Manage skills', value: 'manage-skills' });
     options.push({ label: 'Manage marketplaces', value: 'marketplace' });
   } else {
     // State 3: Workspace exists, all synced
@@ -62,6 +65,7 @@ export function buildMenuOptions(context: TuiContext) {
     options.push({ label: 'Install plugin', value: 'install' });
     options.push({ label: 'Manage plugins', value: 'manage' });
     options.push({ label: 'Manage clients', value: 'manage-clients' });
+    options.push({ label: 'Manage skills', value: 'manage-skills' });
     options.push({ label: 'Manage marketplaces', value: 'marketplace' });
     options.push({ label: 'Check for updates', value: 'update' });
   }
@@ -145,6 +149,9 @@ export async function runWizard(): Promise<void> {
         break;
       case 'manage-clients':
         await runManageClients(context, cache);
+        break;
+      case 'manage-skills':
+        await runManageSkills(context, cache);
         break;
       case 'marketplace':
         await runBrowseMarketplaces(context, cache);
