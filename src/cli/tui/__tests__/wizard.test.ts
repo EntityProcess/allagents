@@ -36,11 +36,12 @@ describe('buildMenuOptions', () => {
       expect(values).toContain('install');
     });
 
-    it('should NOT include sync, status, manage, or update', () => {
+    it('should NOT include sync, status, manage, manage-skills, or update', () => {
       const values = actionValues(context);
       expect(values).not.toContain('sync');
       expect(values).not.toContain('status');
       expect(values).not.toContain('manage');
+      expect(values).not.toContain('manage-skills');
       expect(values).not.toContain('update');
     });
 
@@ -93,6 +94,11 @@ describe('buildMenuOptions', () => {
       const values = actionValues(context);
       expect(values).toContain('manage-clients');
     });
+
+    it('should include manage-skills', () => {
+      const values = actionValues(context);
+      expect(values).toContain('manage-skills');
+    });
   });
 
   describe('State 3: All synced', () => {
@@ -125,6 +131,11 @@ describe('buildMenuOptions', () => {
     it('should include manage-clients', () => {
       const values = actionValues(context);
       expect(values).toContain('manage-clients');
+    });
+
+    it('should include manage-skills', () => {
+      const values = actionValues(context);
+      expect(values).toContain('manage-skills');
     });
 
     it('should have "exit" as the last option', () => {
