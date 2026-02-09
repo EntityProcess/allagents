@@ -39,7 +39,9 @@ describe('user-workspace', () => {
       const config = await getUserWorkspaceConfig();
       expect(config).toBeTruthy();
       expect(config!.plugins).toEqual([]);
-      expect(config!.clients).toContain('claude');
+      // User-scope should NOT include claude (only project-scope does)
+      expect(config!.clients).not.toContain('claude');
+      expect(config!.clients).toContain('copilot');
     });
 
     test('does not overwrite existing config', async () => {
@@ -55,10 +57,11 @@ describe('user-workspace', () => {
       expect(config!.plugins).toContain(pluginDir);
     });
 
-    test('creates default config with all clients', async () => {
+    test('creates default config with user-scope clients (excludes claude)', async () => {
       await ensureUserWorkspace();
       const config = await getUserWorkspaceConfig();
-      expect(config!.clients).toContain('claude');
+      // User-scope excludes claude (only project-scope includes it)
+      expect(config!.clients).not.toContain('claude');
       expect(config!.clients).toContain('copilot');
       expect(config!.clients).toContain('codex');
       expect(config!.clients).toContain('cursor');
