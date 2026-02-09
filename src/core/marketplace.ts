@@ -67,13 +67,6 @@ export interface MarketplaceResult {
 }
 
 /**
- * Well-known marketplace mappings (name → GitHub repo)
- */
-const WELL_KNOWN_MARKETPLACES: Record<string, string> = {
-  'claude-plugins-official': 'anthropics/claude-plugins-official',
-};
-
-/**
  * Get the allagents config directory
  */
 export function getAllagentsDir(): string {
@@ -127,12 +120,37 @@ export async function saveRegistry(registry: MarketplaceRegistry): Promise<void>
 }
 
 /**
+ * Get the normalized source location key for a marketplace (owner/repo without branch)
+ */
+function getSourceLocationKey(source: MarketplaceSource): string {
+  if (source.type === 'github') {
+    const { owner, repo } = parseLocation(source.location);
+    return `${owner}/${repo}`;
+  }
+  return source.location;
+}
+
+/**
+ * Find a marketplace by source location in the registry
+ */
+function findBySourceLocation(
+  registry: MarketplaceRegistry,
+  sourceLocation: string,
+): MarketplaceEntry | null {
+  for (const entry of Object.values(registry.marketplaces)) {
+    if (getSourceLocationKey(entry.source) === sourceLocation) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+/**
  * Parse a marketplace source string
  * Supports:
  * - GitHub URL: https://github.com/owner/repo
  * - GitHub shorthand: owner/repo
  * - Local path: /absolute/path or ./relative/path
- * - Well-known name: claude-plugins-official
  */
 export function parseMarketplaceSource(source: string): {
   type: MarketplaceSourceType;
@@ -140,15 +158,6 @@ export function parseMarketplaceSource(source: string): {
   name: string;
   branch?: string;
 } | null {
-  // Well-known marketplace names
-  if (WELL_KNOWN_MARKETPLACES[source]) {
-    return {
-      type: 'github',
-      location: WELL_KNOWN_MARKETPLACES[source],
-      name: source,
-    };
-  }
-
   // GitHub URL
   if (source.startsWith('https://github.com/')) {
     const match = source.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/tree\/(.+))?$/);
@@ -194,6 +203,8 @@ export function parseMarketplaceSource(source: string): {
 
 /**
  * Add a marketplace to the registry
+ * Idempotent: returns success if marketplace is already registered by source location
+ *
  * @param source - Marketplace source (URL, path, or name)
  * @param customName - Optional custom name for the marketplace
  */
@@ -207,7 +218,7 @@ export async function addMarketplace(
   if (!parsed) {
     return {
       success: false,
-      error: `Invalid marketplace source: ${source}\n  Use: GitHub URL, owner/repo, local path, or well-known name`,
+      error: `Invalid marketplace source: ${source}\n  Use: GitHub URL, owner/repo, or local path`,
     };
   }
 
@@ -233,13 +244,21 @@ export async function addMarketplace(
   let name = customName || parsed.name;
   const registry = await loadRegistry();
 
-  // For initial duplicate check, use the pre-manifest name
-  // (will re-check after manifest is read if name changes)
+  // Check if already registered by name
   if (registry.marketplaces[name]) {
     return {
       success: false,
       error: `Marketplace '${name}' already exists. Use 'update' to refresh it.`,
     };
+  }
+
+  // Check if already registered by source location (idempotent)
+  const sourceLocation = parsed.type === 'github'
+    ? `${parseLocation(parsed.location).owner}/${parseLocation(parsed.location).repo}`
+    : parsed.location;
+  const existingBySource = findBySourceLocation(registry, sourceLocation);
+  if (existingBySource) {
+    return { success: true, marketplace: existingBySource };
   }
 
   let marketplacePath: string;
@@ -414,11 +433,7 @@ export async function findMarketplace(
     return registry.marketplaces[name];
   }
   if (sourceLocation) {
-    for (const entry of Object.values(registry.marketplaces)) {
-      if (entry.source.location === sourceLocation) {
-        return entry;
-      }
-    }
+    return findBySourceLocation(registry, sourceLocation);
   }
   return null;
 }
@@ -820,10 +835,9 @@ async function refreshMarketplace(
  * Resolve a plugin@marketplace spec with auto-registration support
  *
  * Auto-registration rules:
- * 1. Well-known marketplace name → auto-register from known GitHub repo
- * 2. plugin@owner/repo format → auto-register owner/repo as marketplace
- * 3. plugin@owner/repo/subpath → auto-register owner/repo, look in subpath/
- * 4. Unknown short name → error with helpful message
+ * 1. plugin@owner/repo format → auto-register owner/repo as marketplace
+ * 2. plugin@owner/repo/subpath → auto-register owner/repo, look in subpath/
+ * 3. Unknown short name → error with helpful message
  */
 export async function resolvePluginSpecWithAutoRegister(
   spec: string,
@@ -847,7 +861,6 @@ export async function resolvePluginSpecWithAutoRegister(
 
   // If not registered, try auto-registration
   if (!marketplace) {
-    // For owner/repo format, pass the full owner/repo string
     const sourceToRegister = owner && repo ? `${owner}/${repo}` : marketplaceName;
     const autoRegResult = await autoRegisterMarketplace(sourceToRegister);
     if (!autoRegResult.success) {
@@ -910,46 +923,29 @@ export async function resolvePluginSpecWithAutoRegister(
 }
 
 /**
- * Auto-register a marketplace by name
- *
- * Supports:
- * 1. Well-known names (e.g., "claude-plugins-official" → anthropics/claude-plugins-official)
- * 2. owner/repo format (e.g., "obra/superpowers" → github.com/obra/superpowers)
+ * Auto-register a marketplace by source.
+ * Only supports owner/repo format for GitHub marketplaces.
  */
 async function autoRegisterMarketplace(
-  name: string,
+  source: string,
 ): Promise<{ success: boolean; name?: string; error?: string }> {
-  const wellKnown = getWellKnownMarketplaces();
-
-  // Check if it's a well-known marketplace name
-  if (wellKnown[name]) {
-    console.log(`Auto-registering well-known marketplace: ${name}`);
-    const result = await addMarketplace(name);
-    if (!result.success) {
-      return { success: false, error: result.error || 'Unknown error' };
-    }
-    return { success: true, name };
-  }
-
   // Check if it's an owner/repo format
-  if (name.includes('/') && !name.includes('://')) {
-    const parts = name.split('/');
+  if (source.includes('/') && !source.includes('://')) {
+    const parts = source.split('/');
     if (parts.length === 2 && parts[0] && parts[1]) {
-      console.log(`Auto-registering GitHub marketplace: ${name}`);
-      const result = await addMarketplace(name);
+      console.log(`Auto-registering GitHub marketplace: ${source}`);
+      const result = await addMarketplace(source);
       if (!result.success) {
         return { success: false, error: result.error || 'Unknown error' };
       }
-      // Use the name from the registered entry (may differ from repo name if manifest has a name)
-      const registeredName = result.marketplace?.name ?? parts[1];
-      return { success: true, name: registeredName };
+      return { success: true, name: result.marketplace?.name ?? parts[1] };
     }
   }
 
   // Unknown marketplace name - provide helpful error
   return {
     success: false,
-    error: `Marketplace '${name}' not found.\n  Options:\n  1. Use fully qualified name: plugin@owner/repo\n  2. Register first: allagents plugin marketplace add <source>\n  3. Well-known marketplaces: ${Object.keys(wellKnown).join(', ')}`,
+    error: `Marketplace '${source}' not found.\n  Use fully qualified format: plugin@owner/repo`,
   };
 }
 
@@ -965,10 +961,57 @@ export function isPluginSpec(spec: string): boolean {
 }
 
 /**
- * Get well-known marketplace names
+ * Extract unique marketplace sources from a list of plugin specs.
+ * Used to pre-register marketplaces before parallel plugin validation.
  */
-export function getWellKnownMarketplaces(): Record<string, string> {
-  return { ...WELL_KNOWN_MARKETPLACES };
+export function extractUniqueMarketplaceSources(plugins: string[]): string[] {
+  const sources = new Set<string>();
+
+  for (const plugin of plugins) {
+    if (!isPluginSpec(plugin)) continue;
+
+    const parsed = parsePluginSpec(plugin);
+    if (!parsed) continue;
+
+    // For owner/repo format, use the full owner/repo as source
+    if (parsed.owner && parsed.repo) {
+      sources.add(`${parsed.owner}/${parsed.repo}`);
+    }
+  }
+
+  return Array.from(sources);
+}
+
+/**
+ * Ensure all marketplaces for the given plugins are registered.
+ * Called before parallel plugin validation to avoid race conditions.
+ *
+ * @param plugins - List of plugin sources (may include plugin@marketplace specs)
+ * @returns Results of marketplace registration attempts
+ */
+export async function ensureMarketplacesRegistered(
+  plugins: string[],
+): Promise<Array<{ source: string; success: boolean; name?: string; error?: string }>> {
+  const sources = extractUniqueMarketplaceSources(plugins);
+  const results: Array<{ source: string; success: boolean; name?: string; error?: string }> = [];
+
+  for (const source of sources) {
+    // Check if already registered
+    const parts = source.split('/');
+    const sourceLocation = source;
+    const existing = await findMarketplace(parts[1] ?? '', sourceLocation);
+
+    if (existing) {
+      results.push({ source, success: true, name: existing.name });
+      continue;
+    }
+
+    // Register the marketplace
+    const result = await autoRegisterMarketplace(source);
+    results.push({ source, ...result });
+  }
+
+  return results;
 }
 
 /**
