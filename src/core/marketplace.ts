@@ -351,8 +351,7 @@ export async function addMarketplace(
 }
 
 /**
- * Remove a marketplace from the registry
- * Note: Does not delete cloned files
+ * Remove a marketplace from the registry and delete its files
  */
 export async function removeMarketplace(name: string): Promise<MarketplaceResult> {
   const registry = await loadRegistry();
@@ -367,6 +366,11 @@ export async function removeMarketplace(name: string): Promise<MarketplaceResult
   const entry = registry.marketplaces[name];
   delete registry.marketplaces[name];
   await saveRegistry(registry);
+
+  // Delete the cached directory
+  if (existsSync(entry.path)) {
+    await rm(entry.path, { recursive: true, force: true });
+  }
 
   // Cascade: remove user-level plugins referencing this marketplace
   const { removeUserPluginsForMarketplace } = await import('./user-workspace.js');
