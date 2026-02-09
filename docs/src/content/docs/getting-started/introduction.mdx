@@ -20,6 +20,71 @@ AllAgents solves this by providing:
 | File location | Runtime lookup from cache | Copied to workspace (git-versioned) |
 | Project structure | AI config mixed with code | Separate workspace repo |
 
+## Architecture
+
+```mermaid
+graph TB
+    subgraph Marketplaces
+        M1[claude-plugins-official]
+        M2[obra/superpowers]
+        M3[custom marketplace]
+    end
+
+    subgraph Plugins
+        P1[code-review]
+        P2[superpowers]
+        P3[my-plugin]
+    end
+
+    subgraph "Plugin Contents"
+        S[skills/]
+        H[hooks/]
+        A[agents/]
+        MCP[mcp/]
+        C[commands/]
+    end
+
+    M1 --> P1
+    M2 --> P2
+    M3 --> P3
+
+    P1 & P2 & P3 --> S & H & A & MCP & C
+
+    subgraph "User Scope (~/.allagents/)"
+        UW[workspace.yaml]
+        UC[~/.claude/]
+        UA[~/.agents/]
+    end
+
+    subgraph "Project Scope (.allagents/)"
+        PW[workspace.yaml]
+
+        subgraph Repositories
+            R1[repo-1/]
+            R2[repo-2/]
+            R3[repo-3/]
+        end
+
+        PC[.claude/]
+        PA[.agents/]
+    end
+
+    S & H & A & C --> UC & UA
+    S & H & A & C --> PC & PA
+
+    PW --> R1 & R2 & R3
+```
+
+**Key concepts:**
+
+| Concept | Description |
+|---------|-------------|
+| **Marketplace** | Registry of available plugins (GitHub repo with manifest) |
+| **Plugin** | Package containing skills, hooks, agents, MCP servers, and commands |
+| **User Scope** | Plugins installed to `~/.allagents/` available across all projects |
+| **Project Scope** | Plugins installed to `.allagents/` for a specific workspace |
+| **Workspace** | Configuration linking multiple repositories with shared plugins |
+
 ## Next Steps
 
 - [Installation](/getting-started/installation/) - Install AllAgents

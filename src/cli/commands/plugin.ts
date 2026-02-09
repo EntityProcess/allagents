@@ -30,6 +30,7 @@ import {
   pluginInstallMeta,
   pluginUninstallMeta,
 } from '../metadata/plugin.js';
+import { skillsCmd } from './plugin-skills.js';
 
 /**
  * Build a JSON-friendly sync data object from a sync result.
@@ -893,5 +894,6 @@ export const pluginCmd = conciseSubcommands({
     marketplace: marketplaceCmd,
     list: pluginListCmd,
     validate: pluginValidateCmd,
+    skills: skillsCmd,
   },
 });

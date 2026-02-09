@@ -226,7 +226,13 @@ export async function copySkills(
   }
 
   const entries = await readdir(sourceDir, { withFileTypes: true });
-  const skillDirs = entries.filter((e) => e.isDirectory());
+  let skillDirs = entries.filter((e) => e.isDirectory());
+
+  // When skillNameMap is provided, only copy skills that are in the map
+  // (disabled skills are excluded from the map during collection)
+  if (skillNameMap) {
+    skillDirs = skillDirs.filter((e) => skillNameMap.has(e.name));
+  }
 
   // Determine if we should use symlinks for this client
   const useSymlinks = syncMode === 'symlink' && !isUniversalClient(client) && canonicalSkillsPath;
@@ -312,11 +318,15 @@ export interface CollectedSkill {
  * Used for the first pass of two-pass name resolution
  * @param pluginPath - Resolved path to plugin directory
  * @param pluginSource - Original plugin source reference
+ * @param disabledSkills - Optional set of disabled skill keys (plugin:skill format)
+ * @param pluginName - Optional plugin name for building skill keys
  * @returns Array of collected skill information
  */
 export async function collectPluginSkills(
   pluginPath: string,
   pluginSource: string,
+  disabledSkills?: Set<string>,
+  pluginName?: string,
 ): Promise<CollectedSkill[]> {
   const skillsDir = join(pluginPath, 'skills');
 
@@ -327,7 +337,12 @@ export async function collectPluginSkills(
   const entries = await readdir(skillsDir, { withFileTypes: true });
   const skillDirs = entries.filter((e) => e.isDirectory());
 
-  return skillDirs.map((entry) => ({
+  // Filter out disabled skills if disabledSkills set is provided
+  const filteredDirs = disabledSkills && pluginName
+    ? skillDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`))
+    : skillDirs;
+
+  return filteredDirs.map((entry) => ({
     folderName: entry.name,
     skillPath: join(skillsDir, entry.name),
     pluginPath,

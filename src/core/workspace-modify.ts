@@ -289,3 +289,109 @@ export async function removePlugin(
     };
   }
 }
+
+/**
+ * Get disabled skills from workspace config
+ * @param workspacePath - Path to workspace directory (default: cwd)
+ * @returns Array of disabled skill keys (plugin:skill format)
+ */
+export async function getDisabledSkills(
+  workspacePath: string = process.cwd(),
+): Promise<string[]> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) return [];
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    return config.disabledSkills ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Add a skill to disabledSkills in workspace config
+ * @param skillKey - Skill key in plugin:skill format
+ * @param workspacePath - Path to workspace directory (default: cwd)
+ */
+export async function addDisabledSkill(
+  skillKey: string,
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
+    };
+  }
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const disabledSkills = config.disabledSkills ?? [];
+
+    if (disabledSkills.includes(skillKey)) {
+      return {
+        success: false,
+        error: `Skill '${skillKey}' is already disabled`,
+      };
+    }
+
+    config.disabledSkills = [...disabledSkills, skillKey];
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Remove a skill from disabledSkills in workspace config
+ * @param skillKey - Skill key in plugin:skill format
+ * @param workspacePath - Path to workspace directory (default: cwd)
+ */
+export async function removeDisabledSkill(
+  skillKey: string,
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
+    };
+  }
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const disabledSkills = config.disabledSkills ?? [];
+
+    if (!disabledSkills.includes(skillKey)) {
+      return {
+        success: false,
+        error: `Skill '${skillKey}' is already enabled`,
+      };
+    }
+
+    config.disabledSkills = disabledSkills.filter((s) => s !== skillKey);
+    // Remove empty array from config
+    if (config.disabledSkills.length === 0) {
+      config.disabledSkills = undefined;
+    }
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}

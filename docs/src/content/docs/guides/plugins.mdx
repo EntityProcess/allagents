@@ -45,6 +45,37 @@ After sync:
 └── testing/                     # unchanged (unique)
 ```
 
+## Disabling Individual Skills
+
+You can disable specific skills from a plugin without uninstalling the entire plugin:
+
+```bash
+# List all skills with their status
+allagents plugin skills list
+
+# Disable a skill
+allagents plugin skills remove brainstorming
+
+# Re-enable a skill
+allagents plugin skills add brainstorming
+```
+
+Disabled skills are stored in `disabledSkills` in workspace.yaml and are excluded from sync:
+
+```yaml
+plugins:
+  - superpowers@official
+
+disabledSkills:
+  - superpowers:brainstorming
+```
+
+When a skill exists in multiple plugins, use `--plugin` to specify which one:
+
+```bash
+allagents plugin skills remove coding-standards --plugin my-plugin
+```
+
 ## Plugin Spec Format
 
 Plugins use the `plugin@marketplace` format:
