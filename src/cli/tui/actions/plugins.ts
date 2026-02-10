@@ -12,6 +12,8 @@ import {
   type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
+import { getAllSkillsFromPlugins } from '../../../core/skills.js';
+import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 
@@ -171,7 +173,7 @@ export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise
 
 /**
  * Plugin detail screen.
- * Shows actions for a specific installed plugin: remove.
+ * Shows actions for a specific installed plugin: browse skills, remove.
  */
 async function runPluginDetail(
   pluginKey: string,
@@ -181,60 +183,110 @@ async function runPluginDetail(
   const scope = pluginKey.startsWith('project:') ? 'project' : 'user';
   const pluginSource = pluginKey.replace(/^(project|user):/, '');
 
-  const action = await select({
-    message: `Plugin: ${pluginSource} [${scope}]`,
-    options: [
-      { label: 'Remove', value: 'remove' as const },
-      { label: 'Back', value: 'back' as const },
-    ],
-  });
-
-  if (p.isCancel(action) || action === 'back') {
-    return;
-  }
-
-  if (action === 'remove') {
-    const confirmed = await confirm({
-      message: `Remove plugin "${pluginSource}"?`,
+  while (true) {
+    const action = await select({
+      message: `Plugin: ${pluginSource} [${scope}]`,
+      options: [
+        { label: 'Browse skills', value: 'browse' as const },
+        { label: 'Remove', value: 'remove' as const },
+        { label: 'Back', value: 'back' as const },
+      ],
     });
 
-    if (p.isCancel(confirmed) || !confirmed) {
+    if (p.isCancel(action) || action === 'back') {
       return;
     }
 
-    const s = p.spinner();
-    s.start('Removing plugin...');
-
-    if (scope === 'project' && context.workspacePath) {
-      const result = await removePlugin(pluginSource, context.workspacePath);
-      if (!result.success) {
-        s.stop('Removal failed');
-        p.note(result.error ?? 'Unknown error', 'Error');
-        return;
-      }
-      s.stop('Plugin removed');
-
-      const syncS = p.spinner();
-      syncS.start('Syncing...');
-      await syncWorkspace(context.workspacePath);
-      syncS.stop('Sync complete');
-    } else {
-      const result = await removeUserPlugin(pluginSource);
-      if (!result.success) {
-        s.stop('Removal failed');
-        p.note(result.error ?? 'Unknown error', 'Error');
-        return;
-      }
-      s.stop('Plugin removed');
-
-      const syncS = p.spinner();
-      syncS.start('Syncing...');
-      await syncUserWorkspace();
-      syncS.stop('Sync complete');
+    if (action === 'browse') {
+      await runBrowsePluginSkills(pluginSource, scope, context);
+      continue;
     }
 
-    cache?.invalidate();
-    p.note(`Removed: ${pluginSource} [${scope}]`, 'Success');
+    if (action === 'remove') {
+      const confirmed = await confirm({
+        message: `Remove plugin "${pluginSource}"?`,
+      });
+
+      if (p.isCancel(confirmed) || !confirmed) {
+        continue;
+      }
+
+      const s = p.spinner();
+      s.start('Removing plugin...');
+
+      if (scope === 'project' && context.workspacePath) {
+        const result = await removePlugin(pluginSource, context.workspacePath);
+        if (!result.success) {
+          s.stop('Removal failed');
+          p.note(result.error ?? 'Unknown error', 'Error');
+          continue;
+        }
+        s.stop('Plugin removed');
+
+        const syncS = p.spinner();
+        syncS.start('Syncing...');
+        await syncWorkspace(context.workspacePath);
+        syncS.stop('Sync complete');
+      } else {
+        const result = await removeUserPlugin(pluginSource);
+        if (!result.success) {
+          s.stop('Removal failed');
+          p.note(result.error ?? 'Unknown error', 'Error');
+          continue;
+        }
+        s.stop('Plugin removed');
+
+        const syncS = p.spinner();
+        syncS.start('Syncing...');
+        await syncUserWorkspace();
+        syncS.stop('Sync complete');
+      }
+
+      cache?.invalidate();
+      p.note(`Removed: ${pluginSource} [${scope}]`, 'Success');
+      return;
+    }
+  }
+}
+
+/**
+ * Browse skills from a specific plugin.
+ * Shows all skills from the plugin with their status (enabled/disabled).
+ */
+async function runBrowsePluginSkills(
+  pluginSource: string,
+  scope: 'project' | 'user',
+  context: TuiContext,
+): Promise<void> {
+  try {
+    const workspacePath = scope === 'user' ? getHomeDir() : context.workspacePath ?? process.cwd();
+    const allSkills = await getAllSkillsFromPlugins(workspacePath);
+    
+    // Filter skills to only those from this plugin
+    const pluginSkills = allSkills.filter((s) => s.pluginSource === pluginSource);
+
+    if (pluginSkills.length === 0) {
+      p.note('No skills found in this plugin.', 'Skills');
+      return;
+    }
+
+    const skillOptions: Array<{ label: string; value: string }> = pluginSkills.map((skill) => {
+      const status = skill.disabled ? ' (disabled)' : '';
+      const icon = skill.disabled ? '\u2717' : '\u2713';
+      return {
+        label: `${icon} ${skill.name}${status}`,
+        value: skill.name,
+      };
+    });
+    skillOptions.push({ label: 'Back', value: '__back__' });
+
+    await select({
+      message: `Skills in ${pluginSource}`,
+      options: skillOptions,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    p.note(message, 'Error');
   }
 }
 
