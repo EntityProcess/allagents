@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, rm, mkdir, writeFile, lstat, readlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncWorkspace } from '../../../src/core/sync.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
@@ -66,7 +66,10 @@ clients:
 
     // Symlink should point to canonical
     const target = await readlink(claudePath);
-    expect(target).toContain('.agents/skills/my-skill');
+    // On Windows, junction may return absolute or relative path
+    // On Unix, it's a relative path. Just check it contains the canonical path.
+    const normalizedTarget = target.split(sep).join('/');
+    expect(normalizedTarget).toContain('.agents/skills/my-skill');
   });
 
   it('does not create symlink for universal clients', async () => {

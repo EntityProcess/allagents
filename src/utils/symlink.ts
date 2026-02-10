@@ -1,4 +1,4 @@
-import { symlink, lstat, readlink, rm, mkdir } from 'node:fs/promises';
+import { symlink, lstat, readlink, rm, mkdir, unlink } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { platform } from 'node:os';
 import { realpath } from 'node:fs/promises';
@@ -28,6 +28,8 @@ async function resolveParentSymlinks(path: string): Promise<string> {
  * Resolve the target of a symlink to an absolute path
  */
 function resolveSymlinkTarget(linkPath: string, linkTarget: string): string {
+  // If linkTarget is already absolute (e.g., Windows junction), resolve returns it as-is
+  // Otherwise, resolve it relative to the link's directory
   return resolve(dirname(linkPath), linkTarget);
 }
 
@@ -65,11 +67,13 @@ export async function createSymlink(target: string, linkPath: string): Promise<b
       if (stats.isSymbolicLink()) {
         // Check if it already points to the correct target
         const existingTarget = await readlink(linkPath);
-        if (resolveSymlinkTarget(linkPath, existingTarget) === resolvedTarget) {
+        const resolvedExisting = resolveSymlinkTarget(linkPath, existingTarget);
+        if (resolvedExisting === resolvedTarget) {
           return true; // Already correct, skip recreation
         }
         // Points to wrong target, remove it
-        await rm(linkPath);
+        // Use unlink for symlinks/junctions on Windows
+        await unlink(linkPath);
       } else {
         // Not a symlink (regular file/dir), remove it
         await rm(linkPath, { recursive: true });
@@ -79,7 +83,7 @@ export async function createSymlink(target: string, linkPath: string): Promise<b
       // For ELOOP, try to remove the broken symlink
       if (err && typeof err === 'object' && 'code' in err && err.code === 'ELOOP') {
         try {
-          await rm(linkPath, { force: true });
+          await unlink(linkPath);
         } catch {
           // If we can't remove it, symlink creation will fail and trigger copy fallback
         }

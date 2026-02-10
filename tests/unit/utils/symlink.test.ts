@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, rm, mkdir, writeFile, lstat, readlink } from 'node:fs/promises';
 import { existsSync, symlinkSync, mkdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
-import { tmpdir } from 'node:os';
+import { join, relative, resolve } from 'node:path';
+import { tmpdir, platform } from 'node:os';
 import { createSymlink, isValidSymlink } from '../../../src/utils/symlink.js';
+
+const isWindows = platform() === 'win32';
 
 describe('symlink utilities', () => {
   let testDir: string;
@@ -38,7 +40,9 @@ describe('symlink utilities', () => {
 
       // Verify symlink points to correct target
       const target = await readlink(linkPath);
-      expect(join(linkDir, target)).toBe(targetDir);
+      // On Windows junctions, readlink returns absolute path. On Unix, it's relative.
+      const resolvedTarget = resolve(linkDir, target);
+      expect(resolvedTarget).toBe(resolve(targetDir));
     });
 
     it('uses relative paths for symlinks', async () => {
@@ -52,9 +56,15 @@ describe('symlink utilities', () => {
 
       expect(result).toBe(true);
       const target = await readlink(linkPath);
-      // Should be a relative path
-      expect(target.startsWith('/')).toBe(false);
-      expect(target).toBe('../../a/b/target');
+      
+      // On Windows with junctions, readlink returns absolute path
+      // On Unix, it returns the relative path
+      if (isWindows) {
+        expect(resolve(target)).toBe(resolve(targetDir));
+      } else {
+        expect(target.startsWith('/')).toBe(false);
+        expect(target).toBe('../../a/b/target');
+      }
     });
 
     it('returns true if symlink already points to correct target', async () => {
@@ -90,7 +100,8 @@ describe('symlink utilities', () => {
 
       // Verify it now points to target2
       const target = await readlink(linkPath);
-      expect(join(testDir, target)).toBe(target2);
+      const resolvedTarget = resolve(testDir, target);
+      expect(resolvedTarget).toBe(resolve(target2));
     });
 
     it('replaces regular directory with symlink', async () => {
