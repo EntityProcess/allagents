@@ -686,7 +686,9 @@ async function validatePlugin(
 ): Promise<ValidatedPlugin> {
   // Check for plugin@marketplace format first
   if (isPluginSpec(pluginSource)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(pluginSource);
+    const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, {
+      offline,
+    });
     if (!resolved.success) {
       return {
         plugin: pluginSource,
