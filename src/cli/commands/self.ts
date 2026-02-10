@@ -83,11 +83,19 @@ const updateCmd = command({
       });
 
       if (result.exitCode === 0) {
-        // Get the new version by spawning allagents --version
+        // Get the new version from the package manager
         let newVersion: string | undefined;
         try {
-          const versionResult = await execa('allagents', ['--version']);
-          newVersion = versionResult.stdout.trim();
+          if (packageManager === 'npm') {
+            const versionResult = await execa('npm', ['list', '-g', 'allagents', '--depth=0', '--json']);
+            const pkgInfo = JSON.parse(versionResult.stdout);
+            newVersion = pkgInfo.dependencies?.allagents?.version;
+          } else {
+            const versionResult = await execa('bun', ['pm', 'ls', '-g']);
+            // Parse bun output to find allagents version
+            const match = versionResult.stdout.match(/allagents@([\d.]+)/);
+            newVersion = match?.[1];
+          }
         } catch {
           // Fallback if we can't get new version
         }
