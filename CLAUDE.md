@@ -18,14 +18,15 @@ Do NOT add `Co-Authored-By` attribution to commit messages.
 
 ### Issue Workflow
 
-When working on a GitHub issue or creating an OpenSpec proposal, **ALWAYS** follow this workflow:
+When working on a GitHub issue, **ALWAYS** follow this workflow:
 
-1. **Create a feature branch** from `main`:
+1. **Create a worktree with a feature branch** from `main`:
    ```bash
-   git checkout main
-   git pull origin main
-   git checkout -b <type>/<issue-number>-<short-description>
-   # Example: feat/42-add-new-embedder
+   # From the repository root
+   cd /path/to/allagents
+   git worktree add ../allagents_<type>-<short-description> <type>/<issue-number>-<short-description>
+   # Example: git worktree add ../allagents_feat-add-new-embedder feat/42-add-new-embedder
+   cd ../allagents_<type>-<short-description>
    ```
 
 2. **Implement the changes** and commit following the commit convention
@@ -78,12 +79,23 @@ Tests use `bun:test`. Run with `bun test` or target a specific file with `bun te
 
 ### Git Worktrees
 
-When creating a git worktree, place it in a **sibling folder** using the naming convention `projectname_branchname`:
+**ALWAYS use git worktrees for feature development.** This allows you to work on multiple branches simultaneously without switching contexts.
+
+Create worktrees in a **sibling folder** using the naming convention `projectname_branchname`:
 
 ```bash
 # From the repository root
-git worktree add ../allagents_docs-update docs/update-readme
+git worktree add ../allagents_<branchname> <branchname>
+
+# Examples:
 git worktree add ../allagents_feat-new-feature feat/new-feature
+git worktree add ../allagents_fix-bug-123 fix/123-description
+```
+
+When done:
+```bash
+# Remove worktree after branch is merged
+git worktree remove ../allagents_<branchname>
 ```
 
 ## Troubleshooting
