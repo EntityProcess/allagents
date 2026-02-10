@@ -97,4 +97,16 @@ describe('parseMarketplaceSource Windows local paths', () => {
     expect(result!.type).toBe('local');
     expect(result!.name).toBe('plugins');
   });
+
+  it('should parse UNC paths', () => {
+    const result = parseMarketplaceSource('\\\\server\\share\\marketplace');
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('local');
+  });
+
+  it('should parse relative path with backslashes as local', () => {
+    const result = parseMarketplaceSource('some\\local\\path');
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('local');
+  });
 });

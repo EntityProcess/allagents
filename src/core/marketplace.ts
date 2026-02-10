@@ -175,30 +175,24 @@ export function parseMarketplaceSource(source: string): {
     return null;
   }
 
-  // Local path (absolute or relative starting with ., /, or Windows drive letter)
-  if (source.startsWith('/') || source.startsWith('.') || /^[a-zA-Z]:[\\/]/.test(source)) {
-    const absPath = resolve(source);
-    const name = basename(absPath) || 'local';
+  // GitHub shorthand: owner/repo (exactly one slash, no backslashes, no protocol)
+  const parts = source.split('/');
+  if (parts.length === 2 && parts[0] && parts[1] && !source.includes('\\') && !source.includes('://')) {
     return {
-      type: 'local',
-      location: absPath,
-      name,
+      type: 'github',
+      location: source,
+      name: parts[1],
     };
   }
 
-  // GitHub shorthand: owner/repo (exactly one slash, no dots at start)
-  if (source.includes('/') && !source.includes('://')) {
-    const parts = source.split('/');
-    if (parts.length === 2 && parts[0] && parts[1]) {
-      return {
-        type: 'github',
-        location: source,
-        name: parts[1],
-      };
-    }
-  }
-
-  return null;
+  // Everything else is a local path
+  const absPath = resolve(source);
+  const name = basename(absPath) || 'local';
+  return {
+    type: 'local',
+    location: absPath,
+    name,
+  };
 }
 
 /**
@@ -386,8 +380,8 @@ export async function removeMarketplace(name: string): Promise<MarketplaceResult
   delete registry.marketplaces[name];
   await saveRegistry(registry);
 
-  // Delete the cached directory
-  if (existsSync(entry.path)) {
+  // Delete the cached directory (only for cloned GitHub marketplaces, not local paths)
+  if (entry.source.type !== 'local' && existsSync(entry.path)) {
     await rm(entry.path, { recursive: true, force: true });
   }
 
