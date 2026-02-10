@@ -15,7 +15,7 @@ import { getWorkspaceStatus } from '../../../core/status.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 
-const { select, multiselect, text, confirm } = p;
+const { select, text, confirm } = p;
 
 /**
  * Get marketplace list, using cache when available.
@@ -110,6 +110,137 @@ async function installSelectedPlugin(
 }
 
 /**
+ * Plugins sub-menu.
+ * Lists installed plugins (click to remove) and offers adding new ones.
+ * Follows the marketplace pattern: list items, drill into details.
+ */
+export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise<void> {
+  try {
+    while (true) {
+      // Build options: + Add plugin, then list installed plugins
+      const options: Array<{ label: string; value: string }> = [
+        { label: '+ Add plugin', value: '__add__' },
+      ];
+
+      // Gather installed plugins from status
+      let status = cache?.getStatus();
+      if (!status) {
+        status = await getWorkspaceStatus(context.workspacePath ?? undefined);
+        cache?.setStatus(status);
+      }
+
+      if (status.success) {
+        for (const plugin of status.plugins) {
+          const key = `project:${plugin.source}`;
+          options.push({
+            label: `${plugin.source} (${plugin.type}) [project]`,
+            value: key,
+          });
+        }
+        for (const plugin of status.userPlugins ?? []) {
+          const key = `user:${plugin.source}`;
+          options.push({
+            label: `${plugin.source} (${plugin.type}) [user]`,
+            value: key,
+          });
+        }
+      }
+
+      options.push({ label: 'Back', value: '__back__' });
+
+      const selected = await select({
+        message: 'Plugins',
+        options,
+      });
+
+      if (p.isCancel(selected) || selected === '__back__') {
+        return;
+      }
+
+      if (selected === '__add__') {
+        await runInstallPlugin(context, cache);
+        continue;
+      }
+
+      // User selected an installed plugin — show detail screen
+      await runPluginDetail(selected, context, cache);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    p.note(message, 'Error');
+  }
+}
+
+/**
+ * Plugin detail screen.
+ * Shows actions for a specific installed plugin: remove.
+ */
+async function runPluginDetail(
+  pluginKey: string,
+  context: TuiContext,
+  cache?: TuiCache,
+): Promise<void> {
+  const scope = pluginKey.startsWith('project:') ? 'project' : 'user';
+  const pluginSource = pluginKey.replace(/^(project|user):/, '');
+
+  const action = await select({
+    message: `Plugin: ${pluginSource} [${scope}]`,
+    options: [
+      { label: 'Remove', value: 'remove' as const },
+      { label: 'Back', value: 'back' as const },
+    ],
+  });
+
+  if (p.isCancel(action) || action === 'back') {
+    return;
+  }
+
+  if (action === 'remove') {
+    const confirmed = await confirm({
+      message: `Remove plugin "${pluginSource}"?`,
+    });
+
+    if (p.isCancel(confirmed) || !confirmed) {
+      return;
+    }
+
+    const s = p.spinner();
+    s.start('Removing plugin...');
+
+    if (scope === 'project' && context.workspacePath) {
+      const result = await removePlugin(pluginSource, context.workspacePath);
+      if (!result.success) {
+        s.stop('Removal failed');
+        p.note(result.error ?? 'Unknown error', 'Error');
+        return;
+      }
+      s.stop('Plugin removed');
+
+      const syncS = p.spinner();
+      syncS.start('Syncing...');
+      await syncWorkspace(context.workspacePath);
+      syncS.stop('Sync complete');
+    } else {
+      const result = await removeUserPlugin(pluginSource);
+      if (!result.success) {
+        s.stop('Removal failed');
+        p.note(result.error ?? 'Unknown error', 'Error');
+        return;
+      }
+      s.stop('Plugin removed');
+
+      const syncS = p.spinner();
+      syncS.start('Syncing...');
+      await syncUserWorkspace();
+      syncS.stop('Sync complete');
+    }
+
+    cache?.invalidate();
+    p.note(`Removed: ${pluginSource} [${scope}]`, 'Success');
+  }
+}
+
+/**
  * Plugin installation flow.
  * Lists marketplace plugins, lets user pick one, installs it, and auto-syncs.
  */
@@ -164,109 +295,6 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
   }
 }
 
-/**
- * Plugin management (uninstall) flow.
- * Lists installed plugins, lets user pick which to remove, and auto-syncs.
- */
-export async function runManagePlugins(context: TuiContext, cache?: TuiCache): Promise<void> {
-  try {
-    let status = cache?.getStatus();
-    if (!status) {
-      status = await getWorkspaceStatus(context.workspacePath ?? undefined);
-      cache?.setStatus(status);
-    }
-
-    if (!status.success) {
-      p.note('Failed to get workspace status.', 'Error');
-      return;
-    }
-
-    // Build options from both project and user plugins, tracking scope
-    const pluginsByScope = new Map<string, 'project' | 'user'>();
-    const options: Array<{ label: string; value: string }> = [];
-
-    // Add project-level plugins
-    for (const plugin of status.plugins) {
-      const key = `project:${plugin.source}`;
-      pluginsByScope.set(key, 'project');
-      options.push({
-        label: `${plugin.available ? '\u2713' : '\u2717'} ${plugin.source} (${plugin.type}) [project]`,
-        value: key,
-      });
-    }
-
-    // Add user-level plugins
-    for (const plugin of status.userPlugins ?? []) {
-      const key = `user:${plugin.source}`;
-      pluginsByScope.set(key, 'user');
-      options.push({
-        label: `${plugin.available ? '\u2713' : '\u2717'} ${plugin.source} (${plugin.type}) [user]`,
-        value: key,
-      });
-    }
-
-    if (options.length === 0) {
-      p.note('No plugins installed.', 'Plugins');
-      return;
-    }
-
-    const selected = await multiselect({
-      message: 'Select plugins to remove (submit empty to go back)',
-      options,
-      required: false,
-    });
-
-    if (p.isCancel(selected)) {
-      return;
-    }
-
-    if (selected.length === 0) {
-      p.note('No plugins selected.', 'Plugins');
-      return;
-    }
-
-    const s = p.spinner();
-    s.start('Removing plugins...');
-
-    const results: string[] = [];
-    let removedFromProject = false;
-    let removedFromUser = false;
-
-    for (const key of selected) {
-      const scope = pluginsByScope.get(key);
-      const pluginSource = key.replace(/^(project|user):/, '');
-
-      if (scope === 'project' && context.workspacePath) {
-        const result = await removePlugin(pluginSource, context.workspacePath);
-        results.push(`${result.success ? '\u2713' : '\u2717'} ${pluginSource} [project]`);
-        if (result.success) removedFromProject = true;
-      } else {
-        const result = await removeUserPlugin(pluginSource);
-        results.push(`${result.success ? '\u2713' : '\u2717'} ${pluginSource} [user]`);
-        if (result.success) removedFromUser = true;
-      }
-    }
-
-    s.stop('Plugins removed');
-
-    // Auto-sync affected scopes
-    const syncS = p.spinner();
-    syncS.start('Syncing...');
-    if (removedFromProject && context.workspacePath) {
-      await syncWorkspace(context.workspacePath);
-    }
-    if (removedFromUser) {
-      await syncUserWorkspace();
-    }
-    syncS.stop('Sync complete');
-    cache?.invalidate();
-
-    p.note(results.join('\n'), 'Removed');
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    p.note(message, 'Error');
-  }
-}
 
 /**
  * Browse and manage registered marketplaces.

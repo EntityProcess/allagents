@@ -11,64 +11,38 @@ const { select } = p;
 // Disable Escape key as cancel trigger to prevent terminal freezes.
 // Ctrl+C (\x03) still works for cancellation.
 settings.aliases.delete('escape');
-import { runInit } from './actions/init.js';
 import { runSync } from './actions/sync.js';
 import { runStatus } from './actions/status.js';
-import { runInstallPlugin, runManagePlugins, runBrowseMarketplaces } from './actions/plugins.js';
+import { runBrowseMarketplaces, runPlugins } from './actions/plugins.js';
 import { runManageClients } from './actions/clients.js';
-import { runManageSkills } from './actions/skills.js';
-import { runUpdate } from './actions/update.js';
+import { runSkills } from './actions/skills.js';
 import { getUpdateNotice } from '../update-check.js';
 
 export type MenuAction =
-  | 'init'
+  | 'workspace'
   | 'sync'
-  | 'status'
-  | 'install'
-  | 'manage'
-  | 'manage-clients'
-  | 'manage-skills'
+  | 'plugins'
+  | 'skills'
+  | 'clients'
   | 'marketplace'
-  | 'update'
   | 'exit';
 
 /**
  * Build context-aware menu options based on workspace state.
+ * Plugins, Skills, Clients, and Marketplaces are always visible.
  */
 export function buildMenuOptions(context: TuiContext) {
   const options: Array<{ label: string; value: MenuAction; hint?: string }> = [];
 
-  if (!context.hasWorkspace) {
-    // State 1: No workspace detected
-    options.push({ label: 'Initialize workspace', value: 'init' });
-    options.push({ label: 'Manage marketplaces', value: 'marketplace' });
-    options.push({
-      label: 'Install plugin (user scope)',
-      value: 'install',
-    });
-  } else if (context.needsSync) {
-    // State 2: Workspace exists, needs sync
-    options.push({
-      label: 'Sync plugins',
-      value: 'sync',
-      hint: 'sync needed',
-    });
-    options.push({ label: 'View status', value: 'status' });
-    options.push({ label: 'Install plugin', value: 'install' });
-    options.push({ label: 'Manage plugins', value: 'manage' });
-    options.push({ label: 'Manage clients', value: 'manage-clients' });
-    options.push({ label: 'Manage skills', value: 'manage-skills' });
-    options.push({ label: 'Manage marketplaces', value: 'marketplace' });
-  } else {
-    // State 3: Workspace exists, all synced
-    options.push({ label: 'View status', value: 'status' });
-    options.push({ label: 'Install plugin', value: 'install' });
-    options.push({ label: 'Manage plugins', value: 'manage' });
-    options.push({ label: 'Manage clients', value: 'manage-clients' });
-    options.push({ label: 'Manage skills', value: 'manage-skills' });
-    options.push({ label: 'Manage marketplaces', value: 'marketplace' });
-    options.push({ label: 'Check for updates', value: 'update' });
+  if (context.needsSync) {
+    options.push({ label: 'Sync plugins', value: 'sync', hint: 'sync needed' });
   }
+
+  options.push({ label: 'Workspace', value: 'workspace' });
+  options.push({ label: 'Plugins', value: 'plugins' });
+  options.push({ label: 'Skills', value: 'skills' });
+  options.push({ label: 'Clients', value: 'clients' });
+  options.push({ label: 'Marketplaces', value: 'marketplace' });
 
   options.push({ label: 'Exit', value: 'exit' });
   return options;
@@ -130,35 +104,25 @@ export async function runWizard(): Promise<void> {
     }
 
     switch (action) {
-      case 'init':
-        await runInit();
-        cache.invalidate();
-        break;
       case 'sync':
         await runSync(context);
         cache.invalidate();
         break;
-      case 'status':
+      case 'workspace':
         await runStatus(context, cache);
+        cache.invalidate();
         break;
-      case 'install':
-        await runInstallPlugin(context, cache);
+      case 'plugins':
+        await runPlugins(context, cache);
         break;
-      case 'manage':
-        await runManagePlugins(context, cache);
+      case 'skills':
+        await runSkills(context, cache);
         break;
-      case 'manage-clients':
+      case 'clients':
         await runManageClients(context, cache);
-        break;
-      case 'manage-skills':
-        await runManageSkills(context, cache);
         break;
       case 'marketplace':
         await runBrowseMarketplaces(context, cache);
-        break;
-      case 'update':
-        await runUpdate();
-        cache.invalidate();
         break;
       case 'exit':
         p.outro('Bye');

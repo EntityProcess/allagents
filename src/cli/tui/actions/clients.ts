@@ -1,37 +1,57 @@
 import * as p from '@clack/prompts';
 import { ClientTypeSchema, type ClientType } from '../../../models/workspace-config.js';
 import { setClients } from '../../../core/workspace-modify.js';
-import { syncWorkspace } from '../../../core/sync.js';
+import { setUserClients, getUserWorkspaceConfig } from '../../../core/user-workspace.js';
+import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
 
-const { multiselect } = p;
+const { select, multiselect } = p;
 
 /**
- * Manage workspace clients - lets user toggle which AI clients are enabled.
+ * Manage clients - lets user select scope then toggle AI clients.
+ * Auto-creates workspace.yaml if it doesn't exist.
  */
 export async function runManageClients(context: TuiContext, cache?: TuiCache): Promise<void> {
   try {
-    if (!context.workspacePath) {
-      p.note('No workspace found. Initialize a workspace first.', 'Error');
-      return;
+    // Determine scope
+    let scope: 'project' | 'user' = 'user';
+    if (context.hasWorkspace) {
+      const scopeChoice = await select({
+        message: 'Installation scope',
+        options: [
+          { label: 'Project (install in current directory, committed with your project)', value: 'project' as const },
+          { label: 'User (global)', value: 'user' as const },
+        ],
+      });
+
+      if (p.isCancel(scopeChoice)) {
+        return;
+      }
+
+      scope = scopeChoice;
     }
 
-    // Get current clients from workspace status
-    let status = cache?.getStatus();
-    if (!status) {
-      status = await getWorkspaceStatus(context.workspacePath);
-      cache?.setStatus(status);
+    // Get current clients for the selected scope
+    let currentClients: string[] = [];
+    if (scope === 'project') {
+      let status = cache?.getStatus();
+      if (!status) {
+        status = await getWorkspaceStatus(context.workspacePath ?? undefined);
+        cache?.setStatus(status);
+      }
+      currentClients = status.clients ?? [];
+    } else {
+      const userConfig = await getUserWorkspaceConfig();
+      currentClients = userConfig?.clients ?? [];
     }
-
-    const currentClients = status.clients ?? [];
 
     // All supported clients except vscode
     const allClients = ClientTypeSchema.options.filter((c) => c !== 'vscode');
 
     const selectedClients = await multiselect({
-      message: 'Select AI clients for this workspace',
+      message: `Select AI clients [${scope}]`,
       options: allClients.map((c) => ({
         label: c,
         value: c,
@@ -55,20 +75,29 @@ export async function runManageClients(context: TuiContext, cache?: TuiCache): P
     const s = p.spinner();
     s.start('Updating clients...');
 
-    const result = await setClients(selectedClients, context.workspacePath);
-    if (!result.success) {
-      s.stop('Failed to update clients');
-      p.note(result.error ?? 'Unknown error', 'Error');
-      return;
+    if (scope === 'project') {
+      const workspacePath = context.workspacePath ?? process.cwd();
+      const result = await setClients(selectedClients, workspacePath);
+      if (!result.success) {
+        s.stop('Failed to update clients');
+        p.note(result.error ?? 'Unknown error', 'Error');
+        return;
+      }
+      await syncWorkspace(workspacePath);
+    } else {
+      const result = await setUserClients(selectedClients);
+      if (!result.success) {
+        s.stop('Failed to update clients');
+        p.note(result.error ?? 'Unknown error', 'Error');
+        return;
+      }
+      await syncUserWorkspace();
     }
-
-    // Re-sync after client change
-    await syncWorkspace(context.workspacePath);
 
     s.stop('Clients updated');
     cache?.invalidate();
 
-    p.note(`Clients: ${selectedClients.length > 0 ? selectedClients.join(', ') : 'none'}`, 'Updated');
+    p.note(`Clients [${scope}]: ${selectedClients.length > 0 ? selectedClients.join(', ') : 'none'}`, 'Updated');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     p.note(message, 'Error');

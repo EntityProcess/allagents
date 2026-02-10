@@ -22,130 +22,54 @@ function actionValues(context: TuiContext): MenuAction[] {
 }
 
 describe('buildMenuOptions', () => {
-  describe('State 1: No workspace', () => {
-    const context = makeContext({ hasWorkspace: false, needsSync: false });
+  describe('always-visible categories', () => {
+    const states = [
+      makeContext({ hasWorkspace: false }),
+      makeContext({ hasWorkspace: true, needsSync: true }),
+      makeContext({ hasWorkspace: true, needsSync: false }),
+    ];
 
-    it('should have "init" as the first option', () => {
-      const values = actionValues(context);
-      expect(values[0]).toBe('init');
-    });
-
-    it('should include marketplace and install', () => {
-      const values = actionValues(context);
-      expect(values).toContain('marketplace');
-      expect(values).toContain('install');
-    });
-
-    it('should NOT include sync, status, manage, manage-skills, or update', () => {
-      const values = actionValues(context);
-      expect(values).not.toContain('sync');
-      expect(values).not.toContain('status');
-      expect(values).not.toContain('manage');
-      expect(values).not.toContain('manage-skills');
-      expect(values).not.toContain('update');
-    });
-
-    it('should have "exit" as the last option', () => {
-      const values = actionValues(context);
-      expect(values[values.length - 1]).toBe('exit');
-    });
+    for (const ctx of states) {
+      it(`includes workspace, plugins, skills, clients, marketplace (hasWorkspace=${ctx.hasWorkspace}, needsSync=${ctx.needsSync})`, () => {
+        const values = actionValues(ctx);
+        expect(values).toContain('workspace');
+        expect(values).toContain('plugins');
+        expect(values).toContain('skills');
+        expect(values).toContain('clients');
+        expect(values).toContain('marketplace');
+      });
+    }
   });
 
-  describe('State 2: Workspace needs sync', () => {
-    const context = makeContext({
-      hasWorkspace: true,
-      workspacePath: '/tmp/test',
-      needsSync: true,
-      projectPluginCount: 2,
-      userPluginCount: 1,
-    });
-
-    it('should have "sync" as the first option', () => {
+  describe('sync option', () => {
+    it('should show sync when sync is needed', () => {
+      const context = makeContext({ hasWorkspace: true, needsSync: true });
       const values = actionValues(context);
-      expect(values[0]).toBe('sync');
+      expect(values).toContain('sync');
     });
 
-    it('should include status, install, manage, and marketplace', () => {
-      const values = actionValues(context);
-      expect(values).toContain('status');
-      expect(values).toContain('install');
-      expect(values).toContain('manage');
-      expect(values).toContain('marketplace');
-    });
-
-    it('should NOT include init or update', () => {
-      const values = actionValues(context);
-      expect(values).not.toContain('init');
-      expect(values).not.toContain('update');
-    });
-
-    it('should have "exit" as the last option', () => {
-      const values = actionValues(context);
-      expect(values[values.length - 1]).toBe('exit');
-    });
-
-    it('should show sync needed hint on sync option', () => {
+    it('should show sync needed hint', () => {
+      const context = makeContext({ hasWorkspace: true, needsSync: true });
       const options = buildMenuOptions(context);
       const syncOption = options.find((o) => o.value === 'sync');
       expect(syncOption?.hint).toBe('sync needed');
     });
 
-    it('should include manage-clients', () => {
+    it('should NOT show sync when not needed', () => {
+      const context = makeContext({ hasWorkspace: true, needsSync: false });
       const values = actionValues(context);
-      expect(values).toContain('manage-clients');
-    });
-
-    it('should include manage-skills', () => {
-      const values = actionValues(context);
-      expect(values).toContain('manage-skills');
-    });
-  });
-
-  describe('State 3: All synced', () => {
-    const context = makeContext({
-      hasWorkspace: true,
-      workspacePath: '/tmp/test',
-      needsSync: false,
-      projectPluginCount: 3,
-    });
-
-    it('should have "status" as the first option', () => {
-      const values = actionValues(context);
-      expect(values[0]).toBe('status');
-    });
-
-    it('should include install, manage, marketplace, and update', () => {
-      const values = actionValues(context);
-      expect(values).toContain('install');
-      expect(values).toContain('manage');
-      expect(values).toContain('marketplace');
-      expect(values).toContain('update');
-    });
-
-    it('should NOT include init or sync', () => {
-      const values = actionValues(context);
-      expect(values).not.toContain('init');
       expect(values).not.toContain('sync');
     });
 
-    it('should include manage-clients', () => {
+    it('should NOT show sync without workspace', () => {
+      const context = makeContext({ hasWorkspace: false });
       const values = actionValues(context);
-      expect(values).toContain('manage-clients');
-    });
-
-    it('should include manage-skills', () => {
-      const values = actionValues(context);
-      expect(values).toContain('manage-skills');
-    });
-
-    it('should have "exit" as the last option', () => {
-      const values = actionValues(context);
-      expect(values[values.length - 1]).toBe('exit');
+      expect(values).not.toContain('sync');
     });
   });
 
   describe('exit option', () => {
-    it('should always be present regardless of state', () => {
+    it('should always be last regardless of state', () => {
       const states = [
         makeContext({ hasWorkspace: false }),
         makeContext({ hasWorkspace: true, needsSync: true }),
@@ -153,7 +77,7 @@ describe('buildMenuOptions', () => {
       ];
       for (const ctx of states) {
         const values = actionValues(ctx);
-        expect(values).toContain('exit');
+        expect(values[values.length - 1]).toBe('exit');
       }
     });
   });

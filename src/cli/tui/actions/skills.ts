@@ -65,9 +65,9 @@ async function loadAllSkills(context: TuiContext): Promise<ScopedSkill[]> {
 }
 
 /**
- * Manage skills — lets user toggle which skills are enabled/disabled.
+ * Skills — lets user toggle which skills are enabled/disabled via multiselect.
  */
-export async function runManageSkills(context: TuiContext, cache?: TuiCache): Promise<void> {
+export async function runSkills(context: TuiContext, cache?: TuiCache): Promise<void> {
   try {
     const skills = await loadAllSkills(context);
 

@@ -31,12 +31,15 @@ describe('setClients', () => {
     expect(config.clients).toEqual(['cursor', 'gemini']);
   });
 
-  it('should return error when workspace.yaml does not exist', async () => {
+  it('should auto-create workspace.yaml when it does not exist', async () => {
     const emptyDir = join(tmpdir(), `allagents-test-empty-${Date.now()}`);
     mkdirSync(emptyDir, { recursive: true });
     const result = await setClients(['claude'], emptyDir);
-    expect(result.success).toBe(false);
-    expect(result.error).toBeDefined();
+    expect(result.success).toBe(true);
+
+    const content = readFileSync(join(emptyDir, '.allagents', 'workspace.yaml'), 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    expect(config.clients).toEqual(['claude']);
     rmSync(emptyDir, { recursive: true, force: true });
   });
 });

@@ -41,16 +41,9 @@ export async function setClients(
   clients: ClientType[],
   workspacePath: string = process.cwd(),
 ): Promise<ModifyResult> {
-  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
-
-  if (!existsSync(configPath)) {
-    return {
-      success: false,
-      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
-    };
-  }
-
   try {
+    await ensureWorkspace(workspacePath);
+    const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
     config.clients = clients;

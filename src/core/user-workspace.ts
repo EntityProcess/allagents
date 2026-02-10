@@ -312,6 +312,28 @@ async function addPluginToUserConfig(
 }
 
 /**
+ * Set clients in user-level workspace config.
+ * Creates the config file if it doesn't exist.
+ */
+export async function setUserClients(clients: ClientType[]): Promise<ModifyResult> {
+  await ensureUserWorkspace();
+  const configPath = getUserWorkspaceConfigPath();
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    config.clients = clients;
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
  * Get disabled skills from user workspace config
  * @returns Array of disabled skill keys (plugin:skill format)
  */
