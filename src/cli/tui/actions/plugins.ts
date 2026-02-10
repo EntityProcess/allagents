@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
-import { addPlugin, removePlugin } from '../../../core/workspace-modify.js';
-import { addUserPlugin, removeUserPlugin } from '../../../core/user-workspace.js';
+import { addPlugin, removePlugin, addDisabledSkill, removeDisabledSkill } from '../../../core/workspace-modify.js';
+import { addUserPlugin, removeUserPlugin, addUserDisabledSkill, removeUserDisabledSkill } from '../../../core/user-workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
 import {
   listMarketplaces,
@@ -12,10 +12,12 @@ import {
   type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
+import { getAllSkillsFromPlugins } from '../../../core/skills.js';
+import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 
-const { select, text, confirm } = p;
+const { select, text, confirm, multiselect } = p;
 
 /**
  * Get marketplace list, using cache when available.
@@ -171,7 +173,7 @@ export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise
 
 /**
  * Plugin detail screen.
- * Shows actions for a specific installed plugin: remove.
+ * Shows actions for a specific installed plugin: browse skills, remove.
  */
 async function runPluginDetail(
   pluginKey: string,
@@ -181,60 +183,172 @@ async function runPluginDetail(
   const scope = pluginKey.startsWith('project:') ? 'project' : 'user';
   const pluginSource = pluginKey.replace(/^(project|user):/, '');
 
-  const action = await select({
-    message: `Plugin: ${pluginSource} [${scope}]`,
-    options: [
-      { label: 'Remove', value: 'remove' as const },
-      { label: 'Back', value: 'back' as const },
-    ],
-  });
-
-  if (p.isCancel(action) || action === 'back') {
-    return;
-  }
-
-  if (action === 'remove') {
-    const confirmed = await confirm({
-      message: `Remove plugin "${pluginSource}"?`,
+  while (true) {
+    const action = await select({
+      message: `Plugin: ${pluginSource} [${scope}]`,
+      options: [
+        { label: 'Browse skills', value: 'browse' as const },
+        { label: 'Remove', value: 'remove' as const },
+        { label: 'Back', value: 'back' as const },
+      ],
     });
 
-    if (p.isCancel(confirmed) || !confirmed) {
+    if (p.isCancel(action) || action === 'back') {
+      return;
+    }
+
+    if (action === 'browse') {
+      await runBrowsePluginSkills(pluginSource, scope, context, cache);
+      continue;
+    }
+
+    if (action === 'remove') {
+      const confirmed = await confirm({
+        message: `Remove plugin "${pluginSource}"?`,
+      });
+
+      if (p.isCancel(confirmed) || !confirmed) {
+        continue;
+      }
+
+      const s = p.spinner();
+      s.start('Removing plugin...');
+
+      if (scope === 'project' && context.workspacePath) {
+        const result = await removePlugin(pluginSource, context.workspacePath);
+        if (!result.success) {
+          s.stop('Removal failed');
+          p.note(result.error ?? 'Unknown error', 'Error');
+          continue;
+        }
+        s.stop('Plugin removed');
+
+        const syncS = p.spinner();
+        syncS.start('Syncing...');
+        await syncWorkspace(context.workspacePath);
+        syncS.stop('Sync complete');
+      } else {
+        const result = await removeUserPlugin(pluginSource);
+        if (!result.success) {
+          s.stop('Removal failed');
+          p.note(result.error ?? 'Unknown error', 'Error');
+          continue;
+        }
+        s.stop('Plugin removed');
+
+        const syncS = p.spinner();
+        syncS.start('Syncing...');
+        await syncUserWorkspace();
+        syncS.stop('Sync complete');
+      }
+
+      cache?.invalidate();
+      p.note(`Removed: ${pluginSource} [${scope}]`, 'Success');
+      return;
+    }
+  }
+}
+
+/**
+ * Browse skills from a specific plugin.
+ * Shows all skills from the plugin with their status (enabled/disabled).
+ */
+async function runBrowsePluginSkills(
+  pluginSource: string,
+  scope: 'project' | 'user',
+  context: TuiContext,
+  cache?: TuiCache,
+): Promise<void> {
+  try {
+    const workspacePath = scope === 'user' ? getHomeDir() : context.workspacePath ?? process.cwd();
+    const allSkills = await getAllSkillsFromPlugins(workspacePath);
+    
+    // Filter skills to only those from this plugin
+    const pluginSkills = allSkills.filter((s) => s.pluginSource === pluginSource);
+
+    if (pluginSkills.length === 0) {
+      p.note('No skills found in this plugin.', 'Skills');
+      return;
+    }
+
+    // Build multiselect options
+    const options = pluginSkills.map((skill) => ({
+      label: `${skill.name}`,
+      value: skill.name,
+    }));
+
+    // Pre-select enabled skills (not disabled)
+    const initialValues = pluginSkills.filter((s) => !s.disabled).map((s) => s.name);
+
+    const selected = await multiselect({
+      message: `Toggle skills in ${pluginSource} (selected = enabled)`,
+      options,
+      initialValues,
+      required: false,
+    });
+
+    if (p.isCancel(selected)) {
+      return;
+    }
+
+    const selectedSet = new Set(selected);
+
+    // Compute diff
+    const toDisable = pluginSkills.filter((s) => !s.disabled && !selectedSet.has(s.name));
+    const toEnable = pluginSkills.filter((s) => s.disabled && selectedSet.has(s.name));
+
+    if (toDisable.length === 0 && toEnable.length === 0) {
+      p.note('No changes made.', 'Skills');
       return;
     }
 
     const s = p.spinner();
-    s.start('Removing plugin...');
+    s.start('Updating skills...');
 
-    if (scope === 'project' && context.workspacePath) {
-      const result = await removePlugin(pluginSource, context.workspacePath);
-      if (!result.success) {
-        s.stop('Removal failed');
-        p.note(result.error ?? 'Unknown error', 'Error');
-        return;
+    // Disable newly unchecked skills
+    for (const skill of toDisable) {
+      const skillKey = `${skill.pluginName}:${skill.name}`;
+      if (scope === 'user') {
+        await addUserDisabledSkill(skillKey);
+      } else if (context.workspacePath) {
+        await addDisabledSkill(skillKey, context.workspacePath);
       }
-      s.stop('Plugin removed');
-
-      const syncS = p.spinner();
-      syncS.start('Syncing...');
-      await syncWorkspace(context.workspacePath);
-      syncS.stop('Sync complete');
-    } else {
-      const result = await removeUserPlugin(pluginSource);
-      if (!result.success) {
-        s.stop('Removal failed');
-        p.note(result.error ?? 'Unknown error', 'Error');
-        return;
-      }
-      s.stop('Plugin removed');
-
-      const syncS = p.spinner();
-      syncS.start('Syncing...');
-      await syncUserWorkspace();
-      syncS.stop('Sync complete');
     }
 
+    // Enable newly checked skills
+    for (const skill of toEnable) {
+      const skillKey = `${skill.pluginName}:${skill.name}`;
+      if (scope === 'user') {
+        await removeUserDisabledSkill(skillKey);
+      } else if (context.workspacePath) {
+        await removeDisabledSkill(skillKey, context.workspacePath);
+      }
+    }
+
+    s.stop('Skills updated');
+
+    // Auto-sync
+    const syncS = p.spinner();
+    syncS.start('Syncing...');
+    if (scope === 'project' && context.workspacePath) {
+      await syncWorkspace(context.workspacePath);
+    } else if (scope === 'user') {
+      await syncUserWorkspace();
+    }
+    syncS.stop('Sync complete');
     cache?.invalidate();
-    p.note(`Removed: ${pluginSource} [${scope}]`, 'Success');
+
+    const changes: string[] = [];
+    for (const skill of toEnable) {
+      changes.push(`✓ Enabled: ${skill.name}`);
+    }
+    for (const skill of toDisable) {
+      changes.push(`✗ Disabled: ${skill.name}`);
+    }
+    p.note(changes.join('\n'), 'Updated');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    p.note(message, 'Error');
   }
 }
 
