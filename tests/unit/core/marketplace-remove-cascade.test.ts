@@ -147,4 +147,26 @@ describe('removeMarketplace cascade', () => {
     expect(result.success).toBe(true);
     expect(existsSync(marketplacePath)).toBe(false);
   });
+
+  it('should not delete the source directory for local marketplaces', async () => {
+    const localSourceDir = join(testDir, 'external-marketplace');
+    await mkdir(localSourceDir, { recursive: true });
+    await writeFile(join(localSourceDir, 'README.md'), '# My Marketplace', 'utf-8');
+
+    await writeRegistry({
+      'local-mp': {
+        name: 'local-mp',
+        source: { type: 'local', location: localSourceDir },
+        path: localSourceDir,
+      },
+    });
+
+    const { existsSync } = await import('node:fs');
+    expect(existsSync(localSourceDir)).toBe(true);
+
+    const result = await removeMarketplace('local-mp');
+    expect(result.success).toBe(true);
+    // Local source directory must NOT be deleted
+    expect(existsSync(localSourceDir)).toBe(true);
+  });
 });

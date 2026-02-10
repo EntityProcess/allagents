@@ -75,3 +75,38 @@ describe('parseMarketplaceSource branch extraction', () => {
     });
   });
 });
+
+describe('parseMarketplaceSource Windows local paths', () => {
+  it('should parse Windows absolute path with forward slashes', () => {
+    const result = parseMarketplaceSource('D:/GitHub/WiseTechGlobal/WTG.AI.Prompts');
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('local');
+    expect(result!.name).toBe('WTG.AI.Prompts');
+  });
+
+  it('should parse Windows absolute path with backslashes', () => {
+    const result = parseMarketplaceSource('C:\\Users\\test\\my-marketplace');
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('local');
+    expect(result!.name).toBe('my-marketplace');
+  });
+
+  it('should parse lowercase Windows drive letter', () => {
+    const result = parseMarketplaceSource('c:/projects/plugins');
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('local');
+    expect(result!.name).toBe('plugins');
+  });
+
+  it('should parse UNC paths', () => {
+    const result = parseMarketplaceSource('\\\\server\\share\\marketplace');
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('local');
+  });
+
+  it('should parse relative path with backslashes as local', () => {
+    const result = parseMarketplaceSource('some\\local\\path');
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('local');
+  });
+});
