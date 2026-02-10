@@ -175,8 +175,8 @@ export function parseMarketplaceSource(source: string): {
     return null;
   }
 
-  // Local path (absolute or relative starting with . or /)
-  if (source.startsWith('/') || source.startsWith('.')) {
+  // Local path (absolute or relative starting with ., /, or Windows drive letter)
+  if (source.startsWith('/') || source.startsWith('.') || /^[a-zA-Z]:[\\/]/.test(source)) {
     const absPath = resolve(source);
     const name = basename(absPath) || 'local';
     return {
