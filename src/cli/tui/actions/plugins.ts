@@ -55,29 +55,27 @@ async function installSelectedPlugin(
   context: TuiContext,
   cache?: TuiCache,
 ): Promise<boolean> {
-  // Determine scope
-  let scope: 'project' | 'user' = 'user';
-  if (context.hasWorkspace) {
-    const scopeChoice = await select({
-      message: 'Install scope',
-      options: [
-        { label: 'Project (this workspace)', value: 'project' as const },
-        { label: 'User (global)', value: 'user' as const },
-      ],
-    });
+  // Determine scope - always show both options
+  const scopeChoice = await select({
+    message: 'Install scope',
+    options: [
+      { label: 'Project (this workspace)', value: 'project' as const },
+      { label: 'User (global)', value: 'user' as const },
+    ],
+  });
 
-    if (p.isCancel(scopeChoice)) {
-      return false;
-    }
-
-    scope = scopeChoice;
+  if (p.isCancel(scopeChoice)) {
+    return false;
   }
+
+  const scope = scopeChoice;
 
   const s = p.spinner();
   s.start('Installing plugin...');
 
-  if (scope === 'project' && context.workspacePath) {
-    const result = await addPlugin(pluginRef, context.workspacePath);
+  if (scope === 'project') {
+    const workspacePath = context.workspacePath ?? process.cwd();
+    const result = await addPlugin(pluginRef, workspacePath);
     if (!result.success) {
       s.stop('Installation failed');
       p.note(result.error ?? 'Unknown error', 'Error');
@@ -87,7 +85,7 @@ async function installSelectedPlugin(
 
     const syncS = p.spinner();
     syncS.start('Syncing...');
-    await syncWorkspace(context.workspacePath);
+    await syncWorkspace(workspacePath);
     syncS.stop('Sync complete');
   } else {
     const result = await addUserPlugin(pluginRef);
