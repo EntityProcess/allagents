@@ -32,7 +32,9 @@ async function resolvePluginPath(
   workspacePath: string,
 ): Promise<string | null> {
   if (isPluginSpec(pluginSource)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(pluginSource);
+    const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, {
+      offline: true,
+    });
     return resolved.success ? resolved.path ?? null : null;
   }
 
