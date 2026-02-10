@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
-import { addPlugin, removePlugin } from '../../../core/workspace-modify.js';
-import { addUserPlugin, removeUserPlugin } from '../../../core/user-workspace.js';
+import { addPlugin, removePlugin, addDisabledSkill, removeDisabledSkill } from '../../../core/workspace-modify.js';
+import { addUserPlugin, removeUserPlugin, addUserDisabledSkill, removeUserDisabledSkill } from '../../../core/user-workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
 import {
   listMarketplaces,
@@ -17,7 +17,7 @@ import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 
-const { select, text, confirm } = p;
+const { select, text, confirm, multiselect } = p;
 
 /**
  * Get marketplace list, using cache when available.
@@ -198,7 +198,7 @@ async function runPluginDetail(
     }
 
     if (action === 'browse') {
-      await runBrowsePluginSkills(pluginSource, scope, context);
+      await runBrowsePluginSkills(pluginSource, scope, context, cache);
       continue;
     }
 
@@ -257,6 +257,7 @@ async function runBrowsePluginSkills(
   pluginSource: string,
   scope: 'project' | 'user',
   context: TuiContext,
+  cache?: TuiCache,
 ): Promise<void> {
   try {
     const workspacePath = scope === 'user' ? getHomeDir() : context.workspacePath ?? process.cwd();
@@ -270,20 +271,81 @@ async function runBrowsePluginSkills(
       return;
     }
 
-    const skillOptions: Array<{ label: string; value: string }> = pluginSkills.map((skill) => {
-      const status = skill.disabled ? ' (disabled)' : '';
-      const icon = skill.disabled ? '\u2717' : '\u2713';
-      return {
-        label: `${icon} ${skill.name}${status}`,
-        value: skill.name,
-      };
-    });
-    skillOptions.push({ label: 'Back', value: '__back__' });
+    // Build multiselect options
+    const options = pluginSkills.map((skill) => ({
+      label: `${skill.name}`,
+      value: skill.name,
+    }));
 
-    await select({
-      message: `Skills in ${pluginSource}`,
-      options: skillOptions,
+    // Pre-select enabled skills (not disabled)
+    const initialValues = pluginSkills.filter((s) => !s.disabled).map((s) => s.name);
+
+    const selected = await multiselect({
+      message: `Toggle skills in ${pluginSource} (selected = enabled)`,
+      options,
+      initialValues,
+      required: false,
     });
+
+    if (p.isCancel(selected)) {
+      return;
+    }
+
+    const selectedSet = new Set(selected);
+
+    // Compute diff
+    const toDisable = pluginSkills.filter((s) => !s.disabled && !selectedSet.has(s.name));
+    const toEnable = pluginSkills.filter((s) => s.disabled && selectedSet.has(s.name));
+
+    if (toDisable.length === 0 && toEnable.length === 0) {
+      p.note('No changes made.', 'Skills');
+      return;
+    }
+
+    const s = p.spinner();
+    s.start('Updating skills...');
+
+    // Disable newly unchecked skills
+    for (const skill of toDisable) {
+      const skillKey = `${skill.pluginName}:${skill.name}`;
+      if (scope === 'user') {
+        await addUserDisabledSkill(skillKey);
+      } else if (context.workspacePath) {
+        await addDisabledSkill(skillKey, context.workspacePath);
+      }
+    }
+
+    // Enable newly checked skills
+    for (const skill of toEnable) {
+      const skillKey = `${skill.pluginName}:${skill.name}`;
+      if (scope === 'user') {
+        await removeUserDisabledSkill(skillKey);
+      } else if (context.workspacePath) {
+        await removeDisabledSkill(skillKey, context.workspacePath);
+      }
+    }
+
+    s.stop('Skills updated');
+
+    // Auto-sync
+    const syncS = p.spinner();
+    syncS.start('Syncing...');
+    if (scope === 'project' && context.workspacePath) {
+      await syncWorkspace(context.workspacePath);
+    } else if (scope === 'user') {
+      await syncUserWorkspace();
+    }
+    syncS.stop('Sync complete');
+    cache?.invalidate();
+
+    const changes: string[] = [];
+    for (const skill of toEnable) {
+      changes.push(`✓ Enabled: ${skill.name}`);
+    }
+    for (const skill of toDisable) {
+      changes.push(`✗ Disabled: ${skill.name}`);
+    }
+    p.note(changes.join('\n'), 'Updated');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     p.note(message, 'Error');
