@@ -1,14 +1,17 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { load, dump } from 'js-yaml';
+import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import type {
+  ClientType,
+  WorkspaceConfig,
+} from '../models/workspace-config.js';
 import {
-  validatePluginSource,
   isGitHubUrl,
+  validatePluginSource,
   verifyGitHubUrlExists,
 } from '../utils/plugin-path.js';
-import type { WorkspaceConfig, ClientType } from '../models/workspace-config.js';
 import {
   isPluginSpec,
   parsePluginSpec,
@@ -20,7 +23,10 @@ import {
  * Matches the template at src/templates/default/.allagents/workspace.yaml.
  */
 const DEFAULT_PROJECT_CLIENTS: ClientType[] = [
-  'claude', 'copilot', 'codex', 'opencode',
+  'claude',
+  'copilot',
+  'codex',
+  'opencode',
 ];
 
 /**
@@ -271,9 +277,9 @@ export async function removePlugin(
     }
 
     // Remove plugin and clean up its disabled skills
-    const removedEntry = config.plugins[index]!;
+    const removedEntry = config.plugins[index] as string;
     config.plugins.splice(index, 1);
-    pruneDisabledSkillsForEntry(config, removedEntry);
+    pruneDisabledSkillsForPlugin(config, removedEntry);
 
     // Write back
     const newContent = dump(config, { lineWidth: -1 });
@@ -290,9 +296,9 @@ export async function removePlugin(
 
 /**
  * Remove disabledSkills entries whose plugin name matches the removed plugin entry.
- * Handles plugin@marketplace specs by extracting the plugin name prefix.
+ * Exported for reuse by user-workspace.ts.
  */
-function pruneDisabledSkillsForEntry(
+export function pruneDisabledSkillsForPlugin(
   config: WorkspaceConfig,
   pluginEntry: string,
 ): void {
@@ -302,7 +308,9 @@ function pruneDisabledSkillsForEntry(
   if (!pluginName) return;
 
   const prefix = `${pluginName}:`;
-  config.disabledSkills = config.disabledSkills.filter((s) => !s.startsWith(prefix));
+  config.disabledSkills = config.disabledSkills.filter(
+    (s) => !s.startsWith(prefix),
+  );
   if (config.disabledSkills.length === 0) {
     config.disabledSkills = undefined;
   }
@@ -310,19 +318,19 @@ function pruneDisabledSkillsForEntry(
 
 /**
  * Extract the plugin name from a plugin source string.
- * For plugin@marketplace specs, returns the plugin component.
- * For bare names (no @), returns the name as-is (used by partial match).
+ * - plugin@marketplace → plugin component
+ * - local path / GitHub URL → last path segment (basename)
+ * - bare name → the name itself
  */
 function extractPluginName(pluginSource: string): string | null {
   if (isPluginSpec(pluginSource)) {
     return parsePluginSpec(pluginSource)?.plugin ?? null;
   }
-  // Not a plugin spec — could be a bare name, local path, or GitHub URL.
-  // Bare names are used as the plugin name directly.
-  if (!pluginSource.includes('/') && !pluginSource.includes('\\')) {
-    return pluginSource;
-  }
-  return null;
+  // Split on both / and \ to handle local paths, URLs, and Windows paths
+  const parts = pluginSource.split(/[/\\]/).filter(Boolean);
+  const last = parts[parts.length - 1];
+  if (!last) return null;
+  return last.replace(/\.git$/, '');
 }
 
 /**

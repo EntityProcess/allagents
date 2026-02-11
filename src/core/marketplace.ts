@@ -1,22 +1,26 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import simpleGit from 'simple-git';
-import { cloneTo, gitHubUrl, GitCloneError, pull } from './git.js';
+import { getHomeDir } from '../constants.js';
 import {
   parseMarketplaceManifest,
   resolvePluginSourcePath,
 } from '../utils/marketplace-manifest-parser.js';
+import { getPluginCachePath, parseGitHubUrl } from '../utils/plugin-path.js';
+import { GitCloneError, cloneTo, gitHubUrl, pull } from './git.js';
 import { fetchPlugin } from './plugin.js';
 import type { FetchResult } from './plugin.js';
-import { parseGitHubUrl, getPluginCachePath } from '../utils/plugin-path.js';
-import { getHomeDir } from '../constants.js';
 
 /**
  * Parse a marketplace location string into owner, repo, and optional branch.
  * Location format: "owner/repo" or "owner/repo/branch" (branch can contain slashes).
  */
-export function parseLocation(location: string): { owner: string; repo: string; branch?: string } {
+export function parseLocation(location: string): {
+  owner: string;
+  repo: string;
+  branch?: string;
+} {
   const [owner = '', repo = '', ...rest] = location.split('/');
   const branch = rest.length > 0 ? rest.join('/') : undefined;
   return { owner, repo, ...(branch !== undefined && { branch }) };
@@ -108,7 +112,9 @@ export async function loadRegistry(): Promise<MarketplaceRegistry> {
 /**
  * Save marketplace registry to disk
  */
-export async function saveRegistry(registry: MarketplaceRegistry): Promise<void> {
+export async function saveRegistry(
+  registry: MarketplaceRegistry,
+): Promise<void> {
   const registryPath = getRegistryPath();
   const dir = getAllagentsDir();
 
@@ -160,11 +166,15 @@ export function parseMarketplaceSource(source: string): {
 } | null {
   // GitHub URL
   if (source.startsWith('https://github.com/')) {
-    const match = source.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/tree\/(.+))?$/);
+    const match = source.match(
+      /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/tree\/(.+))?$/,
+    );
     if (match) {
       const [, owner, repo, branch] = match;
       if (!repo) return null;
-      const location = branch ? `${owner}/${repo}/${branch}` : `${owner}/${repo}`;
+      const location = branch
+        ? `${owner}/${repo}/${branch}`
+        : `${owner}/${repo}`;
       return {
         type: 'github',
         location,
@@ -177,7 +187,13 @@ export function parseMarketplaceSource(source: string): {
 
   // GitHub shorthand: owner/repo (exactly one slash, no backslashes, no protocol)
   const parts = source.split('/');
-  if (parts.length === 2 && parts[0] && parts[1] && !source.includes('\\') && !source.includes('://')) {
+  if (
+    parts.length === 2 &&
+    parts[0] &&
+    parts[1] &&
+    !source.includes('\\') &&
+    !source.includes('://')
+  ) {
     return {
       type: 'github',
       location: source,
@@ -187,7 +203,9 @@ export function parseMarketplaceSource(source: string): {
 
   // Everything else is a local path
   const absPath = resolve(source);
-  const name = basename(absPath) || 'local';
+  // Split on both / and \ so basename extraction works for Windows paths on any OS
+  const name =
+    source.split(/[/\\]/).filter(Boolean).pop() || basename(absPath) || 'local';
   return {
     type: 'local',
     location: absPath,
@@ -247,9 +265,10 @@ export async function addMarketplace(
   }
 
   // Check if already registered by source location (idempotent)
-  const sourceLocation = parsed.type === 'github'
-    ? `${parseLocation(parsed.location).owner}/${parseLocation(parsed.location).repo}`
-    : parsed.location;
+  const sourceLocation =
+    parsed.type === 'github'
+      ? `${parseLocation(parsed.location).owner}/${parseLocation(parsed.location).repo}`
+      : parsed.location;
   const existingBySource = findBySourceLocation(registry, sourceLocation);
   if (existingBySource) {
     return { success: true, marketplace: existingBySource };
@@ -366,7 +385,9 @@ export async function addMarketplace(
 /**
  * Remove a marketplace from the registry and delete its files
  */
-export async function removeMarketplace(name: string): Promise<MarketplaceResult> {
+export async function removeMarketplace(
+  name: string,
+): Promise<MarketplaceResult> {
   const registry = await loadRegistry();
 
   if (!registry.marketplaces[name]) {
@@ -386,7 +407,9 @@ export async function removeMarketplace(name: string): Promise<MarketplaceResult
   }
 
   // Cascade: remove user-level plugins referencing this marketplace
-  const { removeUserPluginsForMarketplace } = await import('./user-workspace.js');
+  const { removeUserPluginsForMarketplace } = await import(
+    './user-workspace.js'
+  );
   const removedUserPlugins = await removeUserPluginsForMarketplace(name);
 
   return {
@@ -409,7 +432,9 @@ export async function listMarketplaces(): Promise<MarketplaceEntry[]> {
 /**
  * Get a marketplace by name
  */
-export async function getMarketplace(name: string): Promise<MarketplaceEntry | null> {
+export async function getMarketplace(
+  name: string,
+): Promise<MarketplaceEntry | null> {
   const registry = await loadRegistry();
   return registry.marketplaces[name] || null;
 }
@@ -474,7 +499,9 @@ export async function updateMarketplace(
 
     try {
       // Check if location includes a branch
-      const { branch: storedBranch } = parseLocation(marketplace.source.location);
+      const { branch: storedBranch } = parseLocation(
+        marketplace.source.location,
+      );
       const git = simpleGit(marketplace.path);
 
       let targetBranch: string;
@@ -485,7 +512,11 @@ export async function updateMarketplace(
         // Default branch marketplace: detect default branch
         targetBranch = 'main';
         try {
-          const ref = await git.raw(['symbolic-ref', 'refs/remotes/origin/HEAD', '--short']);
+          const ref = await git.raw([
+            'symbolic-ref',
+            'refs/remotes/origin/HEAD',
+            '--short',
+          ]);
           const trimmed = ref.trim();
           targetBranch = trimmed.startsWith('origin/')
             ? trimmed.slice('origin/'.length)
@@ -572,10 +603,16 @@ export async function getMarketplacePluginsFromManifest(
   }
 
   const plugins = result.data.plugins.map((plugin) => {
-    const resolvedSource = resolvePluginSourcePath(plugin.source, marketplacePath);
+    const resolvedSource = resolvePluginSourcePath(
+      plugin.source,
+      marketplacePath,
+    );
     const info: MarketplacePluginInfo = {
       name: plugin.name,
-      path: typeof plugin.source === 'string' ? resolve(marketplacePath, plugin.source) : resolvedSource,
+      path:
+        typeof plugin.source === 'string'
+          ? resolve(marketplacePath, plugin.source)
+          : resolvedSource,
       description: plugin.description,
       source: resolvedSource,
     };
@@ -601,7 +638,9 @@ export async function listMarketplacePlugins(
   }
 
   // Try manifest first
-  const manifestResult = await getMarketplacePluginsFromManifest(marketplace.path);
+  const manifestResult = await getMarketplacePluginsFromManifest(
+    marketplace.path,
+  );
   if (manifestResult.plugins.length > 0) {
     return manifestResult;
   }
@@ -712,7 +751,8 @@ export async function resolvePluginSpec(
   }
 
   // Use override name if provided (e.g., when manifest changed the marketplace name)
-  const marketplaceName = options.marketplaceNameOverride ?? parsed.marketplaceName;
+  const marketplaceName =
+    options.marketplaceNameOverride ?? parsed.marketplaceName;
 
   // Determine marketplace path: use override or look up from registry
   let marketplacePath: string | null = options.marketplacePathOverride ?? null;
@@ -746,7 +786,10 @@ export async function resolvePluginSpec(
           // Offline mode: check if plugin is already cached, don't fetch
           const parsedUrl = parseGitHubUrl(pluginEntry.source.url);
           if (parsedUrl) {
-            const cachePath = getPluginCachePath(parsedUrl.owner, parsedUrl.repo);
+            const cachePath = getPluginCachePath(
+              parsedUrl.owner,
+              parsedUrl.repo,
+            );
             if (existsSync(cachePath)) {
               return {
                 path: cachePath,
@@ -856,7 +899,8 @@ export async function resolvePluginSpecWithAutoRegister(
 
   // If not registered, try auto-registration
   if (!marketplace) {
-    const sourceToRegister = owner && repo ? `${owner}/${repo}` : marketplaceName;
+    const sourceToRegister =
+      owner && repo ? `${owner}/${repo}` : marketplaceName;
     const autoRegResult = await autoRegisterMarketplace(sourceToRegister);
     if (!autoRegResult.success) {
       return {
@@ -991,9 +1035,16 @@ export function extractUniqueMarketplaceSources(plugins: string[]): string[] {
  */
 export async function ensureMarketplacesRegistered(
   plugins: string[],
-): Promise<Array<{ source: string; success: boolean; name?: string; error?: string }>> {
+): Promise<
+  Array<{ source: string; success: boolean; name?: string; error?: string }>
+> {
   const sources = extractUniqueMarketplaceSources(plugins);
-  const results: Array<{ source: string; success: boolean; name?: string; error?: string }> = [];
+  const results: Array<{
+    source: string;
+    success: boolean;
+    name?: string;
+    error?: string;
+  }> = [];
 
   for (const source of sources) {
     // Check if already registered
@@ -1018,7 +1069,9 @@ export async function ensureMarketplacesRegistered(
  * Get the short git commit hash for a marketplace directory.
  * Returns null if the marketplace is not a git repo or has no commits.
  */
-export async function getMarketplaceVersion(marketplacePath: string): Promise<string | null> {
+export async function getMarketplaceVersion(
+  marketplacePath: string,
+): Promise<string | null> {
   if (!existsSync(marketplacePath)) {
     return null;
   }
