@@ -11,6 +11,7 @@ import {
 import type { WorkspaceConfig, ClientType } from '../models/workspace-config.js';
 import {
   isPluginSpec,
+  parsePluginSpec,
   resolvePluginSpecWithAutoRegister,
 } from './marketplace.js';
 
@@ -269,8 +270,10 @@ export async function removePlugin(
       };
     }
 
-    // Remove plugin
+    // Remove plugin and clean up its disabled skills
+    const removedEntry = config.plugins[index]!;
     config.plugins.splice(index, 1);
+    pruneDisabledSkillsForEntry(config, removedEntry);
 
     // Write back
     const newContent = dump(config, { lineWidth: -1 });
@@ -283,6 +286,43 @@ export async function removePlugin(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/**
+ * Remove disabledSkills entries whose plugin name matches the removed plugin entry.
+ * Handles plugin@marketplace specs by extracting the plugin name prefix.
+ */
+function pruneDisabledSkillsForEntry(
+  config: WorkspaceConfig,
+  pluginEntry: string,
+): void {
+  if (!config.disabledSkills?.length) return;
+
+  const pluginName = extractPluginName(pluginEntry);
+  if (!pluginName) return;
+
+  const prefix = `${pluginName}:`;
+  config.disabledSkills = config.disabledSkills.filter((s) => !s.startsWith(prefix));
+  if (config.disabledSkills.length === 0) {
+    config.disabledSkills = undefined;
+  }
+}
+
+/**
+ * Extract the plugin name from a plugin source string.
+ * For plugin@marketplace specs, returns the plugin component.
+ * For bare names (no @), returns the name as-is (used by partial match).
+ */
+function extractPluginName(pluginSource: string): string | null {
+  if (isPluginSpec(pluginSource)) {
+    return parsePluginSpec(pluginSource)?.plugin ?? null;
+  }
+  // Not a plugin spec — could be a bare name, local path, or GitHub URL.
+  // Bare names are used as the plugin name directly.
+  if (!pluginSource.includes('/') && !pluginSource.includes('\\')) {
+    return pluginSource;
+  }
+  return null;
 }
 
 /**

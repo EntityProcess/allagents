@@ -188,7 +188,9 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
       return { success: false, error: `Plugin not found in user config: ${plugin}` };
     }
 
+    const removedEntry = config.plugins[index]!;
     config.plugins.splice(index, 1);
+    pruneUserDisabledSkillsForEntry(config, removedEntry);
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
   } catch (error) {
@@ -197,6 +199,40 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/**
+ * Remove disabledSkills entries whose plugin name matches the removed plugin entry.
+ */
+function pruneUserDisabledSkillsForEntry(
+  config: WorkspaceConfig,
+  pluginEntry: string,
+): void {
+  if (!config.disabledSkills?.length) return;
+
+  const pluginName = extractUserPluginName(pluginEntry);
+  if (!pluginName) return;
+
+  const prefix = `${pluginName}:`;
+  config.disabledSkills = config.disabledSkills.filter((s) => !s.startsWith(prefix));
+  if (config.disabledSkills.length === 0) {
+    config.disabledSkills = undefined;
+  }
+}
+
+/**
+ * Extract the plugin name from a plugin source string.
+ * For plugin@marketplace specs, returns the plugin component.
+ * For bare names (no @), returns the name as-is.
+ */
+function extractUserPluginName(pluginSource: string): string | null {
+  if (isPluginSpec(pluginSource)) {
+    return parsePluginSpec(pluginSource)?.plugin ?? null;
+  }
+  if (!pluginSource.includes('/') && !pluginSource.includes('\\')) {
+    return pluginSource;
+  }
+  return null;
 }
 
 /**
