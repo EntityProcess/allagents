@@ -1,9 +1,19 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { load, dump } from 'js-yaml';
+import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
-import type { WorkspaceConfig, ClientType } from '../models/workspace-config.js';
+import type {
+  ClientType,
+  WorkspaceConfig,
+} from '../models/workspace-config.js';
+import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
+import {
+  isGitHubUrl,
+  parseGitHubUrl,
+  validatePluginSource,
+  verifyGitHubUrlExists,
+} from '../utils/plugin-path.js';
 import { getAllagentsDir, getMarketplace } from './marketplace.js';
 import {
   isPluginSpec,
@@ -11,13 +21,9 @@ import {
   resolvePluginSpecWithAutoRegister,
 } from './marketplace.js';
 import {
-  validatePluginSource,
-  isGitHubUrl,
-  parseGitHubUrl,
-  verifyGitHubUrlExists,
-} from '../utils/plugin-path.js';
-import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
-import type { ModifyResult } from './workspace-modify.js';
+  type ModifyResult,
+  pruneDisabledSkillsForPlugin,
+} from './workspace-modify.js';
 
 /**
  * Default clients for user-scope installations.
@@ -26,7 +32,13 @@ import type { ModifyResult } from './workspace-modify.js';
  * (.allagents) installations.
  */
 const DEFAULT_USER_CLIENTS: ClientType[] = [
-  'copilot', 'codex', 'cursor', 'opencode', 'gemini', 'factory', 'ampcode',
+  'copilot',
+  'codex',
+  'cursor',
+  'opencode',
+  'gemini',
+  'factory',
+  'ampcode',
 ];
 
 /**
@@ -43,7 +55,11 @@ export function getUserWorkspaceConfigPath(): string {
  * user config (~/.allagents/workspace.yaml).
  */
 export function isUserConfigPath(workspacePath: string): boolean {
-  const projectConfigPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  const projectConfigPath = join(
+    workspacePath,
+    CONFIG_DIR,
+    WORKSPACE_CONFIG_FILE,
+  );
   const userConfigPath = getUserWorkspaceConfigPath();
   return resolve(projectConfigPath) === resolve(userConfigPath);
 }
@@ -103,18 +119,28 @@ export async function addUserPlugin(plugin: string): Promise<ModifyResult> {
     const normalizedPlugin = resolved.registeredAs
       ? plugin.replace(/@[^@]+$/, `@${resolved.registeredAs}`)
       : plugin;
-    return addPluginToUserConfig(normalizedPlugin, configPath, resolved.registeredAs);
+    return addPluginToUserConfig(
+      normalizedPlugin,
+      configPath,
+      resolved.registeredAs,
+    );
   }
 
   // Handle GitHub URL
   if (isGitHubUrl(plugin)) {
     const validation = validatePluginSource(plugin);
     if (!validation.valid) {
-      return { success: false, error: validation.error || 'Invalid GitHub URL' };
+      return {
+        success: false,
+        error: validation.error || 'Invalid GitHub URL',
+      };
     }
     const verifyResult = await verifyGitHubUrlExists(plugin);
     if (!verifyResult.exists) {
-      return { success: false, error: verifyResult.error || `GitHub URL not found: ${plugin}` };
+      return {
+        success: false,
+        error: verifyResult.error || `GitHub URL not found: ${plugin}`,
+      };
     }
   } else {
     // Local path - verify it exists
@@ -142,9 +168,7 @@ export async function hasUserPlugin(plugin: string): Promise<boolean> {
   if (config.plugins.indexOf(plugin) !== -1) return true;
 
   // Partial match
-  return config.plugins.some(
-    (p) => p.startsWith(`${plugin}@`) || p === plugin,
-  );
+  return config.plugins.some((p) => p.startsWith(`${plugin}@`) || p === plugin);
 }
 
 /**
@@ -185,10 +209,15 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
     }
 
     if (index === -1) {
-      return { success: false, error: `Plugin not found in user config: ${plugin}` };
+      return {
+        success: false,
+        error: `Plugin not found in user config: ${plugin}`,
+      };
     }
 
+    const removedEntry = config.plugins[index] as string;
     config.plugins.splice(index, 1);
+    pruneDisabledSkillsForPlugin(config, removedEntry);
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
   } catch (error) {
@@ -203,7 +232,9 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
  * Get user plugins that reference a given marketplace name.
  * Matches plugins with `@marketplace-name` suffix.
  */
-export async function getUserPluginsForMarketplace(marketplaceName: string): Promise<string[]> {
+export async function getUserPluginsForMarketplace(
+  marketplaceName: string,
+): Promise<string[]> {
   const config = await getUserWorkspaceConfig();
   if (!config) return [];
   return config.plugins.filter((p) => {
@@ -216,7 +247,9 @@ export async function getUserPluginsForMarketplace(marketplaceName: string): Pro
  * Remove all user plugins that reference a given marketplace name.
  * Returns the list of removed plugin specs.
  */
-export async function removeUserPluginsForMarketplace(marketplaceName: string): Promise<string[]> {
+export async function removeUserPluginsForMarketplace(
+  marketplaceName: string,
+): Promise<string[]> {
   const config = await getUserWorkspaceConfig();
   if (!config) return [];
 
@@ -283,7 +316,10 @@ async function addPluginToUserConfig(
     const config = load(content) as WorkspaceConfig;
 
     if (config.plugins.includes(plugin)) {
-      return { success: false, error: `Plugin already exists in user config: ${plugin}` };
+      return {
+        success: false,
+        error: `Plugin already exists in user config: ${plugin}`,
+      };
     }
 
     // Check for semantic duplicates (different strings resolving to same repo)
@@ -302,7 +338,11 @@ async function addPluginToUserConfig(
 
     config.plugins.push(plugin);
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
-    return { success: true, ...(autoRegistered && { autoRegistered }), normalizedPlugin: plugin };
+    return {
+      success: true,
+      ...(autoRegistered && { autoRegistered }),
+      normalizedPlugin: plugin,
+    };
   } catch (error) {
     return {
       success: false,
@@ -315,7 +355,9 @@ async function addPluginToUserConfig(
  * Set clients in user-level workspace config.
  * Creates the config file if it doesn't exist.
  */
-export async function setUserClients(clients: ClientType[]): Promise<ModifyResult> {
+export async function setUserClients(
+  clients: ClientType[],
+): Promise<ModifyResult> {
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
 
@@ -346,7 +388,9 @@ export async function getUserDisabledSkills(): Promise<string[]> {
  * Add a skill to disabledSkills in user workspace config
  * @param skillKey - Skill key in plugin:skill format
  */
-export async function addUserDisabledSkill(skillKey: string): Promise<ModifyResult> {
+export async function addUserDisabledSkill(
+  skillKey: string,
+): Promise<ModifyResult> {
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
 
@@ -356,7 +400,10 @@ export async function addUserDisabledSkill(skillKey: string): Promise<ModifyResu
     const disabledSkills = config.disabledSkills ?? [];
 
     if (disabledSkills.includes(skillKey)) {
-      return { success: false, error: `Skill '${skillKey}' is already disabled` };
+      return {
+        success: false,
+        error: `Skill '${skillKey}' is already disabled`,
+      };
     }
 
     config.disabledSkills = [...disabledSkills, skillKey];
@@ -374,7 +421,9 @@ export async function addUserDisabledSkill(skillKey: string): Promise<ModifyResu
  * Remove a skill from disabledSkills in user workspace config
  * @param skillKey - Skill key in plugin:skill format
  */
-export async function removeUserDisabledSkill(skillKey: string): Promise<ModifyResult> {
+export async function removeUserDisabledSkill(
+  skillKey: string,
+): Promise<ModifyResult> {
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
 
@@ -384,7 +433,10 @@ export async function removeUserDisabledSkill(skillKey: string): Promise<ModifyR
     const disabledSkills = config.disabledSkills ?? [];
 
     if (!disabledSkills.includes(skillKey)) {
-      return { success: false, error: `Skill '${skillKey}' is already enabled` };
+      return {
+        success: false,
+        error: `Skill '${skillKey}' is already enabled`,
+      };
     }
 
     config.disabledSkills = disabledSkills.filter((s) => s !== skillKey);
@@ -424,7 +476,9 @@ export interface InstalledPluginInfo {
  * Get all installed plugins from user workspace config.
  * Only returns plugin@marketplace format plugins.
  */
-export async function getInstalledUserPlugins(): Promise<InstalledPluginInfo[]> {
+export async function getInstalledUserPlugins(): Promise<
+  InstalledPluginInfo[]
+> {
   const config = await getUserWorkspaceConfig();
   if (!config) return [];
 

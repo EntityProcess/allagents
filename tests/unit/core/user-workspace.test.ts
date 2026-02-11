@@ -183,5 +183,49 @@ describe('user-workspace', () => {
       const updatedConfig = await getUserWorkspaceConfig();
       expect(updatedConfig!.plugins).not.toContain('code-review@marketplace');
     });
+
+    test('cleans up disabled skills when removing plugin spec', async () => {
+      await ensureUserWorkspace();
+
+      const configPath = getUserWorkspaceConfigPath();
+      const { load: yamlLoad } = await import('js-yaml');
+      const { dump: yamlDump } = await import('js-yaml');
+      const { writeFile: fsWriteFile } = await import('node:fs/promises');
+
+      const content = await readFile(configPath, 'utf-8');
+      const config = yamlLoad(content) as any;
+      config.plugins.push('cargowise@wtg-ai-prompts');
+      config.disabledSkills = ['cargowise:cw-document-macro', 'other:skill'];
+      await fsWriteFile(configPath, yamlDump(config, { lineWidth: -1 }), 'utf-8');
+
+      const result = await removeUserPlugin('cargowise@wtg-ai-prompts');
+      expect(result.success).toBe(true);
+
+      const updatedConfig = await getUserWorkspaceConfig();
+      expect(updatedConfig!.plugins).not.toContain('cargowise@wtg-ai-prompts');
+      expect(updatedConfig!.disabledSkills ?? []).not.toContain('cargowise:cw-document-macro');
+      expect(updatedConfig!.disabledSkills).toContain('other:skill');
+    });
+
+    test('clears disabledSkills entirely when all belong to removed plugin', async () => {
+      await ensureUserWorkspace();
+
+      const configPath = getUserWorkspaceConfigPath();
+      const { load: yamlLoad } = await import('js-yaml');
+      const { dump: yamlDump } = await import('js-yaml');
+      const { writeFile: fsWriteFile } = await import('node:fs/promises');
+
+      const content = await readFile(configPath, 'utf-8');
+      const config = yamlLoad(content) as any;
+      config.plugins.push('cargowise@wtg-ai-prompts');
+      config.disabledSkills = ['cargowise:cw-document-macro', 'cargowise:cw-coding'];
+      await fsWriteFile(configPath, yamlDump(config, { lineWidth: -1 }), 'utf-8');
+
+      const result = await removeUserPlugin('cargowise@wtg-ai-prompts');
+      expect(result.success).toBe(true);
+
+      const updatedConfig = await getUserWorkspaceConfig();
+      expect(updatedConfig!.disabledSkills).toBeUndefined();
+    });
   });
 });
