@@ -1,5 +1,5 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { fetchPlugin, type FetchDeps } from '../../../src/core/plugin.js';
+import { fetchPlugin, updatePlugin, type FetchDeps, type UpdatePluginDeps } from '../../../src/core/plugin.js';
 import { GitCloneError } from '../../../src/core/git.js';
 
 // Create mock functions for dependency injection
@@ -120,5 +120,83 @@ describe('fetchPlugin', () => {
     expect(result1.success).toBe(true);
     // Only one pull should have occurred despite two concurrent calls
     expect(pullMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('updatePlugin', () => {
+  const mockParsePluginSpec = mock((spec: string) => {
+    if (spec.includes('@')) {
+      const [plugin, marketplace] = spec.split('@');
+      return { plugin, marketplaceName: marketplace };
+    }
+    return null;
+  });
+
+  const mockGetMarketplace = mock(async (name: string) => {
+    if (name === 'test-marketplace') {
+      return { path: '/mock/marketplace/path', source: { type: 'github' } };
+    }
+    return null;
+  });
+
+  const mockParseManifest = mock(async (_path: string) => ({
+    success: true,
+    data: {
+      plugins: [
+        { name: 'embedded-plugin', source: './plugins/embedded' },
+        { name: 'external-plugin', source: { url: 'https://github.com/external/repo' } },
+      ],
+    },
+  }));
+
+  const mockUpdateMarketplace = mock(async (name: string) => [{ name, success: true }]);
+  const mockFetchFn = mock(async (_url: string) => ({
+    success: true,
+    action: 'updated' as const,
+    cachePath: '/mock/cache/path',
+  }));
+
+  const updateDeps: UpdatePluginDeps = {
+    parsePluginSpec: mockParsePluginSpec as unknown as UpdatePluginDeps['parsePluginSpec'],
+    getMarketplace: mockGetMarketplace as unknown as UpdatePluginDeps['getMarketplace'],
+    parseMarketplaceManifest: mockParseManifest as unknown as UpdatePluginDeps['parseMarketplaceManifest'],
+    updateMarketplace: mockUpdateMarketplace as unknown as UpdatePluginDeps['updateMarketplace'],
+    fetchFn: mockFetchFn as unknown as UpdatePluginDeps['fetchFn'],
+  };
+
+  beforeEach(() => {
+    mockParsePluginSpec.mockClear();
+    mockGetMarketplace.mockClear();
+    mockParseManifest.mockClear();
+    mockUpdateMarketplace.mockClear();
+    mockFetchFn.mockClear();
+  });
+
+  it('should skip local path plugins', async () => {
+    const result = await updatePlugin('./local/plugin', updateDeps);
+    expect(result.success).toBe(true);
+    expect(result.action).toBe('skipped');
+  });
+
+  it('should return error when marketplace not found', async () => {
+    const result = await updatePlugin('plugin@unknown-marketplace', updateDeps);
+    expect(result.success).toBe(false);
+    expect(result.action).toBe('failed');
+    expect(result.error).toContain('Marketplace not found');
+  });
+
+  it('should update marketplace for embedded plugins', async () => {
+    const result = await updatePlugin('embedded-plugin@test-marketplace', updateDeps);
+    expect(result.success).toBe(true);
+    expect(result.action).toBe('updated');
+    expect(mockUpdateMarketplace).toHaveBeenCalledWith('test-marketplace');
+  });
+
+  it('should update both marketplace and cache for external plugins', async () => {
+    const result = await updatePlugin('external-plugin@test-marketplace', updateDeps);
+    expect(result.success).toBe(true);
+    expect(result.action).toBe('updated');
+    expect(mockUpdateMarketplace).toHaveBeenCalledWith('test-marketplace');
+    expect(mockFetchFn).toHaveBeenCalledWith('https://github.com/external/repo');
   });
 });

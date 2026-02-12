@@ -162,6 +162,8 @@ export interface SyncOptions {
   workspaceSourceBase?: string;
   /** Override which clients to sync. If provided, only these clients are synced instead of all configured clients. */
   clients?: string[];
+  /** Skip updating AGENTS.md and other generated agent files. Use for plugin-only updates. */
+  skipAgentFiles?: boolean;
 }
 
 /**
@@ -1042,7 +1044,7 @@ export async function syncWorkspace(
   workspacePath: string = process.cwd(),
   options: SyncOptions = {},
 ): Promise<SyncResult> {
-  const { offline = false, dryRun = false, workspaceSourceBase } = options;
+  const { offline = false, dryRun = false, workspaceSourceBase, skipAgentFiles = false } = options;
   const configDir = join(workspacePath, CONFIG_DIR);
   const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
 
@@ -1288,7 +1290,7 @@ export async function syncWorkspace(
   // ensure WORKSPACE-RULES are injected into agent files directly.
   // This handles the case where a user has repositories but no workspace: section.
   // (When workspace.source exists, rules are injected via copyWorkspaceFiles above.)
-  if (!config.workspace && !dryRun) {
+  if (!config.workspace && !dryRun && !skipAgentFiles) {
     await updateAgentFiles(workspacePath);
   }
 

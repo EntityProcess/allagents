@@ -322,3 +322,134 @@ export async function getPluginName(pluginPath: string): Promise<string> {
   // Fallback to directory name
   return basename(pluginPath);
 }
+
+/**
+ * Result of updating an installed plugin
+ */
+export interface InstalledPluginUpdateResult {
+  plugin: string;
+  success: boolean;
+  action: 'updated' | 'skipped' | 'failed';
+  error?: string;
+}
+
+/**
+ * Dependencies for updatePlugin (for testing)
+ */
+export interface UpdatePluginDeps {
+  parsePluginSpec: (spec: string) => { plugin: string; marketplaceName: string } | null;
+  getMarketplace: (name: string) => Promise<{ path: string; source: { type: string } } | null>;
+  parseMarketplaceManifest: (path: string) => Promise<{ success: boolean; data?: { plugins: Array<{ name: string; source: string | { url: string } }> } }>;
+  updateMarketplace: (name: string) => Promise<Array<{ name: string; success: boolean; error?: string }>>;
+  /** Optional fetch function for testing - defaults to fetchPlugin */
+  fetchFn?: (url: string) => Promise<FetchResult>;
+}
+
+/**
+ * Update a single plugin by pulling from remote.
+ * Handles both marketplace-embedded and external plugins.
+ *
+ * @param pluginSpec - Plugin spec (e.g., "plugin@marketplace" or GitHub URL)
+ * @param deps - Dependencies for marketplace operations (lazy loaded to avoid circular imports)
+ */
+export async function updatePlugin(
+  pluginSpec: string,
+  deps: UpdatePluginDeps,
+): Promise<InstalledPluginUpdateResult> {
+  const fetchFn = deps.fetchFn ?? fetchPlugin;
+
+  // Handle plugin@marketplace format
+  const parsed = deps.parsePluginSpec(pluginSpec);
+  if (!parsed) {
+    // Might be a GitHub URL or local path
+    if (pluginSpec.startsWith('https://github.com/')) {
+      // External GitHub URL - update the cached repo
+      const result = await fetchFn(pluginSpec);
+      return {
+        plugin: pluginSpec,
+        success: result.success,
+        action: result.action === 'updated' ? 'updated' : result.success ? 'skipped' : 'failed',
+        ...(result.error && { error: result.error }),
+      };
+    }
+
+    // Local path - nothing to update
+    return {
+      plugin: pluginSpec,
+      success: true,
+      action: 'skipped',
+    };
+  }
+
+  // Get marketplace info
+  const marketplace = await deps.getMarketplace(parsed.marketplaceName);
+  if (!marketplace) {
+    return {
+      plugin: pluginSpec,
+      success: false,
+      action: 'failed',
+      error: `Marketplace not found: ${parsed.marketplaceName}`,
+    };
+  }
+
+  // Parse marketplace manifest to determine if plugin is embedded or external
+  const manifestResult = await deps.parseMarketplaceManifest(marketplace.path);
+  if (!manifestResult.success || !manifestResult.data) {
+    // No manifest - update the marketplace itself (plugin might be in directory)
+    const updateResults = await deps.updateMarketplace(parsed.marketplaceName);
+    const result = updateResults[0];
+    return {
+      plugin: pluginSpec,
+      success: result?.success ?? false,
+      action: result?.success ? 'updated' : 'failed',
+      ...(result?.error && { error: result.error }),
+    };
+  }
+
+  // Find plugin entry in manifest
+  const pluginEntry = manifestResult.data.plugins.find(
+    (p) => p.name === parsed.plugin,
+  );
+
+  if (!pluginEntry) {
+    // Plugin not in manifest - update marketplace and hope for the best
+    const updateResults = await deps.updateMarketplace(parsed.marketplaceName);
+    const result = updateResults[0];
+    return {
+      plugin: pluginSpec,
+      success: result?.success ?? false,
+      action: result?.success ? 'updated' : 'failed',
+      ...(result?.error && { error: result.error }),
+    };
+  }
+
+  // Check if embedded (string path) or external (url object)
+  if (typeof pluginEntry.source === 'string') {
+    // Embedded plugin - update the marketplace
+    const updateResults = await deps.updateMarketplace(parsed.marketplaceName);
+    const result = updateResults[0];
+    return {
+      plugin: pluginSpec,
+      success: result?.success ?? false,
+      action: result?.success ? 'updated' : 'failed',
+      ...(result?.error && { error: result.error }),
+    };
+  }
+
+  // External plugin - update both marketplace (for manifest changes) and the cached repo
+  const url = pluginEntry.source.url;
+
+  // Update the marketplace first (in case manifest changed)
+  if (marketplace.source.type === 'github') {
+    await deps.updateMarketplace(parsed.marketplaceName);
+  }
+
+  // Update the external plugin cache
+  const fetchResult = await fetchFn(url);
+  return {
+    plugin: pluginSpec,
+    success: fetchResult.success,
+    action: fetchResult.action === 'updated' ? 'updated' : fetchResult.success ? 'skipped' : 'failed',
+    ...(fetchResult.error && { error: fetchResult.error }),
+  };
+}

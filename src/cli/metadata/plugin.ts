@@ -178,3 +178,34 @@ export const pluginUninstallMeta: AgentCommandMeta = {
     },
   },
 };
+
+export const pluginUpdateMeta: AgentCommandMeta = {
+  command: 'plugin update',
+  description: 'Update installed plugins to latest version and sync plugin files (skips AGENTS.md)',
+  whenToUse: 'To pull the latest changes for installed plugins and deploy plugin files only, without regenerating AGENTS.md',
+  examples: [
+    'allagents plugin update',
+    'allagents plugin update my-plugin@official',
+    'allagents plugin update --scope user',
+  ],
+  expectedOutput:
+    'Shows update status per plugin, then syncs plugin files. Exit 0 if all succeed, exit 1 if any fail.',
+  positionals: [
+    { name: 'plugin', type: 'string', required: false, description: 'Specific plugin to update (updates all if omitted)' },
+  ],
+  options: [
+    { flag: '--scope', short: '-s', type: 'string', description: 'Installation scope: "project" (default), "user", or "all"' },
+  ],
+  outputSchema: {
+    results: [{ plugin: 'string', success: 'boolean', action: 'string', error: 'string | undefined' }],
+    updated: 'number',
+    skipped: 'number',
+    failed: 'number',
+    syncResult: {
+      copied: 'number',
+      generated: 'number',
+      failed: 'number',
+      skipped: 'number',
+    },
+  },
+};
