@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative } from 'node:path';
 import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
 import { CLIENT_MAPPINGS, isUniversalClient } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
@@ -9,6 +9,7 @@ import { validateSkill } from '../validators/skill.js';
 import { generateWorkspaceRules, type WorkspaceRepository } from '../constants.js';
 import { parseFileSource } from '../utils/plugin-path.js';
 import { createSymlink } from '../utils/symlink.js';
+import { adjustLinksInContent } from '../utils/link-adjuster.js';
 
 /**
  * Agent instruction files that receive WORKSPACE-RULES injection
@@ -462,21 +463,73 @@ export async function copyAgents(
 }
 
 /**
+ * Options for copying GitHub content
+ */
+export interface GitHubCopyOptions extends CopyOptions {
+  /**
+   * Map of skill folder name to resolved name.
+   * Used when skills are renamed due to conflicts, so links can be adjusted accordingly.
+   */
+  skillNameMap?: Map<string, string>;
+}
+
+/**
+ * Recursively process a directory, copying files and adjusting links in markdown.
+ * Single-pass approach: read source → transform if markdown → write to dest.
+ */
+async function copyAndAdjustDirectory(
+  sourceDir: string,
+  destDir: string,
+  sourceBase: string,
+  skillsPath: string,
+  skillNameMap?: Map<string, string>,
+): Promise<void> {
+  await mkdir(destDir, { recursive: true });
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const sourcePath = join(sourceDir, entry.name);
+    const destPath = join(destDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyAndAdjustDirectory(sourcePath, destPath, sourceBase, skillsPath, skillNameMap);
+    } else {
+      const relativePath = relative(sourceBase, sourcePath);
+      const isMarkdown = entry.name.endsWith('.md') || entry.name.endsWith('.markdown');
+
+      if (isMarkdown) {
+        // Read, transform, write in one pass
+        let content = await readFile(sourcePath, 'utf-8');
+        content = adjustLinksInContent(content, relativePath, {
+          ...(skillNameMap && { skillNameMap }),
+          workspaceSkillsPath: skillsPath,
+        });
+        await writeFile(destPath, content, 'utf-8');
+      } else {
+        // Copy non-markdown files directly
+        await cp(sourcePath, destPath);
+      }
+    }
+  }
+}
+
+/**
  * Copy GitHub-specific content from plugin to workspace
- * This includes prompts (.github/prompts/), copilot-instructions.md, and other GitHub Copilot files
+ * This includes prompts (.github/prompts/), copilot-instructions.md, and other GitHub Copilot files.
+ * Adjusts relative links in markdown files to point to correct workspace locations.
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
- * @param options - Copy options (dryRun)
+ * @param options - Copy options (dryRun, skillNameMap)
  * @returns Array of copy results
  */
 export async function copyGitHubContent(
   pluginPath: string,
   workspacePath: string,
   client: ClientType,
-  options: CopyOptions = {},
+  options: GitHubCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false } = options;
+  const { dryRun = false, skillNameMap } = options;
   const mapping = getMapping(client, options);
   const results: CopyResult[] = [];
 
@@ -497,11 +550,14 @@ export async function copyGitHubContent(
     return results;
   }
 
-  await mkdir(destDir, { recursive: true });
-
   try {
-    // Copy entire .github directory contents recursively
-    await cp(sourceDir, destDir, { recursive: true });
+    // Single-pass: copy files and adjust markdown links in one traversal
+    if (mapping.skillsPath) {
+      await copyAndAdjustDirectory(sourceDir, destDir, sourceDir, mapping.skillsPath, skillNameMap);
+    } else {
+      // No skills path - just copy without adjustment
+      await cp(sourceDir, destDir, { recursive: true });
+    }
     results.push({ source: sourceDir, destination: destDir, action: 'copied' });
   } catch (error) {
     results.push({
@@ -565,7 +621,10 @@ export async function copyPluginToWorkspace(
     }),
     copyHooks(pluginPath, workspacePath, client, baseOptions),
     copyAgents(pluginPath, workspacePath, client, baseOptions),
-    copyGitHubContent(pluginPath, workspacePath, client, baseOptions),
+    copyGitHubContent(pluginPath, workspacePath, client, {
+      ...baseOptions,
+      ...(skillNameMap && { skillNameMap }),
+    }),
   ]);
 
   return [...commandResults, ...skillResults, ...hookResults, ...agentResults, ...githubResults];
