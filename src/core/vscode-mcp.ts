@@ -5,6 +5,29 @@ import { getHomeDir } from '../constants.js';
 import type { ValidatedPlugin } from './sync.js';
 
 /**
+ * Deep equality check for MCP server configs.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+  if (typeof a !== 'object') return false;
+
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((val, i) => deepEqual(val, b[i]));
+  }
+
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => key in bObj && deepEqual(aObj[key], bObj[key]));
+}
+
+/**
  * Result of merging MCP server configs into VS Code
  */
 export interface McpMergeResult {
@@ -129,8 +152,11 @@ export function syncVscodeMcpConfig(
 
   for (const [name, config] of pluginServers) {
     if (name in existingServers) {
-      result.skipped++;
-      result.skippedServers.push(name);
+      // Skip silently if config is identical, otherwise report as skipped
+      if (!deepEqual(existingServers[name], config)) {
+        result.skipped++;
+        result.skippedServers.push(name);
+      }
     } else {
       existingServers[name] = config;
       result.added++;
