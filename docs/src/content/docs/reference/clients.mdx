@@ -8,17 +8,17 @@ description: AI coding assistant clients supported by AllAgents.
 | Client | Skills | Agent File | Hooks | Commands |
 |--------|--------|------------|-------|----------|
 | Claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
-| Copilot | `.github/skills/` | `AGENTS.md` | No | No |
-| Codex | `.codex/skills/` | `AGENTS.md` | No | No |
+| Copilot | `.agents/skills/` | `AGENTS.md` | No | `.github/prompts/` |
+| Codex | `.agents/skills/` | `AGENTS.md` | No | No |
 | Cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
-| OpenCode | `.opencode/skills/` | `AGENTS.md` | No | No |
-| Gemini | `.gemini/skills/` | `GEMINI.md` | No | No |
+| OpenCode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` |
+| Gemini | `.agents/skills/` | `GEMINI.md` | No | No |
 | Factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
-| Amp Code | No | `AGENTS.md` | No | No |
+| Amp Code | `.agents/skills/` | `AGENTS.md` | No | No |
 | VSCode | No | No | No | No |
 
 :::note
-Commands are a Claude-specific feature. Skills are the cross-client way to share reusable prompts.
+Skills are the cross-client way to share reusable prompts.
 :::
 
 ### VSCode
