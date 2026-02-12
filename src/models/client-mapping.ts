@@ -11,6 +11,8 @@ export interface ClientMapping {
   agentFile: string;
   agentFileFallback?: string;
   hooksPath?: string;
+  /** Path for GitHub-specific content (prompts, copilot-instructions.md) */
+  githubPath?: string;
 }
 
 /**
@@ -32,6 +34,7 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   copilot: {
     skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
+    githubPath: '.github/',
   },
   codex: {
     skillsPath: '.agents/skills/',
@@ -101,6 +104,7 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   copilot: {
     skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
+    githubPath: '.github/',
   },
   codex: {
     skillsPath: '.agents/skills/',

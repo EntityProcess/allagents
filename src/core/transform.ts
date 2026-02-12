@@ -467,6 +467,60 @@ export async function copyAgents(
 }
 
 /**
+ * Copy GitHub-specific content from plugin to workspace
+ * This includes prompts (.github/prompts/), copilot-instructions.md, and other GitHub Copilot files
+ * @param pluginPath - Path to plugin directory
+ * @param workspacePath - Path to workspace directory
+ * @param client - Target client type
+ * @param options - Copy options (dryRun)
+ * @returns Array of copy results
+ */
+export async function copyGitHubContent(
+  pluginPath: string,
+  workspacePath: string,
+  client: ClientType,
+  options: CopyOptions = {},
+): Promise<CopyResult[]> {
+  const { dryRun = false } = options;
+  const mapping = getMapping(client, options);
+  const results: CopyResult[] = [];
+
+  // Skip if client doesn't support GitHub content
+  if (!mapping.githubPath) {
+    return results;
+  }
+
+  const sourceDir = join(pluginPath, '.github');
+  if (!existsSync(sourceDir)) {
+    return results;
+  }
+
+  const destDir = join(workspacePath, mapping.githubPath);
+
+  if (dryRun) {
+    results.push({ source: sourceDir, destination: destDir, action: 'copied' });
+    return results;
+  }
+
+  await mkdir(destDir, { recursive: true });
+
+  try {
+    // Copy entire .github directory contents recursively
+    await cp(sourceDir, destDir, { recursive: true });
+    results.push({ source: sourceDir, destination: destDir, action: 'copied' });
+  } catch (error) {
+    results.push({
+      source: sourceDir,
+      destination: destDir,
+      action: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+
+  return results;
+}
+
+/**
  * Options for copying a plugin to workspace
  */
 export interface PluginCopyOptions extends CopyOptions {
@@ -490,7 +544,7 @@ export interface PluginCopyOptions extends CopyOptions {
 
 /**
  * Copy all plugin content to workspace for a specific client
- * Plugins provide: commands, skills, hooks, agents
+ * Plugins provide: commands, skills, hooks, agents, and GitHub-specific content
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
@@ -506,7 +560,7 @@ export async function copyPluginToWorkspace(
   const { skillNameMap, syncMode, canonicalSkillsPath, ...baseOptions } = options;
 
   // Run copy operations in parallel for better performance
-  const [commandResults, skillResults, hookResults, agentResults] = await Promise.all([
+  const [commandResults, skillResults, hookResults, agentResults, githubResults] = await Promise.all([
     copyCommands(pluginPath, workspacePath, client, baseOptions),
     copySkills(pluginPath, workspacePath, client, {
       ...baseOptions,
@@ -516,9 +570,10 @@ export async function copyPluginToWorkspace(
     }),
     copyHooks(pluginPath, workspacePath, client, baseOptions),
     copyAgents(pluginPath, workspacePath, client, baseOptions),
+    copyGitHubContent(pluginPath, workspacePath, client, baseOptions),
   ]);
 
-  return [...commandResults, ...skillResults, ...hookResults, ...agentResults];
+  return [...commandResults, ...skillResults, ...hookResults, ...agentResults, ...githubResults];
 }
 
 /**
