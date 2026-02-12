@@ -1,5 +1,5 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { fetchPlugin, updatePlugin, type FetchDeps } from '../../../src/core/plugin.js';
+import { fetchPlugin, updatePlugin, type FetchDeps, type UpdatePluginDeps } from '../../../src/core/plugin.js';
 import { GitCloneError } from '../../../src/core/git.js';
 
 // Create mock functions for dependency injection
@@ -150,12 +150,18 @@ describe('updatePlugin', () => {
   }));
 
   const mockUpdateMarketplace = mock(async (name: string) => [{ name, success: true }]);
+  const mockFetchFn = mock(async (_url: string) => ({
+    success: true,
+    action: 'updated' as const,
+    cachePath: '/mock/cache/path',
+  }));
 
-  const updateDeps = {
-    parsePluginSpec: mockParsePluginSpec as unknown as typeof mockParsePluginSpec,
-    getMarketplace: mockGetMarketplace as unknown as typeof mockGetMarketplace,
-    parseMarketplaceManifest: mockParseManifest as unknown as typeof mockParseManifest,
-    updateMarketplace: mockUpdateMarketplace as unknown as typeof mockUpdateMarketplace,
+  const updateDeps: UpdatePluginDeps = {
+    parsePluginSpec: mockParsePluginSpec as unknown as UpdatePluginDeps['parsePluginSpec'],
+    getMarketplace: mockGetMarketplace as unknown as UpdatePluginDeps['getMarketplace'],
+    parseMarketplaceManifest: mockParseManifest as unknown as UpdatePluginDeps['parseMarketplaceManifest'],
+    updateMarketplace: mockUpdateMarketplace as unknown as UpdatePluginDeps['updateMarketplace'],
+    fetchFn: mockFetchFn as unknown as UpdatePluginDeps['fetchFn'],
   };
 
   beforeEach(() => {
@@ -163,6 +169,7 @@ describe('updatePlugin', () => {
     mockGetMarketplace.mockClear();
     mockParseManifest.mockClear();
     mockUpdateMarketplace.mockClear();
+    mockFetchFn.mockClear();
   });
 
   it('should skip local path plugins', async () => {
@@ -181,21 +188,24 @@ describe('updatePlugin', () => {
   it('should update marketplace for embedded plugins', async () => {
     const result = await updatePlugin('embedded-plugin@test-marketplace', updateDeps);
     expect(result.success).toBe(true);
+    expect(result.action).toBe('updated');
     expect(mockUpdateMarketplace).toHaveBeenCalledWith('test-marketplace');
   });
 
   it('should update both marketplace and cache for external plugins', async () => {
-    // Need to mock existsSync for fetchPlugin - the updatePlugin function calls fetchPlugin
-    // which uses its own deps, so we need to use the global mock
-    existsSyncMock.mockReturnValue(true);
-    pullMock.mockResolvedValue(undefined);
-
     const result = await updatePlugin('external-plugin@test-marketplace', updateDeps);
-    // The fetchPlugin call inside updatePlugin uses its own real implementation
-    // which will try to actually fetch. Since we can't easily mock it here,
-    // we just verify the marketplace was updated and accept that the fetch may fail.
+    expect(result.success).toBe(true);
+    expect(result.action).toBe('updated');
+    // Marketplace should be updated first
     expect(mockUpdateMarketplace).toHaveBeenCalledWith('test-marketplace');
-    // The external plugin fetch might fail because we can't inject deps into updatePlugin's fetchPlugin call
-    // This is expected behavior - the test verifies the flow, not the actual git operations
+    // Then the external plugin should be fetched
+    expect(mockFetchFn).toHaveBeenCalledWith('https://github.com/external/repo');
+  });
+
+  it('should update direct GitHub URL plugins', async () => {
+    const result = await updatePlugin('https://github.com/owner/repo', updateDeps);
+    expect(result.success).toBe(true);
+    expect(result.action).toBe('updated');
+    expect(mockFetchFn).toHaveBeenCalledWith('https://github.com/owner/repo');
   });
 });

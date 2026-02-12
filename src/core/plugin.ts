@@ -334,6 +334,18 @@ export interface InstalledPluginUpdateResult {
 }
 
 /**
+ * Dependencies for updatePlugin (for testing)
+ */
+export interface UpdatePluginDeps {
+  parsePluginSpec: (spec: string) => { plugin: string; marketplaceName: string } | null;
+  getMarketplace: (name: string) => Promise<{ path: string; source: { type: string } } | null>;
+  parseMarketplaceManifest: (path: string) => Promise<{ success: boolean; data?: { plugins: Array<{ name: string; source: string | { url: string } }> } }>;
+  updateMarketplace: (name: string) => Promise<Array<{ name: string; success: boolean; error?: string }>>;
+  /** Optional fetch function for testing - defaults to fetchPlugin */
+  fetchFn?: (url: string) => Promise<FetchResult>;
+}
+
+/**
  * Update a single plugin by pulling from remote.
  * Handles both marketplace-embedded and external plugins.
  *
@@ -342,20 +354,17 @@ export interface InstalledPluginUpdateResult {
  */
 export async function updatePlugin(
   pluginSpec: string,
-  deps: {
-    parsePluginSpec: (spec: string) => { plugin: string; marketplaceName: string } | null;
-    getMarketplace: (name: string) => Promise<{ path: string; source: { type: string } } | null>;
-    parseMarketplaceManifest: (path: string) => Promise<{ success: boolean; data?: { plugins: Array<{ name: string; source: string | { url: string } }> } }>;
-    updateMarketplace: (name: string) => Promise<Array<{ name: string; success: boolean; error?: string }>>;
-  },
+  deps: UpdatePluginDeps,
 ): Promise<InstalledPluginUpdateResult> {
+  const fetchFn = deps.fetchFn ?? fetchPlugin;
+
   // Handle plugin@marketplace format
   const parsed = deps.parsePluginSpec(pluginSpec);
   if (!parsed) {
     // Might be a GitHub URL or local path
     if (pluginSpec.startsWith('https://github.com/')) {
       // External GitHub URL - update the cached repo
-      const result = await fetchPlugin(pluginSpec);
+      const result = await fetchFn(pluginSpec);
       return {
         plugin: pluginSpec,
         success: result.success,
@@ -436,7 +445,7 @@ export async function updatePlugin(
   }
 
   // Update the external plugin cache
-  const fetchResult = await fetchPlugin(url);
+  const fetchResult = await fetchFn(url);
   return {
     plugin: pluginSpec,
     success: fetchResult.success,
