@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncWorkspace, purgeWorkspace, getPurgePaths } from '../../../src/core/sync.js';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, WORKSPACE_RULES } from '../../../src/constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
 
 describe('sync', () => {
   let testDir: string;

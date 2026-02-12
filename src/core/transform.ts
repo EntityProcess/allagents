@@ -6,7 +6,7 @@ import { CLIENT_MAPPINGS, isUniversalClient } from '../models/client-mapping.js'
 import type { ClientMapping } from '../models/client-mapping.js';
 import type { ClientType, WorkspaceFile, SyncMode } from '../models/workspace-config.js';
 import { validateSkill } from '../validators/skill.js';
-import { WORKSPACE_RULES } from '../constants.js';
+import { generateWorkspaceRules, type WorkspaceRepository } from '../constants.js';
 import { parseFileSource } from '../utils/plugin-path.js';
 import { createSymlink } from '../utils/symlink.js';
 
@@ -21,10 +21,10 @@ const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'] as const;
  * - If file exists without markers: appends rules
  * - If file exists with markers: replaces content between markers (idempotent)
  * @param filePath - Path to the agent file (CLAUDE.md or AGENTS.md)
- * @param rules - Optional custom rules content (defaults to WORKSPACE_RULES constant)
+ * @param repositories - Array of repositories to include in the rules (paths embedded directly)
  */
-export async function ensureWorkspaceRules(filePath: string, rules?: string): Promise<void> {
-  const rulesContent = rules ?? WORKSPACE_RULES;
+export async function ensureWorkspaceRules(filePath: string, repositories: WorkspaceRepository[]): Promise<void> {
+  const rulesContent = generateWorkspaceRules(repositories);
   const startMarker = '<!-- WORKSPACE-RULES:START -->';
   const endMarker = '<!-- WORKSPACE-RULES:END -->';
 
@@ -48,11 +48,6 @@ export async function ensureWorkspaceRules(filePath: string, rules?: string): Pr
     await writeFile(filePath, content + rulesContent, 'utf-8');
   }
 }
-
-/**
- * @deprecated Use ensureWorkspaceRules instead
- */
-export const injectWorkspaceRules = ensureWorkspaceRules;
 
 /**
  * Result of a file copy operation
@@ -108,11 +103,11 @@ export interface WorkspaceCopyOptions extends CopyOptions {
    */
   githubCache?: Map<string, string>;
   /**
-   * Skip WORKSPACE-RULES injection into agent files.
-   * Used when repositories is empty/absent — agent files should not receive rules
-   * that reference repository paths.
+   * Repositories to embed in WORKSPACE-RULES.
+   * When provided, rules include actual repository paths directly.
+   * When empty/absent, WORKSPACE-RULES injection is skipped.
    */
-  skipWorkspaceRules?: boolean;
+  repositories?: WorkspaceRepository[];
 }
 
 /**
@@ -705,7 +700,7 @@ export async function copyWorkspaceFiles(
   files: WorkspaceFile[],
   options: WorkspaceCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false, githubCache, skipWorkspaceRules = false } = options;
+  const { dryRun = false, githubCache, repositories = [] } = options;
   const results: CopyResult[] = [];
 
   // Separate string patterns from object entries
@@ -887,12 +882,12 @@ export async function copyWorkspaceFiles(
   }
 
   // Inject WORKSPACE-RULES into all copied agent files (idempotent)
-  // Skip when repositories is empty/absent — rules reference repository paths that don't exist
-  if (!dryRun && !skipWorkspaceRules) {
+  // Skip when repositories is empty — rules reference repository paths that don't exist
+  if (!dryRun && repositories.length > 0) {
     for (const agentFile of copiedAgentFiles) {
       const targetPath = join(workspacePath, agentFile);
       try {
-        await injectWorkspaceRules(targetPath);
+        await ensureWorkspaceRules(targetPath, repositories);
       } catch (error) {
         results.push({
           source: 'WORKSPACE-RULES',

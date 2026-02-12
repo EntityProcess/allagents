@@ -163,6 +163,7 @@ export async function listRepositories(
 /**
  * Ensure WORKSPACE-RULES are injected into agent files for all configured clients.
  * Lightweight alternative to full syncWorkspace() — only touches agent files.
+ * Repository paths are embedded directly in the rules.
  */
 export async function updateAgentFiles(
   workspacePath: string = process.cwd(),
@@ -184,7 +185,8 @@ export async function updateAgentFiles(
   // Always include AGENTS.md as it's the universal fallback
   agentFiles.add('AGENTS.md');
 
+  // Pass repositories directly so paths are embedded in the rules
   for (const agentFile of agentFiles) {
-    await ensureWorkspaceRules(join(workspacePath, agentFile));
+    await ensureWorkspaceRules(join(workspacePath, agentFile), config.repositories);
   }
 }
