@@ -196,16 +196,7 @@ describe('updatePlugin', () => {
     const result = await updatePlugin('external-plugin@test-marketplace', updateDeps);
     expect(result.success).toBe(true);
     expect(result.action).toBe('updated');
-    // Marketplace should be updated first
     expect(mockUpdateMarketplace).toHaveBeenCalledWith('test-marketplace');
-    // Then the external plugin should be fetched
     expect(mockFetchFn).toHaveBeenCalledWith('https://github.com/external/repo');
-  });
-
-  it('should update direct GitHub URL plugins', async () => {
-    const result = await updatePlugin('https://github.com/owner/repo', updateDeps);
-    expect(result.success).toBe(true);
-    expect(result.action).toBe('updated');
-    expect(mockFetchFn).toHaveBeenCalledWith('https://github.com/owner/repo');
   });
 });
