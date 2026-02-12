@@ -104,7 +104,7 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   copilot: {
     skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
-    githubPath: '.github/',
+    githubPath: '.copilot/',
   },
   codex: {
     skillsPath: '.agents/skills/',
