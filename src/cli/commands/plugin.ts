@@ -63,11 +63,11 @@ function buildSyncData(result: Awaited<ReturnType<typeof syncWorkspace>>) {
 /**
  * Run sync and print results. Returns true if sync succeeded.
  */
-async function runSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnType<typeof buildSyncData> | null }> {
+async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<{ ok: boolean; syncData: ReturnType<typeof buildSyncData> | null }> {
   if (!isJsonMode()) {
     console.log('\nSyncing workspace...\n');
   }
-  const result = await syncWorkspace();
+  const result = await syncWorkspace(process.cwd(), options);
 
   if (!result.success && result.error) {
     if (!isJsonMode()) {
@@ -1069,9 +1069,26 @@ const pluginUpdateCmd = command({
       const skipped = results.filter((r) => r.action === 'skipped').length;
       const failed = results.filter((r) => r.action === 'failed').length;
 
+      // Sync plugin files only (skip AGENTS.md and other generated files)
+      let syncOk = true;
+      let syncData: ReturnType<typeof buildSyncData> | null = null;
+
+      if (updated > 0) {
+        if (updateProject && !isUserConfigPath(process.cwd())) {
+          const { ok, syncData: data } = await runSyncAndPrint({ skipAgentFiles: true });
+          if (!ok) syncOk = false;
+          syncData = data;
+        }
+        if (updateUser) {
+          const { ok, syncData: data } = await runUserSyncAndPrint();
+          if (!ok) syncOk = false;
+          if (!syncData) syncData = data;
+        }
+      }
+
       if (isJsonMode()) {
         jsonOutput({
-          success: failed === 0,
+          success: failed === 0 && syncOk,
           command: 'plugin update',
           data: {
             results: results.map((r) => ({
@@ -1083,10 +1100,11 @@ const pluginUpdateCmd = command({
             updated,
             skipped,
             failed,
+            ...(syncData && { syncResult: syncData }),
           },
           ...(failed > 0 && { error: `${failed} plugin(s) failed to update` }),
         });
-        if (failed > 0) {
+        if (failed > 0 || !syncOk) {
           process.exit(1);
         }
         return;
@@ -1094,11 +1112,8 @@ const pluginUpdateCmd = command({
 
       console.log();
       console.log(`Update complete: ${updated} updated, ${skipped} skipped, ${failed} failed`);
-      if (updated > 0) {
-        console.log('\nRun "allagents workspace sync" to deploy updated files.');
-      }
 
-      if (failed > 0) {
+      if (failed > 0 || !syncOk) {
         process.exit(1);
       }
     } catch (error) {
