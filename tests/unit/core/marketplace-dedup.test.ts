@@ -47,6 +47,7 @@ const {
   extractUniqueMarketplaceSources,
   findMarketplace,
   resolvePluginSpecWithAutoRegister,
+  resetAutoRegisterCache,
 } = await import('../../../src/core/marketplace.js');
 
 describe('marketplace deduplication', () => {
@@ -60,6 +61,7 @@ describe('marketplace deduplication', () => {
     testHome = join(tmpdir(), `marketplace-dedup-test-${Date.now()}`);
     process.env.HOME = testHome;
     cloneToCalls.length = 0;
+    resetAutoRegisterCache();
 
     // Spy on console.log to capture log messages
     logMessages = [];

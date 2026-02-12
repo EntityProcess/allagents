@@ -967,6 +967,18 @@ export async function resolvePluginSpecWithAutoRegister(
 }
 
 /**
+ * In-memory cache of marketplace sources registered in this process (source → name).
+ * Prevents duplicate log messages without relying on disk I/O for deduplication,
+ * which can fail on Windows due to transient file locking (antivirus, search indexer).
+ */
+const registeredSourceCache = new Map<string, string>();
+
+/** Reset the auto-register cache (for testing only). */
+export function resetAutoRegisterCache(): void {
+  registeredSourceCache.clear();
+}
+
+/**
  * Auto-register a marketplace by source.
  * Only supports owner/repo format for GitHub marketplaces.
  */
@@ -977,9 +989,16 @@ async function autoRegisterMarketplace(
   if (source.includes('/') && !source.includes('://')) {
     const parts = source.split('/');
     if (parts.length === 2 && parts[0] && parts[1]) {
-      // Check if already registered before logging/adding
+      // Fast in-memory check: skip if already registered in this process
+      const cachedName = registeredSourceCache.get(source);
+      if (cachedName) {
+        return { success: true, name: cachedName };
+      }
+
+      // Disk-based check: skip if already registered in registry
       const existing = await findMarketplace(parts[1], source);
       if (existing) {
+        registeredSourceCache.set(source, existing.name);
         return { success: true, name: existing.name };
       }
 
@@ -988,7 +1007,9 @@ async function autoRegisterMarketplace(
       if (!result.success) {
         return { success: false, error: result.error || 'Unknown error' };
       }
-      return { success: true, name: result.marketplace?.name ?? parts[1] };
+      const name = result.marketplace?.name ?? parts[1];
+      registeredSourceCache.set(source, name);
+      return { success: true, name };
     }
   }
 
@@ -1053,17 +1074,6 @@ export async function ensureMarketplacesRegistered(
   }> = [];
 
   for (const source of sources) {
-    // Check if already registered
-    const parts = source.split('/');
-    const sourceLocation = source;
-    const existing = await findMarketplace(parts[1] ?? '', sourceLocation);
-
-    if (existing) {
-      results.push({ source, success: true, name: existing.name });
-      continue;
-    }
-
-    // Register the marketplace
     const result = await autoRegisterMarketplace(source);
     results.push({ source, ...result });
   }
