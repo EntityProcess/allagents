@@ -196,7 +196,7 @@ describe('syncVscodeMcpConfig', () => {
     expect(written.customKey).toBe('preserved');
   });
 
-  test('skips servers that already exist', () => {
+  test('skips servers that already exist with different config', () => {
     writeFileSync(
       configPath,
       JSON.stringify({
@@ -222,6 +222,33 @@ describe('syncVscodeMcpConfig', () => {
     // Verify original value is preserved
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(written.servers.ediprod.url).toBe('https://user-configured.test');
+  });
+
+  test('silently skips servers with identical config (no skip count)', () => {
+    const serverConfig = { type: 'http', url: 'https://ediprod.mcp.wtg.zone' };
+
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        servers: {
+          ediprod: serverConfig,
+        },
+      }),
+    );
+
+    writeFileSync(
+      join(pluginDir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: { ediprod: serverConfig },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], { configPath });
+
+    expect(result.added).toBe(0);
+    expect(result.skipped).toBe(0);
+    expect(result.addedServers).toEqual([]);
+    expect(result.skippedServers).toEqual([]);
   });
 
   test('dry-run does not write file', () => {
