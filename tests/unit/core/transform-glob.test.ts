@@ -263,7 +263,7 @@ describe('copyWorkspaceFiles with glob patterns', () => {
       expect(results[0].error).toContain('GitHub cache not found');
     });
 
-    it('should inject WORKSPACE-RULES into AGENTS.md from GitHub source', async () => {
+    it('should inject WORKSPACE-RULES into AGENTS.md from GitHub source when repositories provided', async () => {
       // Create a mock GitHub cache directory
       const mockCacheDir = await mkdtemp(join(tmpdir(), 'allagents-github-cache-'));
       await mkdir(join(mockCacheDir, 'plugins', 'test'), { recursive: true });
@@ -272,15 +272,17 @@ describe('copyWorkspaceFiles with glob patterns', () => {
       const githubCache = new Map<string, string>();
       githubCache.set('owner/repo', mockCacheDir);
 
+      // Pass repositories so WORKSPACE-RULES are injected with embedded paths
       const results = await copyWorkspaceFiles(sourceDir, destDir, [
         { dest: 'AGENTS.md', source: 'owner/repo/plugins/test/AGENTS.md' },
-      ], { githubCache });
+      ], { githubCache, repositories: [{ path: '../myrepo', description: 'test repo' }] });
 
       expect(results.length).toBe(1);
       expect(results[0].action).toBe('copied');
 
       const content = await readFile(join(destDir, 'AGENTS.md'), 'utf-8');
       expect(content).toContain('WORKSPACE-RULES');
+      expect(content).toContain('../myrepo'); // Embedded repo path
 
       // Cleanup
       await rm(mockCacheDir, { recursive: true, force: true });

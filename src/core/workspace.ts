@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { load, dump } from 'js-yaml';
 import { syncWorkspace, type SyncResult } from './sync.js';
 import { ensureWorkspaceRules } from './transform.js';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, type WorkspaceRepository } from '../constants.js';
 import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
 import { fetchWorkspaceFromGitHub, readFileFromClone } from './github-fetch.js';
 import { cleanupTempDir } from './git.js';
@@ -224,7 +224,7 @@ export async function initWorkspace(
       }
     }
 
-    const repositories = (parsed?.repositories as unknown[]) ?? [];
+    const repositories = (parsed?.repositories as WorkspaceRepository[]) ?? [];
     const hasRepositories = repositories.length > 0;
 
     // Only create agent files and inject WORKSPACE-RULES when repositories are configured.
@@ -275,12 +275,13 @@ export async function initWorkspace(
 
       // Inject WORKSPACE-RULES into all copied agent files
       // If no agent files were copied, create AGENTS.md with just rules
+      // Repository paths are embedded directly so agents don't need to read workspace.yaml
       if (copiedAgentFiles.length === 0) {
-        await ensureWorkspaceRules(join(absoluteTarget, 'AGENTS.md'));
+        await ensureWorkspaceRules(join(absoluteTarget, 'AGENTS.md'), repositories);
         copiedAgentFiles.push('AGENTS.md');
       } else {
         for (const agentFile of copiedAgentFiles) {
-          await ensureWorkspaceRules(join(absoluteTarget, agentFile));
+          await ensureWorkspaceRules(join(absoluteTarget, agentFile), repositories);
         }
       }
 

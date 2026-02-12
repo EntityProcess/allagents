@@ -1262,12 +1262,12 @@ export async function syncWorkspace(
     }
 
     // Step 5c: Copy workspace files with GitHub cache
-    // When repositories is empty, skip WORKSPACE-RULES injection into any agent files
+    // Pass repositories so paths are embedded directly in WORKSPACE-RULES
     workspaceFileResults = await copyWorkspaceFiles(
       sourcePath,
       workspacePath,
       filesToCopy,
-      { dryRun, githubCache, skipWorkspaceRules: !hasRepositories },
+      { dryRun, githubCache, repositories: config.repositories },
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md

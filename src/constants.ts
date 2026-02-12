@@ -32,17 +32,32 @@ export const WORKSPACE_CONFIG_PATH = `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`;
 export const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'] as const;
 
 /**
- * Static WORKSPACE-RULES content to append to agent files (CLAUDE.md/AGENTS.md)
- * These rules tell AI to read workspace.yaml for actual repo info
+ * Repository type for generating workspace rules
+ * Re-export from workspace-config for consistency with exactOptionalPropertyTypes
  */
-export const WORKSPACE_RULES = `
-<!-- WORKSPACE-RULES:START -->
-## Rule: Workspace Discovery
-TRIGGER: Any task
-ACTION: Read \`.allagents/workspace.yaml\` to get repository paths and project domains
+export type { Repository as WorkspaceRepository } from './models/workspace-config.js';
+import type { Repository } from './models/workspace-config.js';
 
-## Rule: Correct Repository Paths
+/**
+ * Generate WORKSPACE-RULES content with embedded repository paths
+ * This eliminates the indirection of requiring agents to read workspace.yaml
+ * @param repositories - List of repositories with paths and optional descriptions
+ */
+export function generateWorkspaceRules(repositories: Repository[]): string {
+  const repoList = repositories
+    .map((r) => `- ${r.path}${r.description ? ` - ${r.description}` : ''}`)
+    .join('\n');
+
+  return `
+<!-- WORKSPACE-RULES:START -->
+## Workspace Repositories
+The following repositories are part of this workspace:
+${repoList}
+
+## Rule: Use Repository Paths
 TRIGGER: File operations (read, search, modify)
-ACTION: Use repository paths from \`.allagents/workspace.yaml\`, not assumptions
+ACTION: Use the repository paths listed above, not assumptions
 <!-- WORKSPACE-RULES:END -->
 `;
+}
+
