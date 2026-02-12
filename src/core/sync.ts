@@ -46,6 +46,8 @@ import {
   generateVscodeWorkspace,
   getWorkspaceOutputPath,
 } from './vscode-workspace.js';
+import { syncVscodeMcpConfig } from './vscode-mcp.js';
+import type { McpMergeResult } from './vscode-mcp.js';
 
 /**
  * Result of deduplicating clients by skillsPath
@@ -115,6 +117,8 @@ export interface SyncResult {
   error?: string;
   /** Warnings for plugins that were skipped during sync */
   warnings?: string[];
+  /** Result of syncing MCP server configs to VS Code */
+  mcpResult?: McpMergeResult;
 }
 
 /**
@@ -123,6 +127,8 @@ export interface SyncResult {
 export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const warnings = [...(a.warnings || []), ...(b.warnings || [])];
   const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
+  // Use whichever mcpResult is present (only user-scope sync produces one)
+  const mcpResult = a.mcpResult ?? b.mcpResult;
   return {
     success: a.success && b.success,
     pluginResults: [...a.pluginResults, ...b.pluginResults],
@@ -132,6 +138,7 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     totalGenerated: a.totalGenerated + b.totalGenerated,
     ...(warnings.length > 0 && { warnings }),
     ...(purgedPaths.length > 0 && { purgedPaths }),
+    ...(mcpResult && { mcpResult }),
   };
 }
 
@@ -1485,6 +1492,15 @@ export async function syncUserWorkspace(
     await saveSyncState(homeDir, syncedFiles);
   }
 
+  // Sync MCP server configs to VS Code if vscode client is configured
+  let mcpResult: McpMergeResult | undefined;
+  if (clients.includes('vscode') && validPlugins.length > 0) {
+    mcpResult = syncVscodeMcpConfig(validPlugins, { dryRun });
+    if (mcpResult.warnings.length > 0) {
+      warnings.push(...mcpResult.warnings);
+    }
+  }
+
   return {
     success: totalFailed === 0,
     pluginResults,
@@ -1493,6 +1509,7 @@ export async function syncUserWorkspace(
     totalSkipped,
     totalGenerated,
     ...(warnings.length > 0 && { warnings }),
+    ...(mcpResult && { mcpResult }),
   };
 }
 
