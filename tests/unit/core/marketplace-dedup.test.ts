@@ -46,6 +46,8 @@ const {
   ensureMarketplacesRegistered,
   extractUniqueMarketplaceSources,
   findMarketplace,
+  resolvePluginSpecWithAutoRegister,
+  resetAutoRegisterCache,
 } = await import('../../../src/core/marketplace.js');
 
 describe('marketplace deduplication', () => {
@@ -59,6 +61,7 @@ describe('marketplace deduplication', () => {
     testHome = join(tmpdir(), `marketplace-dedup-test-${Date.now()}`);
     process.env.HOME = testHome;
     cloneToCalls.length = 0;
+    resetAutoRegisterCache();
 
     // Spy on console.log to capture log messages
     logMessages = [];
@@ -175,6 +178,33 @@ describe('marketplace deduplication', () => {
       const found = await findMarketplace('test-repo', 'owner/test-repo');
       expect(found).not.toBeNull();
       expect(found?.name).toBe('test-marketplace');
+    });
+  });
+
+  describe('resolvePluginSpecWithAutoRegister', () => {
+    it('should not log when marketplace was pre-registered by ensureMarketplacesRegistered', async () => {
+      const plugins = ['plugin-a@owner/test-repo', 'plugin-b@owner/test-repo'];
+
+      // Pre-register marketplaces (like sync.ts does before validateAllPlugins)
+      await ensureMarketplacesRegistered(plugins);
+      const preRegLogs = logMessages.filter((m) =>
+        m.includes('Auto-registering'),
+      );
+      expect(preRegLogs).toHaveLength(1);
+
+      // Clear log messages to isolate next phase
+      logMessages.length = 0;
+
+      // Now resolve plugins (like validateAllPlugins does)
+      await Promise.all(
+        plugins.map((spec) => resolvePluginSpecWithAutoRegister(spec)),
+      );
+
+      // Should NOT have logged any additional auto-registration messages
+      const postRegLogs = logMessages.filter((m) =>
+        m.includes('Auto-registering'),
+      );
+      expect(postRegLogs).toHaveLength(0);
     });
   });
 });
