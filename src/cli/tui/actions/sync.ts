@@ -46,6 +46,9 @@ export async function runSync(context: TuiContext): Promise<void> {
         lines.push(
           `Copied: ${userResult.totalCopied}  Failed: ${userResult.totalFailed}  Skipped: ${userResult.totalSkipped}`,
         );
+        if (userResult.mcpResult && (userResult.mcpResult.added > 0 || userResult.mcpResult.skipped > 0)) {
+          lines.push(`MCP servers: ${userResult.mcpResult.added} added, ${userResult.mcpResult.skipped} skipped`);
+        }
         p.note(lines.join('\n'), 'User Sync');
       }
     }

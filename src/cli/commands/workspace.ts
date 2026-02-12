@@ -33,6 +33,14 @@ function buildSyncData(result: SyncResult) {
       copyResults: pr.copyResults,
     })),
     purgedPaths: result.purgedPaths ?? [],
+    ...(result.mcpResult && {
+      mcpServers: {
+        added: result.mcpResult.added,
+        skipped: result.mcpResult.skipped,
+        addedServers: result.mcpResult.addedServers,
+        skippedServers: result.mcpResult.skippedServers,
+      },
+    }),
   };
 }
 
@@ -226,6 +234,14 @@ const syncCmd = command({
         console.log('\nWarnings:');
         for (const warning of result.warnings) {
           console.log(`  \u26A0 ${warning}`);
+        }
+      }
+
+      // Print MCP server sync results
+      if (result.mcpResult && (result.mcpResult.added > 0 || result.mcpResult.skipped > 0)) {
+        console.log(`\nMCP servers: ${result.mcpResult.added} added, ${result.mcpResult.skipped} skipped`);
+        for (const name of result.mcpResult.addedServers) {
+          console.log(`  + ${name}`);
         }
       }
 
