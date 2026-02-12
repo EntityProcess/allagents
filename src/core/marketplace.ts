@@ -977,6 +977,12 @@ async function autoRegisterMarketplace(
   if (source.includes('/') && !source.includes('://')) {
     const parts = source.split('/');
     if (parts.length === 2 && parts[0] && parts[1]) {
+      // Check if already registered before logging/adding
+      const existing = await findMarketplace(parts[1], source);
+      if (existing) {
+        return { success: true, name: existing.name };
+      }
+
       console.log(`Auto-registering GitHub marketplace: ${source}`);
       const result = await addMarketplace(source);
       if (!result.success) {
