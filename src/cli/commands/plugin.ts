@@ -6,6 +6,8 @@ import {
   updateMarketplace,
   listMarketplacePlugins,
   getMarketplaceVersion,
+  getMarketplace,
+  parsePluginSpec,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { addPlugin, removePlugin, hasPlugin } from '../../core/workspace-modify.js';
@@ -16,8 +18,11 @@ import {
   isUserConfigPath,
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
+  getUserWorkspaceConfig,
   type InstalledPluginInfo,
 } from '../../core/user-workspace.js';
+import { updatePlugin, type InstalledPluginUpdateResult } from '../../core/plugin.js';
+import { parseMarketplaceManifest } from '../../utils/marketplace-manifest-parser.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import {
@@ -29,6 +34,7 @@ import {
   pluginValidateMeta,
   pluginInstallMeta,
   pluginUninstallMeta,
+  pluginUpdateMeta,
 } from '../metadata/plugin.js';
 import { skillsCmd } from './plugin-skills.js';
 
@@ -912,6 +918,220 @@ const pluginUninstallCmd = command({
 });
 
 // =============================================================================
+// plugin update
+// =============================================================================
+
+const pluginUpdateCmd = command({
+  name: 'update',
+  description: buildDescription(pluginUpdateMeta),
+  args: {
+    plugin: positional({ type: optional(string), displayName: 'plugin' }),
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Installation scope: "project" (default), "user", or "all"' }),
+  },
+  handler: async ({ plugin, scope }) => {
+    try {
+      // Determine which plugins to update based on scope
+      const updateAll = scope === 'all';
+      const updateUser = scope === 'user' || updateAll;
+      const updateProject = scope === 'project' || (!scope && !updateAll) || updateAll;
+
+      // Collect installed plugins based on scope
+      const pluginsToUpdate: string[] = [];
+
+      if (updateProject && !isUserConfigPath(process.cwd())) {
+        const projectPlugins = await getInstalledProjectPlugins(process.cwd());
+        for (const p of projectPlugins) {
+          pluginsToUpdate.push(p.spec);
+        }
+      }
+
+      if (updateUser) {
+        const userPlugins = await getInstalledUserPlugins();
+        for (const p of userPlugins) {
+          // Avoid duplicates if same plugin is in both scopes
+          if (!pluginsToUpdate.includes(p.spec)) {
+            pluginsToUpdate.push(p.spec);
+          }
+        }
+      }
+
+      // Also include raw plugin entries (GitHub URLs, local paths)
+      if (updateProject && !isUserConfigPath(process.cwd())) {
+        const { existsSync } = await import('node:fs');
+        const { readFile } = await import('node:fs/promises');
+        const { join } = await import('node:path');
+        const { load } = await import('js-yaml');
+        const { CONFIG_DIR, WORKSPACE_CONFIG_FILE } = await import('../../constants.js');
+        const configPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+        if (existsSync(configPath)) {
+          const content = await readFile(configPath, 'utf-8');
+          const config = load(content) as { plugins?: string[] };
+          for (const p of config.plugins ?? []) {
+            if (!pluginsToUpdate.includes(p)) {
+              pluginsToUpdate.push(p);
+            }
+          }
+        }
+      }
+
+      if (updateUser) {
+        const userConfig = await getUserWorkspaceConfig();
+        if (userConfig) {
+          for (const p of userConfig.plugins ?? []) {
+            if (!pluginsToUpdate.includes(p)) {
+              pluginsToUpdate.push(p);
+            }
+          }
+        }
+      }
+
+      // Filter to specific plugin if provided
+      const toUpdate = plugin
+        ? pluginsToUpdate.filter((p) => {
+            // Match by full spec or just plugin name
+            if (p === plugin) return true;
+            const parsed = parsePluginSpec(p);
+            return parsed?.plugin === plugin || p.endsWith(`/${plugin}`);
+          })
+        : pluginsToUpdate;
+
+      if (plugin && toUpdate.length === 0) {
+        const error = `Plugin not found: ${plugin}`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin update', error });
+          process.exit(1);
+        }
+        console.error(`Error: ${error}`);
+        process.exit(1);
+      }
+
+      if (toUpdate.length === 0) {
+        if (isJsonMode()) {
+          jsonOutput({
+            success: true,
+            command: 'plugin update',
+            data: { results: [], updated: 0, skipped: 0, failed: 0 },
+          });
+          return;
+        }
+        console.log('No plugins to update.');
+        return;
+      }
+
+      if (!isJsonMode()) {
+        console.log(plugin ? `Updating plugin: ${plugin}...` : 'Updating plugins...');
+        console.log();
+      }
+
+      // Update each plugin
+      const results: InstalledPluginUpdateResult[] = [];
+      const updatedMarketplaces = new Set<string>();
+
+      // Dependencies for updatePlugin (avoid circular imports)
+      const deps = {
+        parsePluginSpec,
+        getMarketplace,
+        parseMarketplaceManifest,
+        updateMarketplace: async (name: string) => {
+          // Skip if already updated in this run
+          if (updatedMarketplaces.has(name)) {
+            return [{ name, success: true }];
+          }
+          const result = await updateMarketplace(name);
+          if (result[0]?.success) {
+            updatedMarketplaces.add(name);
+          }
+          return result;
+        },
+      };
+
+      for (const pluginSpec of toUpdate) {
+        const result = await updatePlugin(pluginSpec, deps);
+        results.push(result);
+
+        if (!isJsonMode()) {
+          const icon = result.success
+            ? (result.action === 'updated' ? '\u2713' : '-')
+            : '\u2717';
+          const actionLabel = result.action === 'updated'
+            ? 'updated'
+            : result.action === 'skipped'
+              ? 'skipped'
+              : 'failed';
+          console.log(`${icon} ${pluginSpec} (${actionLabel})`);
+          if (result.error) {
+            console.log(`  Error: ${result.error}`);
+          }
+        }
+      }
+
+      const updated = results.filter((r) => r.action === 'updated').length;
+      const skipped = results.filter((r) => r.action === 'skipped').length;
+      const failed = results.filter((r) => r.action === 'failed').length;
+
+      // Run sync to deploy updated files
+      let syncOk = true;
+      let syncData: ReturnType<typeof buildSyncData> | null = null;
+
+      if (updated > 0 || failed === 0) {
+        // Only sync if something was updated or nothing failed
+        if (updateProject && !isUserConfigPath(process.cwd())) {
+          const { ok, syncData: data } = await runSyncAndPrint();
+          if (!ok) syncOk = false;
+          syncData = data;
+        }
+        if (updateUser) {
+          const { ok, syncData: data } = await runUserSyncAndPrint();
+          if (!ok) syncOk = false;
+          if (!syncData) syncData = data;
+        }
+      }
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: failed === 0 && syncOk,
+          command: 'plugin update',
+          data: {
+            results: results.map((r) => ({
+              plugin: r.plugin,
+              success: r.success,
+              action: r.action,
+              ...(r.error && { error: r.error }),
+            })),
+            updated,
+            skipped,
+            failed,
+            ...(syncData && { syncResult: syncData }),
+          },
+          ...(failed > 0 && { error: `${failed} plugin(s) failed to update` }),
+        });
+        if (failed > 0 || !syncOk) {
+          process.exit(1);
+        }
+        return;
+      }
+
+      console.log();
+      console.log(`Update complete: ${updated} updated, ${skipped} skipped, ${failed} failed`);
+
+      if (failed > 0 || !syncOk) {
+        process.exit(1);
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin update', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
 // plugin subcommands group
 // =============================================================================
 
@@ -921,6 +1141,7 @@ export const pluginCmd = conciseSubcommands({
   cmds: {
     install: pluginInstallCmd,
     uninstall: pluginUninstallCmd,
+    update: pluginUpdateCmd,
     marketplace: marketplaceCmd,
     list: pluginListCmd,
     validate: pluginValidateCmd,
