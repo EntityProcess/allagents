@@ -1069,27 +1069,9 @@ const pluginUpdateCmd = command({
       const skipped = results.filter((r) => r.action === 'skipped').length;
       const failed = results.filter((r) => r.action === 'failed').length;
 
-      // Run sync to deploy updated files
-      let syncOk = true;
-      let syncData: ReturnType<typeof buildSyncData> | null = null;
-
-      if (updated > 0 || failed === 0) {
-        // Only sync if something was updated or nothing failed
-        if (updateProject && !isUserConfigPath(process.cwd())) {
-          const { ok, syncData: data } = await runSyncAndPrint();
-          if (!ok) syncOk = false;
-          syncData = data;
-        }
-        if (updateUser) {
-          const { ok, syncData: data } = await runUserSyncAndPrint();
-          if (!ok) syncOk = false;
-          if (!syncData) syncData = data;
-        }
-      }
-
       if (isJsonMode()) {
         jsonOutput({
-          success: failed === 0 && syncOk,
+          success: failed === 0,
           command: 'plugin update',
           data: {
             results: results.map((r) => ({
@@ -1101,11 +1083,10 @@ const pluginUpdateCmd = command({
             updated,
             skipped,
             failed,
-            ...(syncData && { syncResult: syncData }),
           },
           ...(failed > 0 && { error: `${failed} plugin(s) failed to update` }),
         });
-        if (failed > 0 || !syncOk) {
+        if (failed > 0) {
           process.exit(1);
         }
         return;
@@ -1113,8 +1094,11 @@ const pluginUpdateCmd = command({
 
       console.log();
       console.log(`Update complete: ${updated} updated, ${skipped} skipped, ${failed} failed`);
+      if (updated > 0) {
+        console.log('\nRun "allagents workspace sync" to deploy updated files.');
+      }
 
-      if (failed > 0 || !syncOk) {
+      if (failed > 0) {
         process.exit(1);
       }
     } catch (error) {

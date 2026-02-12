@@ -181,15 +181,15 @@ export const pluginUninstallMeta: AgentCommandMeta = {
 
 export const pluginUpdateMeta: AgentCommandMeta = {
   command: 'plugin update',
-  description: 'Update installed plugins to latest version from remote and re-sync',
-  whenToUse: 'To pull the latest changes for installed plugins and re-deploy them to clients',
+  description: 'Update installed plugins to latest version from remote (does not sync)',
+  whenToUse: 'To pull the latest changes for installed plugins without deploying. Run "workspace sync" after to deploy.',
   examples: [
     'allagents plugin update',
     'allagents plugin update my-plugin@official',
     'allagents plugin update --scope user',
   ],
   expectedOutput:
-    'Shows update status per plugin, then runs sync. Exit 0 if all succeed, exit 1 if any fail.',
+    'Shows update status per plugin. Exit 0 if all succeed, exit 1 if any fail.',
   positionals: [
     { name: 'plugin', type: 'string', required: false, description: 'Specific plugin to update (updates all if omitted)' },
   ],
@@ -201,12 +201,5 @@ export const pluginUpdateMeta: AgentCommandMeta = {
     updated: 'number',
     skipped: 'number',
     failed: 'number',
-    syncResult: {
-      copied: 'number',
-      generated: 'number',
-      failed: 'number',
-      skipped: 'number',
-      plugins: [{ plugin: 'string', success: 'boolean', copied: 'number', generated: 'number', failed: 'number' }],
-    },
   },
 };
