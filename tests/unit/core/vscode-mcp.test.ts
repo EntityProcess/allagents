@@ -240,6 +240,39 @@ describe('syncVscodeMcpConfig', () => {
     expect(existsSync(configPath)).toBe(false);
   });
 
+  test('preserves comments in existing mcp.json', () => {
+    const contentWithComments = `{
+  // User-configured servers
+  "servers": {
+    // My custom server
+    "myserver": {
+      "type": "http",
+      "url": "https://my.test"
+    }
+  }
+}`;
+    writeFileSync(configPath, contentWithComments);
+
+    writeFileSync(
+      join(pluginDir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: { newserver: { type: 'http', url: 'https://new.test' } },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], { configPath });
+
+    expect(result.added).toBe(1);
+
+    const written = readFileSync(configPath, 'utf-8');
+    // Comments must still be present in the output
+    expect(written).toContain('// User-configured servers');
+    expect(written).toContain('// My custom server');
+    // New server was added
+    expect(written).toContain('"newserver"');
+    expect(written).toContain('https://new.test');
+  });
+
   test('no-op when no plugins have .mcp.json', () => {
     // pluginDir has no .mcp.json
     const result = syncVscodeMcpConfig([makePlugin(pluginDir)], { configPath });

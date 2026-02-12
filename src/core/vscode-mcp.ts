@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import JSON5 from 'json5';
+import { modify, applyEdits } from 'jsonc-parser';
 import { getHomeDir } from '../constants.js';
 import type { ValidatedPlugin } from './sync.js';
 
@@ -85,9 +86,15 @@ export function collectMcpServers(
 /**
  * Sync MCP server configs from plugins into VS Code's user-level mcp.json.
  *
- * - New server names are added
+ * Uses jsonc-parser for surgical edits that preserve comments, formatting,
+ * and all other content in the file. Only the new server entries are touched.
+ *
+ * Plugin .mcp.json uses "mcpServers" key (standard MCP format).
+ * VS Code's mcp.json uses "servers" key (VS Code-specific format).
+ *
+ * - New server names are added under "servers"
  * - Existing server names are skipped (non-destructive)
- * - Other keys in mcp.json are preserved
+ * - Comments, formatting, and other keys are fully preserved
  */
 export function syncVscodeMcpConfig(
   validatedPlugins: ValidatedPlugin[],
@@ -111,41 +118,53 @@ export function syncVscodeMcpConfig(
     return result;
   }
 
-  // Read existing VS Code mcp.json (or start fresh)
-  let existingConfig: Record<string, unknown> = {};
+  // Read existing file content as raw text (preserves comments/formatting)
+  let fileContent = '{}';
   if (existsSync(configPath)) {
-    try {
-      const content = readFileSync(configPath, 'utf-8');
-      existingConfig = JSON5.parse(content);
-    } catch {
-      // If invalid, start fresh but warn
-      result.warnings.push(`Could not parse existing ${configPath}, starting fresh`);
-      existingConfig = {};
-    }
+    fileContent = readFileSync(configPath, 'utf-8');
   }
 
-  // Get or create the servers object (VS Code uses "servers" key)
-  const existingServers = (existingConfig.servers as Record<string, unknown>) ?? {};
+  // Parse with JSON5 to check which server names already exist
+  let existingServers: Record<string, unknown> = {};
+  try {
+    const parsed = JSON5.parse(fileContent);
+    if (parsed?.servers && typeof parsed.servers === 'object') {
+      existingServers = parsed.servers as Record<string, unknown>;
+    }
+  } catch {
+    // If unparseable, start fresh but warn
+    result.warnings.push(`Could not parse existing ${configPath}, starting fresh`);
+    fileContent = '{}';
+  }
 
+  // Determine which servers to add vs skip
+  const serversToAdd: [string, unknown][] = [];
   for (const [name, config] of pluginServers) {
     if (name in existingServers) {
       result.skipped++;
       result.skippedServers.push(name);
     } else {
-      existingServers[name] = config;
+      serversToAdd.push([name, config]);
       result.added++;
       result.addedServers.push(name);
     }
   }
 
-  // Write back if there were changes and not dry-run
-  if (result.added > 0 && !dryRun) {
-    existingConfig.servers = existingServers;
+  // Apply surgical edits using jsonc-parser (preserves comments and formatting)
+  if (serversToAdd.length > 0 && !dryRun) {
+    let content = fileContent;
+    const formattingOptions = { tabSize: 2, insertSpaces: true };
+
+    for (const [name, config] of serversToAdd) {
+      const edits = modify(content, ['servers', name], config, { formattingOptions });
+      content = applyEdits(content, edits);
+    }
+
     const dir = dirname(configPath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
+    writeFileSync(configPath, content, 'utf-8');
   }
 
   return result;
