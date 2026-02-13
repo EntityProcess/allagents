@@ -159,6 +159,7 @@ describe('syncVscodeMcpConfig', () => {
     expect(result.added).toBe(2);
     expect(result.skipped).toBe(0);
     expect(result.addedServers).toEqual(['ediprod', 'wtgkb']);
+    expect(result.configPath).toBe(configPath);
 
     // Verify file was written
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -218,13 +219,15 @@ describe('syncVscodeMcpConfig', () => {
     expect(result.added).toBe(0);
     expect(result.skipped).toBe(1);
     expect(result.skippedServers).toEqual(['ediprod']);
+    // Skipped user-managed servers should not be tracked
+    expect(result.trackedServers).toEqual([]);
 
     // Verify original value is preserved
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(written.servers.ediprod.url).toBe('https://user-configured.test');
   });
 
-  test('silently skips servers with identical config (no skip count)', () => {
+  test('silently skips servers with identical config (no skip count, not tracked)', () => {
     const serverConfig = { type: 'http', url: 'https://ediprod.mcp.wtg.zone' };
 
     writeFileSync(
@@ -249,6 +252,8 @@ describe('syncVscodeMcpConfig', () => {
     expect(result.skipped).toBe(0);
     expect(result.addedServers).toEqual([]);
     expect(result.skippedServers).toEqual([]);
+    // Pre-existing user entry should not be tracked
+    expect(result.trackedServers).toEqual([]);
   });
 
   test('dry-run does not write file', () => {
@@ -263,6 +268,7 @@ describe('syncVscodeMcpConfig', () => {
 
     expect(result.added).toBe(1);
     expect(result.addedServers).toEqual(['ediprod']);
+    expect(result.configPath).toBeUndefined();
     // File should NOT have been created
     expect(existsSync(configPath)).toBe(false);
   });
@@ -275,6 +281,7 @@ describe('syncVscodeMcpConfig', () => {
     expect(result.skipped).toBe(0);
     expect(result.addedServers).toEqual([]);
     expect(result.skippedServers).toEqual([]);
+    expect(result.configPath).toBeUndefined();
     expect(existsSync(configPath)).toBe(false);
   });
 
@@ -484,6 +491,8 @@ describe('syncVscodeMcpConfig with tracking', () => {
     expect(result.skipped).toBe(1);
     expect(result.overwritten).toBe(0);
     expect(result.skippedServers).toEqual(['conflict']);
+    // Skipped user-managed servers should not be tracked
+    expect(result.trackedServers).toEqual([]);
 
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(written.servers.conflict.url).toBe('https://user-configured.test');
@@ -511,6 +520,7 @@ describe('syncVscodeMcpConfig with tracking', () => {
     expect(result.removedServers).toContain('orphan1');
     expect(result.removedServers).toContain('orphan2');
     expect(result.trackedServers).toEqual([]);
+    expect(result.configPath).toBe(configPath);
 
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(written.servers.orphan1).toBeUndefined();

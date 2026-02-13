@@ -37,28 +37,8 @@ import {
   pluginUpdateMeta,
 } from '../metadata/plugin.js';
 import { skillsCmd } from './plugin-skills.js';
+import { formatMcpResult, buildSyncData } from '../format-sync.js';
 
-/**
- * Build a JSON-friendly sync data object from a sync result.
- */
-function buildSyncData(result: Awaited<ReturnType<typeof syncWorkspace>>) {
-  return {
-    copied: result.totalCopied,
-    generated: result.totalGenerated,
-    failed: result.totalFailed,
-    skipped: result.totalSkipped,
-    plugins: result.pluginResults.map((pr) => ({
-      plugin: pr.plugin,
-      success: pr.success,
-      error: pr.error,
-      copied: pr.copyResults.filter((r) => r.action === 'copied').length,
-      generated: pr.copyResults.filter((r) => r.action === 'generated').length,
-      failed: pr.copyResults.filter((r) => r.action === 'failed').length,
-      copyResults: pr.copyResults,
-    })),
-    purgedPaths: result.purgedPaths ?? [],
-  };
-}
 
 /**
  * Run sync and print results. Returns true if sync succeeded.
@@ -174,6 +154,17 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
           console.log(
             `    - ${failedResult.destination}: ${failedResult.error}`,
           );
+        }
+      }
+    }
+
+    // Print MCP server sync results
+    if (result.mcpResult) {
+      const mcpLines = formatMcpResult(result.mcpResult);
+      if (mcpLines.length > 0) {
+        console.log('');
+        for (const line of mcpLines) {
+          console.log(line);
         }
       }
     }
