@@ -33,9 +33,11 @@ function deepEqual(a: unknown, b: unknown): boolean {
 export interface McpMergeResult {
   added: number;
   skipped: number;
+  overwritten: number;
   warnings: string[];
   addedServers: string[];
   skippedServers: string[];
+  overwrittenServers: string[];
 }
 
 /**
@@ -114,9 +116,10 @@ export function collectMcpServers(
  */
 export function syncVscodeMcpConfig(
   validatedPlugins: ValidatedPlugin[],
-  options?: { dryRun?: boolean; configPath?: string },
+  options?: { dryRun?: boolean; configPath?: string; force?: boolean },
 ): McpMergeResult {
   const dryRun = options?.dryRun ?? false;
+  const force = options?.force ?? false;
   const configPath = options?.configPath ?? getVscodeMcpConfigPath();
 
   // Collect servers from all plugins
@@ -125,9 +128,11 @@ export function syncVscodeMcpConfig(
   const result: McpMergeResult = {
     added: 0,
     skipped: 0,
+    overwritten: 0,
     warnings: [...warnings],
     addedServers: [],
     skippedServers: [],
+    overwrittenServers: [],
   };
 
   if (pluginServers.size === 0) {
@@ -152,10 +157,15 @@ export function syncVscodeMcpConfig(
 
   for (const [name, config] of pluginServers) {
     if (name in existingServers) {
-      // Skip silently if config is identical, otherwise report as skipped
       if (!deepEqual(existingServers[name], config)) {
-        result.skipped++;
-        result.skippedServers.push(name);
+        if (force) {
+          existingServers[name] = config;
+          result.overwritten++;
+          result.overwrittenServers.push(name);
+        } else {
+          result.skipped++;
+          result.skippedServers.push(name);
+        }
       }
     } else {
       existingServers[name] = config;
@@ -165,7 +175,7 @@ export function syncVscodeMcpConfig(
   }
 
   // Write back if there were changes and not dry-run
-  if (result.added > 0 && !dryRun) {
+  if ((result.added > 0 || result.overwritten > 0) && !dryRun) {
     existingConfig.servers = existingServers;
     const dir = dirname(configPath);
     if (!existsSync(dir)) {

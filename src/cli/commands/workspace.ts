@@ -37,8 +37,10 @@ function buildSyncData(result: SyncResult) {
       mcpServers: {
         added: result.mcpResult.added,
         skipped: result.mcpResult.skipped,
+        overwritten: result.mcpResult.overwritten,
         addedServers: result.mcpResult.addedServers,
         skippedServers: result.mcpResult.skippedServers,
+        overwrittenServers: result.mcpResult.overwrittenServers,
       },
     }),
   };
@@ -126,9 +128,10 @@ const syncCmd = command({
   args: {
     offline: flag({ long: 'offline', description: 'Use cached plugins without fetching latest from remote' }),
     dryRun: flag({ long: 'dry-run', short: 'n', description: 'Simulate sync without making changes' }),
+    force: flag({ long: 'force', short: 'f', description: 'Overwrite existing MCP server entries that differ from plugin config' }),
     client: option({ type: optional(string), long: 'client', short: 'c', description: 'Sync only the specified client (e.g., opencode, claude)' }),
   },
-  handler: async ({ offline, dryRun, client }) => {
+  handler: async ({ offline, dryRun, force, client }) => {
     try {
       if (!isJsonMode() && dryRun) {
         console.log('Dry run mode - no changes will be made\n');
@@ -159,7 +162,7 @@ const syncCmd = command({
         if (!isJsonMode()) {
           console.log('Syncing user workspace...\n');
         }
-        const userResult = await syncUserWorkspace({ offline, dryRun });
+        const userResult = await syncUserWorkspace({ offline, dryRun, force });
         combined = userResult;
       }
 
@@ -238,10 +241,16 @@ const syncCmd = command({
       }
 
       // Print MCP server sync results
-      if (result.mcpResult && (result.mcpResult.added > 0 || result.mcpResult.skipped > 0)) {
-        console.log(`\nMCP servers: ${result.mcpResult.added} added, ${result.mcpResult.skipped} skipped`);
+      if (result.mcpResult && (result.mcpResult.added > 0 || result.mcpResult.skipped > 0 || result.mcpResult.overwritten > 0)) {
+        const parts = [`${result.mcpResult.added} added`];
+        if (result.mcpResult.overwritten > 0) parts.push(`${result.mcpResult.overwritten} overwritten`);
+        if (result.mcpResult.skipped > 0) parts.push(`${result.mcpResult.skipped} skipped`);
+        console.log(`\nMCP servers: ${parts.join(', ')}`);
         for (const name of result.mcpResult.addedServers) {
           console.log(`  + ${name}`);
+        }
+        for (const name of result.mcpResult.overwrittenServers) {
+          console.log(`  ~ ${name}`);
         }
       }
 
