@@ -30,9 +30,8 @@ export async function runInit(): Promise<void> {
       return;
     }
 
-    // Client selection - all supported clients except vscode (it's a workspace generator, not an AI client)
-    const allClients = ClientTypeSchema.options.filter((c) => c !== 'vscode');
-    const defaultClients = ['claude', 'copilot', 'codex', 'opencode'];
+    const allClients = ClientTypeSchema.options;
+    const defaultClients = ['claude', 'copilot', 'vscode', 'codex', 'opencode'];
 
     const selectedClients = await multiselect({
       message: 'Which AI clients do you use?',

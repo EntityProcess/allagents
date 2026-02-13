@@ -63,8 +63,9 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
   vscode: {
-    skillsPath: '',
-    agentFile: '',
+    skillsPath: '.agents/skills/',
+    agentFile: 'AGENTS.md',
+    githubPath: '.github/',
   },
 };
 
@@ -133,7 +134,8 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
   vscode: {
-    skillsPath: '',
-    agentFile: '',
+    skillsPath: '.agents/skills/',
+    agentFile: 'AGENTS.md',
+    githubPath: '.copilot/',
   },
 };

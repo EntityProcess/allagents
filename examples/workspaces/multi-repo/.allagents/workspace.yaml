@@ -28,6 +28,7 @@ plugins:
 
 clients:
   - copilot
+  - vscode
   - claude
   - opencode
   - codex

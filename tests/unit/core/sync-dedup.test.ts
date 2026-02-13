@@ -89,24 +89,19 @@ describe('deduplicateClientsByPath', () => {
     expect(result.clientGroups.get('claude')).toEqual(['claude']);
   });
 
-  it('should handle vscode with empty skillsPath as unique client', () => {
-    // vscode has empty skillsPath ('') and should not be grouped with other clients
+  it('should group vscode with copilot/codex (all use .agents/skills/)', () => {
     const clients = ['copilot', 'vscode', 'codex'] as const;
     const result = deduplicateClientsByPath([...clients], CLIENT_MAPPINGS);
 
-    // vscode should be its own group (not grouped with copilot/codex)
-    expect(result.representativeClients).toHaveLength(2);
+    // All three share .agents/skills/ so should be in one group
+    expect(result.representativeClients).toHaveLength(1);
     expect(result.representativeClients).toContain('copilot');
-    expect(result.representativeClients).toContain('vscode');
 
-    // copilot group should have copilot and codex (both use .agents/skills/)
     const copilotGroup = result.clientGroups.get('copilot');
-    expect(copilotGroup).toHaveLength(2);
+    expect(copilotGroup).toHaveLength(3);
     expect(copilotGroup).toContain('copilot');
+    expect(copilotGroup).toContain('vscode');
     expect(copilotGroup).toContain('codex');
-
-    // vscode should be in its own group
-    expect(result.clientGroups.get('vscode')).toEqual(['vscode']);
   });
 });
 

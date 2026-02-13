@@ -47,8 +47,7 @@ export async function runManageClients(context: TuiContext, cache?: TuiCache): P
       currentClients = userConfig?.clients ?? [];
     }
 
-    // All supported clients except vscode
-    const allClients = ClientTypeSchema.options.filter((c) => c !== 'vscode');
+    const allClients = ClientTypeSchema.options;
 
     const selectedClients = await multiselect({
       message: `Select AI clients [${scope}]`,
