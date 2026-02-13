@@ -13,38 +13,8 @@ import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
 import { ClientTypeSchema } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
+import { formatMcpResult, buildSyncData } from '../format-sync.js';
 
-/**
- * Build a JSON-friendly sync data object from a sync result.
- */
-function buildSyncData(result: SyncResult) {
-  return {
-    copied: result.totalCopied,
-    generated: result.totalGenerated,
-    failed: result.totalFailed,
-    skipped: result.totalSkipped,
-    plugins: result.pluginResults.map((pr) => ({
-      plugin: pr.plugin,
-      success: pr.success,
-      error: pr.error,
-      copied: pr.copyResults.filter((r) => r.action === 'copied').length,
-      generated: pr.copyResults.filter((r) => r.action === 'generated').length,
-      failed: pr.copyResults.filter((r) => r.action === 'failed').length,
-      copyResults: pr.copyResults,
-    })),
-    purgedPaths: result.purgedPaths ?? [],
-    ...(result.mcpResult && {
-      mcpServers: {
-        added: result.mcpResult.added,
-        skipped: result.mcpResult.skipped,
-        overwritten: result.mcpResult.overwritten,
-        addedServers: result.mcpResult.addedServers,
-        skippedServers: result.mcpResult.skippedServers,
-        overwrittenServers: result.mcpResult.overwrittenServers,
-      },
-    }),
-  };
-}
 
 // =============================================================================
 // workspace init
@@ -241,16 +211,13 @@ const syncCmd = command({
       }
 
       // Print MCP server sync results
-      if (result.mcpResult && (result.mcpResult.added > 0 || result.mcpResult.skipped > 0 || result.mcpResult.overwritten > 0)) {
-        const parts = [`${result.mcpResult.added} added`];
-        if (result.mcpResult.overwritten > 0) parts.push(`${result.mcpResult.overwritten} overwritten`);
-        if (result.mcpResult.skipped > 0) parts.push(`${result.mcpResult.skipped} skipped`);
-        console.log(`\nMCP servers: ${parts.join(', ')}`);
-        for (const name of result.mcpResult.addedServers) {
-          console.log(`  + ${name}`);
-        }
-        for (const name of result.mcpResult.overwrittenServers) {
-          console.log(`  ~ ${name}`);
+      if (result.mcpResult) {
+        const mcpLines = formatMcpResult(result.mcpResult);
+        if (mcpLines.length > 0) {
+          console.log('');
+          for (const line of mcpLines) {
+            console.log(line);
+          }
         }
       }
 

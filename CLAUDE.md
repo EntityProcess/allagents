@@ -98,6 +98,25 @@ When done:
 git worktree remove ../allagents_<branchname>
 ```
 
+## Architecture Notes
+
+### MCP Server Sync
+
+MCP servers from plugins are synced to VS Code's `mcp.json`. Key ownership rule:
+
+- **We only track servers we added.** If a server already exists in the user's `mcp.json` before a plugin is installed, we must NOT track it — otherwise uninstalling the plugin would delete the user's manually-configured server.
+- `trackedServers` in sync state = "servers we own and are responsible for updating/removing"
+- Skipped servers (user-managed conflicts) must never be added to `trackedServers`
+
+### CLI Output Paths
+
+User-facing output for sync results is displayed from multiple entry points:
+- `workspace sync` command (`src/cli/commands/workspace.ts`)
+- `plugin install/uninstall/update` commands (`src/cli/commands/plugin.ts`)
+- TUI interactive sync (`src/cli/tui/actions/sync.ts`)
+
+Shared formatting lives in `src/cli/format-sync.ts`. When adding new sync output, update the shared module — not individual call sites.
+
 ## Troubleshooting
 
 ### agent-browser

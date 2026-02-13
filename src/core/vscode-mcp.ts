@@ -42,6 +42,8 @@ export interface McpMergeResult {
   removedServers: string[];
   /** All servers that are now tracked (for saving to sync state) */
   trackedServers: string[];
+  /** Path to the config file that was modified (set when changes are written) */
+  configPath?: string;
 }
 
 /**
@@ -172,8 +174,6 @@ export function syncVscodeMcpConfig(
 
   // Process plugin servers: add new, update tracked, skip user-managed conflicts
   for (const [name, config] of pluginServers) {
-    result.trackedServers.push(name);
-
     if (name in existingServers) {
       if (!deepEqual(existingServers[name], config)) {
         // Config differs - decide based on tracking
@@ -182,23 +182,29 @@ export function syncVscodeMcpConfig(
           existingServers[name] = config;
           result.overwritten++;
           result.overwrittenServers.push(name);
+          result.trackedServers.push(name);
         } else if (force) {
           // Force mode - overwrite even user-managed
           existingServers[name] = config;
           result.overwritten++;
           result.overwrittenServers.push(name);
+          result.trackedServers.push(name);
         } else {
-          // User-managed server with conflict - skip
+          // User-managed server with conflict - skip (do not track)
           result.skipped++;
           result.skippedServers.push(name);
         }
+      } else if (hasTracking && previouslyTracked.has(name)) {
+        // Configs are equal and we previously owned it - keep tracking
+        result.trackedServers.push(name);
       }
-      // If configs are equal, nothing to do (already correct)
+      // If configs are equal but not previously tracked, it's user-managed - don't track
     } else {
       // New server - add it
       existingServers[name] = config;
       result.added++;
       result.addedServers.push(name);
+      result.trackedServers.push(name);
     }
   }
 
@@ -223,6 +229,7 @@ export function syncVscodeMcpConfig(
       mkdirSync(dir, { recursive: true });
     }
     writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
+    result.configPath = configPath;
   }
 
   // Handle edge case: no plugins have MCP servers but we need to clean up
@@ -242,6 +249,7 @@ export function syncVscodeMcpConfig(
         mkdirSync(dir, { recursive: true });
       }
       writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
+      result.configPath = configPath;
     }
   }
 
