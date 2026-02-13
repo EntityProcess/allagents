@@ -494,7 +494,7 @@ async function copyAndAdjustDirectory(
     if (entry.isDirectory()) {
       await copyAndAdjustDirectory(sourcePath, destPath, sourceBase, skillsPath, skillNameMap);
     } else {
-      const relativePath = relative(sourceBase, sourcePath);
+      const relativePath = relative(sourceBase, sourcePath).replaceAll('\\', '/');
       const isMarkdown = entry.name.endsWith('.md') || entry.name.endsWith('.markdown');
 
       if (isMarkdown) {
