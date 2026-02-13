@@ -39,6 +39,7 @@ import {
   loadSyncState,
   saveSyncState,
   getPreviouslySyncedFiles,
+  getPreviouslySyncedMcpServers,
 } from './sync-state.js';
 import type { SyncState } from '../models/sync-state.js';
 import { getUserWorkspaceConfig } from './user-workspace.js';
@@ -1485,20 +1486,24 @@ export async function syncUserWorkspace(
     }
   }
 
-  // Save sync state
-  if (!dryRun) {
-    const allCopyResults = pluginResults.flatMap((r) => r.copyResults);
-    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, clients as ClientType[], USER_CLIENT_MAPPINGS);
-    await saveSyncState(homeDir, syncedFiles);
-  }
-
   // Sync MCP server configs to VS Code if vscode client is configured
   let mcpResult: McpMergeResult | undefined;
-  if (clients.includes('vscode') && validPlugins.length > 0) {
-    mcpResult = syncVscodeMcpConfig(validPlugins, { dryRun, force });
+  if (clients.includes('vscode')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'vscode');
+    mcpResult = syncVscodeMcpConfig(validPlugins, { dryRun, force, trackedServers: trackedMcpServers });
     if (mcpResult.warnings.length > 0) {
       warnings.push(...mcpResult.warnings);
     }
+  }
+
+  // Save sync state (including MCP servers)
+  if (!dryRun) {
+    const allCopyResults = pluginResults.flatMap((r) => r.copyResults);
+    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, clients as ClientType[], USER_CLIENT_MAPPINGS);
+    await saveSyncState(homeDir, {
+      files: syncedFiles,
+      ...(mcpResult && { mcpServers: { vscode: mcpResult.trackedServers } }),
+    });
   }
 
   return {

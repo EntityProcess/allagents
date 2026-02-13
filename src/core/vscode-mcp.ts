@@ -34,10 +34,14 @@ export interface McpMergeResult {
   added: number;
   skipped: number;
   overwritten: number;
+  removed: number;
   warnings: string[];
   addedServers: string[];
   skippedServers: string[];
   overwrittenServers: string[];
+  removedServers: string[];
+  /** All servers that are now tracked (for saving to sync state) */
+  trackedServers: string[];
 }
 
 /**
@@ -110,17 +114,29 @@ export function collectMcpServers(
 /**
  * Sync MCP server configs from plugins into VS Code's user-level mcp.json.
  *
- * - New server names are added
- * - Existing server names are skipped (non-destructive)
- * - Other keys in mcp.json are preserved
+ * With tracking enabled:
+ * - Tracked servers with changed configs are updated (not skipped)
+ * - Tracked servers no longer in plugins are removed
+ * - User-managed servers (not tracked) are preserved
+ *
+ * Without tracking (trackedServers not provided):
+ * - Falls back to legacy behavior (skip conflicts unless force=true)
  */
 export function syncVscodeMcpConfig(
   validatedPlugins: ValidatedPlugin[],
-  options?: { dryRun?: boolean; configPath?: string; force?: boolean },
+  options?: {
+    dryRun?: boolean;
+    configPath?: string;
+    force?: boolean;
+    /** Previously tracked server names (enables update/remove behavior) */
+    trackedServers?: string[];
+  },
 ): McpMergeResult {
   const dryRun = options?.dryRun ?? false;
   const force = options?.force ?? false;
   const configPath = options?.configPath ?? getVscodeMcpConfigPath();
+  const previouslyTracked = new Set(options?.trackedServers ?? []);
+  const hasTracking = options?.trackedServers !== undefined;
 
   // Collect servers from all plugins
   const { servers: pluginServers, warnings } = collectMcpServers(validatedPlugins);
@@ -129,15 +145,14 @@ export function syncVscodeMcpConfig(
     added: 0,
     skipped: 0,
     overwritten: 0,
+    removed: 0,
     warnings: [...warnings],
     addedServers: [],
     skippedServers: [],
     overwrittenServers: [],
+    removedServers: [],
+    trackedServers: [],
   };
-
-  if (pluginServers.size === 0) {
-    return result;
-  }
 
   // Read existing VS Code mcp.json (or start fresh)
   let existingConfig: Record<string, unknown> = {};
@@ -155,33 +170,79 @@ export function syncVscodeMcpConfig(
   // Get or create the servers object (VS Code uses "servers" key)
   const existingServers = (existingConfig.servers as Record<string, unknown>) ?? {};
 
+  // Process plugin servers: add new, update tracked, skip user-managed conflicts
   for (const [name, config] of pluginServers) {
+    result.trackedServers.push(name);
+
     if (name in existingServers) {
       if (!deepEqual(existingServers[name], config)) {
-        if (force) {
+        // Config differs - decide based on tracking
+        if (hasTracking && previouslyTracked.has(name)) {
+          // We own this server - update it
+          existingServers[name] = config;
+          result.overwritten++;
+          result.overwrittenServers.push(name);
+        } else if (force) {
+          // Force mode - overwrite even user-managed
           existingServers[name] = config;
           result.overwritten++;
           result.overwrittenServers.push(name);
         } else {
+          // User-managed server with conflict - skip
           result.skipped++;
           result.skippedServers.push(name);
         }
       }
+      // If configs are equal, nothing to do (already correct)
     } else {
+      // New server - add it
       existingServers[name] = config;
       result.added++;
       result.addedServers.push(name);
     }
   }
 
+  // Remove orphaned tracked servers (previously tracked but no longer in plugins)
+  if (hasTracking) {
+    const currentServerNames = new Set(pluginServers.keys());
+    for (const trackedName of previouslyTracked) {
+      if (!currentServerNames.has(trackedName) && trackedName in existingServers) {
+        delete existingServers[trackedName];
+        result.removed++;
+        result.removedServers.push(trackedName);
+      }
+    }
+  }
+
   // Write back if there were changes and not dry-run
-  if ((result.added > 0 || result.overwritten > 0) && !dryRun) {
+  const hasChanges = result.added > 0 || result.overwritten > 0 || result.removed > 0;
+  if (hasChanges && !dryRun) {
     existingConfig.servers = existingServers;
     const dir = dirname(configPath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
     writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
+  }
+
+  // Handle edge case: no plugins have MCP servers but we need to clean up
+  if (pluginServers.size === 0 && hasTracking && previouslyTracked.size > 0) {
+    // Re-check for removals when no current servers
+    for (const trackedName of previouslyTracked) {
+      if (trackedName in existingServers) {
+        delete existingServers[trackedName];
+        result.removed++;
+        result.removedServers.push(trackedName);
+      }
+    }
+    if (result.removed > 0 && !dryRun) {
+      existingConfig.servers = existingServers;
+      const dir = dirname(configPath);
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+      writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
+    }
   }
 
   return result;

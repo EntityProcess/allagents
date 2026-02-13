@@ -5,6 +5,17 @@ import { CONFIG_DIR, SYNC_STATE_FILE } from '../constants.js';
 import { SyncStateSchema, type SyncState } from '../models/sync-state.js';
 import type { ClientType } from '../models/workspace-config.js';
 
+/** MCP scope identifier (e.g., "vscode" for user-level mcp.json) */
+export type McpScope = 'vscode';
+
+/**
+ * Data structure for saving sync state with optional MCP servers
+ */
+export interface SyncStateData {
+  files: Partial<Record<ClientType, string[]>>;
+  mcpServers?: Partial<Record<McpScope, string[]>>;
+}
+
 /**
  * Get the path to the sync state file
  * @param workspacePath - Path to workspace directory
@@ -47,18 +58,24 @@ export async function loadSyncState(workspacePath: string): Promise<SyncState | 
 /**
  * Save sync state to disk
  * @param workspacePath - Path to workspace directory
- * @param files - Per-client file lists that were synced
+ * @param data - Sync state data including files and optional MCP servers
  */
 export async function saveSyncState(
   workspacePath: string,
-  files: Partial<Record<ClientType, string[]>>,
+  data: SyncStateData | Partial<Record<ClientType, string[]>>,
 ): Promise<void> {
   const statePath = getSyncStatePath(workspacePath);
+
+  // Support both old signature (just files) and new signature (SyncStateData)
+  const normalizedData: SyncStateData = 'files' in data
+    ? data as SyncStateData
+    : { files: data as Partial<Record<ClientType, string[]>> };
 
   const state: SyncState = {
     version: 1,
     lastSync: new Date().toISOString(),
-    files: files as Record<ClientType, string[]>,
+    files: normalizedData.files as Record<ClientType, string[]>,
+    ...(normalizedData.mcpServers && { mcpServers: normalizedData.mcpServers }),
   };
 
   await mkdir(dirname(statePath), { recursive: true });
@@ -80,4 +97,21 @@ export function getPreviouslySyncedFiles(
   }
 
   return state.files[client] ?? [];
+}
+
+/**
+ * Get MCP servers that were previously synced for a specific scope
+ * @param state - Loaded sync state (or null)
+ * @param scope - MCP scope to get servers for (e.g., "vscode")
+ * @returns Array of server names, empty if no state or no servers for scope
+ */
+export function getPreviouslySyncedMcpServers(
+  state: SyncState | null,
+  scope: McpScope,
+): string[] {
+  if (!state?.mcpServers) {
+    return [];
+  }
+
+  return state.mcpServers[scope] ?? [];
 }
