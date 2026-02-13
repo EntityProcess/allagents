@@ -4,7 +4,7 @@ import type { ClientType } from './workspace-config.js';
  * Client-specific path and file configuration
  */
 export interface ClientMapping {
-  /** Path for commands (Claude-specific feature) */
+  /** Path for commands (Claude, OpenCode) */
   commandsPath?: string;
   skillsPath: string;
   agentsPath?: string;

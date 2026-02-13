@@ -298,18 +298,19 @@ These marketplace names auto-resolve to their GitHub repos:
 
 ### Supported Clients
 
-| Client | Skills | Agent File | Hooks | Commands |
-|--------|--------|------------|-------|----------|
+| Client | Skills | Agent File | Hooks | Commands/Prompts |
+|--------|--------|------------|-------|------------------|
 | claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
-| copilot | `.agents/skills/` | `AGENTS.md` | No | No |
+| copilot | `.agents/skills/` | `AGENTS.md` | No | `.github/prompts/` |
 | codex | `.agents/skills/` | `AGENTS.md` | No | No |
 | cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
-| opencode | `.agents/skills/` | `AGENTS.md` | No | No |
+| opencode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` |
 | gemini | `.agents/skills/` | `GEMINI.md` | No | No |
 | factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
 | ampcode | `.agents/skills/` | `AGENTS.md` | No | No |
+| vscode | `.agents/skills/` | `AGENTS.md` | No | `.github/prompts/` |
 
-> **Note:** Clients supporting the universal `.agents/` folder (copilot, codex, opencode, gemini, ampcode) share the same skills directory. Commands are a Claude-specific feature.
+> **Note:** Clients supporting the universal `.agents/` folder (copilot, codex, opencode, gemini, ampcode, vscode) share the same skills directory. Commands/prompts are supported by Claude (`.claude/commands/`), Copilot/VSCode (`.github/prompts/`), and OpenCode (`.opencode/commands/`).
 
 ## Marketplace Structure
 
@@ -337,7 +338,7 @@ my-plugin/
 ├── skills/             # Skill directories with SKILL.md (all clients)
 │   └── debugging/
 │       └── SKILL.md
-├── commands/           # Command files (.md) - Claude only
+├── commands/           # Command files (.md) - Claude, OpenCode
 │   ├── build.md
 │   └── deploy.md
 ├── hooks/              # Hook files (Claude/Factory only)
