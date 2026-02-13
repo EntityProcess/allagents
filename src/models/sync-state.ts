@@ -9,6 +9,8 @@ export const SyncStateSchema = z.object({
   version: z.literal(1),
   lastSync: z.string(), // ISO timestamp
   files: z.record(ClientTypeSchema, z.array(z.string())),
+  // MCP servers tracked per scope (e.g., "vscode" for user-level mcp.json)
+  mcpServers: z.record(z.string(), z.array(z.string())).optional(),
 });
 
 export type SyncState = z.infer<typeof SyncStateSchema>;

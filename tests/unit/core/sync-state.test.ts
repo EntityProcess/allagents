@@ -8,6 +8,7 @@ import {
   loadSyncState,
   saveSyncState,
   getPreviouslySyncedFiles,
+  getPreviouslySyncedMcpServers,
 } from '../../../src/core/sync-state.js';
 import { CONFIG_DIR, SYNC_STATE_FILE } from '../../../src/constants.js';
 
@@ -138,6 +139,126 @@ describe('sync-state', () => {
       expect(getPreviouslySyncedFiles(state, 'copilot')).toEqual([
         '.github/skills/my-skill/',
       ]);
+    });
+  });
+
+  describe('getPreviouslySyncedMcpServers', () => {
+    it('should return empty array when state is null', () => {
+      const result = getPreviouslySyncedMcpServers(null, 'vscode');
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array when mcpServers is not defined', () => {
+      const state = {
+        version: 1 as const,
+        lastSync: '2024-01-01T00:00:00.000Z',
+        files: {},
+      };
+
+      const result = getPreviouslySyncedMcpServers(state, 'vscode');
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array when scope has no servers', () => {
+      const state = {
+        version: 1 as const,
+        lastSync: '2024-01-01T00:00:00.000Z',
+        files: {},
+        mcpServers: {},
+      };
+
+      const result = getPreviouslySyncedMcpServers(state, 'vscode');
+      expect(result).toEqual([]);
+    });
+
+    it('should return servers for specific scope', () => {
+      const state = {
+        version: 1 as const,
+        lastSync: '2024-01-01T00:00:00.000Z',
+        files: {},
+        mcpServers: {
+          vscode: ['server1', 'server2'],
+        },
+      };
+
+      const result = getPreviouslySyncedMcpServers(state, 'vscode');
+      expect(result).toEqual(['server1', 'server2']);
+    });
+  });
+
+  describe('saveSyncState with mcpServers', () => {
+    it('should save state with mcpServers using SyncStateData format', async () => {
+      await saveSyncState(testDir, {
+        files: {
+          claude: ['.claude/commands/cmd1.md'],
+        },
+        mcpServers: {
+          vscode: ['server1', 'server2'],
+        },
+      });
+
+      const statePath = join(testDir, CONFIG_DIR, SYNC_STATE_FILE);
+      const content = await readFile(statePath, 'utf-8');
+      const state = JSON.parse(content);
+
+      expect(state.version).toBe(1);
+      expect(state.files.claude).toEqual(['.claude/commands/cmd1.md']);
+      expect(state.mcpServers.vscode).toEqual(['server1', 'server2']);
+    });
+
+    it('should not include mcpServers key when undefined', async () => {
+      await saveSyncState(testDir, {
+        files: {
+          claude: ['.claude/commands/cmd1.md'],
+        },
+      });
+
+      const statePath = join(testDir, CONFIG_DIR, SYNC_STATE_FILE);
+      const content = await readFile(statePath, 'utf-8');
+      const state = JSON.parse(content);
+
+      expect(state.mcpServers).toBeUndefined();
+    });
+
+    it('should save empty mcpServers array when all servers removed', async () => {
+      await saveSyncState(testDir, {
+        files: {
+          claude: ['.claude/commands/cmd1.md'],
+        },
+        mcpServers: {
+          vscode: [], // Empty array - all servers were removed
+        },
+      });
+
+      const statePath = join(testDir, CONFIG_DIR, SYNC_STATE_FILE);
+      const content = await readFile(statePath, 'utf-8');
+      const state = JSON.parse(content);
+
+      // Should save empty array, not omit the key
+      expect(state.mcpServers).toBeDefined();
+      expect(state.mcpServers.vscode).toEqual([]);
+    });
+
+    it('should load state with mcpServers correctly', async () => {
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      const state = {
+        version: 1,
+        lastSync: '2024-01-01T00:00:00.000Z',
+        files: {
+          claude: ['.claude/commands/test.md'],
+        },
+        mcpServers: {
+          vscode: ['server1'],
+        },
+      };
+      await writeFile(
+        join(testDir, CONFIG_DIR, SYNC_STATE_FILE),
+        JSON.stringify(state),
+      );
+
+      const result = await loadSyncState(testDir);
+      expect(result).not.toBeNull();
+      expect(result!.mcpServers).toEqual({ vscode: ['server1'] });
     });
   });
 });

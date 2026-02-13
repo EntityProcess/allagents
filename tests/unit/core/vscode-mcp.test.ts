@@ -333,4 +333,212 @@ describe('syncVscodeMcpConfig', () => {
     expect(result.overwritten).toBe(0);
     expect(result.overwrittenServers).toEqual([]);
   });
+
+  test('returns trackedServers list for saving to sync state', () => {
+    writeFileSync(
+      join(pluginDir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          server1: { type: 'http', url: 'https://a.test' },
+          server2: { type: 'http', url: 'https://b.test' },
+        },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], { configPath });
+
+    expect(result.trackedServers).toEqual(['server1', 'server2']);
+  });
+});
+
+describe('syncVscodeMcpConfig with tracking', () => {
+  let tempDir: string;
+  let pluginDir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    tempDir = makeTempDir();
+    pluginDir = makeTempDir();
+    configPath = join(tempDir, 'mcp.json');
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+    rmSync(pluginDir, { recursive: true, force: true });
+  });
+
+  test('updates tracked server with changed config without force flag', () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        servers: {
+          tracked: { type: 'http', url: 'https://old.test' },
+        },
+      }),
+    );
+
+    writeFileSync(
+      join(pluginDir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: { tracked: { type: 'http', url: 'https://new.test' } },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], {
+      configPath,
+      trackedServers: ['tracked'],
+    });
+
+    expect(result.overwritten).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.overwrittenServers).toEqual(['tracked']);
+
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.servers.tracked.url).toBe('https://new.test');
+  });
+
+  test('removes tracked servers no longer in plugins', () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        servers: {
+          orphaned: { type: 'http', url: 'https://orphaned.test' },
+          stillUsed: { type: 'http', url: 'https://still.test' },
+        },
+      }),
+    );
+
+    writeFileSync(
+      join(pluginDir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: { stillUsed: { type: 'http', url: 'https://still.test' } },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], {
+      configPath,
+      trackedServers: ['orphaned', 'stillUsed'],
+    });
+
+    expect(result.removed).toBe(1);
+    expect(result.removedServers).toEqual(['orphaned']);
+    expect(result.trackedServers).toEqual(['stillUsed']);
+
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.servers.orphaned).toBeUndefined();
+    expect(written.servers.stillUsed).toBeDefined();
+  });
+
+  test('preserves user-managed servers (not in trackedServers)', () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        servers: {
+          userManaged: { type: 'http', url: 'https://user.test' },
+        },
+      }),
+    );
+
+    writeFileSync(
+      join(pluginDir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: { pluginServer: { type: 'http', url: 'https://plugin.test' } },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], {
+      configPath,
+      trackedServers: [], // User managed server was never tracked
+    });
+
+    expect(result.added).toBe(1);
+    expect(result.removed).toBe(0);
+
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.servers.userManaged).toBeDefined();
+    expect(written.servers.pluginServer).toBeDefined();
+  });
+
+  test('skips user-managed server with conflicting name (not tracked)', () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        servers: {
+          conflict: { type: 'http', url: 'https://user-configured.test' },
+        },
+      }),
+    );
+
+    writeFileSync(
+      join(pluginDir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: { conflict: { type: 'http', url: 'https://plugin.test' } },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], {
+      configPath,
+      trackedServers: [], // 'conflict' is not tracked, so it's user-managed
+    });
+
+    expect(result.skipped).toBe(1);
+    expect(result.overwritten).toBe(0);
+    expect(result.skippedServers).toEqual(['conflict']);
+
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.servers.conflict.url).toBe('https://user-configured.test');
+  });
+
+  test('removes all tracked servers when no plugins have MCP configs', () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        servers: {
+          orphan1: { type: 'http', url: 'https://orphan1.test' },
+          orphan2: { type: 'http', url: 'https://orphan2.test' },
+          userManaged: { type: 'http', url: 'https://user.test' },
+        },
+      }),
+    );
+
+    // Plugin has no .mcp.json
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], {
+      configPath,
+      trackedServers: ['orphan1', 'orphan2'],
+    });
+
+    expect(result.removed).toBe(2);
+    expect(result.removedServers).toContain('orphan1');
+    expect(result.removedServers).toContain('orphan2');
+    expect(result.trackedServers).toEqual([]);
+
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.servers.orphan1).toBeUndefined();
+    expect(written.servers.orphan2).toBeUndefined();
+    expect(written.servers.userManaged).toBeDefined();
+  });
+
+  test('dry-run with tracking does not write file', () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        servers: {
+          orphaned: { type: 'http', url: 'https://orphaned.test' },
+        },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], {
+      configPath,
+      trackedServers: ['orphaned'],
+      dryRun: true,
+    });
+
+    expect(result.removed).toBe(1);
+    expect(result.removedServers).toEqual(['orphaned']);
+
+    // File should still have the orphaned server
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.servers.orphaned).toBeDefined();
+  });
 });
