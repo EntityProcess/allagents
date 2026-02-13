@@ -15,7 +15,7 @@ description: AI coding assistant clients supported by AllAgents.
 | Gemini | `.agents/skills/` | `GEMINI.md` | No | No |
 | Factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
 | Amp Code | `.agents/skills/` | `AGENTS.md` | No | No |
-| VSCode | No | No | No | No |
+| VSCode | `.agents/skills/` | `AGENTS.md` | No | `.github/prompts/` |
 
 :::note
 Skills are the cross-client way to share reusable prompts.
@@ -23,4 +23,4 @@ Skills are the cross-client way to share reusable prompts.
 
 ### VSCode
 
-VSCode is a special client type. Instead of syncing skills or agent files, adding `vscode` to `clients` triggers automatic `.code-workspace` file generation during `workspace sync`. See the [Workspaces guide](/guides/workspaces/#vscode-workspace-generation) for details.
+VSCode syncs the same skills, agent file, and commands as Copilot. Additionally, adding `vscode` to `clients` triggers automatic `.code-workspace` file generation and MCP config syncing during `workspace sync`. See the [Workspaces guide](/guides/workspaces/#vscode-workspace-generation) for details.

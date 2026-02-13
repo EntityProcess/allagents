@@ -45,8 +45,8 @@ describe('CLIENT_MAPPINGS', () => {
     expect(CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.agents/skills/');
   });
 
-  test('vscode has empty skillsPath (not applicable)', () => {
-    expect(CLIENT_MAPPINGS.vscode.skillsPath).toBe('');
+  test('vscode uses universal .agents/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.vscode.skillsPath).toBe('.agents/skills/');
   });
 
   test('project paths are relative (no leading /)', () => {
@@ -100,8 +100,8 @@ describe('USER_CLIENT_MAPPINGS', () => {
     expect(USER_CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.agents/skills/');
   });
 
-  test('vscode has empty skillsPath (not applicable)', () => {
-    expect(USER_CLIENT_MAPPINGS.vscode.skillsPath).toBe('');
+  test('vscode uses universal ~/.agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.vscode.skillsPath).toBe('.agents/skills/');
   });
 
   test('user paths are relative to home directory (no leading /)', () => {
