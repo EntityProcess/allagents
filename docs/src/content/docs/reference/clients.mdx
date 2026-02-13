@@ -5,22 +5,22 @@ description: AI coding assistant clients supported by AllAgents.
 
 ## Client Comparison
 
-| Client | Skills | Agent File | Hooks | Commands |
-|--------|--------|------------|-------|----------|
-| Claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
-| Copilot | `.agents/skills/` | `AGENTS.md` | No | `.github/prompts/` |
-| Codex | `.agents/skills/` | `AGENTS.md` | No | No |
-| Cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
-| OpenCode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` |
-| Gemini | `.agents/skills/` | `GEMINI.md` | No | No |
-| Factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
-| Amp Code | `.agents/skills/` | `AGENTS.md` | No | No |
-| VSCode | `.agents/skills/` | `AGENTS.md` | No | `.github/prompts/` |
+| Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
+|--------|--------|------------|-------|----------|------------------|
+| Claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` | No |
+| Copilot | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
+| Codex | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| Cursor | `.cursor/skills/` | `AGENTS.md` | No | No | No |
+| OpenCode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
+| Gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
+| Factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No | No |
+| Amp Code | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| VSCode | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
 
 :::note
-Skills are the cross-client way to share reusable prompts.
+Skills are the cross-client way to share reusable prompts. GitHub overrides (`.github/prompts/`, `copilot-instructions.md`) are copied to the workspace's `.github/` folder for Copilot/VSCode.
 :::
 
 ### VSCode
 
-VSCode syncs the same skills, agent file, and commands as Copilot. Additionally, adding `vscode` to `clients` triggers automatic `.code-workspace` file generation and MCP config syncing during `workspace sync`. See the [Workspaces guide](/guides/workspaces/#vscode-workspace-generation) for details.
+VSCode syncs the same skills, agent file, and GitHub overrides as Copilot. Additionally, adding `vscode` to `clients` triggers automatic `.code-workspace` file generation and MCP config syncing during `workspace sync`. See the [Workspaces guide](/guides/workspaces/#vscode-workspace-generation) for details.
