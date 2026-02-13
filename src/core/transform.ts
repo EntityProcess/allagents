@@ -120,7 +120,7 @@ function getMapping(client: ClientType, options?: { clientMappings?: Record<stri
 
 /**
  * Copy commands from plugin to workspace for a specific client
- * Commands are copied to clients that support commandsPath (currently Claude only in code, but OpenCode also supports commands)
+ * Commands are copied to clients that support commandsPath
  * @param pluginPath - Path to plugin directory
  * @param workspacePath - Path to workspace directory
  * @param client - Target client type
