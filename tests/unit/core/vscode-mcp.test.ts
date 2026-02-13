@@ -277,4 +277,60 @@ describe('syncVscodeMcpConfig', () => {
     expect(result.skippedServers).toEqual([]);
     expect(existsSync(configPath)).toBe(false);
   });
+
+  test('force overwrites servers with different config', () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        servers: {
+          ediprod: { type: 'http', url: 'https://user-configured.test' },
+        },
+      }),
+    );
+
+    writeFileSync(
+      join(pluginDir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: { ediprod: { type: 'http', url: 'https://plugin.test' } },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], { configPath, force: true });
+
+    expect(result.added).toBe(0);
+    expect(result.skipped).toBe(0);
+    expect(result.overwritten).toBe(1);
+    expect(result.overwrittenServers).toEqual(['ediprod']);
+
+    // Verify the config was overwritten
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.servers.ediprod.url).toBe('https://plugin.test');
+  });
+
+  test('force does not re-add servers with identical config', () => {
+    const serverConfig = { type: 'http', url: 'https://ediprod.mcp.wtg.zone' };
+
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        servers: {
+          ediprod: serverConfig,
+        },
+      }),
+    );
+
+    writeFileSync(
+      join(pluginDir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: { ediprod: serverConfig },
+      }),
+    );
+
+    const result = syncVscodeMcpConfig([makePlugin(pluginDir)], { configPath, force: true });
+
+    expect(result.added).toBe(0);
+    expect(result.skipped).toBe(0);
+    expect(result.overwritten).toBe(0);
+    expect(result.overwrittenServers).toEqual([]);
+  });
 });

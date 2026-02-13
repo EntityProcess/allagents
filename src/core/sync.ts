@@ -1393,7 +1393,7 @@ export async function syncWorkspace(
  * @returns Sync result
  */
 export async function syncUserWorkspace(
-  options: { offline?: boolean; dryRun?: boolean } = {},
+  options: { offline?: boolean; dryRun?: boolean; force?: boolean } = {},
 ): Promise<SyncResult> {
   const homeDir = resolve(getHomeDir());
   const config = await getUserWorkspaceConfig();
@@ -1410,7 +1410,7 @@ export async function syncUserWorkspace(
   }
 
   const clients = config.clients;
-  const { offline = false, dryRun = false } = options;
+  const { offline = false, dryRun = false, force = false } = options;
 
   // Pre-register unique marketplaces to avoid race conditions during parallel validation
   await ensureMarketplacesRegistered(config.plugins);
@@ -1495,7 +1495,7 @@ export async function syncUserWorkspace(
   // Sync MCP server configs to VS Code if vscode client is configured
   let mcpResult: McpMergeResult | undefined;
   if (clients.includes('vscode') && validPlugins.length > 0) {
-    mcpResult = syncVscodeMcpConfig(validPlugins, { dryRun });
+    mcpResult = syncVscodeMcpConfig(validPlugins, { dryRun, force });
     if (mcpResult.warnings.length > 0) {
       warnings.push(...mcpResult.warnings);
     }

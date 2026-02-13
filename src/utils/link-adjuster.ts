@@ -1,4 +1,4 @@
-import { dirname, join, normalize, isAbsolute } from 'node:path';
+import { dirname, join, normalize, isAbsolute } from 'node:path/posix';
 
 /**
  * Options for adjusting links in content
