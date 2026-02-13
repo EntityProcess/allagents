@@ -69,6 +69,7 @@ describe('user-workspace', () => {
       expect(config!.clients).toContain('gemini');
       expect(config!.clients).toContain('factory');
       expect(config!.clients).toContain('ampcode');
+      expect(config!.clients).toContain('vscode');
     });
   });
 

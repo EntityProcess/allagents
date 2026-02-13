@@ -39,6 +39,7 @@ const DEFAULT_USER_CLIENTS: ClientType[] = [
   'gemini',
   'factory',
   'ampcode',
+  'vscode',
 ];
 
 /**
