@@ -4,7 +4,7 @@ import type { ClientType } from './workspace-config.js';
  * Client-specific path and file configuration
  */
 export interface ClientMapping {
-  /** Path for commands (Claude-specific feature) */
+  /** Path for commands (Claude, OpenCode) */
   commandsPath?: string;
   skillsPath: string;
   agentsPath?: string;
@@ -45,6 +45,7 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
   opencode: {
+    commandsPath: '.opencode/commands/',
     skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
   },
@@ -116,6 +117,7 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
   opencode: {
+    commandsPath: '.opencode/commands/',
     skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
   },
