@@ -3,7 +3,11 @@ import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../../../src/models/clien
 
 describe('CLIENT_MAPPINGS', () => {
   test('defines project-level paths for all supported clients', () => {
-    const expectedClients = ['claude', 'copilot', 'codex', 'cursor', 'opencode', 'gemini', 'factory', 'ampcode', 'vscode'];
+    const expectedClients = [
+      'claude', 'copilot', 'codex', 'cursor', 'opencode', 'gemini', 'factory', 'ampcode', 'vscode',
+      // Additional clients
+      'openclaw', 'windsurf', 'cline', 'continue', 'roo', 'kilo', 'trae', 'augment', 'zencoder', 'junie', 'openhands', 'kiro', 'replit', 'kimi',
+    ];
     for (const client of expectedClients) {
       expect(CLIENT_MAPPINGS).toHaveProperty(client);
     }
@@ -47,6 +51,38 @@ describe('CLIENT_MAPPINGS', () => {
 
   test('vscode uses universal .agents/skills/ path', () => {
     expect(CLIENT_MAPPINGS.vscode.skillsPath).toBe('.agents/skills/');
+  });
+
+  test('openclaw uses root-level skills/ path (no dot prefix)', () => {
+    expect(CLIENT_MAPPINGS.openclaw.skillsPath).toBe('skills/');
+  });
+
+  test('windsurf uses provider-specific .windsurf/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.windsurf.skillsPath).toBe('.windsurf/skills/');
+  });
+
+  test('cline uses provider-specific .cline/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.cline.skillsPath).toBe('.cline/skills/');
+  });
+
+  test('continue uses provider-specific .continue/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.continue.skillsPath).toBe('.continue/skills/');
+  });
+
+  test('roo uses provider-specific .roo/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.roo.skillsPath).toBe('.roo/skills/');
+  });
+
+  test('kilo uses provider-specific .kilocode/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.kilo.skillsPath).toBe('.kilocode/skills/');
+  });
+
+  test('replit uses universal .agents/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.replit.skillsPath).toBe('.agents/skills/');
+  });
+
+  test('kimi uses universal .agents/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.kimi.skillsPath).toBe('.agents/skills/');
   });
 
   test('project paths are relative (no leading /)', () => {
@@ -102,6 +138,26 @@ describe('USER_CLIENT_MAPPINGS', () => {
 
   test('vscode uses universal ~/.agents/skills/ path', () => {
     expect(USER_CLIENT_MAPPINGS.vscode.skillsPath).toBe('.agents/skills/');
+  });
+
+  test('openclaw uses root-level skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.openclaw.skillsPath).toBe('skills/');
+  });
+
+  test('windsurf uses ~/.codeium/windsurf/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.windsurf.skillsPath).toBe('.codeium/windsurf/skills/');
+  });
+
+  test('cline uses ~/.cline/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.cline.skillsPath).toBe('.cline/skills/');
+  });
+
+  test('replit uses universal ~/.agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.replit.skillsPath).toBe('.agents/skills/');
+  });
+
+  test('kimi uses universal ~/.agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.kimi.skillsPath).toBe('.agents/skills/');
   });
 
   test('user paths are relative to home directory (no leading /)', () => {

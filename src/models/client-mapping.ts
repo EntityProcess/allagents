@@ -68,6 +68,63 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
     githubPath: '.github/',
   },
+  // Additional clients for feature parity with skills CLI
+  openclaw: {
+    skillsPath: 'skills/', // OpenClaw uses root-level skills/ (no dot prefix)
+    agentFile: 'AGENTS.md',
+  },
+  windsurf: {
+    skillsPath: '.windsurf/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  cline: {
+    skillsPath: '.cline/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  continue: {
+    skillsPath: '.continue/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  roo: {
+    skillsPath: '.roo/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  kilo: {
+    skillsPath: '.kilocode/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  trae: {
+    skillsPath: '.trae/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  augment: {
+    skillsPath: '.augment/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  zencoder: {
+    skillsPath: '.zencoder/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  junie: {
+    skillsPath: '.junie/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  openhands: {
+    skillsPath: '.openhands/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  kiro: {
+    skillsPath: '.kiro/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  replit: {
+    skillsPath: '.agents/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  kimi: {
+    skillsPath: '.agents/skills/',
+    agentFile: 'AGENTS.md',
+  },
 };
 
 /**
@@ -139,5 +196,62 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
     githubPath: '.copilot/',
+  },
+  // Additional clients for feature parity with skills CLI
+  openclaw: {
+    skillsPath: 'skills/', // OpenClaw uses root-level skills/ (no dot prefix)
+    agentFile: 'AGENTS.md',
+  },
+  windsurf: {
+    skillsPath: '.codeium/windsurf/skills/', // Windsurf user path is ~/.codeium/windsurf/skills/
+    agentFile: 'AGENTS.md',
+  },
+  cline: {
+    skillsPath: '.cline/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  continue: {
+    skillsPath: '.continue/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  roo: {
+    skillsPath: '.roo/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  kilo: {
+    skillsPath: '.kilocode/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  trae: {
+    skillsPath: '.trae/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  augment: {
+    skillsPath: '.augment/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  zencoder: {
+    skillsPath: '.zencoder/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  junie: {
+    skillsPath: '.junie/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  openhands: {
+    skillsPath: '.openhands/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  kiro: {
+    skillsPath: '.kiro/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  replit: {
+    skillsPath: '.agents/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  kimi: {
+    skillsPath: '.agents/skills/',
+    agentFile: 'AGENTS.md',
   },
 };

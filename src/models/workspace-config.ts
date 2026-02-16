@@ -73,6 +73,21 @@ export const ClientTypeSchema = z.enum([
   'factory',
   'ampcode',
   'vscode',
+  // Additional clients for feature parity with skills CLI
+  'openclaw',
+  'windsurf',
+  'cline',
+  'continue',
+  'roo',
+  'kilo',
+  'trae',
+  'augment',
+  'zencoder',
+  'junie',
+  'openhands',
+  'kiro',
+  'replit',
+  'kimi',
 ]);
 
 export type ClientType = z.infer<typeof ClientTypeSchema>;
