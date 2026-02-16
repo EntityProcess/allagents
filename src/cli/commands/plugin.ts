@@ -6,7 +6,7 @@ import {
   updateMarketplace,
   listMarketplacePlugins,
   getMarketplaceVersion,
-  getMarketplace,
+  findMarketplace,
   parsePluginSpec,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
@@ -1021,7 +1021,7 @@ const pluginUpdateCmd = command({
       // Dependencies for updatePlugin (avoid circular imports)
       const deps = {
         parsePluginSpec,
-        getMarketplace,
+        getMarketplace: (name: string, sourceLocation?: string) => findMarketplace(name, sourceLocation),
         parseMarketplaceManifest,
         updateMarketplace: async (name: string) => {
           // Skip if already updated in this run

@@ -1,6 +1,7 @@
 import * as p from '@clack/prompts';
 import { getWorkspaceStatus } from '../../../core/status.js';
 import { runInit } from './init.js';
+import { runUpdateAllPlugins } from './plugins.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 
@@ -64,19 +65,36 @@ export async function runStatus(context: TuiContext, cache?: TuiCache): Promise<
 
     p.note(lines.join('\n'), 'Status');
 
-    if (!context.hasWorkspace) {
-      const action = await select({
-        message: 'Options',
-        options: [
-          { label: 'Add workspace', value: 'init' as const },
-          { label: 'Back', value: 'back' as const },
-        ],
-      });
+    // Build options based on workspace state
+    const hasPlugins = (context.projectPluginCount > 0) || (context.userPluginCount > 0);
+    const options: Array<{ label: string; value: 'update_all' | 'init' | 'back'; hint?: string }> = [];
 
-      if (!p.isCancel(action) && action === 'init') {
-        await runInit();
-        cache?.invalidate();
-      }
+    if (hasPlugins) {
+      options.push({ label: 'Update all', value: 'update_all' });
+    }
+
+    if (context.hasWorkspace) {
+      options.push({ label: 'Add workspace', value: 'init', hint: 'in subdirectory' });
+    } else {
+      options.push({ label: 'Add workspace', value: 'init' });
+    }
+
+    options.push({ label: 'Back', value: 'back' });
+
+    const action = await select({
+      message: 'Options',
+      options,
+    });
+
+    if (p.isCancel(action) || action === 'back') {
+      return;
+    }
+
+    if (action === 'update_all') {
+      await runUpdateAllPlugins(context, cache);
+    } else if (action === 'init') {
+      await runInit();
+      cache?.invalidate();
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

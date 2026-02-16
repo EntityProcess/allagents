@@ -77,6 +77,30 @@ Tests use `bun:test`. Run with `bun test` or target a specific file with `bun te
 - Prefer covering the input matrix (e.g. config present/absent across scopes) but collapse cases that exercise identical logic.
 - Tests should be fast and not slow down CI. Remove redundant tests rather than keeping them for completeness.
 
+### Manual E2E Testing
+
+For TUI and CLI changes, **always run the actual tool before merging**:
+
+```bash
+# Build and run TUI
+bun run build && ./dist/index.js
+
+# Test specific CLI commands
+./dist/index.js plugin update
+./dist/index.js workspace sync
+```
+
+Unit tests with mocks verify internal logic but miss integration bugs. Mocks that don't match real interfaces create false confidence.
+
+### Unit Test Anti-patterns
+
+Avoid tests that verify implementation details rather than behavior:
+
+- **Bad**: "verify `updateMarketplace` was called with `'test-marketplace'`" — breaks on refactors, misses real bugs
+- **Good**: "plugin updates successfully when marketplace exists" — tests actual outcome
+
+If a mock doesn't match the real interface (e.g., missing a `name` field the real function returns), the test passes but production breaks. When writing mocks, match the actual return type.
+
 ### Git Worktrees
 
 **ALWAYS use git worktrees for feature development.** This allows you to work on multiple branches simultaneously without switching contexts.

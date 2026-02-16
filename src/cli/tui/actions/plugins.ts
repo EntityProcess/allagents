@@ -1,6 +1,13 @@
 import * as p from '@clack/prompts';
 import { addPlugin, removePlugin, addDisabledSkill, removeDisabledSkill } from '../../../core/workspace-modify.js';
-import { addUserPlugin, removeUserPlugin, addUserDisabledSkill, removeUserDisabledSkill } from '../../../core/user-workspace.js';
+import {
+  addUserPlugin,
+  removeUserPlugin,
+  addUserDisabledSkill,
+  removeUserDisabledSkill,
+  getInstalledUserPlugins,
+  getInstalledProjectPlugins,
+} from '../../../core/user-workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
 import {
   listMarketplaces,
@@ -8,9 +15,13 @@ import {
   addMarketplace,
   removeMarketplace,
   updateMarketplace,
+  findMarketplace,
+  parsePluginSpec,
   type MarketplaceEntry,
   type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
+import { updatePlugin } from '../../../core/plugin.js';
+import { parseMarketplaceManifest } from '../../../utils/marketplace-manifest-parser.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
 import { getAllSkillsFromPlugins } from '../../../core/skills.js';
 import { getHomeDir } from '../../../constants.js';
@@ -18,6 +29,29 @@ import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 
 const { select, text, confirm, multiselect } = p;
+
+/**
+ * Create dependencies for updatePlugin.
+ * Tracks which marketplaces have been updated to avoid redundant fetches.
+ */
+function createUpdateDeps() {
+  const updatedMarketplaces = new Set<string>();
+  return {
+    parsePluginSpec,
+    getMarketplace: (name: string, sourceLocation?: string) => findMarketplace(name, sourceLocation),
+    parseMarketplaceManifest,
+    updateMarketplace: async (name: string) => {
+      if (updatedMarketplaces.has(name)) {
+        return [{ name, success: true }];
+      }
+      const result = await updateMarketplace(name);
+      if (result[0]?.success) {
+        updatedMarketplaces.add(name);
+      }
+      return result;
+    },
+  };
+}
 
 /**
  * Get marketplace list, using cache when available.
@@ -110,6 +144,141 @@ async function installSelectedPlugin(
 }
 
 /**
+ * Update a single plugin.
+ */
+async function runUpdatePlugin(
+  pluginSource: string,
+  scope: 'project' | 'user',
+  context: TuiContext,
+  cache?: TuiCache,
+): Promise<void> {
+  const s = p.spinner();
+  s.start('Updating plugin...');
+
+  const result = await updatePlugin(pluginSource, createUpdateDeps());
+
+  if (!result.success) {
+    s.stop('Update failed');
+    p.note(result.error ?? 'Unknown error', 'Error');
+    return;
+  }
+
+  s.stop(result.action === 'updated' ? 'Plugin updated' : 'Already up to date');
+
+  // Sync after update
+  if (result.action === 'updated') {
+    const syncS = p.spinner();
+    syncS.start('Syncing...');
+    if (scope === 'project' && context.workspacePath) {
+      await syncWorkspace(context.workspacePath);
+    } else {
+      await syncUserWorkspace();
+    }
+    syncS.stop('Sync complete');
+    cache?.invalidate();
+  }
+
+  const icon = result.action === 'updated' ? '\u2713' : '-';
+  p.note(`${icon} ${pluginSource} (${result.action})`, 'Update');
+}
+
+/**
+ * Update all installed plugins.
+ */
+export async function runUpdateAllPlugins(
+  context: TuiContext,
+  cache?: TuiCache,
+): Promise<void> {
+  const s = p.spinner();
+  s.start('Gathering plugins...');
+
+  // Collect all installed plugins
+  const pluginsToUpdate: Array<{ spec: string; scope: 'project' | 'user' }> = [];
+
+  if (context.workspacePath) {
+    const projectPlugins = await getInstalledProjectPlugins(context.workspacePath);
+    for (const plugin of projectPlugins) {
+      pluginsToUpdate.push({ spec: plugin.spec, scope: 'project' });
+    }
+  }
+
+  const userPlugins = await getInstalledUserPlugins();
+  for (const plugin of userPlugins) {
+    // Avoid duplicates
+    if (!pluginsToUpdate.some((existing) => existing.spec === plugin.spec)) {
+      pluginsToUpdate.push({ spec: plugin.spec, scope: 'user' });
+    }
+  }
+
+  if (pluginsToUpdate.length === 0) {
+    s.stop('No plugins to update');
+    return;
+  }
+
+  s.stop(`Found ${pluginsToUpdate.length} plugin(s)`);
+
+  const deps = createUpdateDeps();
+
+  const updateS = p.spinner();
+  updateS.start('Updating plugins...');
+
+  const results: Array<{ plugin: string; action: string; error?: string }> = [];
+  let needsProjectSync = false;
+  let needsUserSync = false;
+
+  for (const { spec, scope } of pluginsToUpdate) {
+    const result = await updatePlugin(spec, deps);
+    const entry: { plugin: string; action: string; error?: string } = {
+      plugin: spec,
+      action: result.action,
+    };
+    if (result.error) {
+      entry.error = result.error;
+    }
+    results.push(entry);
+    if (result.action === 'updated') {
+      if (scope === 'project') needsProjectSync = true;
+      else needsUserSync = true;
+    }
+  }
+
+  updateS.stop('Update complete');
+
+  // Sync if any plugins were updated
+  if (needsProjectSync && context.workspacePath) {
+    const syncS = p.spinner();
+    syncS.start('Syncing project...');
+    await syncWorkspace(context.workspacePath);
+    syncS.stop('Project sync complete');
+  }
+
+  if (needsUserSync) {
+    const syncS = p.spinner();
+    syncS.start('Syncing user...');
+    await syncUserWorkspace();
+    syncS.stop('User sync complete');
+  }
+
+  if (needsProjectSync || needsUserSync) {
+    cache?.invalidate();
+  }
+
+  // Show results
+  const updated = results.filter((r) => r.action === 'updated').length;
+  const skipped = results.filter((r) => r.action === 'skipped').length;
+  const failed = results.filter((r) => r.action === 'failed').length;
+
+  const lines = results.map((r) => {
+    const icon = r.action === 'updated' ? '\u2713' : r.action === 'skipped' ? '-' : '\u2717';
+    return `${icon} ${r.plugin} (${r.action})${r.error ? ` - ${r.error}` : ''}`;
+  });
+  lines.push('');
+  lines.push(`Updated: ${updated}  Skipped: ${skipped}  Failed: ${failed}`);
+
+  p.note(lines.join('\n'), 'Update Results');
+}
+
+/**
  * Plugins sub-menu.
  * Lists installed plugins (click to remove) and offers adding new ones.
  * Follows the marketplace pattern: list items, drill into details.
@@ -117,7 +286,7 @@ async function installSelectedPlugin(
 export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise<void> {
   try {
     while (true) {
-      // Build options: + Add plugin, then list installed plugins
+      // Build options: + Add plugin, Update all, then list installed plugins
       const options: Array<{ label: string; value: string }> = [
         { label: '+ Add plugin', value: '__add__' },
       ];
@@ -127,6 +296,14 @@ export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise
       if (!status) {
         status = await getWorkspaceStatus(context.workspacePath ?? undefined);
         cache?.setStatus(status);
+      }
+
+      const hasPlugins =
+        status.success &&
+        ((status.plugins?.length ?? 0) > 0 || (status.userPlugins?.length ?? 0) > 0);
+
+      if (hasPlugins) {
+        options.push({ label: 'Update all', value: '__update_all__' });
       }
 
       if (status.success) {
@@ -162,6 +339,11 @@ export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise
         continue;
       }
 
+      if (selected === '__update_all__') {
+        await runUpdateAllPlugins(context, cache);
+        continue;
+      }
+
       // User selected an installed plugin — show detail screen
       await runPluginDetail(selected, context, cache);
     }
@@ -188,6 +370,7 @@ async function runPluginDetail(
       message: `Plugin: ${pluginSource} [${scope}]`,
       options: [
         { label: 'Browse skills', value: 'browse' as const },
+        { label: 'Update', value: 'update' as const },
         { label: 'Remove', value: 'remove' as const },
         { label: 'Back', value: 'back' as const },
       ],
@@ -199,6 +382,11 @@ async function runPluginDetail(
 
     if (action === 'browse') {
       await runBrowsePluginSkills(pluginSource, scope, context, cache);
+      continue;
+    }
+
+    if (action === 'update') {
+      await runUpdatePlugin(pluginSource, scope, context, cache);
       continue;
     }
 

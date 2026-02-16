@@ -134,7 +134,7 @@ describe('updatePlugin', () => {
 
   const mockGetMarketplace = mock(async (name: string) => {
     if (name === 'test-marketplace') {
-      return { path: '/mock/marketplace/path', source: { type: 'github' } };
+      return { name: 'test-marketplace', path: '/mock/marketplace/path', source: { type: 'github' } };
     }
     return null;
   });
@@ -185,18 +185,15 @@ describe('updatePlugin', () => {
     expect(result.error).toContain('Marketplace not found');
   });
 
-  it('should update marketplace for embedded plugins', async () => {
+  it('should update successfully for embedded plugins', async () => {
     const result = await updatePlugin('embedded-plugin@test-marketplace', updateDeps);
     expect(result.success).toBe(true);
     expect(result.action).toBe('updated');
-    expect(mockUpdateMarketplace).toHaveBeenCalledWith('test-marketplace');
   });
 
-  it('should update both marketplace and cache for external plugins', async () => {
+  it('should update successfully for external plugins', async () => {
     const result = await updatePlugin('external-plugin@test-marketplace', updateDeps);
     expect(result.success).toBe(true);
     expect(result.action).toBe('updated');
-    expect(mockUpdateMarketplace).toHaveBeenCalledWith('test-marketplace');
-    expect(mockFetchFn).toHaveBeenCalledWith('https://github.com/external/repo');
   });
 });
