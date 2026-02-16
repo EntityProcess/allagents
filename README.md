@@ -11,7 +11,7 @@ CLI tool for managing multi-repo AI agent workspaces with plugin synchronization
 | Feature | Claude Code Plugins | AllAgents |
 |---------|--------------------|-----------|
 | Scope | Single project | Multi-repo workspace |
-| Client support | Claude only | 8 AI clients |
+| Client support | Claude only | 23 AI clients |
 | File location | Runtime lookup from cache | Copied to workspace (git-versioned) |
 | Project structure | AI config mixed with code | Separate workspace repo |
 
@@ -298,19 +298,42 @@ These marketplace names auto-resolve to their GitHub repos:
 
 ### Supported Clients
 
+AllAgents supports 23 AI coding assistants:
+
+#### Universal Clients (share `.agents/skills/`)
+
 | Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
 |--------|--------|------------|-------|----------|------------------|
-| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` | No |
 | copilot | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
 | codex | `.agents/skills/` | `AGENTS.md` | No | No | No |
-| cursor | `.cursor/skills/` | `AGENTS.md` | No | No | No |
 | opencode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
 | gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
-| factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No | No |
 | ampcode | `.agents/skills/` | `AGENTS.md` | No | No | No |
 | vscode | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
+| replit | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| kimi | `.agents/skills/` | `AGENTS.md` | No | No | No |
 
-> **Note:** Clients supporting the universal `.agents/` folder (copilot, codex, opencode, gemini, ampcode, vscode) share the same skills directory. GitHub overrides (`.github/prompts/`, `copilot-instructions.md`) are copied to Copilot/VSCode's `.github/` folder.
+#### Provider-Specific Clients
+
+| Client | Skills | Agent File | Hooks | Commands |
+|--------|--------|------------|-------|----------|
+| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
+| cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
+| factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
+| openclaw | `skills/` | `AGENTS.md` | No | No |
+| windsurf | `.windsurf/skills/` | `AGENTS.md` | No | No |
+| cline | `.cline/skills/` | `AGENTS.md` | No | No |
+| continue | `.continue/skills/` | `AGENTS.md` | No | No |
+| roo | `.roo/skills/` | `AGENTS.md` | No | No |
+| kilo | `.kilocode/skills/` | `AGENTS.md` | No | No |
+| trae | `.trae/skills/` | `AGENTS.md` | No | No |
+| augment | `.augment/skills/` | `AGENTS.md` | No | No |
+| zencoder | `.zencoder/skills/` | `AGENTS.md` | No | No |
+| junie | `.junie/skills/` | `AGENTS.md` | No | No |
+| openhands | `.openhands/skills/` | `AGENTS.md` | No | No |
+| kiro | `.kiro/skills/` | `AGENTS.md` | No | No |
+
+> **Note:** Universal clients share the same `.agents/skills/` directory. GitHub overrides (`.github/prompts/`, `copilot-instructions.md`) are copied to Copilot/VSCode's `.github/` folder.
 
 ## Marketplace Structure
 

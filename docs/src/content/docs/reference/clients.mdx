@@ -3,19 +3,44 @@ title: Supported Clients
 description: AI coding assistant clients supported by AllAgents.
 ---
 
-## Client Comparison
+AllAgents supports 23 AI coding assistants, organized into universal clients (sharing `.agents/skills/`) and provider-specific clients.
+
+## Universal Clients
+
+These clients share the canonical `.agents/skills/` directory:
 
 | Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
 |--------|--------|------------|-------|----------|------------------|
-| Claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` | No |
 | Copilot | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
 | Codex | `.agents/skills/` | `AGENTS.md` | No | No | No |
-| Cursor | `.cursor/skills/` | `AGENTS.md` | No | No | No |
 | OpenCode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
 | Gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
-| Factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No | No |
 | Amp Code | `.agents/skills/` | `AGENTS.md` | No | No | No |
 | VSCode | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
+| Replit | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| Kimi | `.agents/skills/` | `AGENTS.md` | No | No | No |
+
+## Provider-Specific Clients
+
+These clients use their own skills directory:
+
+| Client | Skills | Agent File | Hooks | Commands |
+|--------|--------|------------|-------|----------|
+| Claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
+| Cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
+| Factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
+| OpenClaw | `skills/` | `AGENTS.md` | No | No |
+| Windsurf | `.windsurf/skills/` | `AGENTS.md` | No | No |
+| Cline | `.cline/skills/` | `AGENTS.md` | No | No |
+| Continue | `.continue/skills/` | `AGENTS.md` | No | No |
+| Roo | `.roo/skills/` | `AGENTS.md` | No | No |
+| Kilo | `.kilocode/skills/` | `AGENTS.md` | No | No |
+| Trae | `.trae/skills/` | `AGENTS.md` | No | No |
+| Augment | `.augment/skills/` | `AGENTS.md` | No | No |
+| Zencoder | `.zencoder/skills/` | `AGENTS.md` | No | No |
+| Junie | `.junie/skills/` | `AGENTS.md` | No | No |
+| OpenHands | `.openhands/skills/` | `AGENTS.md` | No | No |
+| Kiro | `.kiro/skills/` | `AGENTS.md` | No | No |
 
 :::note
 Skills are the cross-client way to share reusable prompts. GitHub overrides (`.github/prompts/`, `copilot-instructions.md`) are copied to the workspace's `.github/` folder for Copilot/VSCode.
