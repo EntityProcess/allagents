@@ -337,8 +337,8 @@ export interface InstalledPluginUpdateResult {
  * Dependencies for updatePlugin (for testing)
  */
 export interface UpdatePluginDeps {
-  parsePluginSpec: (spec: string) => { plugin: string; marketplaceName: string } | null;
-  getMarketplace: (name: string) => Promise<{ path: string; source: { type: string } } | null>;
+  parsePluginSpec: (spec: string) => { plugin: string; marketplaceName: string; owner?: string; repo?: string } | null;
+  getMarketplace: (name: string, sourceLocation?: string) => Promise<{ name: string; path: string; source: { type: string } } | null>;
   parseMarketplaceManifest: (path: string) => Promise<{ success: boolean; data?: { plugins: Array<{ name: string; source: string | { url: string } }> } }>;
   updateMarketplace: (name: string) => Promise<Array<{ name: string; success: boolean; error?: string }>>;
   /** Optional fetch function for testing - defaults to fetchPlugin */
@@ -381,8 +381,9 @@ export async function updatePlugin(
     };
   }
 
-  // Get marketplace info
-  const marketplace = await deps.getMarketplace(parsed.marketplaceName);
+  // Get marketplace info (with source location fallback for owner/repo format)
+  const sourceLocation = parsed.owner && parsed.repo ? `${parsed.owner}/${parsed.repo}` : undefined;
+  const marketplace = await deps.getMarketplace(parsed.marketplaceName, sourceLocation);
   if (!marketplace) {
     return {
       plugin: pluginSpec,
@@ -392,11 +393,14 @@ export async function updatePlugin(
     };
   }
 
+  // Use the actual marketplace name (may differ from parsed name if found by source location)
+  const marketplaceName = marketplace.name;
+
   // Parse marketplace manifest to determine if plugin is embedded or external
   const manifestResult = await deps.parseMarketplaceManifest(marketplace.path);
   if (!manifestResult.success || !manifestResult.data) {
     // No manifest - update the marketplace itself (plugin might be in directory)
-    const updateResults = await deps.updateMarketplace(parsed.marketplaceName);
+    const updateResults = await deps.updateMarketplace(marketplaceName);
     const result = updateResults[0];
     return {
       plugin: pluginSpec,
@@ -413,7 +417,7 @@ export async function updatePlugin(
 
   if (!pluginEntry) {
     // Plugin not in manifest - update marketplace and hope for the best
-    const updateResults = await deps.updateMarketplace(parsed.marketplaceName);
+    const updateResults = await deps.updateMarketplace(marketplaceName);
     const result = updateResults[0];
     return {
       plugin: pluginSpec,
@@ -426,7 +430,7 @@ export async function updatePlugin(
   // Check if embedded (string path) or external (url object)
   if (typeof pluginEntry.source === 'string') {
     // Embedded plugin - update the marketplace
-    const updateResults = await deps.updateMarketplace(parsed.marketplaceName);
+    const updateResults = await deps.updateMarketplace(marketplaceName);
     const result = updateResults[0];
     return {
       plugin: pluginSpec,
@@ -441,7 +445,7 @@ export async function updatePlugin(
 
   // Update the marketplace first (in case manifest changed)
   if (marketplace.source.type === 'github') {
-    await deps.updateMarketplace(parsed.marketplaceName);
+    await deps.updateMarketplace(marketplaceName);
   }
 
   // Update the external plugin cache
