@@ -298,18 +298,19 @@ These marketplace names auto-resolve to their GitHub repos:
 
 ### Supported Clients
 
-| Client | Skills | Agent File | Hooks | Commands |
-|--------|--------|------------|-------|----------|
-| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
-| copilot | `.agents/skills/` | `AGENTS.md` | No | No |
-| codex | `.agents/skills/` | `AGENTS.md` | No | No |
-| cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
-| opencode | `.agents/skills/` | `AGENTS.md` | No | No |
-| gemini | `.agents/skills/` | `GEMINI.md` | No | No |
-| factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
-| ampcode | `.agents/skills/` | `AGENTS.md` | No | No |
+| Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
+|--------|--------|------------|-------|----------|------------------|
+| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` | No |
+| copilot | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
+| codex | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| cursor | `.cursor/skills/` | `AGENTS.md` | No | No | No |
+| opencode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
+| gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
+| factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No | No |
+| ampcode | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| vscode | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
 
-> **Note:** Clients supporting the universal `.agents/` folder (copilot, codex, opencode, gemini, ampcode) share the same skills directory. Commands are a Claude-specific feature.
+> **Note:** Clients supporting the universal `.agents/` folder (copilot, codex, opencode, gemini, ampcode, vscode) share the same skills directory. GitHub overrides (`.github/prompts/`, `copilot-instructions.md`) are copied to Copilot/VSCode's `.github/` folder.
 
 ## Marketplace Structure
 
@@ -337,9 +338,12 @@ my-plugin/
 ├── skills/             # Skill directories with SKILL.md (all clients)
 │   └── debugging/
 │       └── SKILL.md
-├── commands/           # Command files (.md) - Claude only
+├── commands/           # Command files (.md) - Claude, OpenCode
 │   ├── build.md
 │   └── deploy.md
+├── .github/            # GitHub overrides (Copilot, VSCode)
+│   └── prompts/
+│       └── review.md
 ├── hooks/              # Hook files (Claude/Factory only)
 │   └── pre-commit.md
 └── AGENTS.md           # Agent configuration (optional)
