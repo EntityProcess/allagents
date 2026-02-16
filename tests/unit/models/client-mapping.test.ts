@@ -5,7 +5,6 @@ describe('CLIENT_MAPPINGS', () => {
   test('defines project-level paths for all supported clients', () => {
     const expectedClients = [
       'claude', 'copilot', 'codex', 'cursor', 'opencode', 'gemini', 'factory', 'ampcode', 'vscode',
-      // Additional clients
       'openclaw', 'windsurf', 'cline', 'continue', 'roo', 'kilo', 'trae', 'augment', 'zencoder', 'junie', 'openhands', 'kiro', 'replit', 'kimi',
     ];
     for (const client of expectedClients) {

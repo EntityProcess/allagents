@@ -73,7 +73,6 @@ export const ClientTypeSchema = z.enum([
   'factory',
   'ampcode',
   'vscode',
-  // Additional clients for feature parity with skills CLI
   'openclaw',
   'windsurf',
   'cline',

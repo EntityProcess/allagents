@@ -68,9 +68,8 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
     githubPath: '.github/',
   },
-  // Additional clients for feature parity with skills CLI
-  openclaw: {
-    skillsPath: 'skills/', // OpenClaw uses root-level skills/ (no dot prefix)
+    openclaw: {
+    skillsPath: 'skills/',
     agentFile: 'AGENTS.md',
   },
   windsurf: {
@@ -197,13 +196,12 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
     githubPath: '.copilot/',
   },
-  // Additional clients for feature parity with skills CLI
-  openclaw: {
-    skillsPath: 'skills/', // OpenClaw uses root-level skills/ (no dot prefix)
+    openclaw: {
+    skillsPath: 'skills/',
     agentFile: 'AGENTS.md',
   },
   windsurf: {
-    skillsPath: '.codeium/windsurf/skills/', // Windsurf user path is ~/.codeium/windsurf/skills/
+    skillsPath: '.codeium/windsurf/skills/',
     agentFile: 'AGENTS.md',
   },
   cline: {
