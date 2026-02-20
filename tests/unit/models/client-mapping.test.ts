@@ -6,6 +6,7 @@ describe('CLIENT_MAPPINGS', () => {
     const expectedClients = [
       'claude', 'copilot', 'codex', 'cursor', 'opencode', 'gemini', 'factory', 'ampcode', 'vscode',
       'openclaw', 'windsurf', 'cline', 'continue', 'roo', 'kilo', 'trae', 'augment', 'zencoder', 'junie', 'openhands', 'kiro', 'replit', 'kimi',
+      'universal',
     ];
     for (const client of expectedClients) {
       expect(CLIENT_MAPPINGS).toHaveProperty(client);
@@ -28,28 +29,28 @@ describe('CLIENT_MAPPINGS', () => {
     expect(CLIENT_MAPPINGS.factory.hooksPath).toBe('.factory/hooks/');
   });
 
-  test('copilot uses universal .agents/skills/ path', () => {
-    expect(CLIENT_MAPPINGS.copilot.skillsPath).toBe('.agents/skills/');
+  test('copilot uses provider-specific .github/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.copilot.skillsPath).toBe('.github/skills/');
   });
 
-  test('codex uses universal .agents/skills/ path', () => {
-    expect(CLIENT_MAPPINGS.codex.skillsPath).toBe('.agents/skills/');
+  test('codex uses provider-specific .codex/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.codex.skillsPath).toBe('.codex/skills/');
   });
 
-  test('opencode uses universal .agents/skills/ path', () => {
-    expect(CLIENT_MAPPINGS.opencode.skillsPath).toBe('.agents/skills/');
+  test('opencode uses provider-specific .opencode/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.opencode.skillsPath).toBe('.opencode/skills/');
   });
 
-  test('gemini uses universal .agents/skills/ path', () => {
-    expect(CLIENT_MAPPINGS.gemini.skillsPath).toBe('.agents/skills/');
+  test('gemini uses provider-specific .gemini/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.gemini.skillsPath).toBe('.gemini/skills/');
   });
 
-  test('ampcode uses universal .agents/skills/ path', () => {
-    expect(CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.agents/skills/');
+  test('ampcode uses provider-specific .ampcode/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.ampcode/skills/');
   });
 
-  test('vscode uses universal .agents/skills/ path', () => {
-    expect(CLIENT_MAPPINGS.vscode.skillsPath).toBe('.agents/skills/');
+  test('vscode uses provider-specific .github/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.vscode.skillsPath).toBe('.github/skills/');
   });
 
   test('openclaw uses root-level skills/ path (no dot prefix)', () => {
@@ -76,12 +77,16 @@ describe('CLIENT_MAPPINGS', () => {
     expect(CLIENT_MAPPINGS.kilo.skillsPath).toBe('.kilocode/skills/');
   });
 
-  test('replit uses universal .agents/skills/ path', () => {
-    expect(CLIENT_MAPPINGS.replit.skillsPath).toBe('.agents/skills/');
+  test('replit uses provider-specific .replit/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.replit.skillsPath).toBe('.replit/skills/');
   });
 
-  test('kimi uses universal .agents/skills/ path', () => {
-    expect(CLIENT_MAPPINGS.kimi.skillsPath).toBe('.agents/skills/');
+  test('kimi uses provider-specific .kimi/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.kimi.skillsPath).toBe('.kimi/skills/');
+  });
+
+  test('universal uses .agents/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.universal.skillsPath).toBe('.agents/skills/');
   });
 
   test('project paths are relative (no leading /)', () => {
@@ -115,28 +120,28 @@ describe('USER_CLIENT_MAPPINGS', () => {
     expect(USER_CLIENT_MAPPINGS.factory.hooksPath).toBe('.factory/hooks/');
   });
 
-  test('copilot uses universal ~/.agents/skills/ path', () => {
-    expect(USER_CLIENT_MAPPINGS.copilot.skillsPath).toBe('.agents/skills/');
+  test('copilot uses provider-specific ~/.copilot/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.copilot.skillsPath).toBe('.copilot/skills/');
   });
 
-  test('codex uses universal ~/.agents/skills/ path', () => {
-    expect(USER_CLIENT_MAPPINGS.codex.skillsPath).toBe('.agents/skills/');
+  test('codex uses provider-specific ~/.codex/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.codex.skillsPath).toBe('.codex/skills/');
   });
 
-  test('opencode uses universal ~/.agents/skills/ path', () => {
-    expect(USER_CLIENT_MAPPINGS.opencode.skillsPath).toBe('.agents/skills/');
+  test('opencode uses provider-specific ~/.opencode/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.opencode.skillsPath).toBe('.opencode/skills/');
   });
 
-  test('gemini uses universal ~/.agents/skills/ path', () => {
-    expect(USER_CLIENT_MAPPINGS.gemini.skillsPath).toBe('.agents/skills/');
+  test('gemini uses provider-specific ~/.gemini/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.gemini.skillsPath).toBe('.gemini/skills/');
   });
 
-  test('ampcode uses universal ~/.agents/skills/ path', () => {
-    expect(USER_CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.agents/skills/');
+  test('ampcode uses provider-specific ~/.ampcode/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.ampcode/skills/');
   });
 
-  test('vscode uses universal ~/.agents/skills/ path', () => {
-    expect(USER_CLIENT_MAPPINGS.vscode.skillsPath).toBe('.agents/skills/');
+  test('vscode uses provider-specific ~/.copilot/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.vscode.skillsPath).toBe('.copilot/skills/');
   });
 
   test('openclaw uses root-level skills/ path', () => {
@@ -151,12 +156,16 @@ describe('USER_CLIENT_MAPPINGS', () => {
     expect(USER_CLIENT_MAPPINGS.cline.skillsPath).toBe('.cline/skills/');
   });
 
-  test('replit uses universal ~/.agents/skills/ path', () => {
-    expect(USER_CLIENT_MAPPINGS.replit.skillsPath).toBe('.agents/skills/');
+  test('replit uses provider-specific ~/.replit/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.replit.skillsPath).toBe('.replit/skills/');
   });
 
-  test('kimi uses universal ~/.agents/skills/ path', () => {
-    expect(USER_CLIENT_MAPPINGS.kimi.skillsPath).toBe('.agents/skills/');
+  test('kimi uses provider-specific ~/.kimi/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.kimi.skillsPath).toBe('.kimi/skills/');
+  });
+
+  test('universal uses ~/.agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.universal.skillsPath).toBe('.agents/skills/');
   });
 
   test('user paths are relative to home directory (no leading /)', () => {

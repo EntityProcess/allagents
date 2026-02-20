@@ -219,8 +219,8 @@ describe('syncUserWorkspace', () => {
     expect(result.error).toBeDefined();
   });
 
-  it('deduplicates universal clients when syncing to user home', async () => {
-    // copilot, codex, opencode all use ~/.agents/skills/ (universal path)
+  it('copies to each provider-specific path when clients have unique paths', async () => {
+    // copilot, codex, opencode now each have unique user-level paths
     const pluginDir = await createLocalPlugin('my-plugin', 'my-skill');
 
     await writeUserConfig({
@@ -232,23 +232,24 @@ describe('syncUserWorkspace', () => {
     const result = await syncUserWorkspace();
 
     expect(result.success).toBe(true);
-    // Should only copy once (not 3 times) since all use the same path
-    expect(result.totalCopied).toBe(1);
+    // Should copy 3 times since all have different paths
+    expect(result.totalCopied).toBe(3);
 
-    // Skill should exist in ~/.agents/skills/
-    const skillDest = join(testDir, '.agents', 'skills', 'my-skill', 'SKILL.md');
-    expect(existsSync(skillDest)).toBe(true);
+    // Skills should exist in each provider-specific path
+    expect(existsSync(join(testDir, '.copilot', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(testDir, '.codex', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(testDir, '.opencode', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
 
     // Verify sync state tracks the skill for all clients
     const statePath = join(testDir, '.allagents', 'sync-state.json');
     const stateContent = JSON.parse(await readFile(statePath, 'utf-8'));
-    expect(stateContent.files.copilot).toContain('.agents/skills/my-skill/');
-    expect(stateContent.files.codex).toContain('.agents/skills/my-skill/');
-    expect(stateContent.files.opencode).toContain('.agents/skills/my-skill/');
+    expect(stateContent.files.copilot).toContain('.copilot/skills/my-skill/');
+    expect(stateContent.files.codex).toContain('.codex/skills/my-skill/');
+    expect(stateContent.files.opencode).toContain('.opencode/skills/my-skill/');
   });
 
-  it('syncs to different paths for mixed universal and unique clients', async () => {
-    // claude uses ~/.claude/skills/, copilot/codex use ~/.agents/skills/
+  it('syncs to different paths for mixed clients', async () => {
+    // claude uses ~/.claude/skills/, copilot uses ~/.copilot/skills/, codex uses ~/.codex/skills/
     const pluginDir = await createLocalPlugin('my-plugin', 'my-skill');
 
     await writeUserConfig({
@@ -260,18 +261,19 @@ describe('syncUserWorkspace', () => {
     const result = await syncUserWorkspace();
 
     expect(result.success).toBe(true);
-    // Should copy twice: once to ~/.claude/skills/, once to ~/.agents/skills/
-    expect(result.totalCopied).toBe(2);
+    // Should copy three times: each client has a unique path
+    expect(result.totalCopied).toBe(3);
 
-    // Skill should exist in both locations
+    // Skill should exist in all locations
     expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
-    expect(existsSync(join(testDir, '.agents', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(testDir, '.copilot', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(testDir, '.codex', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
 
     // Verify sync state tracks correctly
     const statePath = join(testDir, '.allagents', 'sync-state.json');
     const stateContent = JSON.parse(await readFile(statePath, 'utf-8'));
     expect(stateContent.files.claude).toContain('.claude/skills/my-skill/');
-    expect(stateContent.files.copilot).toContain('.agents/skills/my-skill/');
-    expect(stateContent.files.codex).toContain('.agents/skills/my-skill/');
+    expect(stateContent.files.copilot).toContain('.copilot/skills/my-skill/');
+    expect(stateContent.files.codex).toContain('.codex/skills/my-skill/');
   });
 });

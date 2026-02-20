@@ -21,6 +21,9 @@ export interface ClientMapping {
 /**
  * Project-level client path mappings for all supported AI clients.
  * Paths are relative to the project root directory.
+ *
+ * Only the 'universal' client uses .agents/skills/.
+ * All other clients use provider-specific directories.
  */
 export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   claude: {
@@ -32,12 +35,12 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     hooksPath: '.claude/hooks/',
   },
   copilot: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.github/skills/',
     agentFile: 'AGENTS.md',
     githubPath: '.github/',
   },
   codex: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.codex/skills/',
     agentFile: 'AGENTS.md',
   },
   cursor: {
@@ -46,11 +49,11 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   },
   opencode: {
     commandsPath: '.opencode/commands/',
-    skillsPath: '.agents/skills/',
+    skillsPath: '.opencode/skills/',
     agentFile: 'AGENTS.md',
   },
   gemini: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.gemini/skills/',
     agentFile: 'GEMINI.md',
     agentFileFallback: 'AGENTS.md',
   },
@@ -60,11 +63,11 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     hooksPath: '.factory/hooks/',
   },
   ampcode: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.ampcode/skills/',
     agentFile: 'AGENTS.md',
   },
   vscode: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.github/skills/',
     agentFile: 'AGENTS.md',
     githubPath: '.github/',
   },
@@ -117,32 +120,32 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
   replit: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.replit/skills/',
     agentFile: 'AGENTS.md',
   },
   kimi: {
+    skillsPath: '.kimi/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  universal: {
     skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
   },
 };
 
 /**
- * User-level client path mappings for all supported AI clients.
- * Paths are relative to the user's home directory (~/).
- * Used when plugins are installed with --scope user.
- */
-/**
- * The canonical skills path used by universal clients.
- * Skills are copied here first, then symlinked from non-universal client paths.
+ * The canonical skills path used by the universal client.
+ * When universal is in the clients list, skills are copied here first,
+ * then symlinked from non-universal client paths.
  */
 export const CANONICAL_SKILLS_PATH = '.agents/skills/';
 
 /**
- * Check if a client uses the canonical .agents/skills/ path.
- * Universal clients don't need symlinks since they read from canonical directly.
+ * Check if a client is the universal client (uses .agents/skills/).
+ * Only the 'universal' client type returns true.
  */
 export function isUniversalClient(client: ClientType): boolean {
-  return CLIENT_MAPPINGS[client].skillsPath === CANONICAL_SKILLS_PATH;
+  return client === 'universal';
 }
 
 /**
@@ -160,12 +163,12 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     hooksPath: '.claude/hooks/',
   },
   copilot: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.copilot/skills/',
     agentFile: 'AGENTS.md',
     githubPath: '.copilot/',
   },
   codex: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.codex/skills/',
     agentFile: 'AGENTS.md',
   },
   cursor: {
@@ -174,11 +177,11 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   },
   opencode: {
     commandsPath: '.opencode/commands/',
-    skillsPath: '.agents/skills/',
+    skillsPath: '.opencode/skills/',
     agentFile: 'AGENTS.md',
   },
   gemini: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.gemini/skills/',
     agentFile: 'GEMINI.md',
     agentFileFallback: 'AGENTS.md',
   },
@@ -188,11 +191,11 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     hooksPath: '.factory/hooks/',
   },
   ampcode: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.ampcode/skills/',
     agentFile: 'AGENTS.md',
   },
   vscode: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.copilot/skills/',
     agentFile: 'AGENTS.md',
     githubPath: '.copilot/',
   },
@@ -245,10 +248,14 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
   replit: {
-    skillsPath: '.agents/skills/',
+    skillsPath: '.replit/skills/',
     agentFile: 'AGENTS.md',
   },
   kimi: {
+    skillsPath: '.kimi/skills/',
+    agentFile: 'AGENTS.md',
+  },
+  universal: {
     skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
   },

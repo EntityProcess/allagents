@@ -61,9 +61,9 @@ describe('sync', () => {
 
     it('should purge multiple clients', async () => {
       // Setup: Create directories for multiple clients
-      // Note: copilot now uses .agents/skills/ (universal agents folder)
+      // Note: copilot uses .github/skills/ (provider-specific folder)
       await mkdir(join(testDir, '.claude', 'commands'), { recursive: true });
-      await mkdir(join(testDir, '.agents', 'skills'), { recursive: true });
+      await mkdir(join(testDir, '.github', 'skills'), { recursive: true });
       await writeFile(join(testDir, 'CLAUDE.md'), '# Claude');
       await writeFile(join(testDir, 'AGENTS.md'), '# Agents');
 
@@ -72,7 +72,7 @@ describe('sync', () => {
 
       // Verify both are purged
       expect(existsSync(join(testDir, '.claude', 'commands'))).toBe(false);
-      expect(existsSync(join(testDir, '.agents', 'skills'))).toBe(false);
+      expect(existsSync(join(testDir, '.github', 'skills'))).toBe(false);
       expect(existsSync(join(testDir, 'CLAUDE.md'))).toBe(false);
       expect(existsSync(join(testDir, 'AGENTS.md'))).toBe(false);
 
@@ -725,7 +725,7 @@ clients:
     it('should purge files when client is removed from workspace.yaml', async () => {
       // Setup: Create a plugin with a skill
       // Use claude and cursor (different paths) to test removal cleanup
-      // Note: copilot uses .agents/skills/ (universal) while claude uses .claude/skills/
+      // Note: copilot uses .github/skills/ while claude uses .claude/skills/
       const pluginDir = join(testDir, 'my-plugin');
       const skillDir = join(pluginDir, 'skills', 'my-skill');
       await mkdir(skillDir, { recursive: true });
@@ -946,7 +946,7 @@ clients:
       );
 
       // Setup workspace config with two clients (use claude and cursor for different paths)
-      // Note: opencode uses .agents/skills/ (universal), cursor uses .cursor/skills/
+      // Note: opencode uses .opencode/skills/, cursor uses .cursor/skills/
       const configDir = join(testDir, '.allagents');
       await mkdir(configDir, { recursive: true });
       await writeFile(
@@ -974,7 +974,7 @@ clients:
       );
 
       // Setup workspace config with two clients (use claude and cursor for different paths)
-      // Note: opencode uses .agents/skills/ (universal), cursor uses .cursor/skills/
+      // Note: opencode uses .opencode/skills/, cursor uses .cursor/skills/
       const configDir = join(testDir, '.allagents');
       await mkdir(configDir, { recursive: true });
       await writeFile(

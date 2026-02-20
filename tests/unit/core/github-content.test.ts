@@ -89,9 +89,9 @@ Also check [API Guide](../../skills/cw-api/README.md).
       'utf-8',
     );
 
-    // Links should be adjusted to workspace skills path (.agents/skills/)
-    expect(copiedContent).toContain('#file:../../.agents/skills/cw-coding/SKILL.md');
-    expect(copiedContent).toContain('[API Guide](../../.agents/skills/cw-api/README.md)');
+    // Links should be adjusted to workspace skills path (.github/skills/)
+    expect(copiedContent).toContain('#file:../../.github/skills/cw-coding/SKILL.md');
+    expect(copiedContent).toContain('[API Guide](../../.github/skills/cw-api/README.md)');
   });
 
   it('adjusts links using skill name map for renamed skills', async () => {
@@ -106,7 +106,7 @@ Also check [API Guide](../../skills/cw-api/README.md).
     expect(results[0].action).toBe('copied');
 
     const copiedContent = await readFile(join(workspaceDir, '.github', 'instructions', 'file.md'), 'utf-8');
-    expect(copiedContent).toContain('#file:../../.agents/skills/plugin-name:my-skill/SKILL.md');
+    expect(copiedContent).toContain('#file:../../.github/skills/plugin-name:my-skill/SKILL.md');
   });
 
   it('preserves non-skill links and external URLs', async () => {
