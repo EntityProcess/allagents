@@ -45,6 +45,7 @@ plugins:
   - ${pluginDir}
 clients:
   - claude
+  - universal
 `,
     );
 
@@ -83,14 +84,14 @@ repositories: []
 plugins:
   - ${pluginDir}
 clients:
-  - copilot
+  - universal
 `,
     );
 
     const result = await syncWorkspace(testDir);
     expect(result.success).toBe(true);
 
-    // Canonical should exist as a real directory
+    // Universal client uses .agents/skills/ directly as a real directory
     const canonicalPath = join(testDir, '.agents', 'skills', 'my-skill');
     expect(existsSync(canonicalPath)).toBe(true);
     const canonicalStats = await lstat(canonicalPath);
@@ -111,6 +112,7 @@ plugins:
 clients:
   - claude
   - cursor
+  - universal
 `,
     );
 
@@ -138,6 +140,7 @@ plugins:
   - ${pluginDir}
 clients:
   - claude
+  - universal
 `,
     );
 
@@ -153,6 +156,7 @@ repositories: []
 plugins: []
 clients:
   - claude
+  - universal
 `,
     );
 
@@ -206,14 +210,14 @@ plugins:
   - ${pluginDir}
 clients:
   - claude
-  - copilot
+  - universal
 `,
     );
 
     const result = await syncWorkspace(testDir);
     expect(result.success).toBe(true);
 
-    // Copilot uses canonical directly
+    // Universal uses canonical directly
     const canonicalPath = join(testDir, '.agents', 'skills', 'my-skill');
     expect(existsSync(canonicalPath)).toBe(true);
     const canonicalStats = await lstat(canonicalPath);
@@ -229,5 +233,43 @@ clients:
     // Both should have the same content (via symlink for claude)
     expect(existsSync(join(canonicalPath, 'SKILL.md'))).toBe(true);
     expect(existsSync(join(claudePath, 'SKILL.md'))).toBe(true);
+  });
+
+  it('does not create canonical when universal is not in clients list', async () => {
+    const pluginDir = await createPlugin('my-plugin', 'my-skill');
+
+    await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      `
+repositories: []
+plugins:
+  - ${pluginDir}
+clients:
+  - claude
+  - copilot
+`,
+    );
+
+    const result = await syncWorkspace(testDir);
+    expect(result.success).toBe(true);
+
+    // Claude should have a real directory at its own path
+    const claudePath = join(testDir, '.claude', 'skills', 'my-skill');
+    expect(existsSync(claudePath)).toBe(true);
+    const claudeStats = await lstat(claudePath);
+    expect(claudeStats.isSymbolicLink()).toBe(false);
+    expect(claudeStats.isDirectory()).toBe(true);
+
+    // Copilot should have a real directory at its own path
+    const copilotPath = join(testDir, '.github', 'skills', 'my-skill');
+    expect(existsSync(copilotPath)).toBe(true);
+    const copilotStats = await lstat(copilotPath);
+    expect(copilotStats.isSymbolicLink()).toBe(false);
+    expect(copilotStats.isDirectory()).toBe(true);
+
+    // Canonical .agents/skills/ should NOT exist
+    const canonicalPath = join(testDir, '.agents', 'skills');
+    expect(existsSync(canonicalPath)).toBe(false);
   });
 });

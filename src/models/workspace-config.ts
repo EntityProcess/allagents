@@ -87,6 +87,7 @@ export const ClientTypeSchema = z.enum([
   'kiro',
   'replit',
   'kimi',
+  'universal',
 ]);
 
 export type ClientType = z.infer<typeof ClientTypeSchema>;

@@ -810,48 +810,19 @@ async function copyValidatedPlugin(
   const mappings = clientMappings ?? CLIENT_MAPPINGS;
   const clientList = clients as ClientType[];
 
-  if (syncMode === 'symlink') {
-    // Symlink mode: copy to canonical .agents/skills/, symlink from client paths
+  const hasUniversalClient = clientList.some((c) => isUniversalClient(c));
+
+  if (syncMode === 'symlink' && hasUniversalClient) {
+    // Symlink mode with universal: copy to canonical .agents/skills/, symlink from client paths
     //
     // Phase 1: Copy skills to canonical location using deduplication
-    // This ensures canonical is only copied once, and tracked under universal clients
+    // This ensures canonical is only copied once, and tracked under the universal client
     const { representativeClients } = deduplicateClientsByPath(clientList, mappings);
-
-    // Find which representative handles canonical (.agents/skills/)
-    const canonicalRepresentative = representativeClients.find(
-      (c) => mappings[c]?.skillsPath === CANONICAL_SKILLS_PATH,
-    );
-
-    // If no configured client uses canonical directly, we need to add one
-    // to ensure canonical gets copied and tracked
-    const needsCanonicalCopy = !canonicalRepresentative;
-    const nonUniversalClients = clientList.filter((c) => !isUniversalClient(c));
-
-    // Copy to canonical using representative or 'copilot' if needed
-    if (needsCanonicalCopy && nonUniversalClients.length > 0) {
-      const canonicalResults = await copyPluginToWorkspace(
-        validatedPlugin.resolved,
-        workspacePath,
-        'copilot', // Use copilot as canonical representative
-        {
-          dryRun,
-          ...(skillNameMap && { skillNameMap }),
-          // Don't pass clientMappings - use default CLIENT_MAPPINGS for copilot
-          syncMode: 'copy',
-        },
-      );
-      // Filter to only skill results and add to copyResults
-      // These get tracked for ALL non-universal clients
-      const skillResults = canonicalResults.filter(
-        (r) => r.destination.includes(CANONICAL_SKILLS_PATH) && r.action === 'copied',
-      );
-      copyResults.push(...skillResults);
-    }
 
     // Phase 2: Copy for each representative client
     for (const representative of representativeClients) {
       if (isUniversalClient(representative)) {
-        // Universal client: copy directly to canonical
+        // Universal client: copy directly to canonical .agents/skills/
         const results = await copyPluginToWorkspace(
           validatedPlugin.resolved,
           workspacePath,
@@ -882,7 +853,7 @@ async function copyValidatedPlugin(
       }
     }
   } else {
-    // Legacy copy mode: deduplicate and copy directly
+    // No universal client or copy mode: copy directly to each client's path
     const { representativeClients } = deduplicateClientsByPath(clientList, mappings);
 
     for (const client of representativeClients) {
