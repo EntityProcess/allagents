@@ -93,6 +93,34 @@ export const ClientTypeSchema = z.enum([
 export type ClientType = z.infer<typeof ClientTypeSchema>;
 
 /**
+ * Plugin entry in workspace.yaml
+ * Supports string shorthand and object form with optional client override.
+ */
+export const PluginEntrySchema = z.union([
+  PluginSourceSchema,
+  z.object({
+    source: PluginSourceSchema,
+    clients: z.array(ClientTypeSchema).optional(),
+  }),
+]);
+
+export type PluginEntry = z.infer<typeof PluginEntrySchema>;
+
+/**
+ * Resolve plugin source from plugin entry (string or object form)
+ */
+export function getPluginSource(plugin: PluginEntry): string {
+  return typeof plugin === 'string' ? plugin : plugin.source;
+}
+
+/**
+ * Resolve optional plugin-level clients from plugin entry
+ */
+export function getPluginClients(plugin: PluginEntry): ClientType[] | undefined {
+  return typeof plugin === 'string' ? undefined : plugin.clients;
+}
+
+/**
  * VSCode workspace generation configuration
  */
 export const VscodeConfigSchema = z.object({
@@ -116,7 +144,7 @@ export type SyncMode = z.infer<typeof SyncModeSchema>;
 export const WorkspaceConfigSchema = z.object({
   workspace: WorkspaceSchema.optional(),
   repositories: z.array(RepositorySchema),
-  plugins: z.array(PluginSourceSchema),
+  plugins: z.array(PluginEntrySchema),
   clients: z.array(ClientTypeSchema),
   vscode: VscodeConfigSchema.optional(),
   syncMode: SyncModeSchema.optional(),

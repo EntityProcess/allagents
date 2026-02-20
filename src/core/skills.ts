@@ -3,7 +3,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
-import type { WorkspaceConfig } from '../models/workspace-config.js';
+import { getPluginSource, type WorkspaceConfig } from '../models/workspace-config.js';
 import { fetchPlugin, getPluginName } from './plugin.js';
 import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
 import { isPluginSpec, resolvePluginSpecWithAutoRegister } from './marketplace.js';
@@ -74,7 +74,8 @@ export async function getAllSkillsFromPlugins(
   const disabledSkills = new Set(config.disabledSkills ?? []);
   const skills: SkillInfo[] = [];
 
-  for (const pluginSource of config.plugins) {
+  for (const pluginEntry of config.plugins) {
+    const pluginSource = getPluginSource(pluginEntry);
     const pluginPath = await resolvePluginPath(pluginSource, workspacePath);
     if (!pluginPath) continue;
 
