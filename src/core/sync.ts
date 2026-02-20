@@ -7,9 +7,11 @@ import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import type {
   WorkspaceConfig,
   ClientType,
+  PluginEntry,
   WorkspaceFile,
   SyncMode,
 } from '../models/workspace-config.js';
+import { getPluginClients, getPluginSource } from '../models/workspace-config.js';
 import {
   isGitHubUrl,
   parseGitHubUrl,
@@ -181,9 +183,22 @@ export interface ValidatedPlugin {
   plugin: string;
   resolved: string;
   success: boolean;
+  clients: ClientType[];
   error?: string;
   /** Plugin name from marketplace manifest (overrides plugin.json / directory name) */
   pluginName?: string;
+}
+
+interface PluginSyncPlan {
+  source: string;
+  clients: ClientType[];
+}
+
+function collectSyncClients(
+  workspaceClients: ClientType[],
+  plans: PluginSyncPlan[],
+): ClientType[] {
+  return [...new Set([...workspaceClients, ...plans.flatMap((plan) => plan.clients)])];
 }
 
 /**
@@ -704,6 +719,7 @@ async function validatePlugin(
         plugin: pluginSource,
         resolved: '',
         success: false,
+        clients: [],
         error: resolved.error || 'Unknown error',
       };
     }
@@ -711,6 +727,7 @@ async function validatePlugin(
       plugin: pluginSource,
       resolved: resolved.path ?? '',
       success: true,
+      clients: [],
       ...(resolved.pluginName && { pluginName: resolved.pluginName }),
     };
   }
@@ -729,6 +746,7 @@ async function validatePlugin(
         plugin: pluginSource,
         resolved: '',
         success: false,
+        clients: [],
         ...(fetchResult.error && { error: fetchResult.error }),
       };
     }
@@ -740,6 +758,7 @@ async function validatePlugin(
       plugin: pluginSource,
       resolved: resolvedPath,
       success: true,
+      clients: [],
     };
   }
 
@@ -750,6 +769,7 @@ async function validatePlugin(
       plugin: pluginSource,
       resolved: resolvedPath,
       success: false,
+      clients: [],
       error: `Plugin not found at ${resolvedPath}`,
     };
   }
@@ -757,23 +777,50 @@ async function validatePlugin(
     plugin: pluginSource,
     resolved: resolvedPath,
     success: true,
+    clients: [],
   };
 }
 
 /**
+ * Build plugin sync plans with effective clients per plugin.
+ * Effective clients are plugin.clients when provided, otherwise workspace clients.
+ * When a partial client filter is provided, it is applied after effective client resolution.
+ */
+function buildPluginSyncPlans(
+  plugins: PluginEntry[],
+  workspaceClients: ClientType[],
+  selectedClients?: ClientType[],
+): PluginSyncPlan[] {
+  const selected = selectedClients ? new Set(selectedClients) : null;
+
+  return plugins.map((plugin) => {
+    const source = getPluginSource(plugin);
+    const configuredClients = getPluginClients(plugin) ?? workspaceClients;
+    const clients = selected
+      ? configuredClients.filter((client) => selected.has(client))
+      : configuredClients;
+
+    return { source, clients };
+  });
+}
+
+/**
  * Validate all plugins before any destructive action
- * @param plugins - List of plugin sources
+ * @param plans - List of plugin sync plans
  * @param workspacePath - Path to workspace directory
  * @param offline - Skip fetching from remote and use cached version
  * @returns Array of validation results
  */
 async function validateAllPlugins(
-  plugins: string[],
+  plans: PluginSyncPlan[],
   workspacePath: string,
   offline: boolean,
 ): Promise<ValidatedPlugin[]> {
   return Promise.all(
-    plugins.map((plugin) => validatePlugin(plugin, workspacePath, offline)),
+    plans.map(async ({ source, clients }) => {
+      const validated = await validatePlugin(source, workspacePath, offline);
+      return { ...validated, clients };
+    }),
   );
 }
 
@@ -800,7 +847,7 @@ async function validateAllPlugins(
 async function copyValidatedPlugin(
   validatedPlugin: ValidatedPlugin,
   workspacePath: string,
-  clients: string[],
+  clients: ClientType[],
   dryRun: boolean,
   skillNameMap?: Map<string, string>,
   clientMappings?: Record<string, ClientMapping>,
@@ -808,7 +855,7 @@ async function copyValidatedPlugin(
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
   const mappings = clientMappings ?? CLIENT_MAPPINGS;
-  const clientList = clients as ClientType[];
+  const clientList = clients;
 
   const hasUniversalClient = clientList.some((c) => isUniversalClient(c));
 
@@ -1064,14 +1111,20 @@ export async function syncWorkspace(
   const hasRepositories = (config.repositories?.length ?? 0) > 0;
 
   // Filter clients if override provided
-  const clients = options.clients
+  const workspaceClients = options.clients
     ? config.clients.filter((c) => options.clients?.includes(c))
     : config.clients;
 
   // Validate requested clients are in config
   if (options.clients) {
+    const availableClients = new Set<ClientType>(config.clients);
+    for (const plugin of config.plugins) {
+      for (const client of getPluginClients(plugin) ?? []) {
+        availableClients.add(client);
+      }
+    }
     const invalidClients = options.clients.filter(
-      (c) => !config.clients.includes(c as ClientType),
+      (c) => !availableClients.has(c as ClientType),
     );
     if (invalidClients.length > 0) {
       return {
@@ -1081,17 +1134,25 @@ export async function syncWorkspace(
         totalFailed: 0,
         totalSkipped: 0,
         totalGenerated: 0,
-        error: `Client(s) not configured in workspace.yaml: ${invalidClients.join(', ')}\n  Configured clients: ${config.clients.join(', ')}`,
+        error: `Client(s) not configured in workspace.yaml: ${invalidClients.join(', ')}\n  Configured clients: ${Array.from(availableClients).join(', ')}`,
       };
     }
   }
 
+  const selectedClients = options.clients as ClientType[] | undefined;
+  const pluginPlans = buildPluginSyncPlans(
+    config.plugins,
+    config.clients,
+    selectedClients,
+  ).filter((plan) => plan.clients.length > 0);
+  const syncClients = collectSyncClients(workspaceClients, pluginPlans);
+
   // Step 0: Pre-register unique marketplaces to avoid race conditions during parallel validation
-  await ensureMarketplacesRegistered(config.plugins);
+  await ensureMarketplacesRegistered(pluginPlans.map((plan) => plan.source));
 
   // Step 1: Validate all plugins before any destructive action
   const validatedPlugins = await validateAllPlugins(
-    config.plugins,
+    pluginPlans,
     workspacePath,
     offline,
   );
@@ -1128,7 +1189,7 @@ export async function syncWorkspace(
   );
 
   // If ALL plugins failed, abort
-  if (validPlugins.length === 0 && config.plugins.length > 0) {
+  if (validPlugins.length === 0 && pluginPlans.length > 0) {
     return {
       success: false,
       pluginResults: [],
@@ -1147,7 +1208,7 @@ export async function syncWorkspace(
   // Step 2b: Get paths that will be purged (for dry-run reporting)
   // In non-destructive mode, only show files from state (or nothing on first sync)
   const purgedPaths = previousState
-    ? clients
+    ? syncClients
         .map((client) => ({
           client,
           paths: getPreviouslySyncedFiles(previousState, client),
@@ -1157,7 +1218,7 @@ export async function syncWorkspace(
 
   // Step 3: Selective purge - only remove files we previously synced (skip in dry-run mode)
   if (!dryRun) {
-    await selectivePurgeWorkspace(workspacePath, previousState, clients, {
+    await selectivePurgeWorkspace(workspacePath, previousState, syncClients, {
       partialSync: !!options.clients,
     });
   }
@@ -1180,7 +1241,7 @@ export async function syncWorkspace(
       return copyValidatedPlugin(
         validatedPlugin,
         workspacePath,
-        clients,
+        validatedPlugin.clients,
         dryRun,
         skillNameMap,
         undefined, // clientMappings
@@ -1253,7 +1314,7 @@ export async function syncWorkspace(
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
     // Skip when repositories is empty (no agent files should be created)
-    if (hasRepositories && !dryRun && clients.includes('claude') && sourcePath) {
+    if (hasRepositories && !dryRun && syncClients.includes('claude') && sourcePath) {
       const claudePath = join(workspacePath, 'CLAUDE.md');
       const agentsPath = join(workspacePath, 'AGENTS.md');
       const claudeExistsInSource = existsSync(join(sourcePath, 'CLAUDE.md'));
@@ -1274,7 +1335,7 @@ export async function syncWorkspace(
   }
 
   // Step 5d: Generate VSCode .code-workspace file if vscode client is configured
-  if (clients.includes('vscode') && !dryRun) {
+  if (syncClients.includes('vscode') && !dryRun) {
     generateVscodeWorkspaceFile(workspacePath, config);
   }
 
@@ -1331,12 +1392,12 @@ export async function syncWorkspace(
     ];
 
     // Group by client and save state
-    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, clients);
+    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, syncClients);
 
     // When syncing a subset of clients, merge with existing state for non-targeted clients
     if (options.clients && previousState) {
       for (const [client, files] of Object.entries(previousState.files)) {
-        if (!clients.includes(client as ClientType)) {
+        if (!syncClients.includes(client as ClientType)) {
           syncedFiles[client as ClientType] = files;
         }
       }
@@ -1381,14 +1442,19 @@ export async function syncUserWorkspace(
     };
   }
 
-  const clients = config.clients;
+  const workspaceClients = config.clients;
   const { offline = false, dryRun = false, force = false } = options;
 
+  const pluginPlans = buildPluginSyncPlans(config.plugins, workspaceClients).filter(
+    (plan) => plan.clients.length > 0,
+  );
+  const syncClients = collectSyncClients(workspaceClients, pluginPlans);
+
   // Pre-register unique marketplaces to avoid race conditions during parallel validation
-  await ensureMarketplacesRegistered(config.plugins);
+  await ensureMarketplacesRegistered(pluginPlans.map((plan) => plan.source));
 
   // Validate all plugins
-  const validatedPlugins = await validateAllPlugins(config.plugins, homeDir, offline);
+  const validatedPlugins = await validateAllPlugins(pluginPlans, homeDir, offline);
   const failedValidations = validatedPlugins.filter((v) => !v.success);
   const validPlugins = validatedPlugins.filter((v) => v.success);
   const warnings = failedValidations.map(
@@ -1396,7 +1462,7 @@ export async function syncUserWorkspace(
   );
 
   // If ALL plugins failed, abort
-  if (validPlugins.length === 0 && config.plugins.length > 0) {
+  if (validPlugins.length === 0 && pluginPlans.length > 0) {
     return {
       success: false,
       pluginResults: [],
@@ -1414,7 +1480,7 @@ export async function syncUserWorkspace(
 
   // Selective purge
   if (!dryRun) {
-    await selectivePurgeWorkspace(homeDir, previousState, clients);
+    await selectivePurgeWorkspace(homeDir, previousState, syncClients);
   }
 
   // Two-pass skill name resolution (excluding disabled skills)
@@ -1428,7 +1494,7 @@ export async function syncUserWorkspace(
   const pluginResults = await Promise.all(
     validPlugins.map((vp) => {
       const skillNameMap = pluginSkillMaps.get(vp.resolved);
-      return copyValidatedPlugin(vp, homeDir, clients, dryRun, skillNameMap, USER_CLIENT_MAPPINGS, syncMode);
+      return copyValidatedPlugin(vp, homeDir, vp.clients, dryRun, skillNameMap, USER_CLIENT_MAPPINGS, syncMode);
     }),
   );
 
@@ -1459,7 +1525,7 @@ export async function syncUserWorkspace(
 
   // Sync MCP server configs to VS Code if vscode client is configured
   let mcpResult: McpMergeResult | undefined;
-  if (clients.includes('vscode')) {
+  if (syncClients.includes('vscode')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'vscode');
     mcpResult = syncVscodeMcpConfig(validPlugins, { dryRun, force, trackedServers: trackedMcpServers });
     if (mcpResult.warnings.length > 0) {
@@ -1470,7 +1536,7 @@ export async function syncUserWorkspace(
   // Save sync state (including MCP servers)
   if (!dryRun) {
     const allCopyResults = pluginResults.flatMap((r) => r.copyResults);
-    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, clients as ClientType[], USER_CLIENT_MAPPINGS);
+    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, syncClients, USER_CLIENT_MAPPINGS);
     await saveSyncState(homeDir, {
       files: syncedFiles,
       ...(mcpResult && { mcpServers: { vscode: mcpResult.trackedServers } }),
@@ -1488,4 +1554,3 @@ export async function syncUserWorkspace(
     ...(mcpResult && { mcpResult }),
   };
 }
-

@@ -5,8 +5,10 @@ import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   ClientType,
+  PluginEntry,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
+import { getPluginSource } from '../models/workspace-config.js';
 import {
   isGitHubUrl,
   validatePluginSource,
@@ -174,7 +176,7 @@ async function addPluginToConfig(
     const config = load(content) as WorkspaceConfig;
 
     // Check if plugin already exists
-    if (config.plugins.includes(plugin)) {
+    if (config.plugins.some((entry) => getPluginSource(entry) === plugin)) {
       return {
         success: false,
         error: `Plugin already exists in .allagents/workspace.yaml: ${plugin}`,
@@ -219,12 +221,15 @@ export async function hasPlugin(
     const config = load(content) as WorkspaceConfig;
 
     // Exact match first
-    if (config.plugins.indexOf(plugin) !== -1) return true;
+    if (config.plugins.some((entry) => getPluginSource(entry) === plugin)) return true;
 
     // Partial match
     if (!isPluginSpec(plugin)) {
       return config.plugins.some(
-        (p) => p.startsWith(`${plugin}@`) || p === plugin,
+        (entry) => {
+          const source = getPluginSource(entry);
+          return source.startsWith(`${plugin}@`) || source === plugin;
+        },
       );
     }
 
@@ -260,12 +265,17 @@ export async function removePlugin(
     const config = load(content) as WorkspaceConfig;
 
     // Find plugin - exact match first
-    let index = config.plugins.indexOf(plugin);
+    let index = config.plugins.findIndex(
+      (entry) => getPluginSource(entry) === plugin,
+    );
 
     // If not found, try partial match (e.g., "code-review" matches "code-review@claude-plugins-official")
     if (index === -1 && isPluginSpec(plugin) === false) {
       index = config.plugins.findIndex(
-        (p) => p.startsWith(`${plugin}@`) || p === plugin,
+        (entry) => {
+          const source = getPluginSource(entry);
+          return source.startsWith(`${plugin}@`) || source === plugin;
+        },
       );
     }
 
@@ -277,7 +287,7 @@ export async function removePlugin(
     }
 
     // Remove plugin and clean up its disabled skills
-    const removedEntry = config.plugins[index] as string;
+    const removedEntry = getPluginSource(config.plugins[index] as PluginEntry);
     config.plugins.splice(index, 1);
     pruneDisabledSkillsForPlugin(config, removedEntry);
 

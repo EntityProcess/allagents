@@ -34,6 +34,21 @@ describe('WorkspaceConfigSchema', () => {
     const result = WorkspaceConfigSchema.safeParse(invalidConfig);
     expect(result.success).toBe(false);
   });
+
+  it('should accept plugin object with optional clients', () => {
+    const config = {
+      repositories: [],
+      plugins: [
+        { source: 'code-review@claude-plugins-official', clients: ['claude', 'codex'] },
+        './plugins/example',
+      ],
+      clients: ['claude'],
+    };
+
+    const result = WorkspaceConfigSchema.safeParse(config);
+    expect(result.success).toBe(true);
+  });
+
 });
 
 describe('ClientTypeSchema', () => {

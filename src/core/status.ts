@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, getHomeDir } from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
+import { getPluginSource } from '../models/workspace-config.js';
 import {
   parsePluginSource,
   getPluginCachePath,
@@ -63,7 +64,8 @@ export async function getWorkspaceStatus(
     const config = await parseWorkspaceConfig(configPath);
     const plugins: PluginStatus[] = [];
 
-    for (const pluginSource of config.plugins) {
+    for (const pluginEntry of config.plugins) {
+      const pluginSource = getPluginSource(pluginEntry);
       if (isPluginSpec(pluginSource)) {
         const status = await getMarketplacePluginStatus(pluginSource);
         plugins.push(status);
@@ -133,7 +135,8 @@ async function getUserPluginStatuses(): Promise<PluginStatus[]> {
   if (!config) return [];
 
   const statuses: PluginStatus[] = [];
-  for (const pluginSource of config.plugins) {
+  for (const pluginEntry of config.plugins) {
+    const pluginSource = getPluginSource(pluginEntry);
     if (isPluginSpec(pluginSource)) {
       statuses.push(await getMarketplacePluginStatus(pluginSource));
     } else {

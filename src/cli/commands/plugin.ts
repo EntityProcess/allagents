@@ -38,6 +38,7 @@ import {
 } from '../metadata/plugin.js';
 import { skillsCmd } from './plugin-skills.js';
 import { formatMcpResult, buildSyncData } from '../format-sync.js';
+import { getPluginSource, type PluginEntry } from '../../models/workspace-config.js';
 
 
 /**
@@ -956,8 +957,9 @@ const pluginUpdateCmd = command({
         const configPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
         if (existsSync(configPath)) {
           const content = await readFile(configPath, 'utf-8');
-          const config = load(content) as { plugins?: string[] };
-          for (const p of config.plugins ?? []) {
+          const config = load(content) as { plugins?: PluginEntry[] };
+          for (const entry of config.plugins ?? []) {
+            const p = getPluginSource(entry);
             if (!pluginsToUpdate.includes(p)) {
               pluginsToUpdate.push(p);
             }
@@ -968,7 +970,8 @@ const pluginUpdateCmd = command({
       if (updateUser) {
         const userConfig = await getUserWorkspaceConfig();
         if (userConfig) {
-          for (const p of userConfig.plugins ?? []) {
+          for (const entry of userConfig.plugins ?? []) {
+            const p = getPluginSource(entry);
             if (!pluginsToUpdate.includes(p)) {
               pluginsToUpdate.push(p);
             }

@@ -5,8 +5,10 @@ import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   ClientType,
+  PluginEntry,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
+import { getPluginSource } from '../models/workspace-config.js';
 import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import {
   isGitHubUrl,
@@ -166,10 +168,13 @@ export async function hasUserPlugin(plugin: string): Promise<boolean> {
   if (!config) return false;
 
   // Exact match first
-  if (config.plugins.indexOf(plugin) !== -1) return true;
+  if (config.plugins.some((entry) => getPluginSource(entry) === plugin)) return true;
 
   // Partial match
-  return config.plugins.some((p) => p.startsWith(`${plugin}@`) || p === plugin);
+  return config.plugins.some((entry) => {
+    const source = getPluginSource(entry);
+    return source.startsWith(`${plugin}@`) || source === plugin;
+  });
 }
 
 /**
@@ -184,12 +189,17 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
     const config = load(content) as WorkspaceConfig;
 
     // Exact match first
-    let index = config.plugins.indexOf(plugin);
+    let index = config.plugins.findIndex(
+      (entry) => getPluginSource(entry) === plugin,
+    );
 
     // Partial match: plugin name without marketplace suffix
     if (index === -1) {
       index = config.plugins.findIndex(
-        (p) => p.startsWith(`${plugin}@`) || p === plugin,
+        (entry) => {
+          const source = getPluginSource(entry);
+          return source.startsWith(`${plugin}@`) || source === plugin;
+        },
       );
     }
 
@@ -200,7 +210,7 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
         for (let i = 0; i < config.plugins.length; i++) {
           const p = config.plugins[i];
           if (!p) continue;
-          const existing = await resolveGitHubIdentity(p);
+          const existing = await resolveGitHubIdentity(getPluginSource(p));
           if (existing === identity) {
             index = i;
             break;
@@ -216,7 +226,7 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
       };
     }
 
-    const removedEntry = config.plugins[index] as string;
+    const removedEntry = getPluginSource(config.plugins[index] as PluginEntry);
     config.plugins.splice(index, 1);
     pruneDisabledSkillsForPlugin(config, removedEntry);
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
@@ -238,10 +248,12 @@ export async function getUserPluginsForMarketplace(
 ): Promise<string[]> {
   const config = await getUserWorkspaceConfig();
   if (!config) return [];
-  return config.plugins.filter((p) => {
-    const parsed = parsePluginSpec(p);
-    return parsed?.marketplaceName === marketplaceName;
-  });
+  return config.plugins
+    .map((entry) => getPluginSource(entry))
+    .filter((source) => {
+      const parsed = parsePluginSpec(source);
+      return parsed?.marketplaceName === marketplaceName;
+    });
 }
 
 /**
@@ -254,17 +266,17 @@ export async function removeUserPluginsForMarketplace(
   const config = await getUserWorkspaceConfig();
   if (!config) return [];
 
-  const matching = config.plugins.filter((p) => {
-    const parsed = parsePluginSpec(p);
+  const matching = config.plugins.filter((entry) => {
+    const parsed = parsePluginSpec(getPluginSource(entry));
     return parsed?.marketplaceName === marketplaceName;
   });
 
   if (matching.length === 0) return [];
 
   const configPath = getUserWorkspaceConfigPath();
-  config.plugins = config.plugins.filter((p) => !matching.includes(p));
+  config.plugins = config.plugins.filter((entry) => !matching.includes(entry));
   await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
-  return matching;
+  return matching.map((entry) => getPluginSource(entry));
 }
 
 /**
@@ -316,7 +328,7 @@ async function addPluginToUserConfig(
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
 
-    if (config.plugins.includes(plugin)) {
+    if (config.plugins.some((entry) => getPluginSource(entry) === plugin)) {
       return {
         success: false,
         error: `Plugin already exists in user config: ${plugin}`,
@@ -327,11 +339,12 @@ async function addPluginToUserConfig(
     const newIdentity = await resolveGitHubIdentity(plugin);
     if (newIdentity) {
       for (const existing of config.plugins) {
-        const existingIdentity = await resolveGitHubIdentity(existing);
+        const existingSource = getPluginSource(existing);
+        const existingIdentity = await resolveGitHubIdentity(existingSource);
         if (existingIdentity === newIdentity) {
           return {
             success: false,
-            error: `Plugin duplicates existing entry '${existing}': both resolve to ${newIdentity}`,
+            error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
           };
         }
       }
@@ -484,7 +497,8 @@ export async function getInstalledUserPlugins(): Promise<
   if (!config) return [];
 
   const result: InstalledPluginInfo[] = [];
-  for (const plugin of config.plugins) {
+  for (const pluginEntry of config.plugins) {
+    const plugin = getPluginSource(pluginEntry);
     const parsed = parsePluginSpec(plugin);
     if (parsed) {
       result.push({
@@ -514,7 +528,8 @@ export async function getInstalledProjectPlugins(
     if (!config?.plugins) return [];
 
     const result: InstalledPluginInfo[] = [];
-    for (const plugin of config.plugins) {
+    for (const pluginEntry of config.plugins) {
+      const plugin = getPluginSource(pluginEntry);
       const parsed = parsePluginSpec(plugin);
       if (parsed) {
         result.push({

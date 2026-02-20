@@ -5,7 +5,7 @@ import { load, dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { isPluginSpec, parsePluginSpec, getMarketplace } from './marketplace.js';
 import { getUserWorkspaceConfig, getUserWorkspaceConfigPath, isUserConfigPath } from './user-workspace.js';
-import type { WorkspaceConfig } from '../models/workspace-config.js';
+import { getPluginSource, type PluginEntry, type WorkspaceConfig } from '../models/workspace-config.js';
 
 export interface PruneScopeResult {
   removed: string[];
@@ -31,19 +31,26 @@ async function isOrphanedPlugin(pluginSpec: string): Promise<boolean> {
 /**
  * Prune orphaned plugins from a config, returning removed and kept lists
  */
-async function prunePlugins(plugins: string[]): Promise<PruneScopeResult> {
+interface InternalPruneScopeResult extends PruneScopeResult {
+  keptEntries: PluginEntry[];
+}
+
+async function prunePlugins(plugins: PluginEntry[]): Promise<InternalPruneScopeResult> {
   const removed: string[] = [];
   const kept: string[] = [];
+  const keptEntries: PluginEntry[] = [];
 
-  for (const plugin of plugins) {
+  for (const pluginEntry of plugins) {
+    const plugin = getPluginSource(pluginEntry);
     if (await isOrphanedPlugin(plugin)) {
       removed.push(plugin);
     } else {
       kept.push(plugin);
+      keptEntries.push(pluginEntry);
     }
   }
 
-  return { removed, kept };
+  return { removed, kept, keptEntries };
 }
 
 /**
@@ -57,7 +64,7 @@ export async function pruneOrphanedPlugins(
   workspacePath: string,
 ): Promise<PruneResult> {
   // Prune project-level plugins
-  let projectResult: PruneScopeResult = { removed: [], kept: [] };
+  let projectResult: InternalPruneScopeResult = { removed: [], kept: [], keptEntries: [] };
   const projectConfigPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
   if (existsSync(projectConfigPath) && !isUserConfigPath(workspacePath)) {
@@ -66,20 +73,20 @@ export async function pruneOrphanedPlugins(
     projectResult = await prunePlugins(config.plugins);
 
     if (projectResult.removed.length > 0) {
-      config.plugins = projectResult.kept;
+      config.plugins = projectResult.keptEntries;
       await writeFile(projectConfigPath, dump(config, { lineWidth: -1 }), 'utf-8');
     }
   }
 
   // Prune user-level plugins
-  let userResult: PruneScopeResult = { removed: [], kept: [] };
+  let userResult: InternalPruneScopeResult = { removed: [], kept: [], keptEntries: [] };
   const userConfig = await getUserWorkspaceConfig();
 
   if (userConfig) {
     userResult = await prunePlugins(userConfig.plugins);
 
     if (userResult.removed.length > 0) {
-      userConfig.plugins = userResult.kept;
+      userConfig.plugins = userResult.keptEntries;
       const userConfigPath = getUserWorkspaceConfigPath();
       await writeFile(userConfigPath, dump(userConfig, { lineWidth: -1 }), 'utf-8');
     }
