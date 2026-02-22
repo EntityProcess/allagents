@@ -25,7 +25,8 @@
     "check": "biome check src",
     "check:fix": "biome check --write src",
     "prepare": "bun run build && (test -d .git && bunx prek install -t pre-push || true)",
-    "release": "bun run scripts/release.ts"
+    "release": "bun run scripts/release.ts",
+    "publish:next": "bun run build && bun publish --tag next"
   },
   "keywords": [
     "cli",
