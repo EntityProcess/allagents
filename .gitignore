@@ -37,6 +37,9 @@ tmp/
 temp/
 *.tmp
 
+# Git worktrees
+.worktrees/
+
 # Ralph runtime files (not config)
 .ralph/.call_count
 .ralph/.circuit_breaker_history
