@@ -37,7 +37,7 @@ import {
   pluginUpdateMeta,
 } from '../metadata/plugin.js';
 import { skillsCmd } from './plugin-skills.js';
-import { formatMcpResult, buildSyncData } from '../format-sync.js';
+import { formatMcpResult, formatNativeResult, buildSyncData } from '../format-sync.js';
 import { getPluginSource, type PluginEntry } from '../../models/workspace-config.js';
 
 
@@ -88,6 +88,17 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
           console.log(
             `    - ${failedResult.destination}: ${failedResult.error}`,
           );
+        }
+      }
+    }
+
+    // Print native plugin sync results
+    if (result.nativeResult) {
+      const nativeLines = formatNativeResult(result.nativeResult);
+      if (nativeLines.length > 0) {
+        console.log('\nclaude-native:');
+        for (const line of nativeLines) {
+          console.log(line);
         }
       }
     }
@@ -165,6 +176,18 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
       if (mcpLines.length > 0) {
         console.log('');
         for (const line of mcpLines) {
+          console.log(line);
+        }
+      }
+    }
+
+    // Print native plugin sync results
+    if (result.nativeResult) {
+      const nativeLines = formatNativeResult(result.nativeResult);
+      if (nativeLines.length > 0) {
+        console.log('');
+        console.log('claude-native:');
+        for (const line of nativeLines) {
           console.log(line);
         }
       }

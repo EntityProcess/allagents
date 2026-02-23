@@ -1,5 +1,6 @@
 import type { SyncResult } from '../core/sync.js';
 import type { McpMergeResult } from '../core/vscode-mcp.js';
+import type { NativeSyncResult } from '../core/claude-native.js';
 
 /**
  * Format MCP server sync results as display lines.
@@ -36,6 +37,31 @@ export function formatMcpResult(mcpResult: McpMergeResult): string[] {
 }
 
 /**
+ * Format native CLI plugin sync results as display lines.
+ */
+export function formatNativeResult(nativeResult: NativeSyncResult): string[] {
+  const lines: string[] = [];
+
+  if (nativeResult.marketplacesAdded.length > 0) {
+    lines.push(`Marketplaces registered: ${nativeResult.marketplacesAdded.join(', ')}`);
+  }
+
+  for (const plugin of nativeResult.pluginsInstalled) {
+    lines.push(`  + ${plugin} (installed via claude CLI)`);
+  }
+
+  for (const { plugin, error } of nativeResult.pluginsFailed) {
+    lines.push(`  ✗ ${plugin}: ${error}`);
+  }
+
+  for (const plugin of nativeResult.skipped) {
+    lines.push(`  ⊘ ${plugin} (skipped — not a marketplace plugin)`);
+  }
+
+  return lines;
+}
+
+/**
  * Build a JSON-friendly sync data object from a sync result.
  */
 export function buildSyncData(result: SyncResult) {
@@ -65,6 +91,14 @@ export function buildSyncData(result: SyncResult) {
         overwrittenServers: result.mcpResult.overwrittenServers,
         removedServers: result.mcpResult.removedServers,
         ...(result.mcpResult.configPath && { configPath: result.mcpResult.configPath }),
+      },
+    }),
+    ...(result.nativeResult && {
+      nativePlugins: {
+        installed: result.nativeResult.pluginsInstalled,
+        failed: result.nativeResult.pluginsFailed,
+        skipped: result.nativeResult.skipped,
+        marketplacesAdded: result.nativeResult.marketplacesAdded,
       },
     }),
   };

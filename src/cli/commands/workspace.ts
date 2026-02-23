@@ -13,7 +13,7 @@ import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
 import { ClientTypeSchema } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
-import { formatMcpResult, buildSyncData } from '../format-sync.js';
+import { formatMcpResult, formatNativeResult, buildSyncData } from '../format-sync.js';
 
 
 // =============================================================================
@@ -216,6 +216,18 @@ const syncCmd = command({
         if (mcpLines.length > 0) {
           console.log('');
           for (const line of mcpLines) {
+            console.log(line);
+          }
+        }
+      }
+
+      // Print native plugin sync results
+      if (result.nativeResult) {
+        const nativeLines = formatNativeResult(result.nativeResult);
+        if (nativeLines.length > 0) {
+          console.log('');
+          console.log('claude-native:');
+          for (const line of nativeLines) {
             console.log(line);
           }
         }
