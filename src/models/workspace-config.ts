@@ -65,6 +65,7 @@ export type PluginSource = z.infer<typeof PluginSourceSchema>;
  */
 export const ClientTypeSchema = z.enum([
   'claude',
+  'claude-native',
   'copilot',
   'codex',
   'cursor',

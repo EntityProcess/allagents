@@ -34,6 +34,11 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFileFallback: 'AGENTS.md',
     hooksPath: '.claude/hooks/',
   },
+  'claude-native': {
+    skillsPath: '',
+    agentFile: 'CLAUDE.md',
+    agentFileFallback: 'AGENTS.md',
+  },
   copilot: {
     skillsPath: '.github/skills/',
     agentFile: 'AGENTS.md',
@@ -161,6 +166,11 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'CLAUDE.md',
     agentFileFallback: 'AGENTS.md',
     hooksPath: '.claude/hooks/',
+  },
+  'claude-native': {
+    skillsPath: '',
+    agentFile: 'CLAUDE.md',
+    agentFileFallback: 'AGENTS.md',
   },
   copilot: {
     skillsPath: '.copilot/skills/',
