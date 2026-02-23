@@ -570,6 +570,7 @@ const pluginListCmd = command({
           version: string | null;
           scope: string | null;
           enabled: boolean;
+          native: boolean;
         }> = [];
         const allWarnings: string[] = [];
         for (const mp of toList) {
@@ -584,6 +585,7 @@ const pluginListCmd = command({
               version,
               scope: installed?.scope ?? null,
               enabled: !!installed,
+              native: installed?.clients?.includes('claude-native') ?? false,
             });
           }
           for (const warning of result.warnings) {
@@ -660,7 +662,8 @@ const pluginListCmd = command({
         for (const entry of installedPlugins) {
           console.log(`  ❯ ${entry.name}@${entry.marketplace}`);
           console.log(`    Version: ${entry.version ?? 'unknown'}`);
-          console.log(`    Scope: ${entry.installed?.scope}\n`);
+          const viaLabel = entry.installed?.clients?.includes('claude-native') ? ' (via: claude-cli)' : '';
+          console.log(`    Scope: ${entry.installed?.scope}${viaLabel}\n`);
         }
       }
 

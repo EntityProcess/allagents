@@ -8,7 +8,7 @@ import type {
   PluginEntry,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
-import { getPluginSource } from '../models/workspace-config.js';
+import { getPluginClients, getPluginSource } from '../models/workspace-config.js';
 import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import {
   isGitHubUrl,
@@ -484,6 +484,8 @@ export interface InstalledPluginInfo {
   marketplace: string;
   /** Installation scope */
   scope: PluginScope;
+  /** Per-plugin client overrides (if specified in workspace.yaml) */
+  clients?: ClientType[];
 }
 
 /**
@@ -497,15 +499,18 @@ export async function getInstalledUserPlugins(): Promise<
   if (!config) return [];
 
   const result: InstalledPluginInfo[] = [];
+  const defaultClients = config.clients;
   for (const pluginEntry of config.plugins) {
     const plugin = getPluginSource(pluginEntry);
     const parsed = parsePluginSpec(plugin);
     if (parsed) {
+      const clients = getPluginClients(pluginEntry) ?? defaultClients;
       result.push({
         spec: plugin,
         name: parsed.plugin,
         marketplace: parsed.marketplaceName,
         scope: 'user',
+        ...(clients && { clients }),
       });
     }
   }
@@ -528,15 +533,18 @@ export async function getInstalledProjectPlugins(
     if (!config?.plugins) return [];
 
     const result: InstalledPluginInfo[] = [];
+    const defaultClients = config.clients;
     for (const pluginEntry of config.plugins) {
       const plugin = getPluginSource(pluginEntry);
       const parsed = parsePluginSpec(plugin);
       if (parsed) {
+        const clients = getPluginClients(pluginEntry) ?? defaultClients;
         result.push({
           spec: plugin,
           name: parsed.plugin,
           marketplace: parsed.marketplaceName,
           scope: 'project',
+          ...(clients && { clients }),
         });
       }
     }
