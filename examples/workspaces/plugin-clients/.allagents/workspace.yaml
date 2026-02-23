@@ -1,0 +1,35 @@
+# Example: Plugin-level client overrides
+#
+# This example demonstrates specifying which clients a plugin is synced to
+# at the plugin level, overriding the workspace-level clients list.
+#
+# Use cases:
+# - A development-workflow plugin only relevant to Claude and Cursor (which have plugin marketplaces)
+# - A browser-automation skill available to all clients
+# - A language-server plugin that only works with Claude Code
+
+repositories: []
+
+plugins:
+  # String shorthand: inherits workspace-level clients (claude, copilot, cursor, codex)
+  # agent-browser provides headless browser automation for all AI coding assistants
+  - vercel-labs/agent-browser/skills/agent-browser
+
+  # Object form: superpowers only supports Claude Code and Cursor (marketplace-based clients)
+  # Installing from the superpowers-marketplace (auto-registered on first sync)
+  - source: superpowers@obra/superpowers-marketplace
+    clients:
+      - claude
+      - cursor
+
+  # typescript-lsp is a Claude Code plugin from the official Anthropics marketplace
+  # Restrict to claude only since it requires the Claude Code LSP integration
+  - source: anthropics/claude-plugins-official/plugins/typescript-lsp
+    clients:
+      - claude
+
+clients:
+  - claude
+  - copilot
+  - cursor
+  - codex
