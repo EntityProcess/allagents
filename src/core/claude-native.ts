@@ -38,7 +38,10 @@ export async function executeClaudeCommand(
       stderr += data.toString();
     });
 
+    let resolved = false;
     proc.on('close', (code: number | null) => {
+      if (resolved) return;
+      resolved = true;
       const trimmedStderr = stderr.trim();
       resolve({
         success: code === 0,
@@ -48,6 +51,8 @@ export async function executeClaudeCommand(
     });
 
     proc.on('error', (err: Error) => {
+      if (resolved) return;
+      resolved = true;
       resolve({
         success: false,
         output: '',
@@ -155,6 +160,7 @@ export function toClaudePluginSpec(allagentsSource: string): string | null {
   if (marketplacePart.includes('/') && !marketplacePart.includes('://')) {
     const parts = marketplacePart.split('/');
     const repoName = parts[1];
+    if (!repoName) return null;
     return `${pluginName}@${repoName}`;
   }
   return allagentsSource;

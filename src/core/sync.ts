@@ -1470,7 +1470,11 @@ export async function syncWorkspace(
     }
 
     // Track native plugins in sync state for declarative uninstall on next sync
-    const nativePluginsToTrack = nativeResult?.pluginsInstalled ?? [];
+    // When syncing a subset of clients that excludes claude-native, preserve previous state
+    const nativePluginsToTrack = nativeResult?.pluginsInstalled
+      ?? (options.clients && !syncClients.includes('claude-native' as ClientType)
+        ? previousState?.nativePlugins ?? []
+        : []);
 
     await saveSyncState(workspacePath, {
       files: syncedFiles,

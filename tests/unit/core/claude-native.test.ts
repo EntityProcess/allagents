@@ -27,6 +27,10 @@ describe('claude-native', () => {
     test('returns null for empty string', () => {
       expect(toClaudePluginSpec('')).toBeNull();
     });
+
+    test('returns null for trailing slash in marketplace', () => {
+      expect(toClaudePluginSpec('plugin@owner/')).toBeNull();
+    });
   });
 
   describe('extractMarketplaceSource', () => {
