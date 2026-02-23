@@ -11,7 +11,14 @@ import type {
   WorkspaceFile,
   SyncMode,
 } from '../models/workspace-config.js';
-import { getPluginClients, getPluginSource } from '../models/workspace-config.js';
+import {
+  getPluginClients,
+  getPluginSource,
+  getClientTypes,
+  normalizeClientEntry,
+  resolveInstallMode,
+  type ClientEntry,
+} from '../models/workspace-config.js';
 import {
   isGitHubUrl,
   parseGitHubUrl,
@@ -42,6 +49,7 @@ import {
   saveSyncState,
   getPreviouslySyncedFiles,
   getPreviouslySyncedMcpServers,
+  getPreviouslySyncedNativePlugins,
 } from './sync-state.js';
 import type { SyncState } from '../models/sync-state.js';
 import { getUserWorkspaceConfig } from './user-workspace.js';
@@ -51,6 +59,7 @@ import {
 } from './vscode-workspace.js';
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
+import { syncNativePlugins, isClaudeCliAvailable, uninstallPlugin, toClaudePluginSpec, type NativeSyncResult } from './claude-native.js';
 
 /**
  * Result of deduplicating clients by skillsPath
@@ -122,6 +131,8 @@ export interface SyncResult {
   warnings?: string[];
   /** Result of syncing MCP server configs to VS Code */
   mcpResult?: McpMergeResult;
+  /** Result of native CLI plugin installations */
+  nativeResult?: NativeSyncResult;
 }
 
 /**
@@ -132,6 +143,7 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
   // Use whichever mcpResult is present (only user-scope sync produces one)
   const mcpResult = a.mcpResult ?? b.mcpResult;
+  const nativeResult = a.nativeResult ?? b.nativeResult;
   return {
     success: a.success && b.success,
     pluginResults: [...a.pluginResults, ...b.pluginResults],
@@ -142,6 +154,7 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     ...(warnings.length > 0 && { warnings }),
     ...(purgedPaths.length > 0 && { purgedPaths }),
     ...(mcpResult && { mcpResult }),
+    ...(nativeResult && { nativeResult }),
   };
 }
 
@@ -184,6 +197,8 @@ export interface ValidatedPlugin {
   resolved: string;
   success: boolean;
   clients: ClientType[];
+  /** Clients that should use native install for this plugin */
+  nativeClients: ClientType[];
   error?: string;
   /** Plugin name from marketplace manifest (overrides plugin.json / directory name) */
   pluginName?: string;
@@ -192,13 +207,16 @@ export interface ValidatedPlugin {
 interface PluginSyncPlan {
   source: string;
   clients: ClientType[];
+  /** Clients that should use native install for this plugin */
+  nativeClients: ClientType[];
 }
 
 function collectSyncClients(
-  workspaceClients: ClientType[],
+  clientEntries: ClientEntry[],
   plans: PluginSyncPlan[],
 ): ClientType[] {
-  return [...new Set([...workspaceClients, ...plans.flatMap((plan) => plan.clients)])];
+  const workspaceClientTypes = getClientTypes(clientEntries);
+  return [...new Set([...workspaceClientTypes, ...plans.flatMap((plan) => [...plan.clients, ...plan.nativeClients])])];
 }
 
 /**
@@ -720,6 +738,7 @@ async function validatePlugin(
         resolved: '',
         success: false,
         clients: [],
+        nativeClients: [],
         error: resolved.error || 'Unknown error',
       };
     }
@@ -728,6 +747,7 @@ async function validatePlugin(
       resolved: resolved.path ?? '',
       success: true,
       clients: [],
+      nativeClients: [],
       ...(resolved.pluginName && { pluginName: resolved.pluginName }),
     };
   }
@@ -747,6 +767,7 @@ async function validatePlugin(
         resolved: '',
         success: false,
         clients: [],
+        nativeClients: [],
         ...(fetchResult.error && { error: fetchResult.error }),
       };
     }
@@ -759,6 +780,7 @@ async function validatePlugin(
       resolved: resolvedPath,
       success: true,
       clients: [],
+      nativeClients: [],
     };
   }
 
@@ -770,6 +792,7 @@ async function validatePlugin(
       resolved: resolvedPath,
       success: false,
       clients: [],
+      nativeClients: [],
       error: `Plugin not found at ${resolvedPath}`,
     };
   }
@@ -778,6 +801,7 @@ async function validatePlugin(
     resolved: resolvedPath,
     success: true,
     clients: [],
+    nativeClients: [],
   };
 }
 
@@ -788,19 +812,43 @@ async function validatePlugin(
  */
 function buildPluginSyncPlans(
   plugins: PluginEntry[],
-  workspaceClients: ClientType[],
+  clientEntries: ClientEntry[],
   selectedClients?: ClientType[],
 ): PluginSyncPlan[] {
   const selected = selectedClients ? new Set(selectedClients) : null;
+  const workspaceClientTypes = getClientTypes(clientEntries);
 
   return plugins.map((plugin) => {
     const source = getPluginSource(plugin);
-    const configuredClients = getPluginClients(plugin) ?? workspaceClients;
-    const clients = selected
-      ? configuredClients.filter((client) => selected.has(client))
-      : configuredClients;
+    const pluginClientTypes = getPluginClients(plugin) ?? workspaceClientTypes;
+    const effectiveClients = selected
+      ? pluginClientTypes.filter((c) => selected.has(c))
+      : pluginClientTypes;
 
-    return { source, clients };
+    // Check if plugin source is marketplace-based (can be installed natively)
+    const isMarketplace = toClaudePluginSpec(source) !== null;
+
+    // Split into file and native clients based on resolved install mode
+    const fileClients: ClientType[] = [];
+    const nativeClients: ClientType[] = [];
+
+    for (const client of effectiveClients) {
+      const clientEntry = normalizeClientEntry(
+        clientEntries.find((e) =>
+          (typeof e === 'string' ? e : e.name) === client
+        ) ?? client
+      );
+      const mode = resolveInstallMode(plugin, clientEntry);
+
+      if (mode === 'native' && isMarketplace) {
+        nativeClients.push(client);
+      } else {
+        // file mode, OR native mode but non-marketplace plugin (fallback to file)
+        fileClients.push(client);
+      }
+    }
+
+    return { source, clients: fileClients, nativeClients };
   });
 }
 
@@ -817,9 +865,9 @@ async function validateAllPlugins(
   offline: boolean,
 ): Promise<ValidatedPlugin[]> {
   return Promise.all(
-    plans.map(async ({ source, clients }) => {
+    plans.map(async ({ source, clients, nativeClients }) => {
       const validated = await validatePlugin(source, workspacePath, offline);
-      return { ...validated, clients };
+      return { ...validated, clients, nativeClients };
     }),
   );
 }
@@ -1110,14 +1158,20 @@ export async function syncWorkspace(
   // creation and WORKSPACE-RULES injection (same pattern as initWorkspace)
   const hasRepositories = (config.repositories?.length ?? 0) > 0;
 
+  // Extract ClientType[] from potentially mixed ClientEntry[] array
+  const configClientTypes = getClientTypes(config.clients);
+
   // Filter clients if override provided
   const workspaceClients = options.clients
-    ? config.clients.filter((c) => options.clients?.includes(c))
+    ? config.clients.filter((c) => {
+        const name = typeof c === 'string' ? c : c.name;
+        return options.clients?.includes(name);
+      })
     : config.clients;
 
   // Validate requested clients are in config
   if (options.clients) {
-    const availableClients = new Set<ClientType>(config.clients);
+    const availableClients = new Set<ClientType>(configClientTypes);
     for (const plugin of config.plugins) {
       for (const client of getPluginClients(plugin) ?? []) {
         availableClients.add(client);
@@ -1142,9 +1196,9 @@ export async function syncWorkspace(
   const selectedClients = options.clients as ClientType[] | undefined;
   const pluginPlans = buildPluginSyncPlans(
     config.plugins,
-    config.clients,
+    config.clients,      // ClientEntry[] now
     selectedClients,
-  ).filter((plan) => plan.clients.length > 0);
+  ).filter((plan) => plan.clients.length > 0 || plan.nativeClients.length > 0);
   const syncClients = collectSyncClients(workspaceClients, pluginPlans);
 
   // Step 0: Pre-register unique marketplaces to avoid race conditions during parallel validation
@@ -1249,6 +1303,55 @@ export async function syncWorkspace(
       );
     }),
   );
+
+  // Step 4b: Native CLI installations
+  let nativeResult: NativeSyncResult | undefined;
+  const nativePluginsByClient = new Map<ClientType, string[]>();
+
+  for (const vp of validPlugins) {
+    for (const client of vp.nativeClients) {
+      const existing = nativePluginsByClient.get(client) ?? [];
+      existing.push(vp.plugin);
+      nativePluginsByClient.set(client, existing);
+    }
+  }
+
+  if (nativePluginsByClient.size > 0) {
+    if (!dryRun) {
+      const cliAvailable = await isClaudeCliAvailable();
+      if (cliAvailable) {
+        // Uninstall previously-synced native plugins no longer in config
+        for (const [client, sources] of nativePluginsByClient) {
+          const currentSpecs = sources
+            .map((s) => toClaudePluginSpec(s))
+            .filter((s): s is string => s !== null);
+          const previousPlugins = getPreviouslySyncedNativePlugins(previousState, client);
+          const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
+          for (const plugin of removed) {
+            await uninstallPlugin(plugin, 'project', { cwd: workspacePath });
+          }
+        }
+
+        // Install native plugins
+        const allNativeSources = [...new Set(
+          Array.from(nativePluginsByClient.values()).flat()
+        )];
+        nativeResult = await syncNativePlugins(allNativeSources, 'project', {
+          cwd: workspacePath,
+        });
+      } else {
+        warnings.push('Native install: claude CLI not found, skipping native plugin installation');
+      }
+    } else {
+      const allNativeSources = [...new Set(
+        Array.from(nativePluginsByClient.values()).flat()
+      )];
+      nativeResult = await syncNativePlugins(allNativeSources, 'project', {
+        cwd: workspacePath,
+        dryRun: true,
+      });
+    }
+  }
 
   // Step 5: Copy workspace files if configured
   // Supports both workspace.source (default base) and file-level sources
@@ -1403,7 +1506,27 @@ export async function syncWorkspace(
       }
     }
 
-    await saveSyncState(workspacePath, syncedFiles);
+    // Build native plugin tracking per-client
+    const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
+    if (nativeResult) {
+      for (const [client] of nativePluginsByClient) {
+        nativePluginsState[client] = nativeResult.pluginsInstalled;
+      }
+    }
+
+    // Preserve native state for clients not in current sync
+    if (options.clients && previousState?.nativePlugins) {
+      for (const [client, plugins] of Object.entries(previousState.nativePlugins)) {
+        if (!syncClients.includes(client as ClientType)) {
+          nativePluginsState[client as ClientType] = plugins;
+        }
+      }
+    }
+
+    await saveSyncState(workspacePath, {
+      files: syncedFiles,
+      ...(Object.keys(nativePluginsState).length > 0 && { nativePlugins: nativePluginsState }),
+    });
   }
 
   return {
@@ -1415,6 +1538,7 @@ export async function syncWorkspace(
     totalGenerated,
     purgedPaths,
     ...(warnings.length > 0 && { warnings }),
+    ...(nativeResult && { nativeResult }),
   };
 }
 
