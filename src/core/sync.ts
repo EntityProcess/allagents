@@ -51,6 +51,7 @@ import {
 } from './vscode-workspace.js';
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
+import { syncNativePlugins, isClaudeCliAvailable, type NativeSyncResult } from './claude-native.js';
 
 /**
  * Result of deduplicating clients by skillsPath
@@ -122,6 +123,8 @@ export interface SyncResult {
   warnings?: string[];
   /** Result of syncing MCP server configs to VS Code */
   mcpResult?: McpMergeResult;
+  /** Result of native CLI plugin installations (claude-native client) */
+  nativeResult?: NativeSyncResult;
 }
 
 /**
@@ -130,8 +133,8 @@ export interface SyncResult {
 export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const warnings = [...(a.warnings || []), ...(b.warnings || [])];
   const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
-  // Use whichever mcpResult is present (only user-scope sync produces one)
   const mcpResult = a.mcpResult ?? b.mcpResult;
+  const nativeResult = a.nativeResult ?? b.nativeResult;
   return {
     success: a.success && b.success,
     pluginResults: [...a.pluginResults, ...b.pluginResults],
@@ -142,7 +145,15 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     ...(warnings.length > 0 && { warnings }),
     ...(purgedPaths.length > 0 && { purgedPaths }),
     ...(mcpResult && { mcpResult }),
+    ...(nativeResult && { nativeResult }),
   };
+}
+
+/**
+ * Check if a client uses native CLI installation instead of file-based sync.
+ */
+export function isNativeClient(client: ClientType): boolean {
+  return client === 'claude-native';
 }
 
 /**
@@ -855,7 +866,17 @@ async function copyValidatedPlugin(
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
   const mappings = clientMappings ?? CLIENT_MAPPINGS;
-  const clientList = clients;
+  // Filter out native clients — they don't use file-based sync
+  const clientList = clients.filter((c) => !isNativeClient(c));
+
+  if (clientList.length === 0) {
+    return {
+      plugin: validatedPlugin.plugin,
+      resolved: validatedPlugin.resolved,
+      success: true,
+      copyResults: [],
+    };
+  }
 
   const hasUniversalClient = clientList.some((c) => isUniversalClient(c));
 
@@ -1406,6 +1427,34 @@ export async function syncWorkspace(
     await saveSyncState(workspacePath, syncedFiles);
   }
 
+  // Step 7: Run native CLI installations for claude-native client
+  let nativeResult: NativeSyncResult | undefined;
+  if (syncClients.includes('claude-native' as ClientType)) {
+    const nativePluginSources = pluginPlans
+      .filter((plan) => plan.clients.includes('claude-native' as ClientType))
+      .map((plan) => plan.source);
+
+    if (nativePluginSources.length > 0) {
+      if (dryRun) {
+        nativeResult = await syncNativePlugins(nativePluginSources, 'project', {
+          cwd: workspacePath,
+          dryRun: true,
+        });
+      } else {
+        const cliAvailable = await isClaudeCliAvailable();
+        if (cliAvailable) {
+          nativeResult = await syncNativePlugins(nativePluginSources, 'project', {
+            cwd: workspacePath,
+          });
+        } else {
+          warnings.push(
+            'claude-native: claude CLI not found, skipping native plugin installation',
+          );
+        }
+      }
+    }
+  }
+
   return {
     success: !hasFailures,
     pluginResults,
@@ -1415,6 +1464,7 @@ export async function syncWorkspace(
     totalGenerated,
     purgedPaths,
     ...(warnings.length > 0 && { warnings }),
+    ...(nativeResult && { nativeResult }),
   };
 }
 
@@ -1543,6 +1593,31 @@ export async function syncUserWorkspace(
     });
   }
 
+  // Step: Run native CLI installations for claude-native client (user scope)
+  let nativeResult: NativeSyncResult | undefined;
+  if (syncClients.includes('claude-native' as ClientType)) {
+    const nativePluginSources = pluginPlans
+      .filter((plan) => plan.clients.includes('claude-native' as ClientType))
+      .map((plan) => plan.source);
+
+    if (nativePluginSources.length > 0) {
+      if (dryRun) {
+        nativeResult = await syncNativePlugins(nativePluginSources, 'user', {
+          dryRun: true,
+        });
+      } else {
+        const cliAvailable = await isClaudeCliAvailable();
+        if (cliAvailable) {
+          nativeResult = await syncNativePlugins(nativePluginSources, 'user');
+        } else {
+          warnings.push(
+            'claude-native: claude CLI not found, skipping native plugin installation',
+          );
+        }
+      }
+    }
+  }
+
   return {
     success: totalFailed === 0,
     pluginResults,
@@ -1552,5 +1627,6 @@ export async function syncUserWorkspace(
     totalGenerated,
     ...(warnings.length > 0 && { warnings }),
     ...(mcpResult && { mcpResult }),
+    ...(nativeResult && { nativeResult }),
   };
 }
