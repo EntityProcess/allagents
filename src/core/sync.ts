@@ -42,6 +42,7 @@ import {
   saveSyncState,
   getPreviouslySyncedFiles,
   getPreviouslySyncedMcpServers,
+  getPreviouslySyncedNativePlugins,
 } from './sync-state.js';
 import type { SyncState } from '../models/sync-state.js';
 import { getUserWorkspaceConfig } from './user-workspace.js';
@@ -51,7 +52,7 @@ import {
 } from './vscode-workspace.js';
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
-import { syncNativePlugins, isClaudeCliAvailable, type NativeSyncResult } from './claude-native.js';
+import { syncNativePlugins, isClaudeCliAvailable, uninstallPlugin, toClaudePluginSpec, type NativeSyncResult } from './claude-native.js';
 
 /**
  * Result of deduplicating clients by skillsPath
@@ -1405,6 +1406,50 @@ export async function syncWorkspace(
   // Step 6: Save sync state with all copied files (skip in dry-run mode)
   // Always save state after sync (even with partial failures) so state reflects disk reality.
   // The purge has already happened, so we need to track what was actually copied.
+
+  // Step 7: Run native CLI installations for claude-native client
+  let nativeResult: NativeSyncResult | undefined;
+  if (syncClients.includes('claude-native' as ClientType)) {
+    const nativePluginSources = pluginPlans
+      .filter((plan) => plan.clients.includes('claude-native' as ClientType))
+      .map((plan) => plan.source);
+
+    // Convert to claude plugin specs for comparison with previous state
+    const currentNativeSpecs = nativePluginSources
+      .map((s) => toClaudePluginSpec(s))
+      .filter((s): s is string => s !== null);
+
+    if (!dryRun) {
+      const cliAvailable = await isClaudeCliAvailable();
+      if (cliAvailable) {
+        // Uninstall plugins that were previously installed but no longer in config
+        const previousNativePlugins = getPreviouslySyncedNativePlugins(previousState);
+        const removedPlugins = previousNativePlugins.filter(
+          (p) => !currentNativeSpecs.includes(p),
+        );
+        for (const plugin of removedPlugins) {
+          await uninstallPlugin(plugin, 'project', { cwd: workspacePath });
+        }
+
+        if (nativePluginSources.length > 0) {
+          nativeResult = await syncNativePlugins(nativePluginSources, 'project', {
+            cwd: workspacePath,
+          });
+        }
+      } else {
+        warnings.push(
+          'claude-native: claude CLI not found, skipping native plugin installation',
+        );
+      }
+    } else if (nativePluginSources.length > 0) {
+      nativeResult = await syncNativePlugins(nativePluginSources, 'project', {
+        cwd: workspacePath,
+        dryRun: true,
+      });
+    }
+  }
+
+  // Step 8: Save sync state (skip in dry-run mode)
   if (!dryRun) {
     // Collect all copy results
     const allCopyResults: CopyResult[] = [
@@ -1424,35 +1469,13 @@ export async function syncWorkspace(
       }
     }
 
-    await saveSyncState(workspacePath, syncedFiles);
-  }
+    // Track native plugins in sync state for declarative uninstall on next sync
+    const nativePluginsToTrack = nativeResult?.pluginsInstalled ?? [];
 
-  // Step 7: Run native CLI installations for claude-native client
-  let nativeResult: NativeSyncResult | undefined;
-  if (syncClients.includes('claude-native' as ClientType)) {
-    const nativePluginSources = pluginPlans
-      .filter((plan) => plan.clients.includes('claude-native' as ClientType))
-      .map((plan) => plan.source);
-
-    if (nativePluginSources.length > 0) {
-      if (dryRun) {
-        nativeResult = await syncNativePlugins(nativePluginSources, 'project', {
-          cwd: workspacePath,
-          dryRun: true,
-        });
-      } else {
-        const cliAvailable = await isClaudeCliAvailable();
-        if (cliAvailable) {
-          nativeResult = await syncNativePlugins(nativePluginSources, 'project', {
-            cwd: workspacePath,
-          });
-        } else {
-          warnings.push(
-            'claude-native: claude CLI not found, skipping native plugin installation',
-          );
-        }
-      }
-    }
+    await saveSyncState(workspacePath, {
+      files: syncedFiles,
+      ...(nativePluginsToTrack.length > 0 && { nativePlugins: nativePluginsToTrack }),
+    });
   }
 
   return {
@@ -1583,39 +1606,53 @@ export async function syncUserWorkspace(
     }
   }
 
-  // Save sync state (including MCP servers)
-  if (!dryRun) {
-    const allCopyResults = pluginResults.flatMap((r) => r.copyResults);
-    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, syncClients, USER_CLIENT_MAPPINGS);
-    await saveSyncState(homeDir, {
-      files: syncedFiles,
-      ...(mcpResult && { mcpServers: { vscode: mcpResult.trackedServers } }),
-    });
-  }
-
-  // Step: Run native CLI installations for claude-native client (user scope)
+  // Run native CLI installations for claude-native client (user scope)
   let nativeResult: NativeSyncResult | undefined;
   if (syncClients.includes('claude-native' as ClientType)) {
     const nativePluginSources = pluginPlans
       .filter((plan) => plan.clients.includes('claude-native' as ClientType))
       .map((plan) => plan.source);
 
-    if (nativePluginSources.length > 0) {
-      if (dryRun) {
-        nativeResult = await syncNativePlugins(nativePluginSources, 'user', {
-          dryRun: true,
-        });
-      } else {
-        const cliAvailable = await isClaudeCliAvailable();
-        if (cliAvailable) {
-          nativeResult = await syncNativePlugins(nativePluginSources, 'user');
-        } else {
-          warnings.push(
-            'claude-native: claude CLI not found, skipping native plugin installation',
-          );
+    const currentNativeSpecs = nativePluginSources
+      .map((s) => toClaudePluginSpec(s))
+      .filter((s): s is string => s !== null);
+
+    if (!dryRun) {
+      const cliAvailable = await isClaudeCliAvailable();
+      if (cliAvailable) {
+        const previousNativePlugins = getPreviouslySyncedNativePlugins(previousState);
+        const removedPlugins = previousNativePlugins.filter(
+          (p) => !currentNativeSpecs.includes(p),
+        );
+        for (const plugin of removedPlugins) {
+          await uninstallPlugin(plugin, 'user');
         }
+
+        if (nativePluginSources.length > 0) {
+          nativeResult = await syncNativePlugins(nativePluginSources, 'user');
+        }
+      } else {
+        warnings.push(
+          'claude-native: claude CLI not found, skipping native plugin installation',
+        );
       }
+    } else if (nativePluginSources.length > 0) {
+      nativeResult = await syncNativePlugins(nativePluginSources, 'user', {
+        dryRun: true,
+      });
     }
+  }
+
+  // Save sync state (including MCP servers and native plugins)
+  if (!dryRun) {
+    const allCopyResults = pluginResults.flatMap((r) => r.copyResults);
+    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, syncClients, USER_CLIENT_MAPPINGS);
+    const nativePluginsToTrack = nativeResult?.pluginsInstalled ?? [];
+    await saveSyncState(homeDir, {
+      files: syncedFiles,
+      ...(mcpResult && { mcpServers: { vscode: mcpResult.trackedServers } }),
+      ...(nativePluginsToTrack.length > 0 && { nativePlugins: nativePluginsToTrack }),
+    });
   }
 
   return {

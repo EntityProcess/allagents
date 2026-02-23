@@ -39,10 +39,11 @@ export async function executeClaudeCommand(
     });
 
     proc.on('close', (code: number | null) => {
+      const trimmedStderr = stderr.trim();
       resolve({
         success: code === 0,
         output: stdout.trim(),
-        error: stderr.trim() || undefined,
+        ...(trimmedStderr && { error: trimmedStderr }),
       });
     });
 
