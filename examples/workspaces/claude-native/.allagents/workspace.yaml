@@ -1,0 +1,34 @@
+# Example: Claude-native plugin installation
+#
+# This example demonstrates using the `claude-native` client type,
+# which installs plugins using the `claude` CLI instead of copying
+# files to `.claude/` directories.
+#
+# Prerequisites:
+# - Claude CLI must be installed (`claude --version`)
+# - Marketplaces are auto-registered on first sync
+#
+# How it works:
+# - `claude-native` uses `claude plugin marketplace add` to register marketplaces
+# - Then uses `claude plugin install <plugin>@<marketplace> --scope project`
+# - This is different from the `claude` client which copies files directly
+#
+# Benefits:
+# - Plugins are managed by the official Claude CLI
+# - Plugin updates, enable/disable via `claude plugin` commands
+# - Native integration with Claude's plugin system
+#
+# Usage:
+#   allagents workspace sync
+
+repositories: []
+
+plugins:
+  # Marketplace-based plugins work with claude-native
+  # The marketplace is auto-registered, then the plugin is installed via CLI
+  - source: superpowers@obra/superpowers-marketplace
+    clients:
+      - claude-native
+
+clients:
+  - claude-native
