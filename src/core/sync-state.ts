@@ -14,6 +14,7 @@ export type McpScope = 'vscode';
 export interface SyncStateData {
   files: Partial<Record<ClientType, string[]>>;
   mcpServers?: Partial<Record<McpScope, string[]>>;
+  nativePlugins?: Partial<Record<ClientType, string[]>>;
 }
 
 /**
@@ -76,6 +77,7 @@ export async function saveSyncState(
     lastSync: new Date().toISOString(),
     files: normalizedData.files as Record<ClientType, string[]>,
     ...(normalizedData.mcpServers && { mcpServers: normalizedData.mcpServers }),
+    ...(normalizedData.nativePlugins && { nativePlugins: normalizedData.nativePlugins }),
   };
 
   await mkdir(dirname(statePath), { recursive: true });
@@ -114,4 +116,18 @@ export function getPreviouslySyncedMcpServers(
   }
 
   return state.mcpServers[scope] ?? [];
+}
+
+/**
+ * Get native plugins previously installed for a specific client
+ * @param state - Loaded sync state (or null)
+ * @param client - Client type to get native plugins for
+ * @returns Array of plugin names, empty if no state or no plugins for client
+ */
+export function getPreviouslySyncedNativePlugins(
+  state: SyncState | null,
+  client: ClientType,
+): string[] {
+  if (!state?.nativePlugins) return [];
+  return state.nativePlugins[client] ?? [];
 }
