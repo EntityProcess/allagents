@@ -1570,7 +1570,7 @@ export async function syncUserWorkspace(
   const { offline = false, dryRun = false, force = false } = options;
 
   const pluginPlans = buildPluginSyncPlans(config.plugins, workspaceClients).filter(
-    (plan) => plan.clients.length > 0,
+    (plan) => plan.clients.length > 0 || plan.nativeClients.length > 0,
   );
   const syncClients = collectSyncClients(workspaceClients, pluginPlans);
 
@@ -1657,13 +1657,66 @@ export async function syncUserWorkspace(
     }
   }
 
-  // Save sync state (including MCP servers)
+  // Run native CLI installations for user scope
+  let nativeResult: NativeSyncResult | undefined;
+  const nativePluginsByClient = new Map<ClientType, string[]>();
+
+  for (const vp of validPlugins) {
+    for (const client of vp.nativeClients) {
+      const existing = nativePluginsByClient.get(client) ?? [];
+      existing.push(vp.plugin);
+      nativePluginsByClient.set(client, existing);
+    }
+  }
+
+  if (nativePluginsByClient.size > 0) {
+    if (!dryRun) {
+      const cliAvailable = await isClaudeCliAvailable();
+      if (cliAvailable) {
+        // Uninstall previously-synced native plugins no longer in config
+        for (const [client, sources] of nativePluginsByClient) {
+          const currentSpecs = sources
+            .map((s) => toClaudePluginSpec(s))
+            .filter((s): s is string => s !== null);
+          const previousPlugins = getPreviouslySyncedNativePlugins(previousState, client);
+          const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
+          for (const plugin of removed) {
+            await uninstallPlugin(plugin, 'user');
+          }
+        }
+
+        // Install native plugins
+        const allNativeSources = [...new Set(
+          Array.from(nativePluginsByClient.values()).flat()
+        )];
+        nativeResult = await syncNativePlugins(allNativeSources, 'user');
+      } else {
+        warnings.push('Native install: claude CLI not found, skipping native plugin installation');
+      }
+    } else {
+      const allNativeSources = [...new Set(
+        Array.from(nativePluginsByClient.values()).flat()
+      )];
+      nativeResult = await syncNativePlugins(allNativeSources, 'user', { dryRun: true });
+    }
+  }
+
+  // Save sync state (including MCP servers and native plugins)
   if (!dryRun) {
     const allCopyResults = pluginResults.flatMap((r) => r.copyResults);
     const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, syncClients, USER_CLIENT_MAPPINGS);
+
+    const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
+    if (nativeResult) {
+      for (const [client] of nativePluginsByClient) {
+        nativePluginsState[client] = nativeResult.pluginsInstalled;
+      }
+    }
+
     await saveSyncState(homeDir, {
       files: syncedFiles,
       ...(mcpResult && { mcpServers: { vscode: mcpResult.trackedServers } }),
+      ...(Object.keys(nativePluginsState).length > 0 && { nativePlugins: nativePluginsState }),
     });
   }
 
@@ -1676,5 +1729,6 @@ export async function syncUserWorkspace(
     totalGenerated,
     ...(warnings.length > 0 && { warnings }),
     ...(mcpResult && { mcpResult }),
+    ...(nativeResult && { nativeResult }),
   };
 }
