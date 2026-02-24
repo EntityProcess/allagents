@@ -1,0 +1,24 @@
+# Example: Native plugin installation with install mode
+#
+# This workspace demonstrates using `install: native` on client entries
+# to install plugins via the client's native CLI instead of copying files.
+#
+# How it works:
+# - Claude with `install: native` uses `claude plugin marketplace add` and
+#   `claude plugin install` to install marketplace plugins natively.
+# - Non-marketplace plugins (local paths, GitHub URLs) automatically fall
+#   back to file-based copy even for native clients.
+# - Copilot uses standard file-based sync (the default).
+#
+# Usage:
+#   allagents workspace sync
+
+repositories: []
+
+plugins:
+  - source: superpowers@obra/superpowers-marketplace
+
+clients:
+  - copilot
+  - name: claude
+    install: native
