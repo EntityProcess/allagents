@@ -143,7 +143,15 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
   // Use whichever mcpResult is present (only user-scope sync produces one)
   const mcpResult = a.mcpResult ?? b.mcpResult;
-  const nativeResult = a.nativeResult ?? b.nativeResult;
+  // Merge nativeResults when both scopes produce them
+  const nativeResult = a.nativeResult && b.nativeResult
+    ? {
+        marketplacesAdded: [...a.nativeResult.marketplacesAdded, ...b.nativeResult.marketplacesAdded],
+        pluginsInstalled: [...a.nativeResult.pluginsInstalled, ...b.nativeResult.pluginsInstalled],
+        pluginsFailed: [...a.nativeResult.pluginsFailed, ...b.nativeResult.pluginsFailed],
+        skipped: [...a.nativeResult.skipped, ...b.nativeResult.skipped],
+      }
+    : a.nativeResult ?? b.nativeResult;
   return {
     success: a.success && b.success,
     pluginResults: [...a.pluginResults, ...b.pluginResults],
@@ -1316,41 +1324,59 @@ export async function syncWorkspace(
     }
   }
 
-  if (nativePluginsByClient.size > 0) {
-    if (!dryRun) {
-      const cliAvailable = await isClaudeCliAvailable();
-      if (cliAvailable) {
-        // Uninstall previously-synced native plugins no longer in config
-        for (const [client, sources] of nativePluginsByClient) {
-          const currentSpecs = sources
-            .map((s) => toClaudePluginSpec(s))
-            .filter((s): s is string => s !== null);
-          const previousPlugins = getPreviouslySyncedNativePlugins(previousState, client);
-          const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
-          for (const plugin of removed) {
+  // Detect clients that previously had native plugins but no longer do (mode switch or removal)
+  const previousNativeClients = previousState?.nativePlugins
+    ? (Object.keys(previousState.nativePlugins) as ClientType[]).filter(
+        (c) => (previousState.nativePlugins![c]?.length ?? 0) > 0
+      )
+    : [];
+  const hasNativeWork = nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
+
+  if (hasNativeWork && !dryRun) {
+    const cliAvailable = await isClaudeCliAvailable();
+    if (cliAvailable) {
+      // Uninstall previously-synced native plugins no longer in config
+      // This covers both: plugins removed from a native client, AND clients that switched away from native mode
+      const allPreviousNativeClients = new Set([
+        ...nativePluginsByClient.keys(),
+        ...previousNativeClients,
+      ]);
+      for (const client of allPreviousNativeClients) {
+        const currentSources = nativePluginsByClient.get(client) ?? [];
+        const currentSpecs = currentSources
+          .map((s) => toClaudePluginSpec(s))
+          .filter((s): s is string => s !== null);
+        const previousPlugins = getPreviouslySyncedNativePlugins(previousState, client);
+        const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
+        for (const plugin of removed) {
+          try {
             await uninstallPlugin(plugin, 'project', { cwd: workspacePath });
+          } catch (err) {
+            warnings.push(`Native uninstall failed for ${plugin}: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
+      }
 
-        // Install native plugins
+      // Install native plugins
+      if (nativePluginsByClient.size > 0) {
         const allNativeSources = [...new Set(
           Array.from(nativePluginsByClient.values()).flat()
         )];
         nativeResult = await syncNativePlugins(allNativeSources, 'project', {
           cwd: workspacePath,
         });
-      } else {
-        warnings.push('Native install: claude CLI not found, skipping native plugin installation');
       }
-    } else {
-      const allNativeSources = [...new Set(
-        Array.from(nativePluginsByClient.values()).flat()
-      )];
-      nativeResult = await syncNativePlugins(allNativeSources, 'project', {
-        cwd: workspacePath,
-        dryRun: true,
-      });
+    } else if (nativePluginsByClient.size > 0) {
+      warnings.push('Native install: claude CLI not found, skipping native plugin installation');
     }
+  } else if (nativePluginsByClient.size > 0 && dryRun) {
+    const allNativeSources = [...new Set(
+      Array.from(nativePluginsByClient.values()).flat()
+    )];
+    nativeResult = await syncNativePlugins(allNativeSources, 'project', {
+      cwd: workspacePath,
+      dryRun: true,
+    });
   }
 
   // Step 5: Copy workspace files if configured
@@ -1506,11 +1532,15 @@ export async function syncWorkspace(
       }
     }
 
-    // Build native plugin tracking per-client
+    // Build native plugin tracking per-client (only plugins specific to each client)
     const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
-    if (nativeResult) {
-      for (const [client] of nativePluginsByClient) {
-        nativePluginsState[client] = nativeResult.pluginsInstalled;
+    const installedSet = new Set(nativeResult?.pluginsInstalled ?? []);
+    for (const [client, sources] of nativePluginsByClient) {
+      const clientSpecs = sources
+        .map((s) => toClaudePluginSpec(s))
+        .filter((s): s is string => s !== null && installedSet.has(s));
+      if (clientSpecs.length > 0) {
+        nativePluginsState[client] = clientSpecs;
       }
     }
 
@@ -1669,36 +1699,53 @@ export async function syncUserWorkspace(
     }
   }
 
-  if (nativePluginsByClient.size > 0) {
-    if (!dryRun) {
-      const cliAvailable = await isClaudeCliAvailable();
-      if (cliAvailable) {
-        // Uninstall previously-synced native plugins no longer in config
-        for (const [client, sources] of nativePluginsByClient) {
-          const currentSpecs = sources
-            .map((s) => toClaudePluginSpec(s))
-            .filter((s): s is string => s !== null);
-          const previousPlugins = getPreviouslySyncedNativePlugins(previousState, client);
-          const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
-          for (const plugin of removed) {
+  // Detect clients that previously had native plugins but no longer do
+  const previousNativeClients = previousState?.nativePlugins
+    ? (Object.keys(previousState.nativePlugins) as ClientType[]).filter(
+        (c) => (previousState.nativePlugins![c]?.length ?? 0) > 0
+      )
+    : [];
+  const hasNativeWork = nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
+
+  if (hasNativeWork && !dryRun) {
+    const cliAvailable = await isClaudeCliAvailable();
+    if (cliAvailable) {
+      // Uninstall previously-synced native plugins no longer in config
+      const allPreviousNativeClients = new Set([
+        ...nativePluginsByClient.keys(),
+        ...previousNativeClients,
+      ]);
+      for (const client of allPreviousNativeClients) {
+        const currentSources = nativePluginsByClient.get(client) ?? [];
+        const currentSpecs = currentSources
+          .map((s) => toClaudePluginSpec(s))
+          .filter((s): s is string => s !== null);
+        const previousPlugins = getPreviouslySyncedNativePlugins(previousState, client);
+        const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
+        for (const plugin of removed) {
+          try {
             await uninstallPlugin(plugin, 'user');
+          } catch (err) {
+            warnings.push(`Native uninstall failed for ${plugin}: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
+      }
 
-        // Install native plugins
+      // Install native plugins
+      if (nativePluginsByClient.size > 0) {
         const allNativeSources = [...new Set(
           Array.from(nativePluginsByClient.values()).flat()
         )];
         nativeResult = await syncNativePlugins(allNativeSources, 'user');
-      } else {
-        warnings.push('Native install: claude CLI not found, skipping native plugin installation');
       }
-    } else {
-      const allNativeSources = [...new Set(
-        Array.from(nativePluginsByClient.values()).flat()
-      )];
-      nativeResult = await syncNativePlugins(allNativeSources, 'user', { dryRun: true });
+    } else if (nativePluginsByClient.size > 0) {
+      warnings.push('Native install: claude CLI not found, skipping native plugin installation');
     }
+  } else if (nativePluginsByClient.size > 0 && dryRun) {
+    const allNativeSources = [...new Set(
+      Array.from(nativePluginsByClient.values()).flat()
+    )];
+    nativeResult = await syncNativePlugins(allNativeSources, 'user', { dryRun: true });
   }
 
   // Save sync state (including MCP servers and native plugins)
@@ -1707,9 +1754,13 @@ export async function syncUserWorkspace(
     const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, syncClients, USER_CLIENT_MAPPINGS);
 
     const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
-    if (nativeResult) {
-      for (const [client] of nativePluginsByClient) {
-        nativePluginsState[client] = nativeResult.pluginsInstalled;
+    const installedSet = new Set(nativeResult?.pluginsInstalled ?? []);
+    for (const [client, sources] of nativePluginsByClient) {
+      const clientSpecs = sources
+        .map((s) => toClaudePluginSpec(s))
+        .filter((s): s is string => s !== null && installedSet.has(s));
+      if (clientSpecs.length > 0) {
+        nativePluginsState[client] = clientSpecs;
       }
     }
 
