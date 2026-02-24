@@ -1327,7 +1327,7 @@ export async function syncWorkspace(
   // Detect clients that previously had native plugins but no longer do (mode switch or removal)
   const previousNativeClients = previousState?.nativePlugins
     ? (Object.keys(previousState.nativePlugins) as ClientType[]).filter(
-        (c) => (previousState.nativePlugins![c]?.length ?? 0) > 0
+        (c) => (previousState.nativePlugins?.[c]?.length ?? 0) > 0
       )
     : [];
   const hasNativeWork = nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
@@ -1702,7 +1702,7 @@ export async function syncUserWorkspace(
   // Detect clients that previously had native plugins but no longer do
   const previousNativeClients = previousState?.nativePlugins
     ? (Object.keys(previousState.nativePlugins) as ClientType[]).filter(
-        (c) => (previousState.nativePlugins![c]?.length ?? 0) > 0
+        (c) => (previousState.nativePlugins?.[c]?.length ?? 0) > 0
       )
     : [];
   const hasNativeWork = nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
