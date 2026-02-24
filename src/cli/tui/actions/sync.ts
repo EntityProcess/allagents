@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
-import { formatMcpResult } from '../../format-sync.js';
+import { formatMcpResult, formatNativeResult } from '../../format-sync.js';
 import type { TuiContext } from '../context.js';
 
 /**
@@ -27,6 +27,9 @@ export async function runSync(context: TuiContext): Promise<void> {
         lines.push(
           `Copied: ${result.totalCopied}  Failed: ${result.totalFailed}  Skipped: ${result.totalSkipped}`,
         );
+        if (result.nativeResult) {
+          lines.push(...formatNativeResult(result.nativeResult));
+        }
         p.note(lines.join('\n'), 'Project Sync');
       }
     }
@@ -49,6 +52,9 @@ export async function runSync(context: TuiContext): Promise<void> {
         );
         if (userResult.mcpResult) {
           lines.push(...formatMcpResult(userResult.mcpResult));
+        }
+        if (userResult.nativeResult) {
+          lines.push(...formatNativeResult(userResult.nativeResult));
         }
         p.note(lines.join('\n'), 'User Sync');
       }
