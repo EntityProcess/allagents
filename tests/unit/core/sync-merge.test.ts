@@ -76,6 +76,71 @@ describe('mergeSyncResults', () => {
     expect(merged.warnings).toEqual(['warn1', 'warn2']);
   });
 
+  test('merges nativeResult from both results', () => {
+    const a: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      nativeResult: {
+        marketplacesAdded: ['org/repo-a'],
+        pluginsInstalled: ['pluginA@repo-a'],
+        pluginsFailed: [],
+        skipped: [],
+      },
+    };
+    const b: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      nativeResult: {
+        marketplacesAdded: ['org/repo-b'],
+        pluginsInstalled: ['pluginB@repo-b'],
+        pluginsFailed: [{ plugin: 'pluginC@repo-c', error: 'not found' }],
+        skipped: ['local-plugin'],
+      },
+    };
+    const merged = mergeSyncResults(a, b);
+    expect(merged.nativeResult).toEqual({
+      marketplacesAdded: ['org/repo-a', 'org/repo-b'],
+      pluginsInstalled: ['pluginA@repo-a', 'pluginB@repo-b'],
+      pluginsFailed: [{ plugin: 'pluginC@repo-c', error: 'not found' }],
+      skipped: ['local-plugin'],
+    });
+  });
+
+  test('uses single nativeResult when only one side has it', () => {
+    const a: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      nativeResult: {
+        marketplacesAdded: ['org/repo'],
+        pluginsInstalled: ['plugin@repo'],
+        pluginsFailed: [],
+        skipped: [],
+      },
+    };
+    const b: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+    };
+    const merged = mergeSyncResults(a, b);
+    expect(merged.nativeResult).toEqual(a.nativeResult);
+  });
+
   test('merges purgedPaths from both results', () => {
     const a: SyncResult = {
       success: true,

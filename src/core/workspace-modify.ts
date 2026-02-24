@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
-  ClientType,
+  ClientEntry,
   PluginEntry,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
@@ -24,7 +24,7 @@ import {
  * Default clients for auto-created project workspace.yaml.
  * Matches the template at src/templates/default/.allagents/workspace.yaml.
  */
-const DEFAULT_PROJECT_CLIENTS: ClientType[] = [
+const DEFAULT_PROJECT_CLIENTS: ClientEntry[] = [
   'claude',
   'copilot',
   'codex',
@@ -47,7 +47,7 @@ export interface ModifyResult {
  * @param workspacePath - Path to workspace directory (default: cwd)
  */
 export async function setClients(
-  clients: ClientType[],
+  clients: ClientEntry[],
   workspacePath: string = process.cwd(),
 ): Promise<ModifyResult> {
   try {

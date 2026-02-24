@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
-  ClientType,
+  ClientEntry,
   PluginEntry,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
@@ -33,7 +33,7 @@ import {
  * project-level Claude config. Claude is only included for project-scoped
  * (.allagents) installations.
  */
-const DEFAULT_USER_CLIENTS: ClientType[] = [
+const DEFAULT_USER_CLIENTS: ClientEntry[] = [
   'copilot',
   'codex',
   'cursor',
@@ -370,7 +370,7 @@ async function addPluginToUserConfig(
  * Creates the config file if it doesn't exist.
  */
 export async function setUserClients(
-  clients: ClientType[],
+  clients: ClientEntry[],
 ): Promise<ModifyResult> {
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();

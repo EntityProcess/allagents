@@ -11,6 +11,8 @@ export const SyncStateSchema = z.object({
   files: z.record(ClientTypeSchema, z.array(z.string())),
   // MCP servers tracked per scope (e.g., "vscode" for user-level mcp.json)
   mcpServers: z.record(z.string(), z.array(z.string())).optional(),
+  // Native plugins tracked per client type (e.g., "claude" for claude plugin install)
+  nativePlugins: z.record(ClientTypeSchema, z.array(z.string())).optional(),
 });
 
 export type SyncState = z.infer<typeof SyncStateSchema>;

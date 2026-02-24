@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, getHomeDir } from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
-import { getPluginSource } from '../models/workspace-config.js';
+import { getPluginSource, getClientTypes } from '../models/workspace-config.js';
 import {
   parsePluginSource,
   getPluginCachePath,
@@ -82,7 +82,7 @@ export async function getWorkspaceStatus(
       success: true,
       plugins,
       userPlugins,
-      clients: config.clients,
+      clients: getClientTypes(config.clients),
     };
   } catch (error) {
     return {

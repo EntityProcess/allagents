@@ -93,6 +93,27 @@ export const ClientTypeSchema = z.enum([
 export type ClientType = z.infer<typeof ClientTypeSchema>;
 
 /**
+ * Installation mode for plugins
+ * - 'file': Copy plugin files to client directories (default)
+ * - 'native': Use client's native CLI to install (e.g., `claude plugin install`)
+ */
+export const InstallModeSchema = z.enum(['file', 'native']);
+export type InstallMode = z.infer<typeof InstallModeSchema>;
+
+/**
+ * Client entry — string shorthand or object with install mode.
+ * String "claude" is equivalent to { name: "claude", install: "file" }.
+ */
+export const ClientEntrySchema = z.union([
+  ClientTypeSchema,
+  z.object({
+    name: ClientTypeSchema,
+    install: InstallModeSchema.default('file'),
+  }),
+]);
+export type ClientEntry = z.infer<typeof ClientEntrySchema>;
+
+/**
  * Plugin entry in workspace.yaml
  * Supports string shorthand and object form with optional client override.
  */
@@ -101,6 +122,7 @@ export const PluginEntrySchema = z.union([
   z.object({
     source: PluginSourceSchema,
     clients: z.array(ClientTypeSchema).optional(),
+    install: InstallModeSchema.optional(),
   }),
 ]);
 
@@ -118,6 +140,55 @@ export function getPluginSource(plugin: PluginEntry): string {
  */
 export function getPluginClients(plugin: PluginEntry): ClientType[] | undefined {
   return typeof plugin === 'string' ? undefined : plugin.clients;
+}
+
+/**
+ * Get plugin-level install mode override (if any)
+ */
+export function getPluginInstallMode(plugin: PluginEntry): InstallMode | undefined {
+  return typeof plugin === 'string' ? undefined : plugin.install;
+}
+
+/**
+ * Normalize a client entry to { name, install } form.
+ */
+export function normalizeClientEntry(entry: ClientEntry): { name: ClientType; install: InstallMode } {
+  if (typeof entry === 'string') {
+    return { name: entry, install: 'file' };
+  }
+  return { name: entry.name, install: entry.install ?? 'file' };
+}
+
+/**
+ * Extract ClientType values from client entries.
+ */
+export function getClientTypes(entries: ClientEntry[]): ClientType[] {
+  return entries.map((e) => (typeof e === 'string' ? e : e.name));
+}
+
+/**
+ * Get install mode for a specific client from entries.
+ * Returns 'file' if client not found.
+ */
+export function getClientInstallMode(entries: ClientEntry[], client: ClientType): InstallMode {
+  for (const entry of entries) {
+    const normalized = normalizeClientEntry(entry);
+    if (normalized.name === client) return normalized.install;
+  }
+  return 'file';
+}
+
+/**
+ * Resolve effective install mode for a (plugin, client) pair.
+ * Priority: plugin-level > client-level > 'file' default.
+ */
+export function resolveInstallMode(
+  pluginEntry: PluginEntry,
+  clientEntry: { name: ClientType; install: InstallMode },
+): InstallMode {
+  const pluginMode = getPluginInstallMode(pluginEntry);
+  if (pluginMode) return pluginMode;
+  return clientEntry.install;
 }
 
 /**
@@ -145,7 +216,7 @@ export const WorkspaceConfigSchema = z.object({
   workspace: WorkspaceSchema.optional(),
   repositories: z.array(RepositorySchema),
   plugins: z.array(PluginEntrySchema),
-  clients: z.array(ClientTypeSchema),
+  clients: z.array(ClientEntrySchema),
   vscode: VscodeConfigSchema.optional(),
   syncMode: SyncModeSchema.optional(),
   disabledSkills: z.array(z.string()).optional(),

@@ -1,5 +1,5 @@
 import * as p from '@clack/prompts';
-import { ClientTypeSchema, type ClientType } from '../../../models/workspace-config.js';
+import { ClientTypeSchema, getClientTypes, type ClientType } from '../../../models/workspace-config.js';
 import { setClients } from '../../../core/workspace-modify.js';
 import { setUserClients, getUserWorkspaceConfig } from '../../../core/user-workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
@@ -44,7 +44,7 @@ export async function runManageClients(context: TuiContext, cache?: TuiCache): P
       currentClients = status.clients ?? [];
     } else {
       const userConfig = await getUserWorkspaceConfig();
-      currentClients = userConfig?.clients ?? [];
+      currentClients = userConfig?.clients ? getClientTypes(userConfig.clients) : [];
     }
 
     const allClients = ClientTypeSchema.options;
