@@ -361,7 +361,7 @@ const marketplaceRemoveCmd = command({
           data: {
             name,
             path: result.marketplace?.path,
-            retainedPlugins: result.retainedUserPlugins ?? [],
+            retainedUserPlugins: result.retainedUserPlugins ?? [],
           },
         });
         return;
