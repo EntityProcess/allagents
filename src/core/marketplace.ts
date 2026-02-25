@@ -68,6 +68,8 @@ export interface MarketplaceResult {
   error?: string;
   /** User-level plugins that were removed during marketplace removal cascade */
   removedUserPlugins?: string[];
+  /** User-level plugins that still reference the removed marketplace (returned when cascade is off) */
+  retainedUserPlugins?: string[];
 }
 
 /**
@@ -384,10 +386,15 @@ export async function addMarketplace(
 }
 
 /**
- * Remove a marketplace from the registry and delete its files
+ * Remove a marketplace from the registry and delete its files.
+ *
+ * By default, user-level plugins referencing the marketplace are **retained**
+ * (listed in `retainedUserPlugins`). Pass `{ cascade: true }` to remove them
+ * (listed in `removedUserPlugins`).
  */
 export async function removeMarketplace(
   name: string,
+  options: { cascade?: boolean } = {},
 ): Promise<MarketplaceResult> {
   const registry = await loadRegistry();
 
@@ -407,16 +414,30 @@ export async function removeMarketplace(
     await rm(entry.path, { recursive: true, force: true });
   }
 
-  // Cascade: remove user-level plugins referencing this marketplace
-  const { removeUserPluginsForMarketplace } = await import(
+  if (options.cascade) {
+    // Cascade: remove user-level plugins referencing this marketplace
+    const { removeUserPluginsForMarketplace } = await import(
+      './user-workspace.js'
+    );
+    const removedUserPlugins = await removeUserPluginsForMarketplace(name);
+
+    return {
+      success: true,
+      marketplace: entry,
+      removedUserPlugins,
+    };
+  }
+
+  // No cascade (default): report which plugins still reference this marketplace
+  const { getUserPluginsForMarketplace } = await import(
     './user-workspace.js'
   );
-  const removedUserPlugins = await removeUserPluginsForMarketplace(name);
+  const retainedUserPlugins = await getUserPluginsForMarketplace(name);
 
   return {
     success: true,
     marketplace: entry,
-    removedUserPlugins,
+    retainedUserPlugins,
   };
 }
 
