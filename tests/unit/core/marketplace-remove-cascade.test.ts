@@ -142,6 +142,37 @@ describe('removeMarketplace cascade', () => {
     expect(result.retainedUserPlugins).toEqual([]);
   });
 
+  it('should remove user plugins when cascade is explicitly enabled', async () => {
+    await writeRegistry({
+      'my-marketplace': {
+        name: 'my-marketplace',
+        source: { type: 'local', location: '/tmp/mp' },
+        path: '/tmp/mp',
+      },
+    });
+
+    await writeUserConfig({
+      repositories: [],
+      plugins: [
+        'pluginA@my-marketplace',
+        'pluginB@my-marketplace',
+        'pluginC@other-marketplace',
+      ],
+      clients: ['claude'],
+    });
+
+    const result = await removeMarketplace('my-marketplace', { cascade: true });
+    expect(result.success).toBe(true);
+
+    const config = await readUserConfig();
+    expect(config.plugins).toEqual(['pluginC@other-marketplace']);
+    expect(result.removedUserPlugins).toEqual([
+      'pluginA@my-marketplace',
+      'pluginB@my-marketplace',
+    ]);
+    expect(result.retainedUserPlugins).toBeUndefined();
+  });
+
   it('should delete the marketplace directory when it exists', async () => {
     const marketplacePath = join(testDir, '.allagents', 'plugins', 'marketplaces', 'my-marketplace');
     await mkdir(marketplacePath, { recursive: true });
