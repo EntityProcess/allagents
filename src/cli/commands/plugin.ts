@@ -373,7 +373,7 @@ const marketplaceRemoveCmd = command({
         for (const p of result.retainedUserPlugins) {
           console.log(`    - ${p}`);
         }
-        console.log(`\n  To remove them: allagents plugin remove <name>`);
+        console.log('\n  To remove them: allagents plugin remove <name>');
       }
     } catch (error) {
       if (error instanceof Error) {
