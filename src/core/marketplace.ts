@@ -164,6 +164,9 @@ export function parseMarketplaceSource(source: string): {
   name: string;
   branch?: string;
 } | null {
+  // Strip trailing slashes so URLs like https://github.com/owner/repo/ are accepted
+  source = source.replace(/\/+$/, '');
+
   // GitHub URL
   if (source.startsWith('https://github.com/')) {
     const match = source.match(
