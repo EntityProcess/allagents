@@ -6,6 +6,10 @@ export class CopilotNativeClient implements NativeClient {
     return result.success;
   }
 
+  supportsScope(scope: 'user' | 'project'): boolean {
+    return scope === 'user';
+  }
+
   toPluginSpec(allagentsSource: string): string | null {
     const atIndex = allagentsSource.lastIndexOf('@');
     if (atIndex <= 0 || atIndex === allagentsSource.length - 1) return null;

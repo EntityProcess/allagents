@@ -30,6 +30,13 @@ describe('native/claude', () => {
     });
   });
 
+  describe('supportsScope', () => {
+    test('supports both user and project scope', () => {
+      expect(client.supportsScope('user')).toBe(true);
+      expect(client.supportsScope('project')).toBe(true);
+    });
+  });
+
   describe('extractMarketplaceSource', () => {
     test('extracts owner/repo from marketplace spec', () => {
       expect(client.extractMarketplaceSource('superpowers@obra/superpowers-marketplace')).toBe(

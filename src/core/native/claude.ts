@@ -6,6 +6,10 @@ export class ClaudeNativeClient implements NativeClient {
     return result.success;
   }
 
+  supportsScope(_scope: 'user' | 'project'): boolean {
+    return true;
+  }
+
   toPluginSpec(allagentsSource: string): string | null {
     const atIndex = allagentsSource.lastIndexOf('@');
     if (atIndex <= 0 || atIndex === allagentsSource.length - 1) return null;

@@ -821,12 +821,14 @@ async function validatePlugin(
 function buildPluginSyncPlans(
   plugins: PluginEntry[],
   clientEntries: ClientEntry[],
+  scope: 'user' | 'project',
   selectedClients?: ClientType[],
-): PluginSyncPlan[] {
+): { plans: PluginSyncPlan[]; warnings: string[] } {
+  const warnings: string[] = [];
   const selected = selectedClients ? new Set(selectedClients) : null;
   const workspaceClientTypes = getClientTypes(clientEntries);
 
-  return plugins.map((plugin) => {
+  const plans = plugins.map((plugin) => {
     const source = getPluginSource(plugin);
     const pluginClientTypes = getPluginClients(plugin) ?? workspaceClientTypes;
     const effectiveClients = selected
@@ -848,7 +850,12 @@ function buildPluginSyncPlans(
       // Check if this client supports native install AND the plugin is marketplace-based for this client
       const nativeClient = mode === 'native' ? getNativeClient(client) : null;
       if (nativeClient && nativeClient.toPluginSpec(source) !== null) {
-        nativeClients.push(client);
+        if (nativeClient.supportsScope(scope)) {
+          nativeClients.push(client);
+        } else {
+          fileClients.push(client);
+          warnings.push(`${client} native install only supports user scope, falling back to file copy`);
+        }
       } else {
         fileClients.push(client);
       }
@@ -856,6 +863,8 @@ function buildPluginSyncPlans(
 
     return { source, clients: fileClients, nativeClients };
   });
+
+  return { plans, warnings };
 }
 
 /**
@@ -1200,19 +1209,21 @@ export async function syncWorkspace(
   }
 
   const selectedClients = options.clients as ClientType[] | undefined;
-  const pluginPlans = buildPluginSyncPlans(
+  const { plans: pluginPlans, warnings: planWarnings } = buildPluginSyncPlans(
     config.plugins,
     config.clients,      // ClientEntry[] now
+    'project',
     selectedClients,
-  ).filter((plan) => plan.clients.length > 0 || plan.nativeClients.length > 0);
-  const syncClients = collectSyncClients(workspaceClients, pluginPlans);
+  );
+  const filteredPlans = pluginPlans.filter((plan) => plan.clients.length > 0 || plan.nativeClients.length > 0);
+  const syncClients = collectSyncClients(workspaceClients, filteredPlans);
 
   // Step 0: Pre-register unique marketplaces to avoid race conditions during parallel validation
-  await ensureMarketplacesRegistered(pluginPlans.map((plan) => plan.source));
+  await ensureMarketplacesRegistered(filteredPlans.map((plan) => plan.source));
 
   // Step 1: Validate all plugins before any destructive action
   const validatedPlugins = await validateAllPlugins(
-    pluginPlans,
+    filteredPlans,
     workspacePath,
     offline,
   );
@@ -1244,12 +1255,13 @@ export async function syncWorkspace(
   // Separate valid and failed plugins
   const failedValidations = validatedPlugins.filter((v) => !v.success);
   const validPlugins = validatedPlugins.filter((v) => v.success);
-  const warnings = failedValidations.map(
-    (v) => `${v.plugin}: ${v.error} (skipped)`,
-  );
+  const warnings = [
+    ...planWarnings,
+    ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
+  ];
 
   // If ALL plugins failed, abort
-  if (validPlugins.length === 0 && pluginPlans.length > 0) {
+  if (validPlugins.length === 0 && filteredPlans.length > 0) {
     return {
       success: false,
       pluginResults: [],
@@ -1612,7 +1624,8 @@ export async function syncUserWorkspace(
   const workspaceClients = config.clients;
   const { offline = false, dryRun = false, force = false } = options;
 
-  const pluginPlans = buildPluginSyncPlans(config.plugins, workspaceClients).filter(
+  const { plans: allPluginPlans, warnings: planWarnings } = buildPluginSyncPlans(config.plugins, workspaceClients, 'user');
+  const pluginPlans = allPluginPlans.filter(
     (plan) => plan.clients.length > 0 || plan.nativeClients.length > 0,
   );
   const syncClients = collectSyncClients(workspaceClients, pluginPlans);
@@ -1624,9 +1637,10 @@ export async function syncUserWorkspace(
   const validatedPlugins = await validateAllPlugins(pluginPlans, homeDir, offline);
   const failedValidations = validatedPlugins.filter((v) => !v.success);
   const validPlugins = validatedPlugins.filter((v) => v.success);
-  const warnings = failedValidations.map(
-    (v) => `${v.plugin}: ${v.error} (skipped)`,
-  );
+  const warnings = [
+    ...planWarnings,
+    ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
+  ];
 
   // If ALL plugins failed, abort
   if (validPlugins.length === 0 && pluginPlans.length > 0) {

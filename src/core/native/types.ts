@@ -17,6 +17,9 @@ export interface NativeClient {
   /** Check if the CLI binary is available */
   isAvailable(): Promise<boolean>;
 
+  /** Whether this client supports the given install scope */
+  supportsScope(scope: 'user' | 'project'): boolean;
+
   /** Convert allagents plugin source to this client's spec format. Null = not marketplace-based. */
   toPluginSpec(allagentsSource: string): string | null;
 

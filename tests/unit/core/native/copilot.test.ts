@@ -30,6 +30,16 @@ describe('native/copilot', () => {
     });
   });
 
+  describe('supportsScope', () => {
+    test('supports user scope', () => {
+      expect(client.supportsScope('user')).toBe(true);
+    });
+
+    test('does not support project scope', () => {
+      expect(client.supportsScope('project')).toBe(false);
+    });
+  });
+
   describe('extractMarketplaceSource', () => {
     test('extracts owner/repo from marketplace spec', () => {
       expect(client.extractMarketplaceSource('superpowers@obra/superpowers-marketplace')).toBe(
