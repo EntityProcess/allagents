@@ -7,6 +7,7 @@ import {
   removeUserDisabledSkill,
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
+  getUserPluginsForMarketplace,
 } from '../../../core/user-workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
 import {
@@ -753,10 +754,30 @@ async function runMarketplaceDetail(
         continue;
       }
 
+      // Check for linked plugins before removing
+      const linkedPlugins = await getUserPluginsForMarketplace(marketplaceName);
+      let cascade = false;
+
+      if (linkedPlugins.length > 0) {
+        const pluginAction = await select({
+          message: `${linkedPlugins.length} plugin(s) still reference this marketplace:\n${linkedPlugins.map((pl) => `  - ${pl}`).join('\n')}\n\nWhat would you like to do with them?`,
+          options: [
+            { value: 'keep' as const, label: 'Keep plugins (can be removed later)' },
+            { value: 'remove' as const, label: 'Remove plugins from config' },
+          ],
+        });
+
+        if (p.isCancel(pluginAction)) {
+          continue;
+        }
+
+        cascade = pluginAction === 'remove';
+      }
+
       try {
         const s = p.spinner();
         s.start('Removing marketplace...');
-        const result = await removeMarketplace(marketplaceName);
+        const result = await removeMarketplace(marketplaceName, { cascade });
         s.stop(
           result.success
             ? 'Marketplace removed'
