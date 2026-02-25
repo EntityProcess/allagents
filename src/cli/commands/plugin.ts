@@ -29,6 +29,7 @@ import {
   marketplaceAddMeta,
   marketplaceRemoveMeta,
   marketplaceUpdateMeta,
+  marketplaceBrowseMeta,
   pluginListMeta,
   pluginValidateMeta,
   pluginInstallMeta,
@@ -465,6 +466,125 @@ const marketplaceUpdateCmd = command({
 });
 
 // =============================================================================
+// plugin marketplace browse
+// =============================================================================
+
+const marketplaceBrowseCmd = command({
+  name: 'browse',
+  description: buildDescription(marketplaceBrowseMeta),
+  args: {
+    name: positional({ type: string, displayName: 'name' }),
+  },
+  handler: async ({ name }) => {
+    try {
+      const marketplace = await findMarketplace(name);
+      if (!marketplace) {
+        const error = `Marketplace '${name}' not found`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace browse', error });
+          process.exit(1);
+        }
+        console.error(`Error: ${error}`);
+        console.log('\nTo see registered marketplaces:');
+        console.log('  allagents plugin marketplace list');
+        process.exit(1);
+      }
+
+      const result = await listMarketplacePlugins(name);
+
+      // Build installed lookup
+      const userPlugins = await getInstalledUserPlugins();
+      const projectPlugins = await getInstalledProjectPlugins(process.cwd());
+      const installedMap = new Map<string, InstalledPluginInfo>();
+
+      // Build reverse lookup: repo name -> marketplace name
+      const marketplaces = await listMarketplaces();
+      const repoToMarketplace = new Map<string, string>();
+      for (const mp of marketplaces) {
+        if (mp.source.type === 'github') {
+          const parts = mp.source.location.split('/');
+          if (parts.length >= 2 && parts[1]) {
+            repoToMarketplace.set(parts[1], mp.name);
+          }
+        }
+      }
+      const resolveMarketplaceName = (mpName: string): string => {
+        return repoToMarketplace.get(mpName) ?? mpName;
+      };
+
+      for (const p of userPlugins) {
+        const mpName = resolveMarketplaceName(p.marketplace);
+        installedMap.set(`${p.name}@${mpName}`, p);
+      }
+      for (const p of projectPlugins) {
+        const mpName = resolveMarketplaceName(p.marketplace);
+        installedMap.set(`${p.name}@${mpName}`, p);
+      }
+
+      const plugins = result.plugins.map((plugin) => {
+        const key = `${plugin.name}@${name}`;
+        const installed = installedMap.get(key);
+        return {
+          name: plugin.name,
+          description: plugin.description ?? null,
+          installed: !!installed,
+          scope: installed?.scope ?? null,
+        };
+      });
+
+      const installedCount = plugins.filter((p) => p.installed).length;
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'plugin marketplace browse',
+          data: {
+            marketplace: name,
+            plugins,
+            total: plugins.length,
+            installed: installedCount,
+            ...(result.warnings.length > 0 && { warnings: result.warnings }),
+          },
+        });
+        return;
+      }
+
+      // Print warnings
+      for (const warning of result.warnings) {
+        console.log(`  Warning: ${warning}`);
+      }
+
+      if (plugins.length === 0) {
+        console.log(`No plugins found in "${name}" marketplace.`);
+        return;
+      }
+
+      console.log(`Plugins in "${name}" marketplace:\n`);
+      for (const plugin of plugins) {
+        const status = plugin.installed ? ` (installed - ${plugin.scope})` : '';
+        console.log(`  ❯ ${plugin.name}${status}`);
+        if (plugin.description) {
+          console.log(`    ${plugin.description}`);
+        }
+        console.log();
+      }
+
+      console.log(`Total: ${plugins.length} plugins (${installedCount} installed)`);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace browse', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
 // plugin marketplace subcommands group
 // =============================================================================
 
@@ -473,6 +593,7 @@ const marketplaceCmd = conciseSubcommands({
   description: 'Manage plugin marketplaces',
   cmds: {
     list: marketplaceListCmd,
+    browse: marketplaceBrowseCmd,
     add: marketplaceAddCmd,
     remove: marketplaceRemoveCmd,
     update: marketplaceUpdateCmd,
