@@ -1,6 +1,6 @@
 import type { SyncResult } from '../core/sync.js';
 import type { McpMergeResult } from '../core/vscode-mcp.js';
-import type { NativeSyncResult } from '../core/claude-native.js';
+import type { NativeSyncResult } from '../core/native/types.js';
 
 /**
  * Format MCP server sync results as display lines.
