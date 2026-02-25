@@ -5,7 +5,6 @@ import {
   removeMarketplace,
   updateMarketplace,
   listMarketplacePlugins,
-  getMarketplaceVersion,
   findMarketplace,
   parsePluginSpec,
 } from '../../core/marketplace.js';
@@ -30,6 +29,7 @@ import {
   marketplaceAddMeta,
   marketplaceRemoveMeta,
   marketplaceUpdateMeta,
+  marketplaceBrowseMeta,
   pluginListMeta,
   pluginValidateMeta,
   pluginInstallMeta,
@@ -466,71 +466,38 @@ const marketplaceUpdateCmd = command({
 });
 
 // =============================================================================
-// plugin marketplace subcommands group
+// plugin marketplace browse
 // =============================================================================
 
-const marketplaceCmd = conciseSubcommands({
-  name: 'marketplace',
-  description: 'Manage plugin marketplaces',
-  cmds: {
-    list: marketplaceListCmd,
-    add: marketplaceAddCmd,
-    remove: marketplaceRemoveCmd,
-    update: marketplaceUpdateCmd,
-  },
-});
-
-// =============================================================================
-// plugin list command - list plugins from marketplaces
-// =============================================================================
-
-const pluginListCmd = command({
-  name: 'list',
-  description: buildDescription(pluginListMeta),
+const marketplaceBrowseCmd = command({
+  name: 'browse',
+  description: buildDescription(marketplaceBrowseMeta),
   args: {
-    marketplace: positional({ type: optional(string), displayName: 'marketplace' }),
+    name: positional({ type: string, displayName: 'name' }),
   },
-  handler: async ({ marketplace }) => {
+  handler: async ({ name }) => {
     try {
-      const marketplaces = await listMarketplaces();
-
-      if (marketplaces.length === 0) {
+      if (!await findMarketplace(name)) {
+        const error = `Marketplace '${name}' not found`;
         if (isJsonMode()) {
-          jsonOutput({
-            success: true,
-            command: 'plugin list',
-            data: { plugins: [], total: 0 },
-          });
-          return;
-        }
-        console.log('No marketplaces registered.\n');
-        console.log('Add a marketplace first:');
-        console.log('  allagents plugin marketplace add <source>');
-        return;
-      }
-
-      // Filter to specific marketplace if provided
-      const toList = marketplace
-        ? marketplaces.filter((m) => m.name === marketplace)
-        : marketplaces;
-
-      if (marketplace && toList.length === 0) {
-        if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin list', error: `Marketplace '${marketplace}' not found` });
+          jsonOutput({ success: false, command: 'plugin marketplace browse', error });
           process.exit(1);
         }
-        console.error(`Marketplace '${marketplace}' not found`);
+        console.error(`Error: ${error}`);
+        console.log('\nTo see registered marketplaces:');
+        console.log('  allagents plugin marketplace list');
         process.exit(1);
       }
 
-      // Get installed plugins for status/scope lookup
+      const result = await listMarketplacePlugins(name);
+
+      // Build installed lookup
       const userPlugins = await getInstalledUserPlugins();
       const projectPlugins = await getInstalledProjectPlugins(process.cwd());
       const installedMap = new Map<string, InstalledPluginInfo>();
 
       // Build reverse lookup: repo name -> marketplace name
-      // This handles the case where plugins are stored as "plugin@owner/repo"
-      // but the marketplace is registered with a different name (from manifest)
+      const marketplaces = await listMarketplaces();
       const repoToMarketplace = new Map<string, string>();
       for (const mp of marketplaces) {
         if (mp.source.type === 'github') {
@@ -540,139 +507,144 @@ const pluginListCmd = command({
           }
         }
       }
-
-      // Helper to resolve marketplace name
-      const resolveMarketplaceName = (name: string): string => {
-        return repoToMarketplace.get(name) ?? name;
+      const resolveMarketplaceName = (mpName: string): string => {
+        return repoToMarketplace.get(mpName) ?? mpName;
       };
 
-      // Build lookup map: key is "plugin@marketplace" using resolved names
       for (const p of userPlugins) {
         const mpName = resolveMarketplaceName(p.marketplace);
         installedMap.set(`${p.name}@${mpName}`, p);
       }
-      // Project scope overrides user scope if same plugin is in both
       for (const p of projectPlugins) {
         const mpName = resolveMarketplaceName(p.marketplace);
         installedMap.set(`${p.name}@${mpName}`, p);
       }
 
-      // Get version (commit hash) for each marketplace
-      const versionMap = new Map<string, string | null>();
-      for (const mp of toList) {
-        const version = await getMarketplaceVersion(mp.path);
-        versionMap.set(mp.name, version);
-      }
+      const plugins = result.plugins.map((plugin) => {
+        const key = `${plugin.name}@${name}`;
+        const installed = installedMap.get(key);
+        return {
+          name: plugin.name,
+          description: plugin.description ?? null,
+          installed: !!installed,
+          scope: installed?.scope ?? null,
+        };
+      });
+
+      const installedCount = plugins.filter((p) => p.installed).length;
 
       if (isJsonMode()) {
-        const allPlugins: Array<{
-          name: string;
-          marketplace: string;
-          version: string | null;
-          scope: string | null;
-          enabled: boolean;
-        }> = [];
-        const allWarnings: string[] = [];
-        for (const mp of toList) {
-          const result = await listMarketplacePlugins(mp.name);
-          const version = versionMap.get(mp.name) ?? null;
-          for (const plugin of result.plugins) {
-            const key = `${plugin.name}@${mp.name}`;
-            const installed = installedMap.get(key);
-            allPlugins.push({
-              name: plugin.name,
-              marketplace: mp.name,
-              version,
-              scope: installed?.scope ?? null,
-              enabled: !!installed,
-            });
-          }
-          for (const warning of result.warnings) {
-            allWarnings.push(`${mp.name}: ${warning}`);
-          }
-        }
         jsonOutput({
           success: true,
-          command: 'plugin list',
+          command: 'plugin marketplace browse',
           data: {
-            plugins: allPlugins,
-            total: allPlugins.length,
-            ...(allWarnings.length > 0 && { warnings: allWarnings }),
+            marketplace: name,
+            plugins,
+            total: plugins.length,
+            installed: installedCount,
+            ...(result.warnings.length > 0 && { warnings: result.warnings }),
           },
         });
         return;
       }
 
-      // Text output matching Claude's format
-      let totalPlugins = 0;
-      const allPluginEntries: Array<{
-        name: string;
-        marketplace: string;
-        version: string | null;
-        installed: InstalledPluginInfo | undefined;
-        warning?: string;
-      }> = [];
-
-      for (const mp of toList) {
-        const result = await listMarketplacePlugins(mp.name);
-        const version = versionMap.get(mp.name) ?? null;
-
-        for (const warning of result.warnings) {
-          allPluginEntries.push({
-            name: '',
-            marketplace: mp.name,
-            version,
-            installed: undefined,
-            warning,
-          });
-        }
-
-        for (const plugin of result.plugins) {
-          const key = `${plugin.name}@${mp.name}`;
-          const installed = installedMap.get(key);
-          allPluginEntries.push({
-            name: plugin.name,
-            marketplace: mp.name,
-            version,
-            installed,
-          });
-          totalPlugins++;
-        }
+      // Print warnings
+      for (const warning of result.warnings) {
+        console.log(`  Warning: ${warning}`);
       }
 
-      if (totalPlugins === 0) {
-        console.log('No plugins found in registered marketplaces.');
+      if (plugins.length === 0) {
+        console.log(`No plugins found in "${name}" marketplace.`);
         return;
       }
 
-      // Separate plugins into installed and available
-      const installedPlugins = allPluginEntries.filter((e) => e.installed && !e.warning);
-      const availablePlugins = allPluginEntries.filter((e) => !e.installed && !e.warning);
-      const warnings = allPluginEntries.filter((e) => e.warning);
-
-      // Print warnings first
-      for (const entry of warnings) {
-        console.log(`  Warning: ${entry.warning}`);
-      }
-
-      // Print installed plugins
-      if (installedPlugins.length > 0) {
-        console.log('Installed plugins:\n');
-        for (const entry of installedPlugins) {
-          console.log(`  ❯ ${entry.name}@${entry.marketplace}`);
-          console.log(`    Version: ${entry.version ?? 'unknown'}`);
-          console.log(`    Scope: ${entry.installed?.scope}\n`);
+      console.log(`Plugins in "${name}" marketplace:\n`);
+      for (const plugin of plugins) {
+        const status = plugin.installed ? ` (installed - ${plugin.scope})` : '';
+        console.log(`  ❯ ${plugin.name}${status}`);
+        if (plugin.description) {
+          console.log(`    ${plugin.description}`);
         }
+        console.log();
       }
 
-      // Print available plugins
-      if (availablePlugins.length > 0) {
-        console.log('Available plugins:\n');
-        for (const entry of availablePlugins) {
-          console.log(`  ❯ ${entry.name}@${entry.marketplace}`);
-          console.log(`    Version: ${entry.version ?? 'unknown'}\n`);
+      console.log(`Total: ${plugins.length} plugins (${installedCount} installed)`);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace browse', error: error.message });
+          process.exit(1);
         }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
       }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
+// plugin marketplace subcommands group
+// =============================================================================
+
+const marketplaceCmd = conciseSubcommands({
+  name: 'marketplace',
+  description: 'Manage plugin marketplaces',
+  cmds: {
+    list: marketplaceListCmd,
+    browse: marketplaceBrowseCmd,
+    add: marketplaceAddCmd,
+    remove: marketplaceRemoveCmd,
+    update: marketplaceUpdateCmd,
+  },
+});
+
+// =============================================================================
+// plugin list command - list installed plugins
+// =============================================================================
+
+const pluginListCmd = command({
+  name: 'list',
+  description: buildDescription(pluginListMeta),
+  args: {},
+  handler: async () => {
+    try {
+      const userPlugins = await getInstalledUserPlugins();
+      const projectPlugins = await getInstalledProjectPlugins(process.cwd());
+      const allInstalled = [...userPlugins, ...projectPlugins];
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'plugin list',
+          data: {
+            plugins: allInstalled.map((p) => ({
+              name: p.name,
+              marketplace: p.marketplace,
+              scope: p.scope,
+            })),
+            total: allInstalled.length,
+          },
+        });
+        return;
+      }
+
+      if (allInstalled.length === 0) {
+        console.log('No plugins installed.\n');
+        console.log('To discover available plugins:');
+        console.log('  allagents plugin marketplace browse <name>\n');
+        console.log('To see registered marketplaces:');
+        console.log('  allagents plugin marketplace list');
+        return;
+      }
+
+      console.log('Installed plugins:\n');
+      for (const p of allInstalled) {
+        console.log(`  ❯ ${p.spec}`);
+        console.log(`    Scope: ${p.scope}\n`);
+      }
+
+      console.log(`Total: ${allInstalled.length} installed`);
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
