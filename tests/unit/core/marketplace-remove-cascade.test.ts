@@ -47,7 +47,7 @@ describe('removeMarketplace cascade', () => {
     return load(content) as WorkspaceConfig;
   }
 
-  it('should remove user plugins referencing the removed marketplace', async () => {
+  it('should NOT remove user plugins by default (no cascade)', async () => {
     await writeRegistry({
       'my-marketplace': {
         name: 'my-marketplace',
@@ -69,11 +69,24 @@ describe('removeMarketplace cascade', () => {
     const result = await removeMarketplace('my-marketplace');
     expect(result.success).toBe(true);
 
+    // Plugins should still be in the config — not removed
     const config = await readUserConfig();
-    expect(config.plugins).toEqual(['pluginC@other-marketplace']);
+    expect(config.plugins).toEqual([
+      'pluginA@my-marketplace',
+      'pluginB@my-marketplace',
+      'pluginC@other-marketplace',
+    ]);
+
+    // removedUserPlugins should be undefined (no cascade happened)
+    expect(result.removedUserPlugins).toBeUndefined();
+    // retainedUserPlugins should list the marketplace's plugins
+    expect(result.retainedUserPlugins).toEqual([
+      'pluginA@my-marketplace',
+      'pluginB@my-marketplace',
+    ]);
   });
 
-  it('should return removed user plugins in result', async () => {
+  it('should return retainedUserPlugins listing marketplace plugins', async () => {
     await writeRegistry({
       'my-marketplace': {
         name: 'my-marketplace',
@@ -90,7 +103,8 @@ describe('removeMarketplace cascade', () => {
 
     const result = await removeMarketplace('my-marketplace');
     expect(result.success).toBe(true);
-    expect(result.removedUserPlugins).toEqual(['pluginA@my-marketplace']);
+    expect(result.retainedUserPlugins).toEqual(['pluginA@my-marketplace']);
+    expect(result.removedUserPlugins).toBeUndefined();
   });
 
   it('should succeed even when no user config exists', async () => {
@@ -104,7 +118,8 @@ describe('removeMarketplace cascade', () => {
 
     const result = await removeMarketplace('my-marketplace');
     expect(result.success).toBe(true);
-    expect(result.removedUserPlugins).toEqual([]);
+    expect(result.retainedUserPlugins).toEqual([]);
+    expect(result.removedUserPlugins).toBeUndefined();
   });
 
   it('should succeed when no user plugins reference the marketplace', async () => {
@@ -124,7 +139,38 @@ describe('removeMarketplace cascade', () => {
 
     const result = await removeMarketplace('my-marketplace');
     expect(result.success).toBe(true);
-    expect(result.removedUserPlugins).toEqual([]);
+    expect(result.retainedUserPlugins).toEqual([]);
+  });
+
+  it('should remove user plugins when cascade is explicitly enabled', async () => {
+    await writeRegistry({
+      'my-marketplace': {
+        name: 'my-marketplace',
+        source: { type: 'local', location: '/tmp/mp' },
+        path: '/tmp/mp',
+      },
+    });
+
+    await writeUserConfig({
+      repositories: [],
+      plugins: [
+        'pluginA@my-marketplace',
+        'pluginB@my-marketplace',
+        'pluginC@other-marketplace',
+      ],
+      clients: ['claude'],
+    });
+
+    const result = await removeMarketplace('my-marketplace', { cascade: true });
+    expect(result.success).toBe(true);
+
+    const config = await readUserConfig();
+    expect(config.plugins).toEqual(['pluginC@other-marketplace']);
+    expect(result.removedUserPlugins).toEqual([
+      'pluginA@my-marketplace',
+      'pluginB@my-marketplace',
+    ]);
+    expect(result.retainedUserPlugins).toBeUndefined();
   });
 
   it('should delete the marketplace directory when it exists', async () => {
