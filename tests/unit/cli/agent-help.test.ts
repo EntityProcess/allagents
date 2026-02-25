@@ -6,6 +6,7 @@ import {
   marketplaceAddMeta,
   marketplaceRemoveMeta,
   marketplaceUpdateMeta,
+  marketplaceBrowseMeta,
   pluginListMeta,
   pluginValidateMeta,
   pluginInstallMeta,
@@ -24,6 +25,7 @@ const allCommands: AgentCommandMeta[] = [
   marketplaceAddMeta,
   marketplaceRemoveMeta,
   marketplaceUpdateMeta,
+  marketplaceBrowseMeta,
   pluginListMeta,
   pluginValidateMeta,
   updateMeta,
@@ -56,8 +58,8 @@ describe('extractAgentHelpFlag', () => {
 });
 
 describe('agent command metadata', () => {
-  test('contains exactly 12 commands', () => {
-    expect(allCommands.length).toBe(12);
+  test('contains exactly 13 commands', () => {
+    expect(allCommands.length).toBe(13);
   });
 
   test('all expected commands are present', () => {
@@ -66,6 +68,7 @@ describe('agent command metadata', () => {
       'plugin install',
       'plugin list',
       'plugin marketplace add',
+      'plugin marketplace browse',
       'plugin marketplace list',
       'plugin marketplace remove',
       'plugin marketplace update',
