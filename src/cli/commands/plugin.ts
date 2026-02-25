@@ -477,8 +477,7 @@ const marketplaceBrowseCmd = command({
   },
   handler: async ({ name }) => {
     try {
-      const marketplace = await findMarketplace(name);
-      if (!marketplace) {
+      if (!await findMarketplace(name)) {
         const error = `Marketplace '${name}' not found`;
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'plugin marketplace browse', error });
@@ -612,16 +611,7 @@ const pluginListCmd = command({
     try {
       const userPlugins = await getInstalledUserPlugins();
       const projectPlugins = await getInstalledProjectPlugins(process.cwd());
-
-      // Merge: project-scope entries take precedence over user-scope for same plugin
-      const pluginMap = new Map<string, InstalledPluginInfo>();
-      for (const p of userPlugins) {
-        pluginMap.set(p.spec, p);
-      }
-      for (const p of projectPlugins) {
-        pluginMap.set(p.spec, p);
-      }
-      const allInstalled = [...pluginMap.values()];
+      const allInstalled = [...userPlugins, ...projectPlugins];
 
       if (isJsonMode()) {
         jsonOutput({
