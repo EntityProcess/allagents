@@ -78,21 +78,38 @@ export const marketplaceUpdateMeta: AgentCommandMeta = {
   },
 };
 
-export const pluginListMeta: AgentCommandMeta = {
-  command: 'plugin list',
-  description: 'List available plugins from registered marketplaces',
-  whenToUse: 'To browse available plugins before installing one into your workspace',
+export const marketplaceBrowseMeta: AgentCommandMeta = {
+  command: 'plugin marketplace browse',
+  description: 'Browse available plugins in a marketplace',
+  whenToUse: 'To discover and browse available plugins in a specific marketplace before installing',
   examples: [
-    'allagents plugin list',
-    'allagents plugin list official',
+    'allagents plugin marketplace browse official',
+    'allagents plugin marketplace browse superpowers',
   ],
   expectedOutput:
-    'Lists plugins grouped by marketplace with install-ready names (plugin@marketplace). Shows total count.',
+    'Lists all plugins in the marketplace with descriptions and install status. Shows total count.',
   positionals: [
-    { name: 'marketplace', type: 'string', required: false, description: 'Filter plugins by marketplace name' },
+    { name: 'name', type: 'string', required: true, description: 'Name of the marketplace to browse' },
   ],
   outputSchema: {
-    plugins: [{ name: 'string', marketplace: 'string' }],
+    marketplace: 'string',
+    plugins: [{ name: 'string', description: 'string | null', installed: 'boolean', scope: 'string | null' }],
+    total: 'number',
+    installed: 'number',
+  },
+};
+
+export const pluginListMeta: AgentCommandMeta = {
+  command: 'plugin list',
+  description: 'List installed plugins',
+  whenToUse: 'To see which plugins are currently installed in your workspace',
+  examples: [
+    'allagents plugin list',
+  ],
+  expectedOutput:
+    'Lists installed plugins with their marketplace and scope. If none installed, suggests using marketplace browse.',
+  outputSchema: {
+    plugins: [{ name: 'string', marketplace: 'string', scope: 'string' }],
     total: 'number',
   },
 };
