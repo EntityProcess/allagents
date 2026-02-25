@@ -64,6 +64,7 @@ export type PluginSource = z.infer<typeof PluginSourceSchema>;
  * Supported AI client types
  */
 export const ClientTypeSchema = z.enum([
+  'universal',
   'claude',
   'copilot',
   'codex',
@@ -87,7 +88,6 @@ export const ClientTypeSchema = z.enum([
   'kiro',
   'replit',
   'kimi',
-  'universal',
 ]);
 
 export type ClientType = z.infer<typeof ClientTypeSchema>;
