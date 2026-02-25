@@ -166,19 +166,20 @@ export function parseMarketplaceSource(source: string): {
 } | null {
   // GitHub URL
   if (source.startsWith('https://github.com/')) {
-    const match = source.match(
-      /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/tree\/(.+))?$/,
-    );
-    if (match) {
-      const [, owner, repo, branch] = match;
-      if (!repo) return null;
+    const parsed = parseGitHubUrl(source);
+    if (parsed) {
+      // In marketplace context, subpath after /tree/ is part of the branch name
+      const branch =
+        parsed.branch && parsed.subpath
+          ? `${parsed.branch}/${parsed.subpath}`
+          : parsed.branch;
       const location = branch
-        ? `${owner}/${repo}/${branch}`
-        : `${owner}/${repo}`;
+        ? `${parsed.owner}/${parsed.repo}/${branch}`
+        : `${parsed.owner}/${parsed.repo}`;
       return {
         type: 'github',
         location,
-        name: repo,
+        name: parsed.repo,
         ...(branch && { branch }),
       };
     }

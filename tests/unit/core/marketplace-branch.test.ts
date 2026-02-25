@@ -66,6 +66,15 @@ describe('parseMarketplaceSource branch extraction', () => {
     });
   });
 
+  it('should handle GitHub URL with trailing slash', () => {
+    const result = parseMarketplaceSource('https://github.com/owner/repo/');
+    expect(result).toEqual({
+      type: 'github',
+      location: 'owner/repo',
+      name: 'repo',
+    });
+  });
+
   it('should not extract branch from owner/repo shorthand', () => {
     const result = parseMarketplaceSource('owner/repo');
     expect(result).toEqual({
