@@ -361,17 +361,19 @@ const marketplaceRemoveCmd = command({
           data: {
             name,
             path: result.marketplace?.path,
+            retainedPlugins: result.retainedUserPlugins ?? [],
           },
         });
         return;
       }
 
       console.log(`\u2713 Marketplace '${name}' removed`);
-      if (result.removedUserPlugins && result.removedUserPlugins.length > 0) {
-        console.log(`  Removed ${result.removedUserPlugins.length} user plugin(s):`);
-        for (const p of result.removedUserPlugins) {
+      if (result.retainedUserPlugins && result.retainedUserPlugins.length > 0) {
+        console.log(`\n  \u26A0 ${result.retainedUserPlugins.length} plugin(s) still reference this marketplace:`);
+        for (const p of result.retainedUserPlugins) {
           console.log(`    - ${p}`);
         }
+        console.log(`\n  To remove them: allagents plugin remove <name>`);
       }
     } catch (error) {
       if (error instanceof Error) {
