@@ -616,59 +616,77 @@ const pluginListCmd = command({
       const allInstalled = [...userPlugins, ...projectPlugins];
 
       // Load native plugins from sync state
-      interface NativePluginInfo {
-        spec: string;
-        client: string;
-        scope: 'user' | 'project';
-      }
-      const nativePlugins: NativePluginInfo[] = [];
-      const seen = new Set<string>();
-
       const userSyncState = await loadSyncState(getAllagentsDir());
       const projectSyncState = await loadSyncState(process.cwd());
 
+      // Build merged map: key = "spec:scope" → { spec, scope, nativeClients[] }
+      interface MergedPlugin {
+        spec: string;
+        name: string;
+        marketplace: string;
+        scope: 'user' | 'project';
+        nativeClients: string[];
+      }
+      const merged = new Map<string, MergedPlugin>();
+
+      // Add marketplace plugins
+      for (const p of allInstalled) {
+        const key = `${p.spec}:${p.scope}`;
+        merged.set(key, {
+          spec: p.spec,
+          name: p.name,
+          marketplace: p.marketplace,
+          scope: p.scope,
+          nativeClients: [],
+        });
+      }
+
+      // Merge native plugins
       for (const [state, scope] of [
         [userSyncState, 'user'],
         [projectSyncState, 'project'],
       ] as const) {
         for (const [client, specs] of Object.entries(state?.nativePlugins ?? {})) {
           for (const spec of specs) {
-            const key = `${spec}:${client}:${scope}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              nativePlugins.push({ spec, client, scope });
+            const key = `${spec}:${scope}`;
+            const existing = merged.get(key);
+            if (existing) {
+              if (!existing.nativeClients.includes(client)) {
+                existing.nativeClients.push(client);
+              }
+            } else {
+              merged.set(key, {
+                spec,
+                name: spec.split('@')[0] ?? spec,
+                marketplace: spec.split('@')[1] ?? '',
+                scope,
+                nativeClients: [client],
+              });
             }
           }
         }
       }
 
-      const totalCount = allInstalled.length + nativePlugins.length;
+      const plugins = [...merged.values()];
 
       if (isJsonMode()) {
         jsonOutput({
           success: true,
           command: 'plugin list',
           data: {
-            plugins: [
-              ...allInstalled.map((p) => ({
-                name: p.name,
-                marketplace: p.marketplace,
-                scope: p.scope,
-              })),
-              ...nativePlugins.map((p) => ({
-                name: p.spec,
-                client: p.client,
-                scope: p.scope,
-                native: true,
-              })),
-            ],
-            total: totalCount,
+            plugins: plugins.map((p) => ({
+              name: p.name,
+              marketplace: p.marketplace,
+              scope: p.scope,
+              ...(p.nativeClients.length > 0 && { nativeClients: p.nativeClients }),
+            })),
+            total: plugins.length,
           },
         });
         return;
       }
 
-      if (totalCount === 0) {
+      if (plugins.length === 0) {
         console.log('No plugins installed.\n');
         console.log('To discover available plugins:');
         console.log('  allagents plugin marketplace browse <name>\n');
@@ -678,16 +696,14 @@ const pluginListCmd = command({
       }
 
       console.log('Installed plugins:\n');
-      for (const p of allInstalled) {
-        console.log(`  ❯ ${p.spec}`);
-        console.log(`    Scope: ${p.scope}\n`);
-      }
-      for (const p of nativePlugins) {
-        console.log(`  ❯ ${p.spec} (native: ${p.client})`);
+      for (const p of plugins) {
+        const tags = p.nativeClients.map((c) => `native: ${c}`);
+        const suffix = tags.length > 0 ? ` (${tags.join(', ')})` : '';
+        console.log(`  ❯ ${p.spec}${suffix}`);
         console.log(`    Scope: ${p.scope}\n`);
       }
 
-      console.log(`Total: ${totalCount} installed`);
+      console.log(`Total: ${plugins.length} installed`);
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
