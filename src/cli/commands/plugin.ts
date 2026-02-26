@@ -7,8 +7,10 @@ import {
   listMarketplacePlugins,
   findMarketplace,
   parsePluginSpec,
+  getAllagentsDir,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
+import { loadSyncState } from '../../core/sync-state.js';
 import { addPlugin, removePlugin, hasPlugin } from '../../core/workspace-modify.js';
 import {
   addUserPlugin,
@@ -613,23 +615,60 @@ const pluginListCmd = command({
       const projectPlugins = await getInstalledProjectPlugins(process.cwd());
       const allInstalled = [...userPlugins, ...projectPlugins];
 
+      // Load native plugins from sync state
+      interface NativePluginInfo {
+        spec: string;
+        client: string;
+        scope: 'user' | 'project';
+      }
+      const nativePlugins: NativePluginInfo[] = [];
+      const seen = new Set<string>();
+
+      const userSyncState = await loadSyncState(getAllagentsDir());
+      const projectSyncState = await loadSyncState(process.cwd());
+
+      for (const [state, scope] of [
+        [userSyncState, 'user'],
+        [projectSyncState, 'project'],
+      ] as const) {
+        for (const [client, specs] of Object.entries(state?.nativePlugins ?? {})) {
+          for (const spec of specs) {
+            const key = `${spec}:${client}:${scope}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              nativePlugins.push({ spec, client, scope });
+            }
+          }
+        }
+      }
+
+      const totalCount = allInstalled.length + nativePlugins.length;
+
       if (isJsonMode()) {
         jsonOutput({
           success: true,
           command: 'plugin list',
           data: {
-            plugins: allInstalled.map((p) => ({
-              name: p.name,
-              marketplace: p.marketplace,
-              scope: p.scope,
-            })),
-            total: allInstalled.length,
+            plugins: [
+              ...allInstalled.map((p) => ({
+                name: p.name,
+                marketplace: p.marketplace,
+                scope: p.scope,
+              })),
+              ...nativePlugins.map((p) => ({
+                name: p.spec,
+                client: p.client,
+                scope: p.scope,
+                native: true,
+              })),
+            ],
+            total: totalCount,
           },
         });
         return;
       }
 
-      if (allInstalled.length === 0) {
+      if (totalCount === 0) {
         console.log('No plugins installed.\n');
         console.log('To discover available plugins:');
         console.log('  allagents plugin marketplace browse <name>\n');
@@ -643,8 +682,12 @@ const pluginListCmd = command({
         console.log(`  ❯ ${p.spec}`);
         console.log(`    Scope: ${p.scope}\n`);
       }
+      for (const p of nativePlugins) {
+        console.log(`  ❯ ${p.spec} (native: ${p.client})`);
+        console.log(`    Scope: ${p.scope}\n`);
+      }
 
-      console.log(`Total: ${allInstalled.length} installed`);
+      console.log(`Total: ${totalCount} installed`);
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
