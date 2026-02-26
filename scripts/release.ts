@@ -124,9 +124,6 @@ async function main() {
   pkg.version = newVersion;
   await Bun.write("package.json", JSON.stringify(pkg, null, 2) + "\n");
 
-  // Format the file
-  await $`bunx biome format --write package.json`.quiet();
-
   // Commit the version bump
   await $`git add package.json`;
   await $`git commit -m ${"chore(release): bump version to " + newVersion}`;
