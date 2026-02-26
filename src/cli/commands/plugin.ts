@@ -7,8 +7,10 @@ import {
   listMarketplacePlugins,
   findMarketplace,
   parsePluginSpec,
+  getAllagentsDir,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
+import { loadSyncState } from '../../core/sync-state.js';
 import { addPlugin, removePlugin, hasPlugin } from '../../core/workspace-modify.js';
 import {
   addUserPlugin,
@@ -38,7 +40,18 @@ import {
 } from '../metadata/plugin.js';
 import { skillsCmd } from './plugin-skills.js';
 import { formatMcpResult, formatNativeResult, buildSyncData } from '../format-sync.js';
-import { getPluginSource, type PluginEntry } from '../../models/workspace-config.js';
+import {
+  getPluginSource,
+  getPluginClients,
+  getClientTypes,
+  type PluginEntry,
+  type WorkspaceConfig,
+} from '../../models/workspace-config.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { load } from 'js-yaml';
 
 
 /**
@@ -609,27 +622,113 @@ const pluginListCmd = command({
   args: {},
   handler: async () => {
     try {
+      // Build per-plugin client map from workspace configs
+      // key = "spec:scope" → file-sync client types
+      const pluginClients = new Map<string, string[]>();
+
+      async function loadConfigClients(
+        configPath: string,
+        scope: 'user' | 'project',
+      ): Promise<void> {
+        if (!existsSync(configPath)) return;
+        try {
+          const content = await readFile(configPath, 'utf-8');
+          const config = load(content) as WorkspaceConfig;
+          if (!config?.plugins || !config?.clients) return;
+          const defaultClients = getClientTypes(config.clients);
+          for (const entry of config.plugins) {
+            const spec = getPluginSource(entry);
+            const clients = getPluginClients(entry) ?? defaultClients;
+            pluginClients.set(`${spec}:${scope}`, clients);
+          }
+        } catch { /* ignore read/parse errors */ }
+      }
+
+      const userConfigPath = join(getAllagentsDir(), WORKSPACE_CONFIG_FILE);
+      const projectConfigPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+      await loadConfigClients(userConfigPath, 'user');
+      await loadConfigClients(projectConfigPath, 'project');
+
+      // Get installed marketplace plugins
       const userPlugins = await getInstalledUserPlugins();
       const projectPlugins = await getInstalledProjectPlugins(process.cwd());
       const allInstalled = [...userPlugins, ...projectPlugins];
+
+      // Load native plugins from sync state
+      const userSyncState = await loadSyncState(getAllagentsDir());
+      const projectSyncState = await loadSyncState(process.cwd());
+
+      // Build merged map: key = "spec:scope"
+      interface MergedPlugin {
+        spec: string;
+        name: string;
+        marketplace: string;
+        scope: 'user' | 'project';
+        fileClients: string[];
+        nativeClients: string[];
+      }
+      const merged = new Map<string, MergedPlugin>();
+
+      for (const p of allInstalled) {
+        const key = `${p.spec}:${p.scope}`;
+        merged.set(key, {
+          spec: p.spec,
+          name: p.name,
+          marketplace: p.marketplace,
+          scope: p.scope,
+          fileClients: pluginClients.get(key) ?? [],
+          nativeClients: [],
+        });
+      }
+
+      // Merge native plugins
+      for (const [state, scope] of [
+        [userSyncState, 'user'],
+        [projectSyncState, 'project'],
+      ] as const) {
+        for (const [client, specs] of Object.entries(state?.nativePlugins ?? {})) {
+          for (const spec of specs) {
+            const key = `${spec}:${scope}`;
+            const existing = merged.get(key);
+            if (existing) {
+              if (!existing.nativeClients.includes(client)) {
+                existing.nativeClients.push(client);
+              }
+            } else {
+              merged.set(key, {
+                spec,
+                name: spec.split('@')[0] ?? spec,
+                marketplace: spec.split('@')[1] ?? '',
+                scope,
+                fileClients: [],
+                nativeClients: [client],
+              });
+            }
+          }
+        }
+      }
+
+      const plugins = [...merged.values()];
 
       if (isJsonMode()) {
         jsonOutput({
           success: true,
           command: 'plugin list',
           data: {
-            plugins: allInstalled.map((p) => ({
+            plugins: plugins.map((p) => ({
               name: p.name,
               marketplace: p.marketplace,
               scope: p.scope,
+              ...(p.fileClients.length > 0 && { clients: p.fileClients }),
+              ...(p.nativeClients.length > 0 && { nativeClients: p.nativeClients }),
             })),
-            total: allInstalled.length,
+            total: plugins.length,
           },
         });
         return;
       }
 
-      if (allInstalled.length === 0) {
+      if (plugins.length === 0) {
         console.log('No plugins installed.\n');
         console.log('To discover available plugins:');
         console.log('  allagents plugin marketplace browse <name>\n');
@@ -639,12 +738,22 @@ const pluginListCmd = command({
       }
 
       console.log('Installed plugins:\n');
-      for (const p of allInstalled) {
+      for (const p of plugins) {
         console.log(`  ❯ ${p.spec}`);
-        console.log(`    Scope: ${p.scope}\n`);
+        console.log(`    Scope: ${p.scope}`);
+
+        const hasClients = p.fileClients.length > 0 || p.nativeClients.length > 0;
+        if (hasClients) {
+          const parts = [
+            ...p.nativeClients.map((c) => `native ${c}`),
+            ...p.fileClients,
+          ];
+          console.log(`    Clients: ${parts.join(', ')}`);
+        }
+        console.log('');
       }
 
-      console.log(`Total: ${allInstalled.length} installed`);
+      console.log(`Total: ${plugins.length} installed`);
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
