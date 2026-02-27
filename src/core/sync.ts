@@ -130,6 +130,8 @@ export interface SyncResult {
   error?: string;
   /** Warnings for plugins that were skipped during sync */
   warnings?: string[];
+  /** Informational messages (non-warning) */
+  messages?: string[];
   /** Result of syncing MCP server configs to VS Code */
   mcpResult?: McpMergeResult;
   /** Result of native CLI plugin installations */
@@ -141,6 +143,7 @@ export interface SyncResult {
  */
 export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const warnings = [...(a.warnings || []), ...(b.warnings || [])];
+  const messages = [...(a.messages || []), ...(b.messages || [])];
   const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
   // Use whichever mcpResult is present (only user-scope sync produces one)
   const mcpResult = a.mcpResult ?? b.mcpResult;
@@ -161,6 +164,7 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     totalSkipped: a.totalSkipped + b.totalSkipped,
     totalGenerated: a.totalGenerated + b.totalGenerated,
     ...(warnings.length > 0 && { warnings }),
+    ...(messages.length > 0 && { messages }),
     ...(purgedPaths.length > 0 && { purgedPaths }),
     ...(mcpResult && { mcpResult }),
     ...(nativeResult && { nativeResult }),
@@ -273,6 +277,13 @@ function collectNativePluginSources(validPlugins: ValidatedPlugin[]): {
   }
 
   return { pluginsByClient, marketplaceSourcesByClient };
+}
+
+function attachNativeClientContext(result: NativeSyncResult, clientType: ClientType): NativeSyncResult {
+  return {
+    ...result,
+    pluginsFailed: result.pluginsFailed.map((failure) => ({ ...failure, client: clientType })),
+  };
 }
 
 function collectSyncClients(
@@ -1316,6 +1327,7 @@ export async function syncWorkspace(
     ...planWarnings,
     ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
   ];
+  const messages: string[] = [];
 
   // If ALL plugins failed, abort
   if (validPlugins.length === 0 && filteredPlans.length > 0) {
@@ -1412,7 +1424,7 @@ export async function syncWorkspace(
       if (!cliAvailable) {
         const sources = nativePluginsByClient.get(clientType);
         if (sources && sources.length > 0) {
-          warnings.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
+          messages.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
         }
         continue;
       }
@@ -1443,7 +1455,12 @@ export async function syncWorkspace(
 
       // Install
       if (currentSources.length > 0) {
-        perClientResults.push(await nativeClient.syncPlugins(currentSources, 'project', { cwd: workspacePath }));
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(currentSources, 'project', { cwd: workspacePath }),
+            clientType,
+          ),
+        );
       }
     }
 
@@ -1455,7 +1472,12 @@ export async function syncWorkspace(
     for (const [clientType, sources] of nativePluginsByClient) {
       const nativeClient = getNativeClient(clientType);
       if (nativeClient && sources.length > 0) {
-        perClientResults.push(await nativeClient.syncPlugins(sources, 'project', { cwd: workspacePath, dryRun: true }));
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(sources, 'project', { cwd: workspacePath, dryRun: true }),
+            clientType,
+          ),
+        );
       }
     }
     if (perClientResults.length > 0) {
@@ -1654,6 +1676,7 @@ export async function syncWorkspace(
     totalGenerated,
     purgedPaths,
     ...(warnings.length > 0 && { warnings }),
+    ...(messages.length > 0 && { messages }),
     ...(nativeResult && { nativeResult }),
   };
 }
@@ -1702,6 +1725,7 @@ export async function syncUserWorkspace(
     ...planWarnings,
     ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
   ];
+  const messages: string[] = [];
 
   // If ALL plugins failed, abort
   if (validPlugins.length === 0 && pluginPlans.length > 0) {
@@ -1808,7 +1832,7 @@ export async function syncUserWorkspace(
       if (!cliAvailable) {
         const sources = nativePluginsByClient.get(clientType);
         if (sources && sources.length > 0) {
-          warnings.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
+          messages.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
         }
         continue;
       }
@@ -1838,7 +1862,12 @@ export async function syncUserWorkspace(
 
       // Install
       if (currentSources.length > 0) {
-        perClientResults.push(await nativeClient.syncPlugins(currentSources, 'user'));
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(currentSources, 'user'),
+            clientType,
+          ),
+        );
       }
     }
 
@@ -1850,7 +1879,12 @@ export async function syncUserWorkspace(
     for (const [clientType, sources] of nativePluginsByClient) {
       const nativeClient = getNativeClient(clientType);
       if (nativeClient && sources.length > 0) {
-        perClientResults.push(await nativeClient.syncPlugins(sources, 'user', { dryRun: true }));
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(sources, 'user', { dryRun: true }),
+            clientType,
+          ),
+        );
       }
     }
     if (perClientResults.length > 0) {
@@ -1891,6 +1925,7 @@ export async function syncUserWorkspace(
     totalSkipped,
     totalGenerated,
     ...(warnings.length > 0 && { warnings }),
+    ...(messages.length > 0 && { messages }),
     ...(mcpResult && { mcpResult }),
     ...(nativeResult && { nativeResult }),
   };

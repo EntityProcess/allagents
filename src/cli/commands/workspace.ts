@@ -99,9 +99,10 @@ const syncCmd = command({
     offline: flag({ long: 'offline', description: 'Use cached plugins without fetching latest from remote' }),
     dryRun: flag({ long: 'dry-run', short: 'n', description: 'Simulate sync without making changes' }),
     force: flag({ long: 'force', short: 'f', description: 'Overwrite existing MCP server entries that differ from plugin config' }),
+    verbose: flag({ long: 'verbose', short: 'v', description: 'Show informational sync messages' }),
     client: option({ type: optional(string), long: 'client', short: 'c', description: 'Sync only the specified client (e.g., opencode, claude)' }),
   },
-  handler: async ({ offline, dryRun, force, client }) => {
+  handler: async ({ offline, dryRun, force, verbose, client }) => {
     try {
       if (!isJsonMode() && dryRun) {
         console.log('Dry run mode - no changes will be made\n');
@@ -207,6 +208,14 @@ const syncCmd = command({
         console.log('\nWarnings:');
         for (const warning of result.warnings) {
           console.log(`  \u26A0 ${warning}`);
+        }
+      }
+
+      // Show informational messages
+      if (verbose && result.messages && result.messages.length > 0) {
+        console.log('');
+        for (const message of result.messages) {
+          console.log(`  ${message}`);
         }
       }
 

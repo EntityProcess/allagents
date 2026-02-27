@@ -93,7 +93,7 @@ describe('agent command metadata', () => {
   test('workspace sync has expected options', () => {
     const syncCmd = allCommands.find((c) => c.command === 'workspace sync')!;
     expect(syncCmd.options).toBeInstanceOf(Array);
-    expect(syncCmd.options!.length).toBe(3);
+    expect(syncCmd.options!.length).toBe(4);
 
     const dryRun = syncCmd.options!.find((o) => o.flag === '--dry-run');
     expect(dryRun).toBeDefined();
@@ -104,6 +104,11 @@ describe('agent command metadata', () => {
     expect(client).toBeDefined();
     expect(client!.type).toBe('string');
     expect(client!.short).toBe('-c');
+
+    const verbose = syncCmd.options!.find((o) => o.flag === '--verbose');
+    expect(verbose).toBeDefined();
+    expect(verbose!.type).toBe('boolean');
+    expect(verbose!.short).toBe('-v');
   });
 
   test('plugin install has required positional', () => {

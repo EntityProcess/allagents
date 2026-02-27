@@ -50,8 +50,9 @@ export function formatNativeResult(nativeResult: NativeSyncResult): string[] {
     lines.push(`  + ${plugin} (installed via native CLI)`);
   }
 
-  for (const { plugin, error } of nativeResult.pluginsFailed) {
-    lines.push(`  \u2717 ${plugin}: ${error}`);
+  for (const { client, plugin, error } of nativeResult.pluginsFailed) {
+    const provider = client ? `[${client}] ` : '';
+    lines.push(`  \u2717 ${provider}${plugin}: ${error}`);
   }
 
   for (const plugin of nativeResult.skipped) {
@@ -70,6 +71,7 @@ export function buildSyncData(result: SyncResult) {
     generated: result.totalGenerated,
     failed: result.totalFailed,
     skipped: result.totalSkipped,
+    ...(result.messages && result.messages.length > 0 && { messages: result.messages }),
     plugins: result.pluginResults.map((pr) => ({
       plugin: pr.plugin,
       success: pr.success,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { formatMcpResult } from '../../../src/cli/format-sync.js';
+import { formatMcpResult, formatNativeResult } from '../../../src/cli/format-sync.js';
 import type { McpMergeResult } from '../../../src/core/vscode-mcp.js';
+import type { NativeSyncResult } from '../../../src/core/native/types.js';
 
 function makeResult(overrides: Partial<McpMergeResult> = {}): McpMergeResult {
   return {
@@ -65,5 +66,22 @@ describe('formatMcpResult', () => {
     }));
 
     expect(lines.some((l) => l.includes('File modified'))).toBe(false);
+  });
+});
+
+describe('formatNativeResult', () => {
+  test('includes provider name when present on failed native installs', () => {
+    const result: NativeSyncResult = {
+      marketplacesAdded: [],
+      pluginsInstalled: [],
+      pluginsFailed: [
+        { client: 'copilot', plugin: 'glow@wtg-ai-prompts', error: 'boom' },
+      ],
+      skipped: [],
+    };
+
+    expect(formatNativeResult(result)).toEqual([
+      '  ✗ [copilot] glow@wtg-ai-prompts: boom',
+    ]);
   });
 });
