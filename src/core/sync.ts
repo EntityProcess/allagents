@@ -43,6 +43,7 @@ import {
   isPluginSpec,
   resolvePluginSpecWithAutoRegister,
   ensureMarketplacesRegistered,
+  parsePluginSpec,
 } from './marketplace.js';
 import {
   loadSyncState,
@@ -210,6 +211,8 @@ export interface ValidatedPlugin {
   error?: string;
   /** Plugin name from marketplace manifest (overrides plugin.json / directory name) */
   pluginName?: string;
+  /** Canonical marketplace name when it differs from the spec (e.g., manifest overrides repo name) */
+  registeredAs?: string;
 }
 
 interface PluginSyncPlan {
@@ -217,6 +220,59 @@ interface PluginSyncPlan {
   clients: ClientType[];
   /** Clients that should use native install for this plugin */
   nativeClients: ClientType[];
+}
+
+/**
+ * Build a native-friendly plugin spec using the canonical marketplace name.
+ * When a marketplace manifest overrides the repo name (e.g., repo "WTG.AI.Prompts"
+ * → manifest name "wtg-ai-prompts"), the native CLI only knows the canonical name.
+ *
+ * Returns the canonical spec and, if applicable, the original owner/repo source
+ * needed to pre-register the marketplace with the native CLI.
+ */
+function resolveNativePluginSource(vp: ValidatedPlugin): {
+  spec: string;
+  marketplaceSource?: string;
+} {
+  if (!vp.registeredAs) return { spec: vp.plugin };
+
+  const parsed = parsePluginSpec(vp.plugin);
+  if (!parsed) return { spec: vp.plugin };
+
+  const canonicalSpec = `${parsed.plugin}@${vp.registeredAs}`;
+  if (parsed.owner && parsed.repo) {
+    return { spec: canonicalSpec, marketplaceSource: `${parsed.owner}/${parsed.repo}` };
+  }
+  return { spec: canonicalSpec };
+}
+
+/**
+ * Collect native plugin specs and marketplace sources from validated plugins.
+ * Resolves canonical marketplace names so native CLI operations use the correct spec.
+ */
+function collectNativePluginSources(validPlugins: ValidatedPlugin[]): {
+  pluginsByClient: Map<ClientType, string[]>;
+  marketplaceSourcesByClient: Map<ClientType, Set<string>>;
+} {
+  const pluginsByClient = new Map<ClientType, string[]>();
+  const marketplaceSourcesByClient = new Map<ClientType, Set<string>>();
+
+  for (const vp of validPlugins) {
+    for (const client of vp.nativeClients) {
+      const existing = pluginsByClient.get(client) ?? [];
+      const { spec, marketplaceSource } = resolveNativePluginSource(vp);
+      existing.push(spec);
+      pluginsByClient.set(client, existing);
+
+      if (marketplaceSource) {
+        const sources = marketplaceSourcesByClient.get(client) ?? new Set();
+        sources.add(marketplaceSource);
+        marketplaceSourcesByClient.set(client, sources);
+      }
+    }
+  }
+
+  return { pluginsByClient, marketplaceSourcesByClient };
 }
 
 function collectSyncClients(
@@ -757,6 +813,7 @@ async function validatePlugin(
       clients: [],
       nativeClients: [],
       ...(resolved.pluginName && { pluginName: resolved.pluginName }),
+      ...(resolved.registeredAs && { registeredAs: resolved.registeredAs }),
     };
   }
 
@@ -1324,15 +1381,10 @@ export async function syncWorkspace(
 
   // Step 4b: Native CLI installations
   let nativeResult: NativeSyncResult | undefined;
-  const nativePluginsByClient = new Map<ClientType, string[]>();
-
-  for (const vp of validPlugins) {
-    for (const client of vp.nativeClients) {
-      const existing = nativePluginsByClient.get(client) ?? [];
-      existing.push(vp.plugin);
-      nativePluginsByClient.set(client, existing);
-    }
-  }
+  const {
+    pluginsByClient: nativePluginsByClient,
+    marketplaceSourcesByClient: nativeMarketplaceSources,
+  } = collectNativePluginSources(validPlugins);
 
   // Detect clients that previously had native plugins but no longer do (mode switch or removal)
   const previousNativeClients = previousState?.nativePlugins
@@ -1363,6 +1415,15 @@ export async function syncWorkspace(
           warnings.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
         }
         continue;
+      }
+
+      // Pre-register marketplaces whose canonical name differs from repo name.
+      // syncPlugins won't extract these from canonical specs (no owner/repo).
+      const marketplaceSources = nativeMarketplaceSources.get(clientType);
+      if (marketplaceSources) {
+        for (const source of marketplaceSources) {
+          await nativeClient.addMarketplace(source, { cwd: workspacePath });
+        }
       }
 
       // Uninstall removed plugins
@@ -1716,15 +1777,10 @@ export async function syncUserWorkspace(
 
   // Run native CLI installations for user scope
   let nativeResult: NativeSyncResult | undefined;
-  const nativePluginsByClient = new Map<ClientType, string[]>();
-
-  for (const vp of validPlugins) {
-    for (const client of vp.nativeClients) {
-      const existing = nativePluginsByClient.get(client) ?? [];
-      existing.push(vp.plugin);
-      nativePluginsByClient.set(client, existing);
-    }
-  }
+  const {
+    pluginsByClient: nativePluginsByClient,
+    marketplaceSourcesByClient: nativeMarketplaceSources,
+  } = collectNativePluginSources(validPlugins);
 
   // Detect clients that previously had native plugins but no longer do
   const previousNativeClients = previousState?.nativePlugins
@@ -1755,6 +1811,14 @@ export async function syncUserWorkspace(
           warnings.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
         }
         continue;
+      }
+
+      // Pre-register marketplaces whose canonical name differs from repo name
+      const marketplaceSources = nativeMarketplaceSources.get(clientType);
+      if (marketplaceSources) {
+        for (const source of marketplaceSources) {
+          await nativeClient.addMarketplace(source);
+        }
       }
 
       // Uninstall removed plugins
