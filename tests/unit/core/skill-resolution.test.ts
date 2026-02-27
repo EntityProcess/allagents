@@ -59,10 +59,10 @@ description: Skill B
     expect(skills).toHaveLength(0);
   });
 
-  it('should skip skill directories without SKILL.md', async () => {
+  it('should include skill directories without SKILL.md', async () => {
     const pluginDir = join(testDir, 'plugin-with-stale');
     await mkdir(join(pluginDir, 'skills', 'valid-skill'), { recursive: true });
-    await mkdir(join(pluginDir, 'skills', 'stale-skill'), { recursive: true });
+    await mkdir(join(pluginDir, 'skills', 'no-skillmd'), { recursive: true });
     await writeFile(
       join(pluginDir, 'skills', 'valid-skill', 'SKILL.md'),
       `---
@@ -70,12 +70,12 @@ name: valid-skill
 description: Valid Skill
 ---`,
     );
-    // stale-skill has no SKILL.md (e.g., removed from marketplace)
 
     const skills = await collectPluginSkills(pluginDir, 'test-source');
 
-    expect(skills).toHaveLength(1);
-    expect(skills[0]?.folderName).toBe('valid-skill');
+    expect(skills).toHaveLength(2);
+    const names = skills.map((s) => s.folderName).sort();
+    expect(names).toEqual(['no-skillmd', 'valid-skill']);
   });
 
   it('should ignore files in skills directory (only dirs)', async () => {
