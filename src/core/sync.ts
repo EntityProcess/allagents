@@ -130,6 +130,8 @@ export interface SyncResult {
   error?: string;
   /** Warnings for plugins that were skipped during sync */
   warnings?: string[];
+  /** Informational messages (non-warning) */
+  messages?: string[];
   /** Result of syncing MCP server configs to VS Code */
   mcpResult?: McpMergeResult;
   /** Result of native CLI plugin installations */
@@ -141,6 +143,7 @@ export interface SyncResult {
  */
 export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const warnings = [...(a.warnings || []), ...(b.warnings || [])];
+  const messages = [...(a.messages || []), ...(b.messages || [])];
   const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
   // Use whichever mcpResult is present (only user-scope sync produces one)
   const mcpResult = a.mcpResult ?? b.mcpResult;
@@ -161,6 +164,7 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     totalSkipped: a.totalSkipped + b.totalSkipped,
     totalGenerated: a.totalGenerated + b.totalGenerated,
     ...(warnings.length > 0 && { warnings }),
+    ...(messages.length > 0 && { messages }),
     ...(purgedPaths.length > 0 && { purgedPaths }),
     ...(mcpResult && { mcpResult }),
     ...(nativeResult && { nativeResult }),
@@ -1316,6 +1320,7 @@ export async function syncWorkspace(
     ...planWarnings,
     ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
   ];
+  const messages: string[] = [];
 
   // If ALL plugins failed, abort
   if (validPlugins.length === 0 && filteredPlans.length > 0) {
@@ -1412,7 +1417,7 @@ export async function syncWorkspace(
       if (!cliAvailable) {
         const sources = nativePluginsByClient.get(clientType);
         if (sources && sources.length > 0) {
-          warnings.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
+          messages.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
         }
         continue;
       }
@@ -1654,6 +1659,7 @@ export async function syncWorkspace(
     totalGenerated,
     purgedPaths,
     ...(warnings.length > 0 && { warnings }),
+    ...(messages.length > 0 && { messages }),
     ...(nativeResult && { nativeResult }),
   };
 }
@@ -1702,6 +1708,7 @@ export async function syncUserWorkspace(
     ...planWarnings,
     ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
   ];
+  const messages: string[] = [];
 
   // If ALL plugins failed, abort
   if (validPlugins.length === 0 && pluginPlans.length > 0) {
@@ -1808,7 +1815,7 @@ export async function syncUserWorkspace(
       if (!cliAvailable) {
         const sources = nativePluginsByClient.get(clientType);
         if (sources && sources.length > 0) {
-          warnings.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
+          messages.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
         }
         continue;
       }
@@ -1891,6 +1898,7 @@ export async function syncUserWorkspace(
     totalSkipped,
     totalGenerated,
     ...(warnings.length > 0 && { warnings }),
+    ...(messages.length > 0 && { messages }),
     ...(mcpResult && { mcpResult }),
     ...(nativeResult && { nativeResult }),
   };

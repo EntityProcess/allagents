@@ -210,6 +210,14 @@ const syncCmd = command({
         }
       }
 
+      // Show informational messages
+      if (result.messages && result.messages.length > 0) {
+        console.log('');
+        for (const message of result.messages) {
+          console.log(`  ${message}`);
+        }
+      }
+
       // Print MCP server sync results
       if (result.mcpResult) {
         const mcpLines = formatMcpResult(result.mcpResult);

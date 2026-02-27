@@ -70,6 +70,7 @@ export function buildSyncData(result: SyncResult) {
     generated: result.totalGenerated,
     failed: result.totalFailed,
     skipped: result.totalSkipped,
+    ...(result.messages && result.messages.length > 0 && { messages: result.messages }),
     plugins: result.pluginResults.map((pr) => ({
       plugin: pr.plugin,
       success: pr.success,

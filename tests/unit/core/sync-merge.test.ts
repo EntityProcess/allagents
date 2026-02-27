@@ -76,6 +76,29 @@ describe('mergeSyncResults', () => {
     expect(merged.warnings).toEqual(['warn1', 'warn2']);
   });
 
+  test('merges messages from both results', () => {
+    const a: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      messages: ['msg1'],
+    };
+    const b: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      messages: ['msg2'],
+    };
+    const merged = mergeSyncResults(a, b);
+    expect(merged.messages).toEqual(['msg1', 'msg2']);
+  });
+
   test('merges nativeResult from both results', () => {
     const a: SyncResult = {
       success: true,
