@@ -5,7 +5,6 @@ import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
 import { CLIENT_MAPPINGS, isUniversalClient } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import type { ClientType, WorkspaceFile, SyncMode } from '../models/workspace-config.js';
-import { validateSkill } from '../validators/skill.js';
 import { generateWorkspaceRules, type WorkspaceRepository } from '../constants.js';
 import { parseFileSource } from '../utils/plugin-path.js';
 import { createSymlink } from '../utils/symlink.js';
@@ -239,17 +238,6 @@ export async function copySkills(
     // Use resolved name from skillNameMap if available, otherwise use folder name
     const resolvedName = skillNameMap?.get(entry.name) ?? entry.name;
     const skillDestPath = join(destDir, resolvedName);
-
-    // Validate skill before copying
-    const validation = await validateSkill(skillSourcePath);
-    if (!validation.valid) {
-      return {
-        source: skillSourcePath,
-        destination: skillDestPath,
-        action: 'failed',
-        ...(validation.error && { error: validation.error }),
-      };
-    }
 
     if (dryRun) {
       return {
