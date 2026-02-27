@@ -941,13 +941,21 @@ export async function resolvePluginSpecWithAutoRegister(
     };
   }
 
-  // Pull latest marketplace if online and not yet updated this session
+  // Pull latest marketplace if online, not freshly cloned, and not yet updated this session
   if (
+    !didAutoRegister &&
     !options.offline &&
     marketplace.source.type === 'github' &&
     !updatedMarketplaceCache.has(marketplace.name)
   ) {
-    await updateMarketplace(marketplace.name);
+    const results = await updateMarketplace(marketplace.name);
+    const result = results[0];
+    if (result?.success) {
+      updatedMarketplaceCache.add(marketplace.name);
+    }
+  }
+  // Mark freshly cloned marketplaces as updated so subsequent calls skip the pull
+  if (didAutoRegister) {
     updatedMarketplaceCache.add(marketplace.name);
   }
 

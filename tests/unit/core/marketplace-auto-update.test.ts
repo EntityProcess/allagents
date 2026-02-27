@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 // Track calls
 const pullCalls: Array<{ path: string }> = [];
 const simpleGitCalls: Array<{ method: string; args: unknown[] }> = [];
+let pullShouldFail = false;
 
 function createMockGit() {
   return {
@@ -32,6 +33,7 @@ mock.module('simple-git', () => ({
 mock.module('../../../src/core/git.js', () => ({
   pull: mock((path: string) => {
     pullCalls.push({ path });
+    if (pullShouldFail) return Promise.reject(new Error('network timeout'));
     return Promise.resolve();
   }),
   cloneTo: mock((_url: string, path: string) => {
@@ -62,6 +64,7 @@ describe('resolvePluginSpecWithAutoRegister auto-updates marketplace', () => {
     process.env.HOME = testHome;
     pullCalls.length = 0;
     simpleGitCalls.length = 0;
+    pullShouldFail = false;
     resetUpdatedMarketplaceCache();
   });
 
@@ -219,5 +222,68 @@ describe('resolvePluginSpecWithAutoRegister auto-updates marketplace', () => {
     expect(pullCalls.length).toBe(2);
     expect(pullCalls[0].path).toBe(mpPath1);
     expect(pullCalls[1].path).toBe(mpPath2);
+  });
+
+  it('retries pull on next call when previous pull failed', async () => {
+    const mpPath = setupMarketplace('test-mp', [
+      { name: 'my-plugin', source: './plugins/my-plugin' },
+    ]);
+    setupRegistry({
+      'test-mp': {
+        name: 'test-mp',
+        source: { type: 'github', location: 'owner/test-mp' },
+        path: mpPath,
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+      },
+    });
+
+    // First call: pull fails
+    pullShouldFail = true;
+    const result1 = await resolvePluginSpecWithAutoRegister('my-plugin@test-mp');
+    // Plugin still resolves from cached state
+    expect(result1.success).toBe(true);
+    expect(pullCalls.length).toBe(1);
+
+    // Second call: pull should be retried (not cached as updated)
+    pullShouldFail = false;
+    pullCalls.length = 0;
+    const result2 = await resolvePluginSpecWithAutoRegister('my-plugin@test-mp');
+    expect(result2.success).toBe(true);
+    expect(pullCalls.length).toBe(1);
+  });
+
+  it('skips pull for freshly auto-registered marketplace', async () => {
+    // No registry or marketplace pre-setup — auto-register will clone fresh
+    const registryDir = join(testHome, '.allagents');
+    mkdirSync(registryDir, { recursive: true });
+    writeFileSync(
+      join(registryDir, 'marketplaces.json'),
+      JSON.stringify({ version: 1, marketplaces: {} }, null, 2),
+    );
+
+    // The auto-register path will clone the marketplace. We need the cloned
+    // directory to contain the plugin so resolution succeeds.
+    const gitMod = await import('../../../src/core/git.js');
+    const cloneToMock = gitMod.cloneTo as ReturnType<typeof mock>;
+    cloneToMock.mockImplementation((_url: string, path: string) => {
+      mkdirSync(join(path, '.claude-plugin'), { recursive: true });
+      writeFileSync(
+        join(path, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify({
+          name: 'fresh-mp',
+          plugins: [{ name: 'my-plugin', source: './plugins/my-plugin' }],
+        }),
+      );
+      mkdirSync(join(path, 'plugins', 'my-plugin'), { recursive: true });
+      return Promise.resolve();
+    });
+
+    const result = await resolvePluginSpecWithAutoRegister(
+      'my-plugin@owner/fresh-mp',
+    );
+
+    expect(result.success).toBe(true);
+    // No pull should have happened — marketplace was just cloned fresh
+    expect(pullCalls.length).toBe(0);
   });
 });
