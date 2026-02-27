@@ -941,6 +941,24 @@ export async function resolvePluginSpecWithAutoRegister(
     };
   }
 
+  // Pull latest marketplace if online, not freshly cloned, and not yet updated this session
+  if (
+    !didAutoRegister &&
+    !options.offline &&
+    marketplace.source.type === 'github' &&
+    !updatedMarketplaceCache.has(marketplace.name)
+  ) {
+    const results = await updateMarketplace(marketplace.name);
+    const result = results[0];
+    if (result?.success) {
+      updatedMarketplaceCache.add(marketplace.name);
+    }
+  }
+  // Mark freshly cloned marketplaces as updated so subsequent calls skip the pull
+  if (didAutoRegister) {
+    updatedMarketplaceCache.add(marketplace.name);
+  }
+
   // Determine the expected subpath for error messages
   const expectedSubpath = subpath ?? 'plugins';
 
@@ -998,6 +1016,17 @@ const registeredSourceCache = new Map<string, string>();
 /** Reset the auto-register cache (for testing only). */
 export function resetAutoRegisterCache(): void {
   registeredSourceCache.clear();
+}
+
+/**
+ * In-memory cache of marketplaces already updated (git pull) in this process.
+ * Ensures each marketplace is only pulled once per CLI session.
+ */
+const updatedMarketplaceCache = new Set<string>();
+
+/** Reset the updated-marketplace cache (for testing only). */
+export function resetUpdatedMarketplaceCache(): void {
+  updatedMarketplaceCache.clear();
 }
 
 /**
