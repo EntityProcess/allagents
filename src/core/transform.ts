@@ -331,11 +331,7 @@ export async function collectPluginSkills(
   }
 
   const entries = await readdir(skillsDir, { withFileTypes: true });
-  // Only include directories that contain a SKILL.md file.
-  // Stale directories (e.g., skills removed from marketplace) are skipped.
-  const skillDirs = entries.filter(
-    (e) => e.isDirectory() && existsSync(join(skillsDir, e.name, 'SKILL.md')),
-  );
+  const skillDirs = entries.filter((e) => e.isDirectory());
 
   // Filter out disabled skills if disabledSkills set is provided
   const filteredDirs = disabledSkills && pluginName
