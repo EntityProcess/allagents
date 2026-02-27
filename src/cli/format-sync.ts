@@ -50,8 +50,9 @@ export function formatNativeResult(nativeResult: NativeSyncResult): string[] {
     lines.push(`  + ${plugin} (installed via native CLI)`);
   }
 
-  for (const { plugin, error } of nativeResult.pluginsFailed) {
-    lines.push(`  \u2717 ${plugin}: ${error}`);
+  for (const { client, plugin, error } of nativeResult.pluginsFailed) {
+    const provider = client ? `[${client}] ` : '';
+    lines.push(`  \u2717 ${provider}${plugin}: ${error}`);
   }
 
   for (const plugin of nativeResult.skipped) {

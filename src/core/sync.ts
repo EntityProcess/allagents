@@ -279,6 +279,13 @@ function collectNativePluginSources(validPlugins: ValidatedPlugin[]): {
   return { pluginsByClient, marketplaceSourcesByClient };
 }
 
+function attachNativeClientContext(result: NativeSyncResult, clientType: ClientType): NativeSyncResult {
+  return {
+    ...result,
+    pluginsFailed: result.pluginsFailed.map((failure) => ({ ...failure, client: clientType })),
+  };
+}
+
 function collectSyncClients(
   clientEntries: ClientEntry[],
   plans: PluginSyncPlan[],
@@ -1448,7 +1455,12 @@ export async function syncWorkspace(
 
       // Install
       if (currentSources.length > 0) {
-        perClientResults.push(await nativeClient.syncPlugins(currentSources, 'project', { cwd: workspacePath }));
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(currentSources, 'project', { cwd: workspacePath }),
+            clientType,
+          ),
+        );
       }
     }
 
@@ -1460,7 +1472,12 @@ export async function syncWorkspace(
     for (const [clientType, sources] of nativePluginsByClient) {
       const nativeClient = getNativeClient(clientType);
       if (nativeClient && sources.length > 0) {
-        perClientResults.push(await nativeClient.syncPlugins(sources, 'project', { cwd: workspacePath, dryRun: true }));
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(sources, 'project', { cwd: workspacePath, dryRun: true }),
+            clientType,
+          ),
+        );
       }
     }
     if (perClientResults.length > 0) {
@@ -1845,7 +1862,12 @@ export async function syncUserWorkspace(
 
       // Install
       if (currentSources.length > 0) {
-        perClientResults.push(await nativeClient.syncPlugins(currentSources, 'user'));
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(currentSources, 'user'),
+            clientType,
+          ),
+        );
       }
     }
 
@@ -1857,7 +1879,12 @@ export async function syncUserWorkspace(
     for (const [clientType, sources] of nativePluginsByClient) {
       const nativeClient = getNativeClient(clientType);
       if (nativeClient && sources.length > 0) {
-        perClientResults.push(await nativeClient.syncPlugins(sources, 'user', { dryRun: true }));
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(sources, 'user', { dryRun: true }),
+            clientType,
+          ),
+        );
       }
     }
     if (perClientResults.length > 0) {

@@ -100,9 +100,13 @@ export class CopilotNativeClient implements NativeClient {
       if (installResult.success) {
         result.pluginsInstalled.push(spec);
       } else {
+        const rawError = installResult.error ?? 'Unknown error';
+        const error = rawError.includes('Plugin path escapes marketplace directory')
+          ? `${rawError} (Copilot rejected a plugin path from this marketplace manifest. Use file install for copilot to avoid native install for this plugin.)`
+          : rawError;
         result.pluginsFailed.push({
           plugin: spec,
-          error: installResult.error ?? 'Unknown error',
+          error,
         });
       }
     }
