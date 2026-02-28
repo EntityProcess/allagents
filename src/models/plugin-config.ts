@@ -9,6 +9,7 @@ export const PluginManifestSchema = z.object({
   description: z.string(),
   author: z.string().optional(),
   license: z.string().optional(),
+  exclude: z.array(z.string()).optional(),
 });
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;
