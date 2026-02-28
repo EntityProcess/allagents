@@ -1,5 +1,9 @@
-import { describe, expect, test } from 'bun:test';
-import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../../../src/models/client-mapping.js';
+import { describe, expect, it, test } from 'bun:test';
+import {
+  CLIENT_MAPPINGS,
+  USER_CLIENT_MAPPINGS,
+  resolveClientMappings,
+} from '../../../src/models/client-mapping.js';
 
 describe('CLIENT_MAPPINGS', () => {
   test('defines project-level paths for all supported clients', () => {
@@ -49,8 +53,9 @@ describe('CLIENT_MAPPINGS', () => {
     expect(CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.ampcode/skills/');
   });
 
-  test('vscode uses provider-specific .github/skills/ path', () => {
-    expect(CLIENT_MAPPINGS.vscode.skillsPath).toBe('.github/skills/');
+  test('vscode defaults to .agents/skills/ path', () => {
+    expect(CLIENT_MAPPINGS.vscode.skillsPath).toBe('.agents/skills/');
+    expect(CLIENT_MAPPINGS.vscode.githubPath).toBeUndefined();
   });
 
   test('openclaw uses root-level skills/ path (no dot prefix)', () => {
@@ -140,8 +145,9 @@ describe('USER_CLIENT_MAPPINGS', () => {
     expect(USER_CLIENT_MAPPINGS.ampcode.skillsPath).toBe('.ampcode/skills/');
   });
 
-  test('vscode uses provider-specific ~/.copilot/skills/ path', () => {
-    expect(USER_CLIENT_MAPPINGS.vscode.skillsPath).toBe('.copilot/skills/');
+  test('vscode defaults to .agents/skills/ path', () => {
+    expect(USER_CLIENT_MAPPINGS.vscode.skillsPath).toBe('.agents/skills/');
+    expect(USER_CLIENT_MAPPINGS.vscode.githubPath).toBeUndefined();
   });
 
   test('openclaw uses root-level skills/ path', () => {
@@ -173,5 +179,57 @@ describe('USER_CLIENT_MAPPINGS', () => {
       expect(mapping.skillsPath).not.toMatch(/^\//);
       if (mapping.commandsPath) expect(mapping.commandsPath).not.toMatch(/^\//);
     }
+  });
+});
+
+describe('resolveClientMappings', () => {
+  describe('project-level (CLIENT_MAPPINGS)', () => {
+    it('should default vscode to .agents/skills/ when no copilot', () => {
+      const resolved = resolveClientMappings(['vscode'], CLIENT_MAPPINGS);
+      expect(resolved.vscode.skillsPath).toBe('.agents/skills/');
+      expect(resolved.vscode.githubPath).toBeUndefined();
+    });
+
+    it('should resolve vscode to .github/skills/ when copilot is present', () => {
+      const resolved = resolveClientMappings(['copilot', 'vscode'], CLIENT_MAPPINGS);
+      expect(resolved.vscode.skillsPath).toBe('.github/skills/');
+      expect(resolved.vscode.githubPath).toBe('.github/');
+    });
+
+    it('should resolve vscode to .github/skills/ when both copilot and universal are present', () => {
+      const resolved = resolveClientMappings(['universal', 'copilot', 'vscode'], CLIENT_MAPPINGS);
+      expect(resolved.vscode.skillsPath).toBe('.github/skills/');
+      expect(resolved.vscode.githubPath).toBe('.github/');
+    });
+
+    it('should resolve vscode to .agents/skills/ when universal is present but not copilot', () => {
+      const resolved = resolveClientMappings(['universal', 'vscode'], CLIENT_MAPPINGS);
+      expect(resolved.vscode.skillsPath).toBe('.agents/skills/');
+      expect(resolved.vscode.githubPath).toBeUndefined();
+    });
+
+    it('should not modify non-vscode client mappings', () => {
+      const resolved = resolveClientMappings(['copilot', 'vscode', 'claude'], CLIENT_MAPPINGS);
+      expect(resolved.copilot).toEqual(CLIENT_MAPPINGS.copilot);
+      expect(resolved.claude).toEqual(CLIENT_MAPPINGS.claude);
+    });
+
+    it('should return baseMappings unchanged when vscode is not in clients', () => {
+      const resolved = resolveClientMappings(['copilot', 'claude'], CLIENT_MAPPINGS);
+      expect(resolved).toBe(CLIENT_MAPPINGS); // same reference
+    });
+  });
+
+  describe('user-level (USER_CLIENT_MAPPINGS)', () => {
+    it('should default vscode to .agents/skills/ when no copilot', () => {
+      const resolved = resolveClientMappings(['vscode'], USER_CLIENT_MAPPINGS);
+      expect(resolved.vscode.skillsPath).toBe('.agents/skills/');
+    });
+
+    it('should resolve vscode to .copilot/skills/ when copilot is present', () => {
+      const resolved = resolveClientMappings(['copilot', 'vscode'], USER_CLIENT_MAPPINGS);
+      expect(resolved.vscode.skillsPath).toBe('.copilot/skills/');
+      expect(resolved.vscode.githubPath).toBe('.copilot/');
+    });
   });
 });
