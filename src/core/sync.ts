@@ -24,7 +24,7 @@ import {
   parseGitHubUrl,
   parseFileSource,
 } from '../utils/plugin-path.js';
-import { fetchPlugin, getPluginName } from './plugin.js';
+import { fetchPlugin, getPluginName, getPluginManifest } from './plugin.js';
 import {
   copyPluginToWorkspace,
   copyWorkspaceFiles,
@@ -988,6 +988,10 @@ async function copyValidatedPlugin(
   const mappings = clientMappings ?? CLIENT_MAPPINGS;
   const clientList = clients;
 
+  // Load plugin manifest to get exclude patterns
+  const manifest = await getPluginManifest(validatedPlugin.resolved);
+  const exclude = manifest?.exclude;
+
   const hasUniversalClient = clientList.some((c) => isUniversalClient(c));
 
   if (syncMode === 'symlink' && hasUniversalClient) {
@@ -1010,6 +1014,7 @@ async function copyValidatedPlugin(
             ...(skillNameMap && { skillNameMap }),
             ...(clientMappings && { clientMappings }),
             syncMode: 'copy',
+            ...(exclude && { exclude }),
           },
         );
         copyResults.push(...results);
@@ -1025,6 +1030,7 @@ async function copyValidatedPlugin(
             ...(clientMappings && { clientMappings }),
             syncMode: 'symlink',
             canonicalSkillsPath: CANONICAL_SKILLS_PATH,
+            ...(exclude && { exclude }),
           },
         );
         copyResults.push(...results);
@@ -1044,6 +1050,7 @@ async function copyValidatedPlugin(
           ...(skillNameMap && { skillNameMap }),
           ...(clientMappings && { clientMappings }),
           syncMode: 'copy',
+          ...(exclude && { exclude }),
         },
       );
       copyResults.push(...results);
