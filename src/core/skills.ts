@@ -79,7 +79,7 @@ export async function getAllSkillsFromPlugins(
     const pluginPath = await resolvePluginPath(pluginSource, workspacePath);
     if (!pluginPath) continue;
 
-    const pluginName = await getPluginName(pluginPath);
+    const pluginName = getPluginName(pluginPath);
     const skillsDir = join(pluginPath, 'skills');
 
     if (!existsSync(skillsDir)) continue;

@@ -214,7 +214,7 @@ export interface ValidatedPlugin {
   /** Clients that should use native install for this plugin */
   nativeClients: ClientType[];
   error?: string;
-  /** Plugin name from marketplace manifest (overrides plugin.json / directory name) */
+  /** Plugin name from marketplace manifest (overrides directory name) */
   pluginName?: string;
   /** Canonical marketplace name when it differs from the spec (e.g., manifest overrides repo name) */
   registeredAs?: string;
@@ -1079,7 +1079,7 @@ async function copyValidatedPlugin(
 interface CollectedSkillEntry {
   /** Skill folder name */
   folderName: string;
-  /** Plugin name (from plugin.json or directory name) */
+  /** Plugin name (directory name) */
   pluginName: string;
   /** Plugin source reference */
   pluginSource: string;
@@ -1101,7 +1101,7 @@ async function collectAllSkills(
   const allSkills: CollectedSkillEntry[] = [];
 
   for (const plugin of validatedPlugins) {
-    const pluginName = plugin.pluginName ?? await getPluginName(plugin.resolved);
+    const pluginName = plugin.pluginName ?? getPluginName(plugin.resolved);
     const skills = await collectPluginSkills(
       plugin.resolved,
       plugin.plugin,
