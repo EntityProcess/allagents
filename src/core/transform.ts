@@ -485,7 +485,7 @@ async function copyAndAdjustDirectory(
 
     // Check exclusion using path relative to plugin root (prefixed with .github/)
     if (exclude && exclude.length > 0) {
-      const relativeToPluginRoot = '.github/' + relative(sourceBase, sourcePath).replaceAll('\\', '/');
+      const relativeToPluginRoot = `.github/${relative(sourceBase, sourcePath).replaceAll('\\', '/')}`;
       if (micromatch.isMatch(relativeToPluginRoot, exclude)) {
         continue;
       }
