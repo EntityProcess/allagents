@@ -5,14 +5,15 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncWorkspace, deduplicateClientsByPath, collectSyncedPaths } from '../../../src/core/sync.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
-import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../../../src/models/client-mapping.js';
+import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, resolveClientMappings } from '../../../src/models/client-mapping.js';
 import type { CopyResult } from '../../../src/core/transform.js';
 
 describe('deduplicateClientsByPath', () => {
-  it('should group clients that share the same skillsPath', () => {
-    // copilot and vscode both use .github/skills/
+  it('should group clients that share the same skillsPath after resolution', () => {
+    // After resolution, copilot and vscode both use .github/skills/
     const clients = ['copilot', 'vscode'] as const;
-    const result = deduplicateClientsByPath([...clients], CLIENT_MAPPINGS);
+    const resolvedMappings = resolveClientMappings([...clients], CLIENT_MAPPINGS);
+    const result = deduplicateClientsByPath([...clients], resolvedMappings);
 
     // Should have only one representative client
     expect(result.representativeClients).toHaveLength(1);
@@ -42,10 +43,11 @@ describe('deduplicateClientsByPath', () => {
     expect(result.clientGroups.get('codex')).toEqual(['codex']);
   });
 
-  it('should handle mixed unique and shared paths', () => {
-    // claude (unique .claude/skills/), copilot+vscode (shared .github/skills/), codex (unique .codex/skills/)
+  it('should handle mixed unique and shared paths after resolution', () => {
+    // claude (unique .claude/skills/), copilot+vscode (shared .github/skills/ after resolution), codex (unique .codex/skills/)
     const clients = ['claude', 'copilot', 'vscode', 'codex'] as const;
-    const result = deduplicateClientsByPath([...clients], CLIENT_MAPPINGS);
+    const resolvedMappings = resolveClientMappings([...clients], CLIENT_MAPPINGS);
+    const result = deduplicateClientsByPath([...clients], resolvedMappings);
 
     // Should have 3 representative clients
     expect(result.representativeClients).toHaveLength(3);
@@ -88,11 +90,12 @@ describe('deduplicateClientsByPath', () => {
     expect(result.clientGroups.get('claude')).toEqual(['claude']);
   });
 
-  it('should group vscode with copilot (both use .github/skills/)', () => {
+  it('should group vscode with copilot after resolution', () => {
     const clients = ['copilot', 'vscode', 'codex'] as const;
-    const result = deduplicateClientsByPath([...clients], CLIENT_MAPPINGS);
+    const resolvedMappings = resolveClientMappings([...clients], CLIENT_MAPPINGS);
+    const result = deduplicateClientsByPath([...clients], resolvedMappings);
 
-    // copilot and vscode share .github/skills/, codex uses .codex/skills/
+    // After resolution, copilot and vscode share .github/skills/, codex uses .codex/skills/
     expect(result.representativeClients).toHaveLength(2);
     expect(result.representativeClients).toContain('copilot');
     expect(result.representativeClients).toContain('codex');
@@ -106,11 +109,19 @@ describe('deduplicateClientsByPath', () => {
     expect(codexGroup).toHaveLength(1);
     expect(codexGroup).toContain('codex');
   });
+
+  it('should not group vscode with copilot in unresolved CLIENT_MAPPINGS', () => {
+    const result = deduplicateClientsByPath(['copilot', 'vscode'], CLIENT_MAPPINGS);
+    // Without resolution, vscode uses .agents/skills/ and copilot uses .github/skills/
+    expect(result.representativeClients).toHaveLength(2);
+    expect(result.representativeClients).toContain('copilot');
+    expect(result.representativeClients).toContain('vscode');
+  });
 });
 
 describe('collectSyncedPaths with shared paths', () => {
-  it('should track file for all clients sharing the same skillsPath', () => {
-    // copilot and vscode both use .github/skills/
+  it('should track file for all clients sharing the same skillsPath after resolution', () => {
+    // After resolution, copilot and vscode both use .github/skills/
     const copyResults: CopyResult[] = [
       {
         source: '/some/plugin/skills/my-skill',
@@ -120,7 +131,8 @@ describe('collectSyncedPaths with shared paths', () => {
     ];
 
     const clients = ['copilot', 'vscode'] as const;
-    const result = collectSyncedPaths(copyResults, '/workspace', [...clients], CLIENT_MAPPINGS);
+    const resolvedMappings = resolveClientMappings([...clients], CLIENT_MAPPINGS);
+    const result = collectSyncedPaths(copyResults, '/workspace', [...clients], resolvedMappings);
 
     // Both clients should track the same skill
     expect(result.copilot).toContain('.github/skills/my-skill/');
