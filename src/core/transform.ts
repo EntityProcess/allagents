@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
+import micromatch from 'micromatch';
 import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
 import { CLIENT_MAPPINGS, isUniversalClient } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
@@ -459,6 +460,8 @@ export interface GitHubCopyOptions extends CopyOptions {
    * Used when skills are renamed due to conflicts, so links can be adjusted accordingly.
    */
   skillNameMap?: Map<string, string>;
+  /** Glob patterns of files to exclude (paths relative to plugin root) */
+  exclude?: string[];
 }
 
 /**
@@ -471,6 +474,7 @@ async function copyAndAdjustDirectory(
   sourceBase: string,
   skillsPath: string,
   skillNameMap?: Map<string, string>,
+  exclude?: string[],
 ): Promise<void> {
   await mkdir(destDir, { recursive: true });
   const entries = await readdir(sourceDir, { withFileTypes: true });
@@ -479,8 +483,16 @@ async function copyAndAdjustDirectory(
     const sourcePath = join(sourceDir, entry.name);
     const destPath = join(destDir, entry.name);
 
+    // Check exclusion using path relative to plugin root (prefixed with .github/)
+    if (exclude && exclude.length > 0) {
+      const relativeToPluginRoot = '.github/' + relative(sourceBase, sourcePath).replaceAll('\\', '/');
+      if (micromatch.isMatch(relativeToPluginRoot, exclude)) {
+        continue;
+      }
+    }
+
     if (entry.isDirectory()) {
-      await copyAndAdjustDirectory(sourcePath, destPath, sourceBase, skillsPath, skillNameMap);
+      await copyAndAdjustDirectory(sourcePath, destPath, sourceBase, skillsPath, skillNameMap, exclude);
     } else {
       const relativePath = relative(sourceBase, sourcePath).replaceAll('\\', '/');
       const isMarkdown = entry.name.endsWith('.md') || entry.name.endsWith('.markdown');
@@ -517,7 +529,7 @@ export async function copyGitHubContent(
   client: ClientType,
   options: GitHubCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false, skillNameMap } = options;
+  const { dryRun = false, skillNameMap, exclude } = options;
   const mapping = getMapping(client, options);
   const results: CopyResult[] = [];
 
@@ -541,9 +553,12 @@ export async function copyGitHubContent(
   try {
     // Single-pass: copy files and adjust markdown links in one traversal
     if (mapping.skillsPath) {
-      await copyAndAdjustDirectory(sourceDir, destDir, sourceDir, mapping.skillsPath, skillNameMap);
+      await copyAndAdjustDirectory(sourceDir, destDir, sourceDir, mapping.skillsPath, skillNameMap, exclude);
+    } else if (exclude && exclude.length > 0) {
+      // Has exclude patterns but no skills path - route through copyAndAdjustDirectory for filtering
+      await copyAndAdjustDirectory(sourceDir, destDir, sourceDir, '', undefined, exclude);
     } else {
-      // No skills path - just copy without adjustment
+      // No skills path and no excludes - just copy without adjustment
       await cp(sourceDir, destDir, { recursive: true });
     }
     results.push({ source: sourceDir, destination: destDir, action: 'copied' });
@@ -579,6 +594,8 @@ export interface PluginCopyOptions extends CopyOptions {
    * Required when syncMode is 'symlink' and client is non-universal.
    */
   canonicalSkillsPath?: string;
+  /** Glob patterns of files to exclude (paths relative to plugin root) */
+  exclude?: string[];
 }
 
 /**
@@ -596,7 +613,7 @@ export async function copyPluginToWorkspace(
   client: ClientType,
   options: PluginCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { skillNameMap, syncMode, canonicalSkillsPath, ...baseOptions } = options;
+  const { skillNameMap, syncMode, canonicalSkillsPath, exclude, ...baseOptions } = options;
 
   // Run copy operations in parallel for better performance
   const [commandResults, skillResults, hookResults, agentResults, githubResults] = await Promise.all([
@@ -612,6 +629,7 @@ export async function copyPluginToWorkspace(
     copyGitHubContent(pluginPath, workspacePath, client, {
       ...baseOptions,
       ...(skillNameMap && { skillNameMap }),
+      ...(exclude && { exclude }),
     }),
   ]);
 
