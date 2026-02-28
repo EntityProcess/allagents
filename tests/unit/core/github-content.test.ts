@@ -109,6 +109,44 @@ Also check [API Guide](../../skills/cw-api/README.md).
     expect(copiedContent).toContain('#file:../../.github/skills/plugin-name:my-skill/SKILL.md');
   });
 
+  it('excludes files matching exclude patterns', async () => {
+    await mkdir(join(pluginDir, '.github', 'instructions'), { recursive: true });
+    await writeFile(
+      join(pluginDir, '.github', 'instructions', 'skills.instructions.md'),
+      '# Generated - should be excluded',
+    );
+    await writeFile(
+      join(pluginDir, '.github', 'instructions', 'coding.instructions.md'),
+      '# Coding guide - should be copied',
+    );
+
+    const results = await copyGitHubContent(pluginDir, workspaceDir, 'copilot', {
+      exclude: ['.github/instructions/skills.instructions.md'],
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].action).toBe('copied');
+    expect(existsSync(join(workspaceDir, '.github', 'instructions', 'skills.instructions.md'))).toBe(false);
+    expect(existsSync(join(workspaceDir, '.github', 'instructions', 'coding.instructions.md'))).toBe(true);
+  });
+
+  it('supports glob patterns in exclude', async () => {
+    await mkdir(join(pluginDir, '.github', 'instructions'), { recursive: true });
+    await writeFile(join(pluginDir, '.github', 'instructions', 'a.md'), '# A');
+    await writeFile(join(pluginDir, '.github', 'instructions', 'b.md'), '# B');
+    await mkdir(join(pluginDir, '.github', 'prompts'), { recursive: true });
+    await writeFile(join(pluginDir, '.github', 'prompts', 'keep.md'), '# Keep');
+
+    const results = await copyGitHubContent(pluginDir, workspaceDir, 'copilot', {
+      exclude: ['.github/instructions/**'],
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].action).toBe('copied');
+    expect(existsSync(join(workspaceDir, '.github', 'instructions'))).toBe(false);
+    expect(existsSync(join(workspaceDir, '.github', 'prompts', 'keep.md'))).toBe(true);
+  });
+
   it('preserves non-skill links and external URLs', async () => {
     await mkdir(join(pluginDir, '.github', 'instructions'), { recursive: true });
     const originalContent = `# Instructions

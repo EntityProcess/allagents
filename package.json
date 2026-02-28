@@ -51,6 +51,7 @@
     "gray-matter": "^4.0.3",
     "js-yaml": "^4.1.0",
     "json5": "^2.2.3",
+    "micromatch": "^4.0.8",
     "simple-git": "^3.30.0",
     "zod": "^3.22.4"
   },
@@ -59,6 +60,7 @@
     "@j178/prek": "^0.3.0",
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
+    "@types/micromatch": "^4.0.10",
     "@types/node": "^20.11.5",
     "shx": "^0.4.0",
     "typescript": "^5.3.3"
