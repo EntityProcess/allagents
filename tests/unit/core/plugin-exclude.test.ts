@@ -56,29 +56,28 @@ describe('plugin exclude patterns', () => {
 
   describe('copyPluginToWorkspace', () => {
     it('applies exclude across all content types', async () => {
-      // Setup commands
+      // Setup commands (claude supports commandsPath)
       await mkdir(join(pluginDir, 'commands'), { recursive: true });
       await writeFile(join(pluginDir, 'commands', 'keep.md'), '# Keep');
       await writeFile(join(pluginDir, 'commands', 'drop.md'), '# Drop');
 
-      // Setup agents
+      // Setup agents (claude supports agentsPath)
       await mkdir(join(pluginDir, 'agents'), { recursive: true });
       await writeFile(join(pluginDir, 'agents', 'keep.md'), '# Keep');
       await writeFile(join(pluginDir, 'agents', 'drop.md'), '# Drop');
 
-      // Setup .github
-      await mkdir(join(pluginDir, '.github', 'prompts'), { recursive: true });
-      await writeFile(join(pluginDir, '.github', 'prompts', 'keep.md'), '# Keep');
-      await writeFile(join(pluginDir, '.github', 'prompts', 'drop.md'), '# Drop');
-
-      await copyPluginToWorkspace(pluginDir, workspaceDir, 'copilot', {
-        exclude: ['commands/drop.md', 'agents/drop.md', '.github/prompts/drop.md'],
+      // Use 'claude' client which supports commands and agents
+      await copyPluginToWorkspace(pluginDir, workspaceDir, 'claude', {
+        exclude: ['commands/drop.md', 'agents/drop.md'],
       });
 
-      // Kept files exist
-      expect(existsSync(join(workspaceDir, '.github', 'prompts', 'keep.md'))).toBe(true);
-      // Excluded files do not
-      expect(existsSync(join(workspaceDir, '.github', 'prompts', 'drop.md'))).toBe(false);
+      // Commands: kept file exists, excluded does not
+      expect(existsSync(join(workspaceDir, '.claude', 'commands', 'keep.md'))).toBe(true);
+      expect(existsSync(join(workspaceDir, '.claude', 'commands', 'drop.md'))).toBe(false);
+
+      // Agents: kept file exists, excluded does not
+      expect(existsSync(join(workspaceDir, '.claude', 'agents', 'keep.md'))).toBe(true);
+      expect(existsSync(join(workspaceDir, '.claude', 'agents', 'drop.md'))).toBe(false);
     });
   });
 });

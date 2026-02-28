@@ -311,7 +311,11 @@ export async function copySkills(
     }
 
     try {
-      await cp(skillSourcePath, skillDestPath, { recursive: true });
+      if (options.exclude && options.exclude.length > 0) {
+        await copyDirectoryWithExclusions(skillSourcePath, skillDestPath, pluginPath, options.exclude);
+      } else {
+        await cp(skillSourcePath, skillDestPath, { recursive: true });
+      }
       return {
         source: skillSourcePath,
         destination: skillDestPath,
