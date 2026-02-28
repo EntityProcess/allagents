@@ -343,10 +343,8 @@ Marketplaces contain multiple plugins:
 my-marketplace/
 ├── plugins/
 │   ├── code-review/
-│   │   ├── plugin.json
 │   │   └── skills/
 │   └── debugging/
-│       ├── plugin.json
 │       └── skills/
 └── README.md
 ```
@@ -357,7 +355,6 @@ Each plugin follows this structure:
 
 ```
 my-plugin/
-├── plugin.json         # Plugin metadata
 ├── skills/             # Skill directories with SKILL.md (all clients)
 │   └── debugging/
 │       └── SKILL.md
