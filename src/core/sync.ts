@@ -1018,7 +1018,7 @@ async function copyValidatedPlugin(
           {
             dryRun,
             ...(skillNameMap && { skillNameMap }),
-            ...(clientMappings && { clientMappings }),
+            clientMappings: mappings,
             syncMode: 'copy',
             ...(exclude && { exclude }),
           },
@@ -1033,7 +1033,7 @@ async function copyValidatedPlugin(
           {
             dryRun,
             ...(skillNameMap && { skillNameMap }),
-            ...(clientMappings && { clientMappings }),
+            clientMappings: mappings,
             syncMode: 'symlink',
             canonicalSkillsPath: CANONICAL_SKILLS_PATH,
             ...(exclude && { exclude }),
@@ -1054,7 +1054,7 @@ async function copyValidatedPlugin(
         {
           dryRun,
           ...(skillNameMap && { skillNameMap }),
-          ...(clientMappings && { clientMappings }),
+          clientMappings: mappings,
           syncMode: 'copy',
           ...(exclude && { exclude }),
         },

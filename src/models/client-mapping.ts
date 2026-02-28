@@ -22,8 +22,9 @@ export interface ClientMapping {
  * Project-level client path mappings for all supported AI clients.
  * Paths are relative to the project root directory.
  *
- * Only the 'universal' client uses .agents/skills/.
- * All other clients use provider-specific directories.
+ * The 'universal' and 'vscode' clients default to .agents/skills/.
+ * When copilot is also configured, vscode follows copilot's paths
+ * via resolveClientMappings().
  */
 export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   claude: {
@@ -276,6 +277,6 @@ export function resolveClientMappings(
   // vscode follows copilot's mapping
   return {
     ...baseMappings,
-    vscode: { ...baseMappings.copilot } as ClientMapping,
+    vscode: { ...baseMappings.copilot },
   };
 }
