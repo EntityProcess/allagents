@@ -9,6 +9,12 @@ export const PluginManifestSchema = z.object({
   description: z.string(),
   author: z.string().optional(),
   license: z.string().optional(),
+  /**
+   * Glob patterns of files to exclude from .github/ content syncing.
+   * Paths are relative to the plugin root (e.g., ".github/instructions/file.md").
+   * Only applies to .github/ directory content; other plugin content types
+   * (commands, skills, hooks, agents) are not affected.
+   */
   exclude: z.array(z.string()).optional(),
 });
 

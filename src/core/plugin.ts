@@ -303,22 +303,10 @@ export async function updateCachedPlugins(
  * @returns The plugin name
  */
 export async function getPluginName(pluginPath: string): Promise<string> {
-  const manifestPath = join(pluginPath, 'plugin.json');
-
-  if (existsSync(manifestPath)) {
-    try {
-      const content = await readFile(manifestPath, 'utf-8');
-      const manifest = JSON.parse(content);
-      const result = PluginManifestSchema.safeParse(manifest);
-
-      if (result.success && result.data.name) {
-        return result.data.name;
-      }
-    } catch {
-      // Fall through to directory name fallback
-    }
+  const manifest = await getPluginManifest(pluginPath);
+  if (manifest?.name) {
+    return manifest.name;
   }
-
   // Fallback to directory name
   return basename(pluginPath);
 }
