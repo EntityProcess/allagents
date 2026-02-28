@@ -337,3 +337,121 @@ syncMode: copy
     expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
   });
 });
+
+describe('syncWorkspace vscode artifact placement', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'allagents-vscode-test-'));
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  async function createPluginWithSkill(name: string, skillName: string): Promise<string> {
+    const pluginDir = join(testDir, name);
+    const skillDir = join(pluginDir, 'skills', skillName);
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'SKILL.md'),
+      `---\nname: ${skillName}\ndescription: A test skill\n---\n\n# ${skillName}`,
+    );
+    return pluginDir;
+  }
+
+  it('should place skills in .agents/ when vscode is the only client', async () => {
+    const pluginDir = await createPluginWithSkill('my-plugin', 'test-skill');
+
+    await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      `
+repositories: []
+plugins:
+  - ${pluginDir}
+clients:
+  - vscode
+`,
+    );
+
+    const result = await syncWorkspace(testDir);
+    expect(result.success).toBe(true);
+    expect(existsSync(join(testDir, '.agents', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill', 'SKILL.md'))).toBe(false);
+  });
+
+  it('should place skills in .github/ when copilot and vscode are both configured', async () => {
+    const pluginDir = await createPluginWithSkill('my-plugin', 'test-skill');
+
+    await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      `
+repositories: []
+plugins:
+  - ${pluginDir}
+clients:
+  - copilot
+  - vscode
+syncMode: copy
+`,
+    );
+
+    const result = await syncWorkspace(testDir);
+    expect(result.success).toBe(true);
+    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+    // Should only copy once (deduped)
+    expect(result.totalCopied).toBe(1);
+  });
+
+  it('should place skills in .agents/ with .github symlink when universal + copilot + vscode', async () => {
+    const pluginDir = await createPluginWithSkill('my-plugin', 'test-skill');
+
+    await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      `
+repositories: []
+plugins:
+  - ${pluginDir}
+clients:
+  - universal
+  - copilot
+  - vscode
+`,
+    );
+
+    const result = await syncWorkspace(testDir);
+    expect(result.success).toBe(true);
+    // Canonical in .agents
+    expect(existsSync(join(testDir, '.agents', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+    // .github should exist (symlink or copy from copilot+vscode)
+    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+  });
+
+  it('should place skills in .agents/ when universal + vscode (no copilot)', async () => {
+    const pluginDir = await createPluginWithSkill('my-plugin', 'test-skill');
+
+    await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      `
+repositories: []
+plugins:
+  - ${pluginDir}
+clients:
+  - universal
+  - vscode
+`,
+    );
+
+    const result = await syncWorkspace(testDir);
+    expect(result.success).toBe(true);
+    expect(existsSync(join(testDir, '.agents', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+    // Should NOT create .github since no copilot
+    expect(existsSync(join(testDir, '.github', 'skills'))).toBe(false);
+    // Should only copy once (deduped — both map to .agents)
+    expect(result.totalCopied).toBe(1);
+  });
+});

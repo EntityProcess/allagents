@@ -33,7 +33,7 @@ import {
   type CopyResult,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
-import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient } from '../models/client-mapping.js';
+import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient, resolveClientMappings } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import {
   resolveSkillNames,
@@ -993,7 +993,7 @@ async function copyValidatedPlugin(
   syncMode: SyncMode = 'symlink',
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
-  const mappings = clientMappings ?? CLIENT_MAPPINGS;
+  const mappings = resolveClientMappings(clients, clientMappings ?? CLIENT_MAPPINGS);
   const clientList = clients;
 
   const exclude = validatedPlugin.exclude;
@@ -1640,7 +1640,8 @@ export async function syncWorkspace(
     ];
 
     // Group by client and save state
-    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, syncClients);
+    const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
+    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, syncClients, resolvedMappings);
 
     // When syncing a subset of clients, merge with existing state for non-targeted clients
     if (options.clients && previousState) {
@@ -1773,7 +1774,8 @@ export async function syncUserWorkspace(
   const pluginResults = await Promise.all(
     validPlugins.map((vp) => {
       const skillNameMap = pluginSkillMaps.get(vp.resolved);
-      return copyValidatedPlugin(vp, homeDir, vp.clients, dryRun, skillNameMap, USER_CLIENT_MAPPINGS, syncMode);
+      const resolvedUserMappings = resolveClientMappings(vp.clients, USER_CLIENT_MAPPINGS);
+      return copyValidatedPlugin(vp, homeDir, vp.clients, dryRun, skillNameMap, resolvedUserMappings, syncMode);
     }),
   );
 
@@ -1908,7 +1910,8 @@ export async function syncUserWorkspace(
   // Save sync state (including MCP servers and native plugins)
   if (!dryRun) {
     const allCopyResults = pluginResults.flatMap((r) => r.copyResults);
-    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, syncClients, USER_CLIENT_MAPPINGS);
+    const resolvedUserMappings = resolveClientMappings(syncClients, USER_CLIENT_MAPPINGS);
+    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, syncClients, resolvedUserMappings);
 
     const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
     const installedSet = new Set(nativeResult?.pluginsInstalled ?? []);
