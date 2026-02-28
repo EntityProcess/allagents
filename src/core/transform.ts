@@ -68,6 +68,49 @@ export interface CopyOptions {
   dryRun?: boolean;
   /** Override client path mappings (defaults to CLIENT_MAPPINGS) */
   clientMappings?: Record<string, ClientMapping>;
+  /**
+   * Glob patterns of files to exclude during sync.
+   * Paths are relative to the plugin root (e.g., ".github/instructions/file.md",
+   * "commands/my-command.md", "skills/my-skill").
+   */
+  exclude?: string[];
+}
+
+/**
+ * Check if a file path (relative to plugin root) matches any exclude pattern.
+ */
+function isExcluded(pluginPath: string, filePath: string, exclude?: string[]): boolean {
+  if (!exclude || exclude.length === 0) return false;
+  const relativePath = relative(pluginPath, filePath).replaceAll('\\', '/');
+  return micromatch.isMatch(relativePath, exclude);
+}
+
+/**
+ * Recursively copy a directory, skipping files that match exclude patterns.
+ */
+async function copyDirectoryWithExclusions(
+  sourceDir: string,
+  destDir: string,
+  pluginPath: string,
+  exclude: string[],
+): Promise<void> {
+  await mkdir(destDir, { recursive: true });
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const sourcePath = join(sourceDir, entry.name);
+    const destPath = join(destDir, entry.name);
+
+    if (isExcluded(pluginPath, sourcePath, exclude)) {
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      await copyDirectoryWithExclusions(sourcePath, destPath, pluginPath, exclude);
+    } else {
+      await cp(sourcePath, destPath);
+    }
+  }
 }
 
 /**
@@ -156,27 +199,29 @@ export async function copyCommands(
   const mdFiles = files.filter((f) => f.endsWith('.md'));
 
   // Process files in parallel for better performance
-  const copyPromises = mdFiles.map(async (file): Promise<CopyResult> => {
-    const sourcePath = join(sourceDir, file);
-    const destPath = join(destDir, file);
+  const copyPromises = mdFiles
+    .filter((file) => !isExcluded(pluginPath, join(sourceDir, file), options.exclude))
+    .map(async (file): Promise<CopyResult> => {
+      const sourcePath = join(sourceDir, file);
+      const destPath = join(destDir, file);
 
-    if (dryRun) {
-      return { source: sourcePath, destination: destPath, action: 'copied' };
-    }
+      if (dryRun) {
+        return { source: sourcePath, destination: destPath, action: 'copied' };
+      }
 
-    try {
-      const content = await readFile(sourcePath, 'utf-8');
-      await writeFile(destPath, content, 'utf-8');
-      return { source: sourcePath, destination: destPath, action: 'copied' };
-    } catch (error) {
-      return {
-        source: sourcePath,
-        destination: destPath,
-        action: 'failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
-    }
-  });
+      try {
+        const content = await readFile(sourcePath, 'utf-8');
+        await writeFile(destPath, content, 'utf-8');
+        return { source: sourcePath, destination: destPath, action: 'copied' };
+      } catch (error) {
+        return {
+          source: sourcePath,
+          destination: destPath,
+          action: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    });
 
   return Promise.all(copyPromises);
 }
@@ -222,7 +267,8 @@ export async function copySkills(
   }
 
   const entries = await readdir(sourceDir, { withFileTypes: true });
-  let skillDirs = entries.filter((e) => e.isDirectory());
+  let skillDirs = entries.filter((e) => e.isDirectory())
+    .filter((e) => !isExcluded(pluginPath, join(sourceDir, e.name), options.exclude));
 
   // When skillNameMap is provided, only copy skills that are in the map
   // (disabled skills are excluded from the map during collection)
@@ -374,7 +420,11 @@ export async function copyHooks(
   await mkdir(destDir, { recursive: true });
 
   try {
-    await cp(sourceDir, destDir, { recursive: true });
+    if (options.exclude && options.exclude.length > 0) {
+      await copyDirectoryWithExclusions(sourceDir, destDir, pluginPath, options.exclude);
+    } else {
+      await cp(sourceDir, destDir, { recursive: true });
+    }
     results.push({ source: sourceDir, destination: destDir, action: 'copied' });
   } catch (error) {
     results.push({
@@ -426,27 +476,29 @@ export async function copyAgents(
   const mdFiles = files.filter((f) => f.endsWith('.md'));
 
   // Process files in parallel for better performance
-  const copyPromises = mdFiles.map(async (file): Promise<CopyResult> => {
-    const sourcePath = join(sourceDir, file);
-    const destPath = join(destDir, file);
+  const copyPromises = mdFiles
+    .filter((file) => !isExcluded(pluginPath, join(sourceDir, file), options.exclude))
+    .map(async (file): Promise<CopyResult> => {
+      const sourcePath = join(sourceDir, file);
+      const destPath = join(destDir, file);
 
-    if (dryRun) {
-      return { source: sourcePath, destination: destPath, action: 'copied' };
-    }
+      if (dryRun) {
+        return { source: sourcePath, destination: destPath, action: 'copied' };
+      }
 
-    try {
-      const content = await readFile(sourcePath, 'utf-8');
-      await writeFile(destPath, content, 'utf-8');
-      return { source: sourcePath, destination: destPath, action: 'copied' };
-    } catch (error) {
-      return {
-        source: sourcePath,
-        destination: destPath,
-        action: 'failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
-    }
-  });
+      try {
+        const content = await readFile(sourcePath, 'utf-8');
+        await writeFile(destPath, content, 'utf-8');
+        return { source: sourcePath, destination: destPath, action: 'copied' };
+      } catch (error) {
+        return {
+          source: sourcePath,
+          destination: destPath,
+          action: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    });
 
   return Promise.all(copyPromises);
 }
@@ -460,9 +512,8 @@ export interface GitHubCopyOptions extends CopyOptions {
    * Used when skills are renamed due to conflicts, so links can be adjusted accordingly.
    */
   skillNameMap?: Map<string, string>;
-  /** Glob patterns of files to exclude (paths relative to plugin root) */
-  exclude?: string[];
 }
+
 
 /**
  * Recursively process a directory, copying files and adjusting links in markdown.
@@ -472,6 +523,7 @@ async function copyAndAdjustDirectory(
   sourceDir: string,
   destDir: string,
   sourceBase: string,
+  pluginPath: string,
   skillsPath: string,
   skillNameMap?: Map<string, string>,
   exclude?: string[],
@@ -483,16 +535,12 @@ async function copyAndAdjustDirectory(
     const sourcePath = join(sourceDir, entry.name);
     const destPath = join(destDir, entry.name);
 
-    // Check exclusion using path relative to plugin root (prefixed with .github/)
-    if (exclude && exclude.length > 0) {
-      const relativeToPluginRoot = `.github/${relative(sourceBase, sourcePath).replaceAll('\\', '/')}`;
-      if (micromatch.isMatch(relativeToPluginRoot, exclude)) {
-        continue;
-      }
+    if (isExcluded(pluginPath, sourcePath, exclude)) {
+      continue;
     }
 
     if (entry.isDirectory()) {
-      await copyAndAdjustDirectory(sourcePath, destPath, sourceBase, skillsPath, skillNameMap, exclude);
+      await copyAndAdjustDirectory(sourcePath, destPath, sourceBase, pluginPath, skillsPath, skillNameMap, exclude);
     } else {
       const relativePath = relative(sourceBase, sourcePath).replaceAll('\\', '/');
       const isMarkdown = entry.name.endsWith('.md') || entry.name.endsWith('.markdown');
@@ -529,7 +577,7 @@ export async function copyGitHubContent(
   client: ClientType,
   options: GitHubCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false, skillNameMap, exclude } = options;
+  const { dryRun = false, skillNameMap } = options;
   const mapping = getMapping(client, options);
   const results: CopyResult[] = [];
 
@@ -552,11 +600,8 @@ export async function copyGitHubContent(
 
   try {
     // Single-pass: copy files and adjust markdown links in one traversal
-    if (mapping.skillsPath) {
-      await copyAndAdjustDirectory(sourceDir, destDir, sourceDir, mapping.skillsPath, skillNameMap, exclude);
-    } else if (exclude && exclude.length > 0) {
-      // Has exclude patterns but no skills path - route through copyAndAdjustDirectory for filtering
-      await copyAndAdjustDirectory(sourceDir, destDir, sourceDir, '', undefined, exclude);
+    if (mapping.skillsPath || (options.exclude && options.exclude.length > 0)) {
+      await copyAndAdjustDirectory(sourceDir, destDir, sourceDir, pluginPath, mapping.skillsPath ?? '', skillNameMap, options.exclude);
     } else {
       // No skills path and no excludes - just copy without adjustment
       await cp(sourceDir, destDir, { recursive: true });
@@ -594,8 +639,6 @@ export interface PluginCopyOptions extends CopyOptions {
    * Required when syncMode is 'symlink' and client is non-universal.
    */
   canonicalSkillsPath?: string;
-  /** Glob patterns of files to exclude (paths relative to plugin root) */
-  exclude?: string[];
 }
 
 /**
@@ -613,7 +656,7 @@ export async function copyPluginToWorkspace(
   client: ClientType,
   options: PluginCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { skillNameMap, syncMode, canonicalSkillsPath, exclude, ...baseOptions } = options;
+  const { skillNameMap, syncMode, canonicalSkillsPath, ...baseOptions } = options;
 
   // Run copy operations in parallel for better performance
   const [commandResults, skillResults, hookResults, agentResults, githubResults] = await Promise.all([
@@ -629,7 +672,6 @@ export async function copyPluginToWorkspace(
     copyGitHubContent(pluginPath, workspacePath, client, {
       ...baseOptions,
       ...(skillNameMap && { skillNameMap }),
-      ...(exclude && { exclude }),
     }),
   ]);
 
