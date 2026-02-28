@@ -18,7 +18,6 @@ describe('getAllSkillsFromPlugins', () => {
     await mkdir(join(pluginDir, 'skills/skill-b'), { recursive: true });
     await writeFile(join(pluginDir, 'skills/skill-a/SKILL.md'), '# Skill A');
     await writeFile(join(pluginDir, 'skills/skill-b/SKILL.md'), '# Skill B');
-    await writeFile(join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'test-plugin' }));
 
     // Create workspace config
     await mkdir(join(tmpDir, '.allagents'), { recursive: true });

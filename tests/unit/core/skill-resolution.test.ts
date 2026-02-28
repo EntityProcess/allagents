@@ -148,12 +148,8 @@ clients:
     const plugin1Dir = join(testDir, 'plugin-alpha');
     const plugin2Dir = join(testDir, 'plugin-beta');
 
-    // Plugin 1 with plugin.json
+    // Plugin 1
     await mkdir(join(plugin1Dir, 'skills', 'common-skill'), { recursive: true });
-    await writeFile(
-      join(plugin1Dir, 'plugin.json'),
-      JSON.stringify({ name: 'plugin-alpha', version: '1.0.0', description: 'Plugin Alpha' }),
-    );
     await writeFile(
       join(plugin1Dir, 'skills', 'common-skill', 'SKILL.md'),
       `---
@@ -164,12 +160,8 @@ description: Common skill from alpha
 # Alpha's Common Skill`,
     );
 
-    // Plugin 2 with plugin.json
+    // Plugin 2
     await mkdir(join(plugin2Dir, 'skills', 'common-skill'), { recursive: true });
-    await writeFile(
-      join(plugin2Dir, 'plugin.json'),
-      JSON.stringify({ name: 'plugin-beta', version: '1.0.0', description: 'Plugin Beta' }),
-    );
     await writeFile(
       join(plugin2Dir, 'skills', 'common-skill', 'SKILL.md'),
       `---
@@ -214,10 +206,6 @@ clients:
     await mkdir(join(plugin1Dir, 'skills', 'unique-to-one'), { recursive: true });
     await mkdir(join(plugin1Dir, 'skills', 'shared'), { recursive: true });
     await writeFile(
-      join(plugin1Dir, 'plugin.json'),
-      JSON.stringify({ name: 'plugin-one', version: '1.0.0', description: 'Plugin One' }),
-    );
-    await writeFile(
       join(plugin1Dir, 'skills', 'unique-to-one', 'SKILL.md'),
       `---
 name: unique-to-one
@@ -234,10 +222,6 @@ description: Shared skill from one
 
     // Plugin 2 with common skill only
     await mkdir(join(plugin2Dir, 'skills', 'shared'), { recursive: true });
-    await writeFile(
-      join(plugin2Dir, 'plugin.json'),
-      JSON.stringify({ name: 'plugin-two', version: '1.0.0', description: 'Plugin Two' }),
-    );
     await writeFile(
       join(plugin2Dir, 'skills', 'shared', 'SKILL.md'),
       `---
@@ -319,14 +303,6 @@ clients:
 
     await mkdir(join(plugin1Dir, 'skills', 'common'), { recursive: true });
     await mkdir(join(plugin2Dir, 'skills', 'common'), { recursive: true });
-    await writeFile(
-      join(plugin1Dir, 'plugin.json'),
-      JSON.stringify({ name: 'plugin-alpha', version: '1.0.0', description: 'Alpha' }),
-    );
-    await writeFile(
-      join(plugin2Dir, 'plugin.json'),
-      JSON.stringify({ name: 'plugin-beta', version: '1.0.0', description: 'Beta' }),
-    );
     await writeFile(
       join(plugin1Dir, 'skills', 'common', 'SKILL.md'),
       `---

@@ -16,7 +16,7 @@ import { extractOrgFromSource } from './source-parser.js';
 export interface SkillEntry {
   /** Skill folder name (e.g., "my-skill") */
   folderName: string;
-  /** Plugin name from plugin.json (e.g., "my-plugin") */
+  /** Plugin name (e.g., "my-plugin") */
   pluginName: string;
   /** Plugin source - GitHub URL/shorthand or local path */
   pluginSource: string;

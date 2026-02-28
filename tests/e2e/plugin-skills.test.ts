@@ -31,7 +31,6 @@ description: Test skill B
 ---
 # Skill B
 `);
-    await writeFile(join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'test-plugin' }));
 
     // Create workspace
     await mkdir(join(tmpDir, '.allagents'), { recursive: true });
