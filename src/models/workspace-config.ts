@@ -123,6 +123,7 @@ export const PluginEntrySchema = z.union([
     source: PluginSourceSchema,
     clients: z.array(ClientTypeSchema).optional(),
     install: InstallModeSchema.optional(),
+    exclude: z.array(z.string()).optional(),
   }),
 ]);
 
@@ -147,6 +148,14 @@ export function getPluginClients(plugin: PluginEntry): ClientType[] | undefined 
  */
 export function getPluginInstallMode(plugin: PluginEntry): InstallMode | undefined {
   return typeof plugin === 'string' ? undefined : plugin.install;
+}
+
+/**
+ * Get plugin-level file exclusion patterns (if any).
+ * Glob patterns are relative to the plugin root.
+ */
+export function getPluginExclude(plugin: PluginEntry): string[] | undefined {
+  return typeof plugin === 'string' ? undefined : plugin.exclude;
 }
 
 /**

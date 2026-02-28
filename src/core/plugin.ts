@@ -6,7 +6,7 @@ import {
   getPluginCachePath,
   validatePluginSource,
 } from '../utils/plugin-path.js';
-import { PluginManifestSchema, type PluginManifest } from '../models/plugin-config.js';
+import { PluginManifestSchema } from '../models/plugin-config.js';
 import { getHomeDir } from '../constants.js';
 import { cloneTo, gitHubUrl, GitCloneError, pull } from './git.js';
 
@@ -303,39 +303,24 @@ export async function updateCachedPlugins(
  * @returns The plugin name
  */
 export async function getPluginName(pluginPath: string): Promise<string> {
-  const manifest = await getPluginManifest(pluginPath);
-  if (manifest?.name) {
-    return manifest.name;
-  }
-  // Fallback to directory name
-  return basename(pluginPath);
-}
-
-/**
- * Get the full plugin manifest from plugin.json
- * @param pluginPath - Resolved path to the plugin directory
- * @returns The parsed manifest, or null if not found / invalid
- */
-export async function getPluginManifest(pluginPath: string): Promise<PluginManifest | null> {
   const manifestPath = join(pluginPath, 'plugin.json');
 
-  if (!existsSync(manifestPath)) {
-    return null;
-  }
+  if (existsSync(manifestPath)) {
+    try {
+      const content = await readFile(manifestPath, 'utf-8');
+      const manifest = JSON.parse(content);
+      const result = PluginManifestSchema.safeParse(manifest);
 
-  try {
-    const content = await readFile(manifestPath, 'utf-8');
-    const manifest = JSON.parse(content);
-    const result = PluginManifestSchema.safeParse(manifest);
-
-    if (result.success) {
-      return result.data;
+      if (result.success && result.data.name) {
+        return result.data.name;
+      }
+    } catch {
+      // Fall through to directory name fallback
     }
-  } catch {
-    // Invalid JSON or parse failure
   }
 
-  return null;
+  // Fallback to directory name
+  return basename(pluginPath);
 }
 
 /**

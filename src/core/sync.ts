@@ -14,6 +14,7 @@ import type {
 import {
   getPluginClients,
   getPluginSource,
+  getPluginExclude,
   getClientTypes,
   normalizeClientEntry,
   resolveInstallMode,
@@ -24,7 +25,7 @@ import {
   parseGitHubUrl,
   parseFileSource,
 } from '../utils/plugin-path.js';
-import { fetchPlugin, getPluginName, getPluginManifest } from './plugin.js';
+import { fetchPlugin, getPluginName } from './plugin.js';
 import {
   copyPluginToWorkspace,
   copyWorkspaceFiles,
@@ -217,6 +218,8 @@ export interface ValidatedPlugin {
   pluginName?: string;
   /** Canonical marketplace name when it differs from the spec (e.g., manifest overrides repo name) */
   registeredAs?: string;
+  /** Glob patterns of files to exclude when syncing (from workspace.yaml) */
+  exclude?: string[];
 }
 
 interface PluginSyncPlan {
@@ -224,6 +227,8 @@ interface PluginSyncPlan {
   clients: ClientType[];
   /** Clients that should use native install for this plugin */
   nativeClients: ClientType[];
+  /** Glob patterns of files to exclude when syncing (from workspace.yaml) */
+  exclude?: string[];
 }
 
 /**
@@ -929,7 +934,8 @@ function buildPluginSyncPlans(
       }
     }
 
-    return { source, clients: fileClients, nativeClients };
+    const exclude = getPluginExclude(plugin);
+    return { source, clients: fileClients, nativeClients, ...(exclude && { exclude }) };
   });
 
   return { plans, warnings };
@@ -948,9 +954,11 @@ async function validateAllPlugins(
   offline: boolean,
 ): Promise<ValidatedPlugin[]> {
   return Promise.all(
-    plans.map(async ({ source, clients, nativeClients }) => {
+    plans.map(async ({ source, clients, nativeClients, exclude }) => {
       const validated = await validatePlugin(source, workspacePath, offline);
-      return { ...validated, clients, nativeClients };
+      const result: ValidatedPlugin = { ...validated, clients, nativeClients };
+      if (exclude) result.exclude = exclude;
+      return result;
     }),
   );
 }
@@ -988,9 +996,7 @@ async function copyValidatedPlugin(
   const mappings = clientMappings ?? CLIENT_MAPPINGS;
   const clientList = clients;
 
-  // Load plugin manifest to get exclude patterns
-  const manifest = await getPluginManifest(validatedPlugin.resolved);
-  const exclude = manifest?.exclude;
+  const exclude = validatedPlugin.exclude;
 
   const hasUniversalClient = clientList.some((c) => isUniversalClient(c));
 
