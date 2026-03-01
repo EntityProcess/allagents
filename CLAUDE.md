@@ -79,16 +79,20 @@ Tests use `bun:test`. Run with `bun test` or target a specific file with `bun te
 
 ### Manual E2E Testing
 
-For TUI and CLI changes, **always run the actual tool before merging**:
+**ALWAYS run manual E2E tests before marking a PR ready for review.** Build the CLI and test the actual user-facing behavior end-to-end. Draft PRs can be created early and committed to frequently, but E2E validation must happen before requesting review.
 
 ```bash
-# Build and run TUI
-bun run build && ./dist/index.js
+# Build the CLI in your worktree
+bun run build
 
-# Test specific CLI commands
-./dist/index.js plugin update
+# Test the specific behavior your change affects
 ./dist/index.js workspace sync
+./dist/index.js plugin update
 ```
+
+**How to E2E test:** Create a temporary workspace in `/tmp/`, configure it with a `workspace.yaml` that exercises your change, run the built CLI against it, and verify the filesystem result matches expectations. Clean up after.
+
+**Include E2E steps in the PR description** so human reviewers can reproduce the test. Document the exact commands you ran and what you verified.
 
 Unit tests with mocks verify internal logic but miss integration bugs. Mocks that don't match real interfaces create false confidence.
 

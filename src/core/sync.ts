@@ -455,17 +455,24 @@ export async function selectivePurgeWorkspace(
     for (const filePath of previousFiles) {
       const fullPath = join(workspacePath, filePath);
 
-      if (!existsSync(fullPath)) {
+      // Use lstatSync instead of existsSync — existsSync follows symlinks,
+      // so broken symlinks (target already deleted) return false and get skipped.
+      // Since we track synced files in state, if it's tracked we should remove it.
+      // Strip trailing slash so lstatSync checks the symlink entry itself.
+      const cleanPath = fullPath.replace(/\/$/, '');
+      let stats: ReturnType<typeof lstatSync>;
+      try {
+        stats = lstatSync(cleanPath);
+      } catch {
         continue;
       }
 
       try {
         // Check if it's a symlink - these need special handling
         // (rm with trailing slash on a symlink fails with ENOTDIR)
-        const stats = lstatSync(fullPath.replace(/\/$/, ''));
         if (stats.isSymbolicLink()) {
           // Remove symlink (works without trailing slash)
-          await unlink(fullPath.replace(/\/$/, ''));
+          await unlink(cleanPath);
         } else if (filePath.endsWith('/')) {
           // Regular directory - remove recursively
           await rm(fullPath, { recursive: true, force: true });
