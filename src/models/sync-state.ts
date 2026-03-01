@@ -13,6 +13,10 @@ export const SyncStateSchema = z.object({
   mcpServers: z.record(z.string(), z.array(z.string())).optional(),
   // Native plugins tracked per client type (e.g., "claude" for claude plugin install)
   nativePlugins: z.record(ClientTypeSchema, z.array(z.string())).optional(),
+  // Hash of last-written .code-workspace file content (for change detection)
+  vscodeWorkspaceHash: z.string().optional(),
+  // Repository paths at last sync (for detecting added/removed repos)
+  vscodeWorkspaceRepos: z.array(z.string()).optional(),
 });
 
 export type SyncState = z.infer<typeof SyncStateSchema>;
