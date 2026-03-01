@@ -58,7 +58,10 @@ import { getUserWorkspaceConfig } from './user-workspace.js';
 import {
   generateVscodeWorkspace,
   getWorkspaceOutputPath,
+  computeWorkspaceHash,
+  reconcileVscodeWorkspaceFolders,
 } from './vscode-workspace.js';
+import { updateRepositories } from './workspace-modify.js';
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
@@ -1178,7 +1181,7 @@ const VSCODE_TEMPLATE_FILE = 'template.code-workspace';
 function generateVscodeWorkspaceFile(
   workspacePath: string,
   config: WorkspaceConfig,
-): void {
+): string {
   const configDir = join(workspacePath, CONFIG_DIR);
 
   // Load template if it exists (supports JSON with comments via JSON5)
@@ -1201,7 +1204,9 @@ function generateVscodeWorkspaceFile(
   });
 
   const outputPath = getWorkspaceOutputPath(workspacePath, config.vscode);
-  writeFileSync(outputPath, `${JSON.stringify(content, null, '\t')}\n`, 'utf-8');
+  const contentStr = `${JSON.stringify(content, null, '\t')}\n`;
+  writeFileSync(outputPath, contentStr, 'utf-8');
+  return contentStr;
 }
 
 /**
@@ -1256,6 +1261,10 @@ export async function syncWorkspace(
           : `Failed to parse ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
     };
   }
+
+  // Track vscode workspace state for sync state persistence
+  let vscodeWorkspaceHash: string | undefined;
+  let vscodeWorkspaceRepos: string[] | undefined;
 
   // Check if repositories are configured — when empty/absent, skip agent file
   // creation and WORKSPACE-RULES injection (same pattern as initWorkspace)
@@ -1589,9 +1598,57 @@ export async function syncWorkspace(
     await updateAgentFiles(workspacePath);
   }
 
-  // Step 5d: Generate VSCode .code-workspace file if vscode client is configured
+  // Step 5d: Reconcile and generate VSCode .code-workspace file
   if (syncClients.includes('vscode') && !dryRun) {
-    generateVscodeWorkspaceFile(workspacePath, config);
+    // Reconcile .code-workspace → workspace.yaml if the file was externally modified
+    if (previousState?.vscodeWorkspaceHash && previousState?.vscodeWorkspaceRepos) {
+      const outputPath = getWorkspaceOutputPath(workspacePath, config.vscode);
+      if (existsSync(outputPath)) {
+        const existingContent = readFileSync(outputPath, 'utf-8');
+        const currentHash = computeWorkspaceHash(existingContent);
+
+        if (currentHash !== previousState.vscodeWorkspaceHash) {
+          // File was modified externally — reconcile folders
+          try {
+            const existingWorkspace = JSON.parse(existingContent);
+            const folders = Array.isArray(existingWorkspace.folders) ? existingWorkspace.folders : [];
+
+            const reconciled = reconcileVscodeWorkspaceFolders(
+              workspacePath,
+              folders,
+              previousState.vscodeWorkspaceRepos,
+              config.repositories,
+            );
+
+            if (reconciled.added.length > 0 || reconciled.removed.length > 0) {
+              // Update workspace.yaml
+              await updateRepositories(
+                { remove: reconciled.removed, add: reconciled.added.map(p => ({ path: p })) },
+                workspacePath,
+              );
+              // Re-read config to pick up changes
+              config = await parseWorkspaceConfig(configPath);
+
+              if (reconciled.removed.length > 0) {
+                messages.push(`Repositories removed (from .code-workspace): ${reconciled.removed.join(', ')}`);
+              }
+              if (reconciled.added.length > 0) {
+                messages.push(`Repositories added (from .code-workspace): ${reconciled.added.join(', ')}`);
+              }
+            }
+          } catch {
+            // If .code-workspace is malformed, skip reconciliation silently
+          }
+        }
+      }
+    }
+
+    // Generate .code-workspace (always, even after reconciliation)
+    const writtenContent = generateVscodeWorkspaceFile(workspacePath, config);
+    vscodeWorkspaceHash = computeWorkspaceHash(writtenContent);
+    vscodeWorkspaceRepos = config.repositories.map(
+      r => resolve(workspacePath, r.path).replace(/\\/g, '/'),
+    );
   }
 
   // Count results from plugins
@@ -1685,6 +1742,8 @@ export async function syncWorkspace(
     await saveSyncState(workspacePath, {
       files: syncedFiles,
       ...(Object.keys(nativePluginsState).length > 0 && { nativePlugins: nativePluginsState }),
+      ...(vscodeWorkspaceHash && { vscodeWorkspaceHash }),
+      ...(vscodeWorkspaceRepos && { vscodeWorkspaceRepos }),
     });
   }
 
