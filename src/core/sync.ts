@@ -1209,6 +1209,313 @@ function generateVscodeWorkspaceFile(
   return contentStr;
 }
 
+function failedSyncResult(error: string, overrides?: Partial<SyncResult>): SyncResult {
+  return {
+    success: false,
+    pluginResults: [],
+    totalCopied: 0,
+    totalFailed: 0,
+    totalSkipped: 0,
+    totalGenerated: 0,
+    error,
+    ...overrides,
+  };
+}
+
+function validateRequestedClients(
+  requestedClients: string[],
+  configClientTypes: ClientType[],
+  plugins: PluginEntry[],
+): string | null {
+  const availableClients = new Set<ClientType>(configClientTypes);
+  for (const plugin of plugins) {
+    for (const client of getPluginClients(plugin) ?? []) {
+      availableClients.add(client);
+    }
+  }
+  const invalidClients = requestedClients.filter(
+    (c) => !availableClients.has(c as ClientType),
+  );
+  if (invalidClients.length > 0) {
+    return `Client(s) not configured in workspace.yaml: ${invalidClients.join(', ')}\n  Configured clients: ${Array.from(availableClients).join(', ')}`;
+  }
+  return null;
+}
+
+function countCopyResults(
+  pluginResults: PluginSyncResult[],
+  workspaceFileResults: CopyResult[],
+): { totalCopied: number; totalFailed: number; totalSkipped: number; totalGenerated: number } {
+  let totalCopied = 0;
+  let totalFailed = 0;
+  let totalSkipped = 0;
+  let totalGenerated = 0;
+
+  for (const pluginResult of pluginResults) {
+    for (const copyResult of pluginResult.copyResults) {
+      switch (copyResult.action) {
+        case 'copied':
+          totalCopied++;
+          break;
+        case 'failed':
+          totalFailed++;
+          break;
+        case 'skipped':
+          totalSkipped++;
+          break;
+        case 'generated':
+          totalGenerated++;
+          break;
+      }
+    }
+  }
+
+  for (const result of workspaceFileResults) {
+    switch (result.action) {
+      case 'copied':
+        totalCopied++;
+        break;
+      case 'failed':
+        totalFailed++;
+        break;
+      case 'skipped':
+        totalSkipped++;
+        break;
+    }
+  }
+
+  return { totalCopied, totalFailed, totalSkipped, totalGenerated };
+}
+
+async function syncNativePlugins(
+  validPlugins: ValidatedPlugin[],
+  syncClients: ClientType[],
+  previousState: SyncState | null,
+  scope: 'project' | 'user',
+  workspacePath: string,
+  dryRun: boolean,
+  warnings: string[],
+  messages: string[],
+): Promise<NativeSyncResult | undefined> {
+  const {
+    pluginsByClient: nativePluginsByClient,
+    marketplaceSourcesByClient: nativeMarketplaceSources,
+  } = collectNativePluginSources(validPlugins);
+
+  const previousNativeClients = previousState?.nativePlugins
+    ? (Object.keys(previousState.nativePlugins) as ClientType[]).filter(
+        (c) => (previousState.nativePlugins?.[c]?.length ?? 0) > 0
+      )
+    : [];
+  const hasNativeWork = nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
+
+  if (hasNativeWork && !dryRun) {
+    const allClients = new Set([...nativePluginsByClient.keys(), ...previousNativeClients]);
+    const perClientResults: NativeSyncResult[] = [];
+
+    for (const clientType of allClients) {
+      const nativeClient = getNativeClient(clientType);
+      if (!nativeClient) {
+        const sources = nativePluginsByClient.get(clientType);
+        if (sources && sources.length > 0) {
+          warnings.push(`Native install: no native client for ${clientType}, skipping`);
+        }
+        continue;
+      }
+
+      const cliAvailable = await nativeClient.isAvailable();
+      if (!cliAvailable) {
+        const sources = nativePluginsByClient.get(clientType);
+        if (sources && sources.length > 0) {
+          messages.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
+        }
+        continue;
+      }
+
+      const marketplaceSources = nativeMarketplaceSources.get(clientType);
+      if (marketplaceSources) {
+        for (const source of marketplaceSources) {
+          if (scope === 'project') {
+            await nativeClient.addMarketplace(source, { cwd: workspacePath });
+          } else {
+            await nativeClient.addMarketplace(source);
+          }
+        }
+      }
+
+      const currentSources = nativePluginsByClient.get(clientType) ?? [];
+      const currentSpecs = currentSources
+        .map((s) => nativeClient.toPluginSpec(s))
+        .filter((s): s is string => s !== null);
+      const previousPlugins = getPreviouslySyncedNativePlugins(previousState, clientType);
+      const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
+      for (const plugin of removed) {
+        try {
+          if (scope === 'project') {
+            await nativeClient.uninstallPlugin(plugin, 'project', { cwd: workspacePath });
+          } else {
+            await nativeClient.uninstallPlugin(plugin, 'user');
+          }
+        } catch (err) {
+          warnings.push(`Native uninstall failed for ${plugin}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      if (currentSources.length > 0) {
+        const syncOpts = scope === 'project' ? { cwd: workspacePath } : undefined;
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(currentSources, scope, syncOpts),
+            clientType,
+          ),
+        );
+      }
+    }
+
+    if (perClientResults.length > 0) {
+      return mergeNativeSyncResults(perClientResults);
+    }
+  } else if (nativePluginsByClient.size > 0 && dryRun) {
+    const perClientResults: NativeSyncResult[] = [];
+    for (const [clientType, sources] of nativePluginsByClient) {
+      const nativeClient = getNativeClient(clientType);
+      if (nativeClient && sources.length > 0) {
+        const syncOpts = scope === 'project'
+          ? { cwd: workspacePath, dryRun: true }
+          : { dryRun: true };
+        perClientResults.push(
+          attachNativeClientContext(
+            await nativeClient.syncPlugins(sources, scope, syncOpts),
+            clientType,
+          ),
+        );
+      }
+    }
+    if (perClientResults.length > 0) {
+      return mergeNativeSyncResults(perClientResults);
+    }
+  }
+
+  return undefined;
+}
+
+async function syncVscodeWorkspaceFile(
+  workspacePath: string,
+  config: WorkspaceConfig,
+  configPath: string,
+  previousState: SyncState | null,
+  messages: string[],
+): Promise<{ config: WorkspaceConfig; hash?: string; repos?: string[] }> {
+  // Reconcile .code-workspace -> workspace.yaml if the file was externally modified
+  let updatedConfig = config;
+  if (previousState?.vscodeWorkspaceHash && previousState?.vscodeWorkspaceRepos) {
+    const outputPath = getWorkspaceOutputPath(workspacePath, config.vscode);
+    if (existsSync(outputPath)) {
+      const existingContent = readFileSync(outputPath, 'utf-8');
+      const currentHash = computeWorkspaceHash(existingContent);
+
+      if (currentHash !== previousState.vscodeWorkspaceHash) {
+        try {
+          const existingWorkspace = JSON.parse(existingContent);
+          const folders = Array.isArray(existingWorkspace.folders) ? existingWorkspace.folders : [];
+
+          const reconciled = reconcileVscodeWorkspaceFolders(
+            workspacePath,
+            folders,
+            previousState.vscodeWorkspaceRepos,
+            config.repositories,
+          );
+
+          if (reconciled.added.length > 0 || reconciled.removed.length > 0) {
+            await updateRepositories(
+              { remove: reconciled.removed, add: reconciled.added.map(p => ({ path: p })) },
+              workspacePath,
+            );
+            updatedConfig = await parseWorkspaceConfig(configPath);
+
+            if (reconciled.removed.length > 0) {
+              messages.push(`Repositories removed (from .code-workspace): ${reconciled.removed.join(', ')}`);
+            }
+            if (reconciled.added.length > 0) {
+              messages.push(`Repositories added (from .code-workspace): ${reconciled.added.join(', ')}`);
+            }
+          }
+        } catch {
+          // If .code-workspace is malformed, skip reconciliation silently
+        }
+      }
+    }
+  }
+
+  // Generate .code-workspace (always, even after reconciliation)
+  const writtenContent = generateVscodeWorkspaceFile(workspacePath, updatedConfig);
+  const hash = computeWorkspaceHash(writtenContent);
+  const repos = updatedConfig.repositories.map(
+    r => resolve(workspacePath, r.path).replace(/\\/g, '/'),
+  );
+
+  return { config: updatedConfig, hash, repos };
+}
+
+async function persistSyncState(
+  workspacePath: string,
+  pluginResults: PluginSyncResult[],
+  workspaceFileResults: CopyResult[],
+  syncClients: ClientType[],
+  previousState: SyncState | null,
+  options: SyncOptions,
+  nativePluginsByClient: Map<ClientType, string[]>,
+  nativeResult: NativeSyncResult | undefined,
+  vscodeState?: { hash: string; repos: string[] },
+): Promise<void> {
+  const allCopyResults: CopyResult[] = [
+    ...pluginResults.flatMap((r) => r.copyResults),
+    ...workspaceFileResults,
+  ];
+
+  const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
+  const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, syncClients, resolvedMappings);
+
+  // When syncing a subset of clients, merge with existing state for non-targeted clients
+  if (options.clients && previousState) {
+    for (const [client, files] of Object.entries(previousState.files)) {
+      if (!syncClients.includes(client as ClientType)) {
+        syncedFiles[client as ClientType] = files;
+      }
+    }
+  }
+
+  // Build native plugin tracking per-client
+  const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
+  const installedSet = new Set(nativeResult?.pluginsInstalled ?? []);
+  for (const [client, sources] of nativePluginsByClient) {
+    const nativeClient = getNativeClient(client);
+    if (!nativeClient) continue;
+    const clientSpecs = sources
+      .map((s) => nativeClient.toPluginSpec(s))
+      .filter((s): s is string => s !== null && installedSet.has(s));
+    if (clientSpecs.length > 0) {
+      nativePluginsState[client] = clientSpecs;
+    }
+  }
+
+  // Preserve native state for clients not in current sync
+  if (options.clients && previousState?.nativePlugins) {
+    for (const [client, plugins] of Object.entries(previousState.nativePlugins)) {
+      if (!syncClients.includes(client as ClientType)) {
+        nativePluginsState[client as ClientType] = plugins;
+      }
+    }
+  }
+
+  await saveSyncState(workspacePath, {
+    files: syncedFiles,
+    ...(Object.keys(nativePluginsState).length > 0 && { nativePlugins: nativePluginsState }),
+    ...(vscodeState?.hash && { vscodeWorkspaceHash: vscodeState.hash }),
+    ...(vscodeState?.repos && { vscodeWorkspaceRepos: vscodeState.repos }),
+  });
+}
+
 /**
  * Sync all plugins to workspace for all configured clients
  *
@@ -1232,15 +1539,9 @@ export async function syncWorkspace(
 
   // Check .allagents/workspace.yaml exists
   if (!existsSync(configPath)) {
-    return {
-      success: false,
-      pluginResults: [],
-      totalCopied: 0,
-      totalFailed: 0,
-      totalSkipped: 0,
-      totalGenerated: 0,
-      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
-    };
+    return failedSyncResult(
+      `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}\n  Run 'allagents workspace init <path>' to create a new workspace`,
+    );
   }
 
   // Parse workspace config
@@ -1248,23 +1549,12 @@ export async function syncWorkspace(
   try {
     config = await parseWorkspaceConfig(configPath);
   } catch (error) {
-    return {
-      success: false,
-      pluginResults: [],
-      totalCopied: 0,
-      totalFailed: 0,
-      totalSkipped: 0,
-      totalGenerated: 0,
-      error:
-        error instanceof Error
-          ? error.message
-          : `Failed to parse ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
-    };
+    return failedSyncResult(
+      error instanceof Error
+        ? error.message
+        : `Failed to parse ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
+    );
   }
-
-  // Track vscode workspace state for sync state persistence
-  let vscodeWorkspaceHash: string | undefined;
-  let vscodeWorkspaceRepos: string[] | undefined;
 
   // Check if repositories are configured — when empty/absent, skip agent file
   // creation and WORKSPACE-RULES injection (same pattern as initWorkspace)
@@ -1283,25 +1573,9 @@ export async function syncWorkspace(
 
   // Validate requested clients are in config
   if (options.clients) {
-    const availableClients = new Set<ClientType>(configClientTypes);
-    for (const plugin of config.plugins) {
-      for (const client of getPluginClients(plugin) ?? []) {
-        availableClients.add(client);
-      }
-    }
-    const invalidClients = options.clients.filter(
-      (c) => !availableClients.has(c as ClientType),
-    );
-    if (invalidClients.length > 0) {
-      return {
-        success: false,
-        pluginResults: [],
-        totalCopied: 0,
-        totalFailed: 0,
-        totalSkipped: 0,
-        totalGenerated: 0,
-        error: `Client(s) not configured in workspace.yaml: ${invalidClients.join(', ')}\n  Configured clients: ${Array.from(availableClients).join(', ')}`,
-      };
+    const clientError = validateRequestedClients(options.clients, configClientTypes, config.plugins);
+    if (clientError) {
+      return failedSyncResult(clientError);
     }
   }
 
@@ -1337,15 +1611,10 @@ export async function syncWorkspace(
       offline,
     );
     if (!validatedWorkspaceSource.success) {
-      return {
-        success: false,
-        pluginResults: [],
-        totalCopied: 0,
-        totalFailed: 1,
-        totalSkipped: 0,
-        totalGenerated: 0,
-        error: `Workspace source validation failed: ${validatedWorkspaceSource.error}`,
-      };
+      return failedSyncResult(
+        `Workspace source validation failed: ${validatedWorkspaceSource.error}`,
+        { totalFailed: 1 },
+      );
     }
   }
 
@@ -1360,16 +1629,10 @@ export async function syncWorkspace(
 
   // If ALL plugins failed, abort
   if (validPlugins.length === 0 && filteredPlans.length > 0) {
-    return {
-      success: false,
-      pluginResults: [],
-      totalCopied: 0,
-      totalFailed: failedValidations.length,
-      totalSkipped: 0,
-      totalGenerated: 0,
-      warnings,
-      error: `All plugins failed validation (workspace unchanged):\n${failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n')}`,
-    };
+    return failedSyncResult(
+      `All plugins failed validation (workspace unchanged):\n${failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n')}`,
+      { totalFailed: failedValidations.length, warnings },
+    );
   }
 
   // Step 2: Load previous sync state for selective purge
@@ -1421,98 +1684,9 @@ export async function syncWorkspace(
   );
 
   // Step 4b: Native CLI installations
-  let nativeResult: NativeSyncResult | undefined;
-  const {
-    pluginsByClient: nativePluginsByClient,
-    marketplaceSourcesByClient: nativeMarketplaceSources,
-  } = collectNativePluginSources(validPlugins);
-
-  // Detect clients that previously had native plugins but no longer do (mode switch or removal)
-  const previousNativeClients = previousState?.nativePlugins
-    ? (Object.keys(previousState.nativePlugins) as ClientType[]).filter(
-        (c) => (previousState.nativePlugins?.[c]?.length ?? 0) > 0
-      )
-    : [];
-  const hasNativeWork = nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
-
-  if (hasNativeWork && !dryRun) {
-    const allClients = new Set([...nativePluginsByClient.keys(), ...previousNativeClients]);
-    const perClientResults: NativeSyncResult[] = [];
-
-    for (const clientType of allClients) {
-      const nativeClient = getNativeClient(clientType);
-      if (!nativeClient) {
-        const sources = nativePluginsByClient.get(clientType);
-        if (sources && sources.length > 0) {
-          warnings.push(`Native install: no native client for ${clientType}, skipping`);
-        }
-        continue;
-      }
-
-      const cliAvailable = await nativeClient.isAvailable();
-      if (!cliAvailable) {
-        const sources = nativePluginsByClient.get(clientType);
-        if (sources && sources.length > 0) {
-          messages.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
-        }
-        continue;
-      }
-
-      // Pre-register marketplaces whose canonical name differs from repo name.
-      // syncPlugins won't extract these from canonical specs (no owner/repo).
-      const marketplaceSources = nativeMarketplaceSources.get(clientType);
-      if (marketplaceSources) {
-        for (const source of marketplaceSources) {
-          await nativeClient.addMarketplace(source, { cwd: workspacePath });
-        }
-      }
-
-      // Uninstall removed plugins
-      const currentSources = nativePluginsByClient.get(clientType) ?? [];
-      const currentSpecs = currentSources
-        .map((s) => nativeClient.toPluginSpec(s))
-        .filter((s): s is string => s !== null);
-      const previousPlugins = getPreviouslySyncedNativePlugins(previousState, clientType);
-      const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
-      for (const plugin of removed) {
-        try {
-          await nativeClient.uninstallPlugin(plugin, 'project', { cwd: workspacePath });
-        } catch (err) {
-          warnings.push(`Native uninstall failed for ${plugin}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-
-      // Install
-      if (currentSources.length > 0) {
-        perClientResults.push(
-          attachNativeClientContext(
-            await nativeClient.syncPlugins(currentSources, 'project', { cwd: workspacePath }),
-            clientType,
-          ),
-        );
-      }
-    }
-
-    if (perClientResults.length > 0) {
-      nativeResult = mergeNativeSyncResults(perClientResults);
-    }
-  } else if (nativePluginsByClient.size > 0 && dryRun) {
-    const perClientResults: NativeSyncResult[] = [];
-    for (const [clientType, sources] of nativePluginsByClient) {
-      const nativeClient = getNativeClient(clientType);
-      if (nativeClient && sources.length > 0) {
-        perClientResults.push(
-          attachNativeClientContext(
-            await nativeClient.syncPlugins(sources, 'project', { cwd: workspacePath, dryRun: true }),
-            clientType,
-          ),
-        );
-      }
-    }
-    if (perClientResults.length > 0) {
-      nativeResult = mergeNativeSyncResults(perClientResults);
-    }
-  }
+  const nativeResult = await syncNativePlugins(
+    validPlugins, syncClients, previousState, 'project', workspacePath, dryRun, warnings, messages,
+  );
 
   // Step 5: Copy workspace files if configured
   // Supports both workspace.source (default base) and file-level sources
@@ -1540,15 +1714,10 @@ export async function syncWorkspace(
     if (fileSourceRepos.length > 0) {
       const { cache, errors } = await fetchFileSourceRepos(fileSourceRepos);
       if (errors.length > 0) {
-        return {
-          success: false,
-          pluginResults,
-          totalCopied: 0,
-          totalFailed: errors.length,
-          totalSkipped: 0,
-          totalGenerated: 0,
-          error: `File source fetch failed (workspace unchanged):\n${errors.map((e) => `  - ${e}`).join('\n')}`,
-        };
+        return failedSyncResult(
+          `File source fetch failed (workspace unchanged):\n${errors.map((e) => `  - ${e}`).join('\n')}`,
+          { pluginResults, totalFailed: errors.length },
+        );
       }
       githubCache = cache;
     }
@@ -1556,15 +1725,10 @@ export async function syncWorkspace(
     // Step 5b: Validate all file sources exist before copying
     const fileValidationErrors = validateFileSources(filesToCopy, sourcePath, githubCache);
     if (fileValidationErrors.length > 0) {
-      return {
-        success: false,
-        pluginResults,
-        totalCopied: 0,
-        totalFailed: fileValidationErrors.length,
-        totalSkipped: 0,
-        totalGenerated: 0,
-        error: `File source validation failed (workspace unchanged):\n${fileValidationErrors.map((e) => `  - ${e}`).join('\n')}`,
-      };
+      return failedSyncResult(
+        `File source validation failed (workspace unchanged):\n${fileValidationErrors.map((e) => `  - ${e}`).join('\n')}`,
+        { pluginResults, totalFailed: fileValidationErrors.length },
+      );
     }
 
     // Step 5c: Copy workspace files with GitHub cache
@@ -1599,152 +1763,26 @@ export async function syncWorkspace(
   }
 
   // Step 5d: Reconcile and generate VSCode .code-workspace file
+  let vscodeState: { hash: string; repos: string[] } | undefined;
   if (syncClients.includes('vscode') && !dryRun) {
-    // Reconcile .code-workspace → workspace.yaml if the file was externally modified
-    if (previousState?.vscodeWorkspaceHash && previousState?.vscodeWorkspaceRepos) {
-      const outputPath = getWorkspaceOutputPath(workspacePath, config.vscode);
-      if (existsSync(outputPath)) {
-        const existingContent = readFileSync(outputPath, 'utf-8');
-        const currentHash = computeWorkspaceHash(existingContent);
-
-        if (currentHash !== previousState.vscodeWorkspaceHash) {
-          // File was modified externally — reconcile folders
-          try {
-            const existingWorkspace = JSON.parse(existingContent);
-            const folders = Array.isArray(existingWorkspace.folders) ? existingWorkspace.folders : [];
-
-            const reconciled = reconcileVscodeWorkspaceFolders(
-              workspacePath,
-              folders,
-              previousState.vscodeWorkspaceRepos,
-              config.repositories,
-            );
-
-            if (reconciled.added.length > 0 || reconciled.removed.length > 0) {
-              // Update workspace.yaml
-              await updateRepositories(
-                { remove: reconciled.removed, add: reconciled.added.map(p => ({ path: p })) },
-                workspacePath,
-              );
-              // Re-read config to pick up changes
-              config = await parseWorkspaceConfig(configPath);
-
-              if (reconciled.removed.length > 0) {
-                messages.push(`Repositories removed (from .code-workspace): ${reconciled.removed.join(', ')}`);
-              }
-              if (reconciled.added.length > 0) {
-                messages.push(`Repositories added (from .code-workspace): ${reconciled.added.join(', ')}`);
-              }
-            }
-          } catch {
-            // If .code-workspace is malformed, skip reconciliation silently
-          }
-        }
-      }
-    }
-
-    // Generate .code-workspace (always, even after reconciliation)
-    const writtenContent = generateVscodeWorkspaceFile(workspacePath, config);
-    vscodeWorkspaceHash = computeWorkspaceHash(writtenContent);
-    vscodeWorkspaceRepos = config.repositories.map(
-      r => resolve(workspacePath, r.path).replace(/\\/g, '/'),
-    );
-  }
-
-  // Count results from plugins
-  let totalCopied = 0;
-  let totalFailed = 0;
-  let totalSkipped = 0;
-  let totalGenerated = 0;
-
-  for (const pluginResult of pluginResults) {
-    for (const copyResult of pluginResult.copyResults) {
-      switch (copyResult.action) {
-        case 'copied':
-          totalCopied++;
-          break;
-        case 'failed':
-          totalFailed++;
-          break;
-        case 'skipped':
-          totalSkipped++;
-          break;
-        case 'generated':
-          totalGenerated++;
-          break;
-      }
+    const result = await syncVscodeWorkspaceFile(workspacePath, config, configPath, previousState, messages);
+    config = result.config;
+    if (result.hash && result.repos) {
+      vscodeState = { hash: result.hash, repos: result.repos };
     }
   }
 
-  // Count results from workspace files
-  for (const result of workspaceFileResults) {
-    switch (result.action) {
-      case 'copied':
-        totalCopied++;
-        break;
-      case 'failed':
-        totalFailed++;
-        break;
-      case 'skipped':
-        totalSkipped++;
-        break;
-    }
-  }
-
+  // Count results
+  const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, workspaceFileResults);
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
 
-  // Step 6: Save sync state with all copied files (skip in dry-run mode)
-  // Always save state after sync (even with partial failures) so state reflects disk reality.
-  // The purge has already happened, so we need to track what was actually copied.
+  // Persist sync state (skip in dry-run mode)
+  const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
   if (!dryRun) {
-    // Collect all copy results
-    const allCopyResults: CopyResult[] = [
-      ...pluginResults.flatMap((r) => r.copyResults),
-      ...workspaceFileResults,
-    ];
-
-    // Group by client and save state
-    const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
-    const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, syncClients, resolvedMappings);
-
-    // When syncing a subset of clients, merge with existing state for non-targeted clients
-    if (options.clients && previousState) {
-      for (const [client, files] of Object.entries(previousState.files)) {
-        if (!syncClients.includes(client as ClientType)) {
-          syncedFiles[client as ClientType] = files;
-        }
-      }
-    }
-
-    // Build native plugin tracking per-client (only plugins specific to each client)
-    const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
-    const installedSet = new Set(nativeResult?.pluginsInstalled ?? []);
-    for (const [client, sources] of nativePluginsByClient) {
-      const nativeClient = getNativeClient(client);
-      if (!nativeClient) continue;
-      const clientSpecs = sources
-        .map((s) => nativeClient.toPluginSpec(s))
-        .filter((s): s is string => s !== null && installedSet.has(s));
-      if (clientSpecs.length > 0) {
-        nativePluginsState[client] = clientSpecs;
-      }
-    }
-
-    // Preserve native state for clients not in current sync
-    if (options.clients && previousState?.nativePlugins) {
-      for (const [client, plugins] of Object.entries(previousState.nativePlugins)) {
-        if (!syncClients.includes(client as ClientType)) {
-          nativePluginsState[client as ClientType] = plugins;
-        }
-      }
-    }
-
-    await saveSyncState(workspacePath, {
-      files: syncedFiles,
-      ...(Object.keys(nativePluginsState).length > 0 && { nativePlugins: nativePluginsState }),
-      ...(vscodeWorkspaceHash && { vscodeWorkspaceHash }),
-      ...(vscodeWorkspaceRepos && { vscodeWorkspaceRepos }),
-    });
+    await persistSyncState(
+      workspacePath, pluginResults, workspaceFileResults, syncClients,
+      previousState, options, nativePluginsByClient, nativeResult, vscodeState,
+    );
   }
 
   return {
@@ -1809,16 +1847,10 @@ export async function syncUserWorkspace(
 
   // If ALL plugins failed, abort
   if (validPlugins.length === 0 && pluginPlans.length > 0) {
-    return {
-      success: false,
-      pluginResults: [],
-      totalCopied: 0,
-      totalFailed: failedValidations.length,
-      totalSkipped: 0,
-      totalGenerated: 0,
-      warnings,
-      error: `All plugins failed validation:\n${failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n')}`,
-    };
+    return failedSyncResult(
+      `All plugins failed validation:\n${failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n')}`,
+      { totalFailed: failedValidations.length, warnings },
+    );
   }
 
   // Load previous sync state (stored at ~/.allagents/sync-state.json)
@@ -1846,29 +1878,7 @@ export async function syncUserWorkspace(
   );
 
   // Count results
-  let totalCopied = 0;
-  let totalFailed = 0;
-  let totalSkipped = 0;
-  let totalGenerated = 0;
-
-  for (const pluginResult of pluginResults) {
-    for (const copyResult of pluginResult.copyResults) {
-      switch (copyResult.action) {
-        case 'copied':
-          totalCopied++;
-          break;
-        case 'failed':
-          totalFailed++;
-          break;
-        case 'skipped':
-          totalSkipped++;
-          break;
-        case 'generated':
-          totalGenerated++;
-          break;
-      }
-    }
-  }
+  const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, []);
 
   // Sync MCP server configs to VS Code if vscode client is configured
   let mcpResult: McpMergeResult | undefined;
@@ -1881,97 +1891,9 @@ export async function syncUserWorkspace(
   }
 
   // Run native CLI installations for user scope
-  let nativeResult: NativeSyncResult | undefined;
-  const {
-    pluginsByClient: nativePluginsByClient,
-    marketplaceSourcesByClient: nativeMarketplaceSources,
-  } = collectNativePluginSources(validPlugins);
-
-  // Detect clients that previously had native plugins but no longer do
-  const previousNativeClients = previousState?.nativePlugins
-    ? (Object.keys(previousState.nativePlugins) as ClientType[]).filter(
-        (c) => (previousState.nativePlugins?.[c]?.length ?? 0) > 0
-      )
-    : [];
-  const hasNativeWork = nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
-
-  if (hasNativeWork && !dryRun) {
-    const allClients = new Set([...nativePluginsByClient.keys(), ...previousNativeClients]);
-    const perClientResults: NativeSyncResult[] = [];
-
-    for (const clientType of allClients) {
-      const nativeClient = getNativeClient(clientType);
-      if (!nativeClient) {
-        const sources = nativePluginsByClient.get(clientType);
-        if (sources && sources.length > 0) {
-          warnings.push(`Native install: no native client for ${clientType}, skipping`);
-        }
-        continue;
-      }
-
-      const cliAvailable = await nativeClient.isAvailable();
-      if (!cliAvailable) {
-        const sources = nativePluginsByClient.get(clientType);
-        if (sources && sources.length > 0) {
-          messages.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
-        }
-        continue;
-      }
-
-      // Pre-register marketplaces whose canonical name differs from repo name
-      const marketplaceSources = nativeMarketplaceSources.get(clientType);
-      if (marketplaceSources) {
-        for (const source of marketplaceSources) {
-          await nativeClient.addMarketplace(source);
-        }
-      }
-
-      // Uninstall removed plugins
-      const currentSources = nativePluginsByClient.get(clientType) ?? [];
-      const currentSpecs = currentSources
-        .map((s) => nativeClient.toPluginSpec(s))
-        .filter((s): s is string => s !== null);
-      const previousPlugins = getPreviouslySyncedNativePlugins(previousState, clientType);
-      const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
-      for (const plugin of removed) {
-        try {
-          await nativeClient.uninstallPlugin(plugin, 'user');
-        } catch (err) {
-          warnings.push(`Native uninstall failed for ${plugin}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-
-      // Install
-      if (currentSources.length > 0) {
-        perClientResults.push(
-          attachNativeClientContext(
-            await nativeClient.syncPlugins(currentSources, 'user'),
-            clientType,
-          ),
-        );
-      }
-    }
-
-    if (perClientResults.length > 0) {
-      nativeResult = mergeNativeSyncResults(perClientResults);
-    }
-  } else if (nativePluginsByClient.size > 0 && dryRun) {
-    const perClientResults: NativeSyncResult[] = [];
-    for (const [clientType, sources] of nativePluginsByClient) {
-      const nativeClient = getNativeClient(clientType);
-      if (nativeClient && sources.length > 0) {
-        perClientResults.push(
-          attachNativeClientContext(
-            await nativeClient.syncPlugins(sources, 'user', { dryRun: true }),
-            clientType,
-          ),
-        );
-      }
-    }
-    if (perClientResults.length > 0) {
-      nativeResult = mergeNativeSyncResults(perClientResults);
-    }
-  }
+  const nativeResult = await syncNativePlugins(
+    validPlugins, syncClients, previousState, 'user', homeDir, dryRun, warnings, messages,
+  );
 
   // Save sync state (including MCP servers and native plugins)
   if (!dryRun) {
@@ -1979,6 +1901,7 @@ export async function syncUserWorkspace(
     const resolvedUserMappings = resolveClientMappings(syncClients, USER_CLIENT_MAPPINGS);
     const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, syncClients, resolvedUserMappings);
 
+    const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
     const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
     const installedSet = new Set(nativeResult?.pluginsInstalled ?? []);
     for (const [client, sources] of nativePluginsByClient) {
