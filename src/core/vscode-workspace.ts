@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { resolve, basename, isAbsolute } from 'node:path';
 import type { Repository, VscodeConfig } from '../models/workspace-config.js';
 
@@ -189,4 +190,12 @@ export function getWorkspaceOutputPath(
   // Default: use workspace directory name
   const dirName = basename(resolve(workspacePath));
   return resolve(workspacePath, `${dirName}.code-workspace`);
+}
+
+/**
+ * Compute SHA-256 hash of .code-workspace file content.
+ * Used to detect external modifications between syncs.
+ */
+export function computeWorkspaceHash(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
 }

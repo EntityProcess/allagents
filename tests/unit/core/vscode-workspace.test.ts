@@ -3,6 +3,7 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   buildPathPlaceholderMap,
+  computeWorkspaceHash,
   generateVscodeWorkspace,
   getWorkspaceOutputPath,
   substitutePathPlaceholders,
@@ -207,5 +208,21 @@ describe('getWorkspaceOutputPath', () => {
     const workspacePath = join(testBase, 'myapp');
     const result = getWorkspaceOutputPath(workspacePath, { output: 'test.code-workspace' });
     expect(result).toBe(join(workspacePath, 'test.code-workspace'));
+  });
+});
+
+describe('computeWorkspaceHash', () => {
+  test('returns consistent SHA-256 hex for same content', () => {
+    const content = '{"folders":[{"path":"."}]}';
+    const hash1 = computeWorkspaceHash(content);
+    const hash2 = computeWorkspaceHash(content);
+    expect(hash1).toBe(hash2);
+    expect(hash1).toHaveLength(64); // SHA-256 hex = 64 chars
+  });
+
+  test('returns different hash for different content', () => {
+    const hash1 = computeWorkspaceHash('{"folders":[{"path":"."}]}');
+    const hash2 = computeWorkspaceHash('{"folders":[{"path":"./src"}]}');
+    expect(hash1).not.toBe(hash2);
   });
 });
