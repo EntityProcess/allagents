@@ -1289,7 +1289,6 @@ function countCopyResults(
 
 async function syncNativePlugins(
   validPlugins: ValidatedPlugin[],
-  syncClients: ClientType[],
   previousState: SyncState | null,
   scope: 'project' | 'user',
   workspacePath: string,
@@ -1466,14 +1465,19 @@ async function persistSyncState(
   options: SyncOptions,
   nativePluginsByClient: Map<ClientType, string[]>,
   nativeResult: NativeSyncResult | undefined,
-  vscodeState?: { hash: string; repos: string[] },
+  extra?: {
+    vscodeState?: { hash: string; repos: string[] };
+    mcpTrackedServers?: string[];
+    clientMappings?: Record<ClientType, ClientMapping>;
+  },
 ): Promise<void> {
   const allCopyResults: CopyResult[] = [
     ...pluginResults.flatMap((r) => r.copyResults),
     ...workspaceFileResults,
   ];
 
-  const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
+  const mappings = extra?.clientMappings ?? CLIENT_MAPPINGS;
+  const resolvedMappings = resolveClientMappings(syncClients, mappings);
   const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, syncClients, resolvedMappings);
 
   // When syncing a subset of clients, merge with existing state for non-targeted clients
@@ -1511,8 +1515,9 @@ async function persistSyncState(
   await saveSyncState(workspacePath, {
     files: syncedFiles,
     ...(Object.keys(nativePluginsState).length > 0 && { nativePlugins: nativePluginsState }),
-    ...(vscodeState?.hash && { vscodeWorkspaceHash: vscodeState.hash }),
-    ...(vscodeState?.repos && { vscodeWorkspaceRepos: vscodeState.repos }),
+    ...(extra?.vscodeState?.hash && { vscodeWorkspaceHash: extra.vscodeState.hash }),
+    ...(extra?.vscodeState?.repos && { vscodeWorkspaceRepos: extra.vscodeState.repos }),
+    ...(extra?.mcpTrackedServers && { mcpServers: { vscode: extra.mcpTrackedServers } }),
   });
 }
 
@@ -1685,7 +1690,7 @@ export async function syncWorkspace(
 
   // Step 4b: Native CLI installations
   const nativeResult = await syncNativePlugins(
-    validPlugins, syncClients, previousState, 'project', workspacePath, dryRun, warnings, messages,
+    validPlugins, previousState, 'project', workspacePath, dryRun, warnings, messages,
   );
 
   // Step 5: Copy workspace files if configured
@@ -1781,7 +1786,8 @@ export async function syncWorkspace(
   if (!dryRun) {
     await persistSyncState(
       workspacePath, pluginResults, workspaceFileResults, syncClients,
-      previousState, options, nativePluginsByClient, nativeResult, vscodeState,
+      previousState, options, nativePluginsByClient, nativeResult,
+      vscodeState ? { vscodeState } : undefined,
     );
   }
 
@@ -1892,34 +1898,20 @@ export async function syncUserWorkspace(
 
   // Run native CLI installations for user scope
   const nativeResult = await syncNativePlugins(
-    validPlugins, syncClients, previousState, 'user', homeDir, dryRun, warnings, messages,
+    validPlugins, previousState, 'user', homeDir, dryRun, warnings, messages,
   );
 
   // Save sync state (including MCP servers and native plugins)
   if (!dryRun) {
-    const allCopyResults = pluginResults.flatMap((r) => r.copyResults);
-    const resolvedUserMappings = resolveClientMappings(syncClients, USER_CLIENT_MAPPINGS);
-    const syncedFiles = collectSyncedPaths(allCopyResults, homeDir, syncClients, resolvedUserMappings);
-
     const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
-    const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
-    const installedSet = new Set(nativeResult?.pluginsInstalled ?? []);
-    for (const [client, sources] of nativePluginsByClient) {
-      const nativeClient = getNativeClient(client);
-      if (!nativeClient) continue;
-      const clientSpecs = sources
-        .map((s) => nativeClient.toPluginSpec(s))
-        .filter((s): s is string => s !== null && installedSet.has(s));
-      if (clientSpecs.length > 0) {
-        nativePluginsState[client] = clientSpecs;
-      }
-    }
-
-    await saveSyncState(homeDir, {
-      files: syncedFiles,
-      ...(mcpResult && { mcpServers: { vscode: mcpResult.trackedServers } }),
-      ...(Object.keys(nativePluginsState).length > 0 && { nativePlugins: nativePluginsState }),
-    });
+    await persistSyncState(
+      homeDir, pluginResults, [], syncClients,
+      previousState, {}, nativePluginsByClient, nativeResult,
+      {
+        clientMappings: USER_CLIENT_MAPPINGS,
+        ...(mcpResult && { mcpTrackedServers: mcpResult.trackedServers }),
+      },
+    );
   }
 
   return {
