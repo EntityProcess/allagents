@@ -6,6 +6,7 @@ import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   ClientEntry,
   PluginEntry,
+  Repository,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
 import { getPluginSource } from '../models/workspace-config.js';
@@ -439,6 +440,40 @@ export async function removeDisabledSkill(
     if (config.disabledSkills.length === 0) {
       config.disabledSkills = undefined;
     }
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Update repositories in workspace.yaml: remove specified paths and add new entries.
+ * Used by .code-workspace reconciliation to sync folder changes back.
+ */
+export async function updateRepositories(
+  changes: { remove: string[]; add: Repository[] },
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  if (changes.remove.length === 0 && changes.add.length === 0) {
+    return { success: true };
+  }
+
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+
+    const removeSet = new Set(changes.remove);
+    config.repositories = config.repositories.filter(
+      (repo) => !removeSet.has(repo.path),
+    );
+    config.repositories.push(...changes.add);
+
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
   } catch (error) {

@@ -15,6 +15,8 @@ export interface SyncStateData {
   files: Partial<Record<ClientType, string[]>>;
   mcpServers?: Partial<Record<McpScope, string[]>>;
   nativePlugins?: Partial<Record<ClientType, string[]>>;
+  vscodeWorkspaceHash?: string;
+  vscodeWorkspaceRepos?: string[];
 }
 
 /**
@@ -78,6 +80,8 @@ export async function saveSyncState(
     files: normalizedData.files as Record<ClientType, string[]>,
     ...(normalizedData.mcpServers && { mcpServers: normalizedData.mcpServers }),
     ...(normalizedData.nativePlugins && { nativePlugins: normalizedData.nativePlugins }),
+    ...(normalizedData.vscodeWorkspaceHash && { vscodeWorkspaceHash: normalizedData.vscodeWorkspaceHash }),
+    ...(normalizedData.vscodeWorkspaceRepos && { vscodeWorkspaceRepos: normalizedData.vscodeWorkspaceRepos }),
   };
 
   await mkdir(dirname(statePath), { recursive: true });

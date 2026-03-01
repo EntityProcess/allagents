@@ -3,8 +3,10 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   buildPathPlaceholderMap,
+  computeWorkspaceHash,
   generateVscodeWorkspace,
   getWorkspaceOutputPath,
+  reconcileVscodeWorkspaceFolders,
   substitutePathPlaceholders,
 } from '../../../src/core/vscode-workspace.js';
 
@@ -207,5 +209,168 @@ describe('getWorkspaceOutputPath', () => {
     const workspacePath = join(testBase, 'myapp');
     const result = getWorkspaceOutputPath(workspacePath, { output: 'test.code-workspace' });
     expect(result).toBe(join(workspacePath, 'test.code-workspace'));
+  });
+});
+
+describe('computeWorkspaceHash', () => {
+  test('returns consistent SHA-256 hex for same content', () => {
+    const content = '{"folders":[{"path":"."}]}';
+    const hash1 = computeWorkspaceHash(content);
+    const hash2 = computeWorkspaceHash(content);
+    expect(hash1).toBe(hash2);
+    expect(hash1).toHaveLength(64); // SHA-256 hex = 64 chars
+  });
+
+  test('returns different hash for different content', () => {
+    const hash1 = computeWorkspaceHash('{"folders":[{"path":"."}]}');
+    const hash2 = computeWorkspaceHash('{"folders":[{"path":"./src"}]}');
+    expect(hash1).not.toBe(hash2);
+  });
+});
+
+describe('reconcileVscodeWorkspaceFolders', () => {
+  const workspacePath = join(testBase, 'myapp');
+  const absPath = (rel: string) => resolve(workspacePath, rel).replace(/\\/g, '/');
+
+  test('no changes when all three sources agree', () => {
+    const lastSyncedRepos = [absPath('../backend'), absPath('../frontend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+      { path: absPath('../frontend') },
+    ];
+    const currentRepos = [{ path: '../backend' }, { path: '../frontend' }];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.updatedRepos).toEqual(currentRepos);
+  });
+
+  test('removes repo that was deleted from .code-workspace', () => {
+    const lastSyncedRepos = [absPath('../backend'), absPath('../frontend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+      // ../frontend removed by user in VS Code
+    ];
+    const currentRepos = [{ path: '../backend' }, { path: '../frontend' }];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.removed).toEqual(['../frontend']);
+    expect(result.added).toEqual([]);
+    expect(result.updatedRepos).toEqual([{ path: '../backend' }]);
+  });
+
+  test('adds repo that was added to .code-workspace', () => {
+    const lastSyncedRepos = [absPath('../backend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+      { path: absPath('../new-service') }, // added by user in VS Code
+    ];
+    const currentRepos = [{ path: '../backend' }];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.added.length).toBe(1);
+    expect(result.added[0]).toContain('new-service');
+    expect(result.removed).toEqual([]);
+    expect(result.updatedRepos.length).toBe(2);
+    expect(result.updatedRepos[0]).toEqual({ path: '../backend' });
+    expect(result.updatedRepos[1].path).toContain('new-service');
+  });
+
+  test('handles simultaneous add in .code-workspace and add in workspace.yaml', () => {
+    const lastSyncedRepos = [absPath('../backend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+      { path: absPath('../from-vscode') }, // added in VS Code
+    ];
+    const currentRepos = [
+      { path: '../backend' },
+      { path: '../from-yaml' }, // added in workspace.yaml
+    ];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.added.length).toBe(1);
+    expect(result.added[0]).toContain('from-vscode');
+    expect(result.removed).toEqual([]);
+    // Should have backend + from-yaml (kept) + from-vscode (added)
+    expect(result.updatedRepos.length).toBe(3);
+  });
+
+  test('handles simultaneous remove in .code-workspace and add in workspace.yaml', () => {
+    const lastSyncedRepos = [absPath('../backend'), absPath('../frontend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+      // ../frontend removed in VS Code
+    ];
+    const currentRepos = [
+      { path: '../backend' },
+      { path: '../frontend' },
+      { path: '../new-cli' }, // added in workspace.yaml
+    ];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.removed).toEqual(['../frontend']);
+    expect(result.added).toEqual([]);
+    expect(result.updatedRepos).toEqual([
+      { path: '../backend' },
+      { path: '../new-cli' },
+    ]);
+  });
+
+  test('skips workspace root folder (.) during reconciliation', () => {
+    const lastSyncedRepos = [absPath('../backend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+    ];
+    const currentRepos = [{ path: '../backend' }];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+  });
+
+  test('preserves existing repo properties (description, source) on unchanged repos', () => {
+    const lastSyncedRepos = [absPath('../backend'), absPath('../frontend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+      // ../frontend removed
+    ];
+    const currentRepos = [
+      { path: '../backend', description: 'API server', repo: 'org/backend' },
+      { path: '../frontend', description: 'Web app' },
+    ];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.updatedRepos).toEqual([
+      { path: '../backend', description: 'API server', repo: 'org/backend' },
+    ]);
   });
 });
