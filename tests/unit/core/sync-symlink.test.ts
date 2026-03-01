@@ -175,6 +175,59 @@ clients:
     expect(symlinkStillExists).toBe(false);
   });
 
+  it('purges symlinks when client is removed from workspace', async () => {
+    const pluginDir = await createPlugin('my-plugin', 'my-skill');
+
+    await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      `
+repositories: []
+plugins:
+  - ${pluginDir}
+clients:
+  - claude
+  - universal
+`,
+    );
+
+    // First sync — creates canonical + symlink
+    await syncWorkspace(testDir);
+
+    const claudeSkillPath = join(testDir, '.claude', 'skills', 'my-skill');
+    const claudeStats = await lstat(claudeSkillPath);
+    expect(claudeStats.isSymbolicLink()).toBe(true);
+
+    // Remove claude from clients, keep universal
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      `
+repositories: []
+plugins:
+  - ${pluginDir}
+clients:
+  - universal
+`,
+    );
+
+    // Second sync — should purge claude symlinks
+    await syncWorkspace(testDir);
+
+    // Claude symlink should be gone (use lstatSync to detect dangling symlinks)
+    let symlinkStillExists = false;
+    try {
+      lstatSync(claudeSkillPath);
+      symlinkStillExists = true;
+    } catch {
+      // expected
+    }
+    expect(symlinkStillExists).toBe(false);
+
+    // Canonical should still exist (universal is still active)
+    const canonicalPath = join(testDir, '.agents', 'skills', 'my-skill');
+    expect(existsSync(canonicalPath)).toBe(true);
+  });
+
   it('uses copy mode when syncMode is set to copy', async () => {
     const pluginDir = await createPlugin('my-plugin', 'my-skill');
 
