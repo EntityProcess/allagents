@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, rm, mkdir, writeFile, lstat, readlink } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncWorkspace } from '../../../src/core/sync.js';
@@ -163,8 +163,16 @@ clients:
     // Second sync
     await syncWorkspace(testDir);
 
-    // Symlink should be purged
-    expect(existsSync(join(testDir, '.claude', 'skills', 'my-skill'))).toBe(false);
+    // Use lstatSync — existsSync follows symlinks and returns false for
+    // broken symlinks, which would hide the bug
+    let symlinkStillExists = false;
+    try {
+      lstatSync(join(testDir, '.claude', 'skills', 'my-skill'));
+      symlinkStillExists = true;
+    } catch {
+      // expected — file doesn't exist
+    }
+    expect(symlinkStillExists).toBe(false);
   });
 
   it('uses copy mode when syncMode is set to copy', async () => {
