@@ -22,8 +22,9 @@ export interface ClientMapping {
  * Project-level client path mappings for all supported AI clients.
  * Paths are relative to the project root directory.
  *
- * Only the 'universal' client uses .agents/skills/.
- * All other clients use provider-specific directories.
+ * The 'universal' and 'vscode' clients default to .agents/skills/.
+ * When copilot is also configured, vscode follows copilot's paths
+ * via resolveClientMappings().
  */
 export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   claude: {
@@ -67,9 +68,8 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
   vscode: {
-    skillsPath: '.github/skills/',
+    skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
-    githubPath: '.github/',
   },
     openclaw: {
     skillsPath: 'skills/',
@@ -195,9 +195,8 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
   vscode: {
-    skillsPath: '.copilot/skills/',
+    skillsPath: '.agents/skills/',
     agentFile: 'AGENTS.md',
-    githubPath: '.copilot/',
   },
     openclaw: {
     skillsPath: 'skills/',
@@ -260,3 +259,24 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
     agentFile: 'AGENTS.md',
   },
 };
+
+/**
+ * Resolve vscode client mapping based on sibling clients.
+ * When copilot is present, vscode follows copilot's paths.
+ * When copilot is absent, vscode defaults to .agents/ (universal behavior).
+ *
+ * Returns baseMappings unchanged if vscode is not in the clients list.
+ */
+export function resolveClientMappings(
+  clients: ClientType[],
+  baseMappings: Record<ClientType, ClientMapping>,
+): Record<ClientType, ClientMapping> {
+  if (!clients.includes('vscode')) return baseMappings;
+  if (!clients.includes('copilot')) return baseMappings;
+
+  // vscode follows copilot's mapping
+  return {
+    ...baseMappings,
+    vscode: { ...baseMappings.copilot },
+  };
+}
