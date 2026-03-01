@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { resolve, basename, isAbsolute } from 'node:path';
+import { resolve, basename, isAbsolute, relative } from 'node:path';
 import type { Repository, VscodeConfig } from '../models/workspace-config.js';
 
 /**
@@ -198,4 +198,92 @@ export function getWorkspaceOutputPath(
  */
 export function computeWorkspaceHash(content: string): string {
   return createHash('sha256').update(content).digest('hex');
+}
+
+/**
+ * Result of reconciling .code-workspace folders with workspace.yaml repositories.
+ */
+export interface ReconcileResult {
+  /** Updated repositories list after merging changes */
+  updatedRepos: Repository[];
+  /** Relative paths of repositories added from .code-workspace */
+  added: string[];
+  /** Relative paths of repositories removed (were in .code-workspace before, now gone) */
+  removed: string[];
+}
+
+/**
+ * 3-way merge of .code-workspace folders and workspace.yaml repositories.
+ *
+ * Uses lastSyncedRepos as the common ancestor to detect:
+ * - Folders removed from .code-workspace → remove from workspace.yaml
+ * - Folders added to .code-workspace → add to workspace.yaml
+ * - Folders added to workspace.yaml (not in lastSyncedRepos) → keep
+ *
+ * @param workspacePath - Workspace root directory (for resolving relative paths)
+ * @param codeWorkspaceFolders - Folders from the existing .code-workspace file
+ * @param lastSyncedRepos - Absolute repo paths from sync state (common ancestor)
+ * @param currentRepos - Current repositories from workspace.yaml
+ */
+export function reconcileVscodeWorkspaceFolders(
+  workspacePath: string,
+  codeWorkspaceFolders: { path: string; name?: string }[],
+  lastSyncedRepos: string[],
+  currentRepos: Repository[],
+): ReconcileResult {
+  const normalizedWorkspacePath = resolve(workspacePath).replace(/\\/g, '/');
+
+  // Build set of absolute paths from .code-workspace folders (exclude '.')
+  const codeWorkspaceAbsPaths = new Set<string>();
+  for (const folder of codeWorkspaceFolders) {
+    if (folder.path === '.') continue;
+    const absPath = (isAbsolute(folder.path)
+      ? folder.path
+      : resolve(workspacePath, folder.path)
+    ).replace(/\\/g, '/');
+    codeWorkspaceAbsPaths.add(absPath);
+  }
+
+  // Build set of last-synced absolute paths (common ancestor)
+  const lastSyncedSet = new Set(lastSyncedRepos.map(p => p.replace(/\\/g, '/')));
+
+  // Build map of absolute path → Repository for current workspace.yaml repos
+  const currentReposByAbsPath = new Map<string, Repository>();
+  for (const repo of currentRepos) {
+    const absPath = resolve(workspacePath, repo.path).replace(/\\/g, '/');
+    currentReposByAbsPath.set(absPath, repo);
+  }
+  const currentAbsPaths = new Set(currentReposByAbsPath.keys());
+
+  const added: string[] = [];
+  const removed: string[] = [];
+  const updatedRepos: Repository[] = [];
+
+  // Keep repos still in .code-workspace or newly added to workspace.yaml
+  for (const [absPath, repo] of currentReposByAbsPath) {
+    const inLastSync = lastSyncedSet.has(absPath);
+    const inCodeWorkspace = codeWorkspaceAbsPaths.has(absPath);
+
+    if (inLastSync && !inCodeWorkspace) {
+      // Was in last sync, removed from .code-workspace → remove
+      removed.push(repo.path);
+    } else {
+      updatedRepos.push(repo);
+    }
+  }
+
+  // Find folders added to .code-workspace that aren't in workspace.yaml
+  for (const absPath of codeWorkspaceAbsPaths) {
+    const inLastSync = lastSyncedSet.has(absPath);
+    const inCurrentRepos = currentAbsPaths.has(absPath);
+
+    if (!inLastSync && !inCurrentRepos) {
+      // New in .code-workspace, not in workspace.yaml → add
+      const relPath = relative(normalizedWorkspacePath, absPath).replace(/\\/g, '/');
+      added.push(relPath);
+      updatedRepos.push({ path: relPath });
+    }
+  }
+
+  return { updatedRepos, added, removed };
 }
