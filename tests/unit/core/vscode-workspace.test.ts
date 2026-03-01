@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolve, join } from 'node:path';
+import { resolve, relative, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   buildPathPlaceholderMap,
@@ -12,7 +12,7 @@ import {
 const testBase = join(tmpdir(), 'allagents-test');
 
 describe('generateVscodeWorkspace', () => {
-  test('generates workspace with repository folders resolved to absolute paths', () => {
+  test('generates workspace with repository folders as relative paths', () => {
     const workspacePath = join(testBase, 'myapp');
     const result = generateVscodeWorkspace({
       workspacePath,
@@ -25,8 +25,8 @@ describe('generateVscodeWorkspace', () => {
 
     expect(result.folders).toEqual([
       { path: '.' },
-      { path: resolve(workspacePath, '../backend').replace(/\\/g, '/') },
-      { path: resolve(workspacePath, '../frontend').replace(/\\/g, '/') },
+      { path: '../backend' },
+      { path: '../frontend' },
     ]);
   });
 
@@ -44,8 +44,8 @@ describe('generateVscodeWorkspace', () => {
 
   test('merges template folders after repo folders, deduplicating by path', () => {
     const workspacePath = join(testBase, 'myapp');
-    const sharedPath = resolve(workspacePath, '../shared').replace(/\\/g, '/');
-    const extraPath = join(testBase, 'extra').replace(/\\/g, '/');
+    const sharedAbsPath = resolve(workspacePath, '../shared').replace(/\\/g, '/');
+    const extraAbsPath = join(testBase, 'extra').replace(/\\/g, '/');
 
     const result = generateVscodeWorkspace({
       workspacePath,
@@ -55,19 +55,19 @@ describe('generateVscodeWorkspace', () => {
       ],
       template: {
         folders: [
-          { path: sharedPath, name: 'SharedLib' }, // duplicate of ../shared
-          { path: extraPath, name: 'ExtraLib' },
+          { path: sharedAbsPath, name: 'SharedLib' }, // duplicate of ../shared (absolute)
+          { path: extraAbsPath, name: 'ExtraLib' },
         ],
       },
     });
 
-    // ../shared resolves to sharedPath — template duplicate removed
-    // extra is not a duplicate, so it's kept with its name
+    // ../shared deduplicates against template's absolute sharedAbsPath
+    // extra is not a duplicate, so it's kept with its name (absolute, from template)
     expect(result.folders).toEqual([
       { path: '.' },
-      { path: resolve(workspacePath, '../backend').replace(/\\/g, '/') },
-      { path: sharedPath },
-      { path: extraPath, name: 'ExtraLib' },
+      { path: '../backend' },
+      { path: '../shared' },
+      { path: extraAbsPath, name: 'ExtraLib' },
     ]);
   });
 
@@ -114,18 +114,16 @@ describe('generateVscodeWorkspace', () => {
 });
 
 describe('substitutePathPlaceholders', () => {
-  // Use resolved paths for the map values (with forward slashes for consistency)
-  const glowPath = resolve(testBase, 'Glow').replace(/\\/g, '/');
-  const glowSharedPath = resolve(testBase, 'Glow.Shared').replace(/\\/g, '/');
+  // Path map now contains relative paths (matching buildPathPlaceholderMap behavior)
   const pathMap = new Map<string, string>([
-    ['../Glow', glowPath],
-    ['../Glow.Shared', glowSharedPath],
+    ['../Glow', '../Glow'],
+    ['../Glow.Shared', '../Glow.Shared'],
   ]);
 
   test('substitutes {path:..} in string values', () => {
     const input = { cwd: '{path:../Glow}/DotNet/Client' };
     const result = substitutePathPlaceholders(input, pathMap);
-    expect(result.cwd).toBe(`${glowPath}/DotNet/Client`);
+    expect(result.cwd).toBe('../Glow/DotNet/Client');
   });
 
   test('substitutes in nested objects', () => {
@@ -137,7 +135,7 @@ describe('substitutePathPlaceholders', () => {
       },
     };
     const result = substitutePathPlaceholders(input, pathMap);
-    expect(result.launch.configurations[0].cwd).toBe(`${glowPath}/src`);
+    expect(result.launch.configurations[0].cwd).toBe('../Glow/src');
     expect(result.launch.configurations[0].name).toBe('dev');
   });
 
@@ -148,7 +146,7 @@ describe('substitutePathPlaceholders', () => {
       ],
     };
     const result = substitutePathPlaceholders(input, pathMap);
-    expect(result.folders[0].path).toBe(glowSharedPath);
+    expect(result.folders[0].path).toBe('../Glow.Shared');
   });
 
   test('leaves strings without placeholders unchanged', () => {
@@ -165,28 +163,30 @@ describe('substitutePathPlaceholders', () => {
 });
 
 describe('buildPathPlaceholderMap', () => {
-  test('registers repositories by relative path', () => {
+  test('registers repositories with normalized relative paths', () => {
     const workspacePath = join(testBase, 'workspace');
     const map = buildPathPlaceholderMap(
       [{ path: '../Glow' }, { path: '../Glow.Shared' }],
       workspacePath,
     );
 
-    expect(map.get('../Glow')).toBe(resolve(workspacePath, '../Glow'));
-    expect(map.get('../Glow.Shared')).toBe(resolve(workspacePath, '../Glow.Shared'));
+    expect(map.get('../Glow')).toBe(relative(workspacePath, resolve(workspacePath, '../Glow')));
+    expect(map.get('../Glow.Shared')).toBe(relative(workspacePath, resolve(workspacePath, '../Glow.Shared')));
   });
 
-  test('resolves paths to absolute paths', () => {
+  test('produces relative paths for portability', () => {
     const workspacePath = join(testBase, 'workspace');
     const map = buildPathPlaceholderMap(
       [{ path: '../Glow', repo: 'WiseTechGlobal/Glow' }],
       workspacePath,
     );
 
-    // Path should be absolute (not relative)
     const resolved = map.get('../Glow');
     expect(resolved).toBeDefined();
-    expect(resolved).not.toContain('..');
+    // Path should be relative (contains ..) for portability
+    expect(resolved).toContain('..');
+    // Path should not be absolute
+    expect(resolved!.startsWith('/')).toBe(false);
   });
 });
 

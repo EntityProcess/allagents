@@ -1,4 +1,4 @@
-import { resolve, basename, isAbsolute } from 'node:path';
+import { resolve, relative, basename, isAbsolute } from 'node:path';
 import type { Repository, VscodeConfig } from '../models/workspace-config.js';
 
 /**
@@ -34,13 +34,16 @@ export type PathPlaceholderMap = Map<string, string>;
 /**
  * Build a placeholder map from repositories using path as the lookup key.
  *
+ * Resolves repository paths relative to workspacePath, producing clean relative paths
+ * (with `..` segments normalized). This keeps .code-workspace files portable.
+ *
  * @param repositories - Repository list from workspace.yaml
  * @param workspacePath - Workspace root for resolving relative paths
- * @returns Map of relative paths to absolute paths
+ * @returns Map of original paths to normalized relative paths
  *
  * @example
  * // Given: { path: "../Glow" } and workspacePath: "/home/user/workspace"
- * // Result: Map { "../Glow" => "/home/user/Glow" }
+ * // Result: Map { "../Glow" => "../Glow" }
  */
 export function buildPathPlaceholderMap(
   repositories: Repository[],
@@ -50,7 +53,8 @@ export function buildPathPlaceholderMap(
 
   for (const repo of repositories) {
     const absolutePath = resolve(workspacePath, repo.path);
-    map.set(repo.path, absolutePath);
+    const relativePath = relative(workspacePath, absolutePath);
+    map.set(repo.path, relativePath);
   }
 
   return map;
@@ -63,7 +67,7 @@ export function buildPathPlaceholderMap(
  *
  * @example
  * // Given repositories: [{ path: "../Glow" }]
- * "{path:../Glow}/src" → "/home/user/Glow/src"
+ * "{path:../Glow}/src" → "../Glow/src"
  * "D:\\GitHub\\Glow" → "D:/GitHub/Glow"
  */
 export function substitutePathPlaceholders<T>(
@@ -121,28 +125,33 @@ export function generateVscodeWorkspace(
 
   // 0. Current workspace folder
   folders.push({ path: '.' });
-  // Track absolute path for deduplication
-  seenPaths.add(resolve(workspacePath, '.'));
+  // Track absolute path for deduplication (normalized for cross-platform)
+  seenPaths.add(resolve(workspacePath, '.').replace(/\\/g, '/'));
 
   // 1. Repository folders (from workspace.yaml)
+  // Use relative paths so the .code-workspace file stays portable when the workspace moves.
   for (const repo of repositories) {
-    const absolutePath = resolve(workspacePath, repo.path).replace(/\\/g, '/');
-    folders.push({ path: absolutePath });
-    seenPaths.add(absolutePath);
+    const absolutePath = resolve(workspacePath, repo.path);
+    const relPath = relative(workspacePath, absolutePath).replace(/\\/g, '/');
+    folders.push({ path: relPath });
+    seenPaths.add(absolutePath.replace(/\\/g, '/'));
   }
 
   // 2. Template folders (deduplicated against repo folders, preserve optional name)
   if (resolvedTemplate && Array.isArray(resolvedTemplate.folders)) {
     for (const folder of resolvedTemplate.folders as WorkspaceFolder[]) {
       const rawPath = folder.path as string;
-      const normalizedPath = (typeof rawPath === 'string' && !isAbsolute(rawPath)
+      // Resolve to absolute for deduplication only
+      const absoluteForDedup = (typeof rawPath === 'string' && !isAbsolute(rawPath)
         ? resolve(workspacePath, rawPath)
         : rawPath).replace(/\\/g, '/');
-      if (!seenPaths.has(normalizedPath)) {
+      if (!seenPaths.has(absoluteForDedup)) {
+        // Keep the path as-is (just normalize backslashes)
+        const normalizedPath = rawPath.replace(/\\/g, '/');
         const entry: WorkspaceFolder = { path: normalizedPath };
         if (folder.name) entry.name = folder.name;
         folders.push(entry);
-        seenPaths.add(normalizedPath);
+        seenPaths.add(absoluteForDedup);
       }
     }
   }

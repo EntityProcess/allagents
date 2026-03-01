@@ -39,11 +39,9 @@ clients:
 
     const folders = result.folders as Array<{ path: string }>;
     expect(folders[0].path).toBe('.');
-    // On Windows paths are absolute (C:\...) not starting with /
-    // Just verify they are not relative (don't start with . or ..)
-    for (const folder of folders.slice(1)) {
-      expect(folder.path.startsWith('.')).toBe(false);
-    }
+    // Paths should be relative for portability (e.g., ../backend, ../frontend)
+    expect(folders[1].path).toBe('../backend');
+    expect(folders[2].path).toBe('../frontend');
 
     expect(result.settings).toEqual({ 'chat.agent.maxRequests': 999 });
   });
