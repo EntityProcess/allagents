@@ -26,6 +26,19 @@ describe('initWorkspace with clients option', () => {
     expect(config.clients).toEqual(['cursor', 'gemini']);
   });
 
+  it('should write client entry objects with install mode to workspace.yaml', async () => {
+    await initWorkspace(testDir, {
+      clients: [{ name: 'claude', install: 'native' }, 'copilot'],
+    });
+
+    const content = readFileSync(join(testDir, '.allagents', 'workspace.yaml'), 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    expect(config.clients).toEqual([
+      { name: 'claude', install: 'native' },
+      'copilot',
+    ]);
+  });
+
   it('should use template default clients when no clients option provided', async () => {
     await initWorkspace(testDir);
 
