@@ -11,7 +11,7 @@ import { addRepository, removeRepository, listRepositories, detectRemote, update
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
-import { ClientTypeSchema } from '../../models/workspace-config.js';
+import { ClientTypeSchema, InstallModeSchema, type ClientEntry } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
 import { formatMcpResult, formatNativeResult, buildSyncData } from '../format-sync.js';
 
@@ -19,6 +19,40 @@ import { formatMcpResult, formatNativeResult, buildSyncData } from '../format-sy
 // =============================================================================
 // workspace init
 // =============================================================================
+
+/**
+ * Parse comma-separated client string with optional :mode suffix.
+ * "claude:native,copilot,vscode" → [{ name: 'claude', install: 'native' }, 'copilot', 'vscode']
+ */
+export function parseClientEntries(input: string): ClientEntry[] {
+  const validClients: readonly string[] = ClientTypeSchema.options;
+  const validModes: readonly string[] = InstallModeSchema.options;
+  const entries: ClientEntry[] = [];
+
+  for (const part of input.split(',').map((s) => s.trim()).filter(Boolean)) {
+    const colonIdx = part.indexOf(':');
+    if (colonIdx === -1) {
+      if (!validClients.includes(part)) {
+        throw new Error(`Invalid client(s): ${part}\n  Valid clients: ${validClients.join(', ')}`);
+      }
+      entries.push(part as ClientEntry);
+    } else {
+      const name = part.slice(0, colonIdx);
+      const mode = part.slice(colonIdx + 1);
+      if (!validClients.includes(name)) {
+        throw new Error(`Invalid client(s): ${name}\n  Valid clients: ${validClients.join(', ')}`);
+      }
+      if (!validModes.includes(mode)) {
+        throw new Error(
+          `Invalid install mode '${mode}' for client '${name}'. Valid modes: ${validModes.join(', ')}`,
+        );
+      }
+      entries.push({ name: name as any, install: mode as any });
+    }
+  }
+
+  return entries;
+}
 
 const initCmd = command({
   name: 'init',
@@ -31,14 +65,7 @@ const initCmd = command({
   handler: async ({ path, from, client }) => {
     try {
       const targetPath = path ?? '.';
-      const clients = client ? client.split(',').map((c) => c.trim()) : undefined;
-      if (clients) {
-        const validClients: readonly string[] = ClientTypeSchema.options;
-        const invalid = clients.filter((c) => !validClients.includes(c));
-        if (invalid.length > 0) {
-          throw new Error(`Invalid client(s): ${invalid.join(', ')}\n  Valid clients: ${validClients.join(', ')}`);
-        }
-      }
+      const clients = client ? parseClientEntries(client) : undefined;
       const result = await initWorkspace(targetPath, {
         ...(from ? { from } : {}),
         ...(clients ? { clients } : {}),
