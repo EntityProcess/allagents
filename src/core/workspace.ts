@@ -6,6 +6,7 @@ import { load, dump } from 'js-yaml';
 import { syncWorkspace, type SyncResult } from './sync.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, type WorkspaceRepository } from '../constants.js';
+import { getClientTypes, type ClientEntry } from '../models/workspace-config.js';
 import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
 import { fetchWorkspaceFromGitHub, readFileFromClone } from './github-fetch.js';
 import { cleanupTempDir } from './git.js';
@@ -17,7 +18,7 @@ export interface InitOptions {
   /** Path to existing workspace.yaml or directory containing one to copy from */
   from?: string;
   /** Override which clients to include in workspace.yaml */
-  clients?: string[];
+  clients?: ClientEntry[];
 }
 
 /**
@@ -192,11 +193,12 @@ export async function initWorkspace(
 
     // Parse config to check repositories and clients (needed before copying template)
     const parsed = load(workspaceYamlContent) as Record<string, unknown>;
-    const clients = (parsed?.clients as string[]) ?? [];
+    const clients = (parsed?.clients as ClientEntry[]) ?? [];
+    const clientNames = getClientTypes(clients);
 
     // Copy template.code-workspace from source if it exists and vscode client is configured
     const VSCODE_TEMPLATE_FILE = 'template.code-workspace';
-    if (clients.includes('vscode') && options.from) {
+    if (clientNames.includes('vscode') && options.from) {
       const targetTemplatePath = join(configDir, VSCODE_TEMPLATE_FILE);
       if (!existsSync(targetTemplatePath)) {
         if (isGitHubUrl(options.from) && githubTempDir) {
@@ -287,7 +289,7 @@ export async function initWorkspace(
 
       // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
       if (
-        clients.includes('claude') &&
+        clientNames.includes('claude') &&
         !copiedAgentFiles.includes('CLAUDE.md') &&
         copiedAgentFiles.includes('AGENTS.md')
       ) {

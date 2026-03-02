@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
 import { initWorkspace } from '../../../core/workspace.js';
-import { ClientTypeSchema } from '../../../models/workspace-config.js';
+import { ClientTypeSchema, type ClientEntry } from '../../../models/workspace-config.js';
 
 const { text, multiselect } = p;
 
@@ -52,7 +52,7 @@ export async function runInit(): Promise<void> {
 
     const options: Parameters<typeof initWorkspace>[1] = {
       ...(fromSource ? { from: fromSource } : {}),
-      ...(selectedClients.length > 0 ? { clients: selectedClients } : {}),
+      ...(selectedClients.length > 0 ? { clients: selectedClients as ClientEntry[] } : {}),
     };
     const result = await initWorkspace(targetPath, options);
 
