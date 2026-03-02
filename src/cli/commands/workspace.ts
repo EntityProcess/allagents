@@ -60,7 +60,7 @@ const initCmd = command({
   args: {
     path: positional({ type: optional(string), displayName: 'path' }),
     from: option({ type: optional(string), long: 'from', description: 'Copy workspace.yaml from existing template/workspace' }),
-    client: option({ type: optional(string), long: 'client', short: 'c', description: 'Comma-separated list of clients (e.g., claude,copilot,cursor)' }),
+    client: option({ type: optional(string), long: 'client', short: 'c', description: 'Comma-separated clients with optional :mode (e.g., claude:native,copilot,cursor)' }),
   },
   handler: async ({ path, from, client }) => {
     try {
