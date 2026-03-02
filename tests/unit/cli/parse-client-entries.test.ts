@@ -24,6 +24,10 @@ describe('parseClientEntries', () => {
     expect(() => parseClientEntries('badclient')).toThrow('Invalid client(s): badclient');
   });
 
+  it('returns empty array for empty input', () => {
+    expect(parseClientEntries('')).toEqual([]);
+  });
+
   it('throws on invalid install mode', () => {
     expect(() => parseClientEntries('claude:invalid')).toThrow(
       "Invalid install mode 'invalid' for client 'claude'",
