@@ -11,7 +11,7 @@ import { addRepository, removeRepository, listRepositories, detectRemote, update
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
-import { ClientTypeSchema, InstallModeSchema, type ClientEntry } from '../../models/workspace-config.js';
+import { ClientTypeSchema, InstallModeSchema, type ClientEntry, type ClientType, type InstallMode } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
 import { formatMcpResult, formatNativeResult, buildSyncData } from '../format-sync.js';
 
@@ -47,7 +47,7 @@ export function parseClientEntries(input: string): ClientEntry[] {
           `Invalid install mode '${mode}' for client '${name}'. Valid modes: ${validModes.join(', ')}`,
         );
       }
-      entries.push({ name: name as any, install: mode as any });
+      entries.push({ name: name as ClientType, install: mode as InstallMode });
     }
   }
 
