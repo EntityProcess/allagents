@@ -2,6 +2,17 @@
 
 A CLI tool for managing AI coding assistant plugins across multiple clients (Claude Code, GitHub Copilot, Cursor, etc.).
 
+## Bug Reports and Issue Requirements
+
+**Before writing any code for a bug fix, confirm you understand the actual problem.** Ask the user clarifying questions when:
+
+- The issue description is vague or could have multiple root causes
+- You cannot reproduce the reported behavior from the description alone
+- The proposed solution in the issue doesn't clearly match the described problem
+- The bug could be a user error (e.g., running a command from the wrong directory) rather than a code defect
+
+Do NOT assume the first plausible-looking code path is the root cause. Verify the user's environment, exact commands run, and expected vs actual output before proposing a fix.
+
 ## Plans
 
 Design documents and implementation plans are stored in `.claude/plans/`. These are temporary working documents - once implementation is complete, delete the plan and update official docs with any user-facing behavior.
@@ -22,11 +33,9 @@ When working on a GitHub issue, **ALWAYS** follow this workflow:
 
 1. **Create a worktree with a feature branch** from `main`:
    ```bash
-   # From the repository root
-   cd /path/to/allagents
-   git worktree add ../allagents_<type>-<short-description> <type>/<issue-number>-<short-description>
-   # Example: git worktree add ../allagents_feat-add-new-embedder feat/42-add-new-embedder
-   cd ../allagents_<type>-<short-description>
+   git worktree add .worktrees/<type>-<short-description> -b <type>/<issue-number>-<short-description>
+   # Example: git worktree add .worktrees/feat-add-new-embedder -b feat/42-add-new-embedder
+   cd .worktrees/<type>-<short-description>
    ```
 
 2. **Implement the changes** and commit following the commit convention
@@ -107,23 +116,11 @@ If a mock doesn't match the real interface (e.g., missing a `name` field the rea
 
 ### Git Worktrees
 
-**ALWAYS use git worktrees for feature development.** This allows you to work on multiple branches simultaneously without switching contexts.
-
-Create worktrees in a **sibling folder** using the naming convention `projectname_branchname`:
-
-```bash
-# From the repository root
-git worktree add ../allagents_<branchname> <branchname>
-
-# Examples:
-git worktree add ../allagents_feat-new-feature feat/new-feature
-git worktree add ../allagents_fix-bug-123 fix/123-description
-```
+**ALWAYS use git worktrees for feature development.** Worktrees live in `.worktrees/` (already in `.gitignore`).
 
 When done:
 ```bash
-# Remove worktree after branch is merged
-git worktree remove ../allagents_<branchname>
+git worktree remove .worktrees/<name>
 ```
 
 ## Architecture Notes
