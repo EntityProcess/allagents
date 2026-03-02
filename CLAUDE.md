@@ -2,6 +2,17 @@
 
 A CLI tool for managing AI coding assistant plugins across multiple clients (Claude Code, GitHub Copilot, Cursor, etc.).
 
+## Bug Reports and Issue Requirements
+
+**Before writing any code for a bug fix, confirm you understand the actual problem.** Ask the user clarifying questions when:
+
+- The issue description is vague or could have multiple root causes
+- You cannot reproduce the reported behavior from the description alone
+- The proposed solution in the issue doesn't clearly match the described problem
+- The bug could be a user error (e.g., running a command from the wrong directory) rather than a code defect
+
+Do NOT assume the first plausible-looking code path is the root cause. Verify the user's environment, exact commands run, and expected vs actual output before proposing a fix.
+
 ## Plans
 
 Design documents and implementation plans are stored in `.claude/plans/`. These are temporary working documents - once implementation is complete, delete the plan and update official docs with any user-facing behavior.
