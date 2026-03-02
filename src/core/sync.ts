@@ -221,6 +221,8 @@ export interface ValidatedPlugin {
   pluginName?: string;
   /** Canonical marketplace name when it differs from the spec (e.g., manifest overrides repo name) */
   registeredAs?: string;
+  /** GitHub marketplace source (owner/repo) for native CLI registration */
+  marketplaceSource?: string;
   /** Glob patterns of files to exclude when syncing (from workspace.yaml) */
   exclude?: string[];
 }
@@ -246,23 +248,27 @@ function resolveNativePluginSource(vp: ValidatedPlugin): {
   spec: string;
   marketplaceSource?: string;
 } {
-  if (!vp.registeredAs) return { spec: vp.plugin };
+  if (!vp.registeredAs) {
+    return { spec: vp.plugin, ...(vp.marketplaceSource && { marketplaceSource: vp.marketplaceSource }) };
+  }
 
   const parsed = parsePluginSpec(vp.plugin);
-  if (!parsed) return { spec: vp.plugin };
+  if (!parsed) {
+    return { spec: vp.plugin, ...(vp.marketplaceSource && { marketplaceSource: vp.marketplaceSource }) };
+  }
 
   const canonicalSpec = `${parsed.plugin}@${vp.registeredAs}`;
   if (parsed.owner && parsed.repo) {
     return { spec: canonicalSpec, marketplaceSource: `${parsed.owner}/${parsed.repo}` };
   }
-  return { spec: canonicalSpec };
+  return { spec: canonicalSpec, ...(vp.marketplaceSource && { marketplaceSource: vp.marketplaceSource }) };
 }
 
 /**
  * Collect native plugin specs and marketplace sources from validated plugins.
  * Resolves canonical marketplace names so native CLI operations use the correct spec.
  */
-function collectNativePluginSources(validPlugins: ValidatedPlugin[]): {
+export function collectNativePluginSources(validPlugins: ValidatedPlugin[]): {
   pluginsByClient: Map<ClientType, string[]>;
   marketplaceSourcesByClient: Map<ClientType, Set<string>>;
 } {
@@ -840,6 +846,7 @@ async function validatePlugin(
       nativeClients: [],
       ...(resolved.pluginName && { pluginName: resolved.pluginName }),
       ...(resolved.registeredAs && { registeredAs: resolved.registeredAs }),
+      ...(resolved.marketplaceSource && { marketplaceSource: resolved.marketplaceSource }),
     };
   }
 

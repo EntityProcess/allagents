@@ -859,6 +859,8 @@ export interface ResolvePluginSpecResult {
   path?: string;
   pluginName?: string;
   registeredAs?: string;
+  /** GitHub marketplace source (owner/repo) for native CLI registration */
+  marketplaceSource?: string;
   error?: string;
 }
 
@@ -998,11 +1000,16 @@ export async function resolvePluginSpecWithAutoRegister(
   const shouldReturnRegisteredAs =
     didAutoRegister || marketplace.name !== marketplaceName;
 
+  // Include marketplace source for GitHub marketplaces so native CLIs can register them
+  const marketplaceSource =
+    marketplace.source.type === 'github' ? marketplace.source.location : undefined;
+
   return {
     success: true,
     path: resolved.path,
     pluginName: resolved.plugin,
     ...(shouldReturnRegisteredAs && { registeredAs: marketplace.name }),
+    ...(marketplaceSource && { marketplaceSource }),
   };
 }
 
