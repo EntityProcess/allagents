@@ -37,6 +37,8 @@ export const CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   },
   copilot: {
     skillsPath: '.github/skills/',
+    agentsPath: '.github/agents/',
+    hooksPath: '.github/hooks/',
     agentFile: 'AGENTS.md',
     githubPath: '.github/',
   },
@@ -164,6 +166,8 @@ export const USER_CLIENT_MAPPINGS: Record<ClientType, ClientMapping> = {
   },
   copilot: {
     skillsPath: '.copilot/skills/',
+    agentsPath: '.copilot/agents/',
+    hooksPath: '.copilot/hooks/',
     agentFile: 'AGENTS.md',
     githubPath: '.copilot/',
   },
