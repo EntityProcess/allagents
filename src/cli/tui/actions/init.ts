@@ -1,8 +1,9 @@
 import * as p from '@clack/prompts';
 import { initWorkspace } from '../../../core/workspace.js';
-import { ClientTypeSchema, type ClientEntry } from '../../../models/workspace-config.js';
+import type { ClientEntry } from '../../../models/workspace-config.js';
+import { promptForClients } from '../prompt-clients.js';
 
-const { text, multiselect } = p;
+const { text } = p;
 
 /**
  * Guided workspace initialization action.
@@ -30,20 +31,9 @@ export async function runInit(): Promise<void> {
       return;
     }
 
-    const allClients = ClientTypeSchema.options;
-    const defaultClients = ['claude', 'copilot', 'vscode', 'codex', 'opencode'];
+    const selectedClients = await promptForClients();
 
-    const selectedClients = await multiselect({
-      message: 'Which AI clients do you use?',
-      options: allClients.map((c) => ({
-        label: c,
-        value: c,
-      })),
-      initialValues: defaultClients,
-      required: false,
-    });
-
-    if (p.isCancel(selectedClients)) {
+    if (selectedClients === null) {
       return;
     }
 
@@ -52,7 +42,7 @@ export async function runInit(): Promise<void> {
 
     const options: Parameters<typeof initWorkspace>[1] = {
       ...(fromSource ? { from: fromSource } : {}),
-      ...(selectedClients.length > 0 ? { clients: selectedClients as ClientEntry[] } : {}),
+      ...(selectedClients.length > 0 ? { clients: selectedClients } : {}),
     };
     const result = await initWorkspace(targetPath, options);
 
