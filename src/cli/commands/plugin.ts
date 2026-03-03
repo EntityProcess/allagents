@@ -1,4 +1,4 @@
-import { command, positional, option, string, optional } from 'cmd-ts';
+import { command, positional, option, string, optional, multioption, array } from 'cmd-ts';
 import {
   addMarketplace,
   listMarketplaces,
@@ -11,7 +11,7 @@ import {
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { loadSyncState } from '../../core/sync-state.js';
-import { addPlugin, removePlugin, hasPlugin } from '../../core/workspace-modify.js';
+import { addPlugin, removePlugin, hasPlugin, addEnabledSkill } from '../../core/workspace-modify.js';
 import {
   addUserPlugin,
   removeUserPlugin,
@@ -20,9 +20,11 @@ import {
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
   getUserWorkspaceConfig,
+  addUserEnabledSkill,
   type InstalledPluginInfo,
 } from '../../core/user-workspace.js';
 import { updatePlugin, type InstalledPluginUpdateResult } from '../../core/plugin.js';
+import { getAllSkillsFromPlugins } from '../../core/skills.js';
 import { parseMarketplaceManifest } from '../../utils/marketplace-manifest-parser.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
@@ -47,7 +49,7 @@ import {
   type PluginEntry,
   type WorkspaceConfig,
 } from '../../models/workspace-config.js';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, getHomeDir } from '../../constants.js';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -803,8 +805,13 @@ const pluginInstallCmd = command({
   args: {
     plugin: positional({ type: string, displayName: 'plugin' }),
     scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Installation scope: "project" (default) or "user"' }),
+    skills: multioption({
+      type: array(string),
+      long: 'skill',
+      description: 'Only enable specific skills (can be repeated)',
+    }),
   },
-  handler: async ({ plugin, scope }) => {
+  handler: async ({ plugin, scope, skills }) => {
     try {
       // Treat as user scope if explicitly requested or if cwd resolves to user config
       const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
@@ -826,34 +833,121 @@ const pluginInstallCmd = command({
           ? await runUserSyncAndPrint()
           : await runSyncAndPrint();
         const displayPlugin = result.normalizedPlugin ?? plugin;
-        jsonOutput({
-          success: ok,
-          command: 'plugin install',
-          data: {
-            plugin: displayPlugin,
-            scope: isUser ? 'user' : 'project',
-            autoRegistered: result.autoRegistered ?? null,
-            syncResult: syncData,
-          },
-          ...(!ok && { error: 'Sync completed with failures' }),
-        });
-        if (!ok) {
-          process.exit(1);
+
+        // If --skill flag provided, handle skill selection before producing JSON output
+        if (skills.length > 0) {
+          if (!ok) {
+            jsonOutput({
+              success: false,
+              command: 'plugin install',
+              error: 'Sync completed with failures',
+              data: { plugin: displayPlugin, scope: isUser ? 'user' : 'project', syncResult: syncData },
+            });
+            process.exit(1);
+          }
+          // Fall through to skill handling below
+        } else {
+          jsonOutput({
+            success: ok,
+            command: 'plugin install',
+            data: {
+              plugin: displayPlugin,
+              scope: isUser ? 'user' : 'project',
+              autoRegistered: result.autoRegistered ?? null,
+              syncResult: syncData,
+            },
+            ...(!ok && { error: 'Sync completed with failures' }),
+          });
+          if (!ok) {
+            process.exit(1);
+          }
+          return;
         }
-        return;
+      } else {
+        const displayPlugin = result.normalizedPlugin ?? plugin;
+        if (result.autoRegistered) {
+          console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
+        }
+        console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${displayPlugin}`);
+
+        const { ok: syncOk } = isUser
+          ? await runUserSyncAndPrint()
+          : await runSyncAndPrint();
+        if (!syncOk) {
+          if (skills.length > 0) {
+            // Continue to skill handling even if initial sync had issues
+          } else {
+            process.exit(1);
+          }
+        }
       }
 
-      const displayPlugin = result.normalizedPlugin ?? plugin;
-      if (result.autoRegistered) {
-        console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
-      }
-      console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${displayPlugin}`);
+      // Handle --skill flag: add selected skills to enabledSkills
+      if (skills.length > 0) {
+        const workspacePath = isUser ? getHomeDir() : process.cwd();
+        const allSkills = await getAllSkillsFromPlugins(workspacePath);
+        const displayPlugin = result.normalizedPlugin ?? plugin;
+        const pluginSkills = allSkills.filter((s) => s.pluginSource === displayPlugin);
 
-      const { ok: syncOk } = isUser
-        ? await runUserSyncAndPrint()
-        : await runSyncAndPrint();
-      if (!syncOk) {
-        process.exit(1);
+        if (pluginSkills.length === 0) {
+          if (!isJsonMode()) {
+            console.error(`Warning: No skills found in plugin ${displayPlugin}`);
+          }
+        } else {
+          const pluginName = pluginSkills[0]!.pluginName;
+          const availableNames = pluginSkills.map((s) => s.name);
+
+          // Validate requested skill names
+          const invalid = skills.filter((s) => !availableNames.includes(s));
+          if (invalid.length > 0) {
+            const error = `Unknown skills: ${invalid.join(', ')}. Available: ${availableNames.join(', ')}`;
+            if (isJsonMode()) {
+              jsonOutput({ success: false, command: 'plugin install', error });
+              process.exit(1);
+            }
+            console.error(`Error: ${error}`);
+            process.exit(1);
+          }
+
+          // Add each skill to enabledSkills
+          for (const skillName of skills) {
+            const skillKey = `${pluginName}:${skillName}`;
+            const addResult = isUser
+              ? await addUserEnabledSkill(skillKey)
+              : await addEnabledSkill(skillKey, workspacePath);
+            if (!addResult.success && !isJsonMode()) {
+              console.error(`Warning: ${addResult.error}`);
+            }
+          }
+
+          if (!isJsonMode()) {
+            console.log(`\nEnabled skills: ${skills.join(', ')}`);
+            console.log('Syncing workspace...\n');
+          }
+
+          // Re-sync with enabledSkills now active
+          const { ok: reSyncOk, syncData: reSyncData } = isUser
+            ? await runUserSyncAndPrint()
+            : await runSyncAndPrint();
+
+          if (isJsonMode()) {
+            jsonOutput({
+              success: reSyncOk,
+              command: 'plugin install',
+              data: {
+                plugin: displayPlugin,
+                scope: isUser ? 'user' : 'project',
+                enabledSkills: skills,
+                syncResult: reSyncData,
+              },
+              ...(!reSyncOk && { error: 'Sync completed with failures' }),
+            });
+            if (!reSyncOk) process.exit(1);
+            return;
+          }
+
+          if (!reSyncOk) process.exit(1);
+        }
       }
     } catch (error) {
       if (error instanceof Error) {
