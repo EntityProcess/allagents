@@ -6,10 +6,16 @@ import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import {
   addDisabledSkill,
   removeDisabledSkill,
+  getEnabledSkills,
+  removeEnabledSkill,
+  addEnabledSkill,
 } from '../../core/workspace-modify.js';
 import {
   addUserDisabledSkill,
   removeUserDisabledSkill,
+  getUserEnabledSkills,
+  removeUserEnabledSkill,
+  addUserEnabledSkill,
   isUserConfigPath,
 } from '../../core/user-workspace.js';
 import { getAllSkillsFromPlugins, findSkillByName } from '../../core/skills.js';
@@ -244,11 +250,27 @@ const removeCmd = command({
         return;
       }
 
-      // Add to disabled skills
+      // Detect mode: does this plugin have enabledSkills entries?
+      const enabledSkills = isUser
+        ? await getUserEnabledSkills()
+        : await getEnabledSkills(workspacePath);
+      const pluginPrefix = `${targetSkill.pluginName}:`;
+      const inAllowlistMode = enabledSkills.some((s) => s.startsWith(pluginPrefix));
+
       const skillKey = `${targetSkill.pluginName}:${skill}`;
-      const result = isUser
-        ? await addUserDisabledSkill(skillKey)
-        : await addDisabledSkill(skillKey, workspacePath);
+
+      let result;
+      if (inAllowlistMode) {
+        // Allowlist mode: remove from enabledSkills to disable
+        result = isUser
+          ? await removeUserEnabledSkill(skillKey)
+          : await removeEnabledSkill(skillKey, workspacePath);
+      } else {
+        // Denylist mode: add to disabledSkills (existing behavior)
+        result = isUser
+          ? await addUserDisabledSkill(skillKey)
+          : await addDisabledSkill(skillKey, workspacePath);
+      }
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -382,11 +404,27 @@ const addCmd = command({
         return;
       }
 
-      // Remove from disabled skills
+      // Detect mode: does this plugin have enabledSkills entries?
+      const enabledSkills = isUser
+        ? await getUserEnabledSkills()
+        : await getEnabledSkills(workspacePath);
+      const pluginPrefix = `${targetSkill.pluginName}:`;
+      const inAllowlistMode = enabledSkills.some((s) => s.startsWith(pluginPrefix));
+
       const skillKey = `${targetSkill.pluginName}:${skill}`;
-      const result = isUser
-        ? await removeUserDisabledSkill(skillKey)
-        : await removeDisabledSkill(skillKey, workspacePath);
+
+      let result;
+      if (inAllowlistMode) {
+        // Allowlist mode: add to enabledSkills to enable
+        result = isUser
+          ? await addUserEnabledSkill(skillKey)
+          : await addEnabledSkill(skillKey, workspacePath);
+      } else {
+        // Denylist mode: remove from disabledSkills (existing behavior)
+        result = isUser
+          ? await removeUserDisabledSkill(skillKey)
+          : await removeDisabledSkill(skillKey, workspacePath);
+      }
 
       if (!result.success) {
         if (isJsonMode()) {
