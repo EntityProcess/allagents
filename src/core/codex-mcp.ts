@@ -130,7 +130,13 @@ export async function syncCodexMcpServers(
       }
 
       if (!dryRun) {
-        await exec('codex', addArgs);
+        const addResult = await exec('codex', addArgs);
+        if (!addResult.success) {
+          result.warnings.push(
+            `Failed to add MCP server '${name}': ${addResult.error ?? 'unknown error'}`,
+          );
+          continue;
+        }
       }
 
       result.added++;
@@ -148,7 +154,17 @@ export async function syncCodexMcpServers(
         existingNames.has(trackedName)
       ) {
         if (!dryRun) {
-          await exec('codex', ['mcp', 'remove', trackedName]);
+          const removeResult = await exec('codex', [
+            'mcp',
+            'remove',
+            trackedName,
+          ]);
+          if (!removeResult.success) {
+            result.warnings.push(
+              `Failed to remove MCP server '${trackedName}': ${removeResult.error ?? 'unknown error'}`,
+            );
+            continue;
+          }
         }
         result.removed++;
         result.removedServers.push(trackedName);
