@@ -44,7 +44,7 @@ describe('initWorkspace with clients option', () => {
 
     const content = readFileSync(join(testDir, '.allagents', 'workspace.yaml'), 'utf-8');
     const config = load(content) as WorkspaceConfig;
-    // Default template has: claude, copilot, codex, opencode
-    expect(config.clients).toContain('claude');
+    // Default template has: universal
+    expect(config.clients).toContain('universal');
   });
 });
