@@ -54,6 +54,7 @@ export async function runSync(context: TuiContext): Promise<void> {
           for (const [scope, mcpResult] of Object.entries(
             userResult.mcpResults,
           )) {
+            if (!mcpResult) continue;
             lines.push(...formatMcpResult(mcpResult, scope));
           }
         }

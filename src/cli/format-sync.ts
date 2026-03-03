@@ -91,20 +91,22 @@ export function buildSyncData(result: SyncResult) {
     purgedPaths: result.purgedPaths ?? [],
     ...(result.mcpResults && {
       mcpServers: Object.fromEntries(
-        Object.entries(result.mcpResults).map(([scope, r]) => [
-          scope,
-          {
-            added: r.added,
-            skipped: r.skipped,
-            overwritten: r.overwritten,
-            removed: r.removed,
-            addedServers: r.addedServers,
-            skippedServers: r.skippedServers,
-            overwrittenServers: r.overwrittenServers,
-            removedServers: r.removedServers,
-            ...(r.configPath && { configPath: r.configPath }),
-          },
-        ]),
+        Object.entries(result.mcpResults)
+          .filter((entry): entry is [string, McpMergeResult] => entry[1] != null)
+          .map(([scope, r]) => [
+            scope,
+            {
+              added: r.added,
+              skipped: r.skipped,
+              overwritten: r.overwritten,
+              removed: r.removed,
+              addedServers: r.addedServers,
+              skippedServers: r.skippedServers,
+              overwrittenServers: r.overwrittenServers,
+              removedServers: r.removedServers,
+              ...(r.configPath && { configPath: r.configPath }),
+            },
+          ]),
       ),
     }),
     ...(result.nativeResult && {

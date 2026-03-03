@@ -137,7 +137,7 @@ export interface SyncResult {
   /** Informational messages (non-warning) */
   messages?: string[];
   /** Results of syncing MCP server configs, keyed by scope (e.g., 'vscode', 'codex') */
-  mcpResults?: Partial<Record<string, McpMergeResult>>;
+  mcpResults?: Record<string, McpMergeResult>;
   /** Result of native CLI plugin installations */
   nativeResult?: NativeSyncResult;
 }

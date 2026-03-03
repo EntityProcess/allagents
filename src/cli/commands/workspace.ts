@@ -249,6 +249,7 @@ const syncCmd = command({
       // Print MCP server sync results
       if (result.mcpResults) {
         for (const [scope, mcpResult] of Object.entries(result.mcpResults)) {
+          if (!mcpResult) continue;
           const mcpLines = formatMcpResult(mcpResult, scope);
           if (mcpLines.length > 0) {
             console.log('');
