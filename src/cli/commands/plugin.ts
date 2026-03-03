@@ -184,12 +184,14 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
     }
 
     // Print MCP server sync results
-    if (result.mcpResult) {
-      const mcpLines = formatMcpResult(result.mcpResult);
-      if (mcpLines.length > 0) {
-        console.log('');
-        for (const line of mcpLines) {
-          console.log(line);
+    if (result.mcpResults) {
+      for (const [scope, mcpResult] of Object.entries(result.mcpResults)) {
+        const mcpLines = formatMcpResult(mcpResult, scope);
+        if (mcpLines.length > 0) {
+          console.log('');
+          for (const line of mcpLines) {
+            console.log(line);
+          }
         }
       }
     }
