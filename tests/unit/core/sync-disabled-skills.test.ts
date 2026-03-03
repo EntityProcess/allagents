@@ -67,4 +67,21 @@ description: Test skill B
     expect(existsSync(join(tmpDir, '.claude/skills/skill-a'))).toBe(true);
     expect(existsSync(join(tmpDir, '.claude/skills/skill-b'))).toBe(true);
   });
+
+  it('syncs only enabled skills in allowlist mode', async () => {
+    const config = {
+      repositories: [],
+      plugins: [pluginDir],
+      clients: ['claude'],
+      enabledSkills: ['test-plugin:skill-b'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    await syncWorkspace(tmpDir);
+
+    // skill-a is NOT in enabledSkills -> should NOT be synced
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-a'))).toBe(false);
+    // skill-b IS in enabledSkills -> should be synced
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-b'))).toBe(true);
+  });
 });

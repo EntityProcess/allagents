@@ -72,6 +72,7 @@ export async function getAllSkillsFromPlugins(
   const content = await readFile(configPath, 'utf-8');
   const config = load(content) as WorkspaceConfig;
   const disabledSkills = new Set(config.disabledSkills ?? []);
+  const enabledSkills = config.enabledSkills ? new Set(config.enabledSkills) : null;
   const skills: SkillInfo[] = [];
 
   for (const pluginEntry of config.plugins) {
@@ -89,12 +90,16 @@ export async function getAllSkillsFromPlugins(
 
     for (const entry of skillDirs) {
       const skillKey = `${pluginName}:${entry.name}`;
+      const isDisabled = enabledSkills
+        ? !enabledSkills.has(skillKey)
+        : disabledSkills.has(skillKey);
+
       skills.push({
         name: entry.name,
         pluginName,
         pluginSource,
         path: join(skillsDir, entry.name),
-        disabled: disabledSkills.has(skillKey),
+        disabled: isDisabled,
       });
     }
   }

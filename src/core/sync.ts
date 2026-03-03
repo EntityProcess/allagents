@@ -1114,6 +1114,7 @@ interface CollectedSkillEntry {
 async function collectAllSkills(
   validatedPlugins: ValidatedPlugin[],
   disabledSkills?: Set<string>,
+  enabledSkills?: Set<string>,
 ): Promise<CollectedSkillEntry[]> {
   const allSkills: CollectedSkillEntry[] = [];
 
@@ -1124,6 +1125,7 @@ async function collectAllSkills(
       plugin.plugin,
       disabledSkills,
       pluginName,
+      enabledSkills,
     );
 
     for (const skill of skills) {
@@ -1669,9 +1671,10 @@ export async function syncWorkspace(
   }
 
   // Step 3b: Two-pass skill name resolution
-  // Pass 1: Collect all skills from all plugins (excluding disabled skills)
+  // Pass 1: Collect all skills from all plugins (excluding disabled/non-enabled skills)
   const disabledSkillsSet = new Set(config.disabledSkills ?? []);
-  const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet);
+  const enabledSkillsSet = config.enabledSkills ? new Set(config.enabledSkills) : undefined;
+  const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet);
 
   // Build per-plugin skill name maps (handles conflicts automatically)
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
@@ -1874,9 +1877,10 @@ export async function syncUserWorkspace(
     await selectivePurgeWorkspace(homeDir, previousState, syncClients);
   }
 
-  // Two-pass skill name resolution (excluding disabled skills)
+  // Two-pass skill name resolution (excluding disabled/non-enabled skills)
   const disabledSkillsSet = new Set(config.disabledSkills ?? []);
-  const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet);
+  const enabledSkillsSet = config.enabledSkills ? new Set(config.enabledSkills) : undefined;
+  const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet);
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
 
   // Copy plugins using USER_CLIENT_MAPPINGS
