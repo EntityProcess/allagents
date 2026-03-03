@@ -10,8 +10,15 @@ Plugins are packages of AI tooling that can be shared across projects and client
 ```
 my-plugin/
 ├── skills/          # Cross-client skills
+├── agents/          # Agent definitions (Claude, Copilot, Factory)
+├── hooks/           # Hook definitions (Claude, Copilot, Factory)
 ├── commands/        # Commands (Claude, OpenCode)
 ├── .github/         # GitHub overrides (Copilot, VSCode)
+│   ├── copilot-instructions.md
+│   ├── instructions/    # Pattern-based instructions
+│   ├── prompts/         # Prompt files
+│   ├── agents/          # GitHub agent overrides
+│   └── hooks/           # GitHub hook overrides
 └── AGENTS.md
 ```
 
