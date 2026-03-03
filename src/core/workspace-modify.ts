@@ -316,12 +316,12 @@ export function pruneDisabledSkillsForPlugin(
 ): void {
   if (!config.disabledSkills?.length) return;
 
-  const pluginName = extractPluginName(pluginEntry);
-  if (!pluginName) return;
+  const names = extractPluginNames(pluginEntry);
+  if (names.length === 0) return;
 
-  const prefix = `${pluginName}:`;
+  const prefixes = names.map((n) => `${n}:`);
   config.disabledSkills = config.disabledSkills.filter(
-    (s) => !s.startsWith(prefix),
+    (s) => !prefixes.some((p) => s.startsWith(p)),
   );
   if (config.disabledSkills.length === 0) {
     config.disabledSkills = undefined;
@@ -329,20 +329,29 @@ export function pruneDisabledSkillsForPlugin(
 }
 
 /**
- * Extract the plugin name from a plugin source string.
- * - plugin@marketplace → plugin component
- * - local path / GitHub URL → last path segment (basename)
- * - bare name → the name itself
+ * Extract possible plugin names from a plugin source string.
+ * Returns all candidate names that might be used as the plugin name prefix
+ * in skill keys (e.g., "pluginName:" in "pluginName:skillName").
+ *
+ * For plugin specs (plugin@marketplace), skill keys may use either the
+ * plugin component or the marketplace name (when the marketplace root
+ * IS the plugin directory).
  */
-function extractPluginName(pluginSource: string): string | null {
+function extractPluginNames(pluginSource: string): string[] {
   if (isPluginSpec(pluginSource)) {
-    return parsePluginSpec(pluginSource)?.plugin ?? null;
+    const parsed = parsePluginSpec(pluginSource);
+    if (!parsed) return [];
+    const names = [parsed.plugin];
+    if (parsed.marketplaceName && parsed.marketplaceName !== parsed.plugin) {
+      names.push(parsed.marketplaceName);
+    }
+    return names;
   }
   // Split on both / and \ to handle local paths, URLs, and Windows paths
   const parts = pluginSource.split(/[/\\]/).filter(Boolean);
   const last = parts[parts.length - 1];
-  if (!last) return null;
-  return last.replace(/\.git$/, '');
+  if (!last) return [];
+  return [last.replace(/\.git$/, '')];
 }
 
 /**
@@ -544,11 +553,11 @@ export function pruneEnabledSkillsForPlugin(
   pluginEntry: string,
 ): void {
   if (!config.enabledSkills?.length) return;
-  const pluginName = extractPluginName(pluginEntry);
-  if (!pluginName) return;
-  const prefix = `${pluginName}:`;
+  const names = extractPluginNames(pluginEntry);
+  if (names.length === 0) return;
+  const prefixes = names.map((n) => `${n}:`);
   config.enabledSkills = config.enabledSkills.filter(
-    (s) => !s.startsWith(prefix),
+    (s) => !prefixes.some((p) => s.startsWith(p)),
   );
   if (config.enabledSkills.length === 0) {
     config.enabledSkills = undefined;
