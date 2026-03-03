@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { copyAgents, copyHooks } from '../../../src/core/transform.js';
+import { copyAgents, copyHooks, copyPluginToWorkspace } from '../../../src/core/transform.js';
 
 describe('copilot agents and hooks sync', () => {
   let testDir: string;
@@ -61,6 +61,51 @@ describe('copilot agents and hooks sync', () => {
     it('returns empty when plugin has no hooks/ directory', async () => {
       const results = await copyHooks(pluginDir, workspaceDir, 'copilot');
       expect(results).toHaveLength(0);
+    });
+  });
+
+  describe('github override precedence', () => {
+    it('.github/agents/ overrides root agents/ on name conflict', async () => {
+      // Root agent
+      await mkdir(join(pluginDir, 'agents'), { recursive: true });
+      await writeFile(join(pluginDir, 'agents', 'conflict.agent.md'), 'ROOT VERSION');
+
+      // .github override
+      await mkdir(join(pluginDir, '.github', 'agents'), { recursive: true });
+      await writeFile(join(pluginDir, '.github', 'agents', 'conflict.agent.md'), 'OVERRIDE VERSION');
+
+      await copyPluginToWorkspace(pluginDir, workspaceDir, 'copilot');
+
+      const content = await readFile(join(workspaceDir, '.github', 'agents', 'conflict.agent.md'), 'utf-8');
+      expect(content).toBe('OVERRIDE VERSION');
+    });
+
+    it('.github/hooks/ overrides root hooks/ on name conflict', async () => {
+      await mkdir(join(pluginDir, 'hooks'), { recursive: true });
+      await writeFile(join(pluginDir, 'hooks', 'conflict.json'), '{"source":"root"}');
+
+      await mkdir(join(pluginDir, '.github', 'hooks'), { recursive: true });
+      await writeFile(join(pluginDir, '.github', 'hooks', 'conflict.json'), '{"source":"override"}');
+
+      await copyPluginToWorkspace(pluginDir, workspaceDir, 'copilot');
+
+      const content = await readFile(join(workspaceDir, '.github', 'hooks', 'conflict.json'), 'utf-8');
+      expect(content).toBe('{"source":"override"}');
+    });
+
+    it('merges root and .github when no conflict', async () => {
+      // Root agent (unique name)
+      await mkdir(join(pluginDir, 'agents'), { recursive: true });
+      await writeFile(join(pluginDir, 'agents', 'root-only.agent.md'), '# Root Agent');
+
+      // .github agent (different name)
+      await mkdir(join(pluginDir, '.github', 'agents'), { recursive: true });
+      await writeFile(join(pluginDir, '.github', 'agents', 'github-only.agent.md'), '# GitHub Agent');
+
+      await copyPluginToWorkspace(pluginDir, workspaceDir, 'copilot');
+
+      expect(existsSync(join(workspaceDir, '.github', 'agents', 'root-only.agent.md'))).toBe(true);
+      expect(existsSync(join(workspaceDir, '.github', 'agents', 'github-only.agent.md'))).toBe(true);
     });
   });
 });

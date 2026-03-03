@@ -662,8 +662,8 @@ export async function copyPluginToWorkspace(
 ): Promise<CopyResult[]> {
   const { skillNameMap, syncMode, canonicalSkillsPath, ...baseOptions } = options;
 
-  // Run copy operations in parallel for better performance
-  const [commandResults, skillResults, hookResults, agentResults, githubResults] = await Promise.all([
+  // Phase 1: Copy root-level artifacts in parallel
+  const [commandResults, skillResults, hookResults, agentResults] = await Promise.all([
     copyCommands(pluginPath, workspacePath, client, baseOptions),
     copySkills(pluginPath, workspacePath, client, {
       ...baseOptions,
@@ -673,11 +673,13 @@ export async function copyPluginToWorkspace(
     }),
     copyHooks(pluginPath, workspacePath, client, baseOptions),
     copyAgents(pluginPath, workspacePath, client, baseOptions),
-    copyGitHubContent(pluginPath, workspacePath, client, {
-      ...baseOptions,
-      ...(skillNameMap && { skillNameMap }),
-    }),
   ]);
+
+  // Phase 2: Copy .github/ content — overrides root-level on name conflicts
+  const githubResults = await copyGitHubContent(pluginPath, workspacePath, client, {
+    ...baseOptions,
+    ...(skillNameMap && { skillNameMap }),
+  });
 
   return [...commandResults, ...skillResults, ...hookResults, ...agentResults, ...githubResults];
 }
