@@ -78,6 +78,28 @@ describe('sync', () => {
 
       expect(result).toHaveLength(2);
     });
+
+    it('should purge agents and hooks directories for copilot client', async () => {
+      await mkdir(join(testDir, '.github', 'skills'), { recursive: true });
+      await mkdir(join(testDir, '.github', 'agents'), { recursive: true });
+      await mkdir(join(testDir, '.github', 'hooks'), { recursive: true });
+      await writeFile(join(testDir, '.github', 'skills', 'test.md'), 'test');
+      await writeFile(join(testDir, '.github', 'agents', 'reviewer.agent.md'), 'test');
+      await writeFile(join(testDir, '.github', 'hooks', 'safety.json'), '{}');
+      await writeFile(join(testDir, 'AGENTS.md'), '# Agents');
+
+      const result = await purgeWorkspace(testDir, ['copilot']);
+
+      expect(existsSync(join(testDir, '.github', 'skills'))).toBe(false);
+      expect(existsSync(join(testDir, '.github', 'agents'))).toBe(false);
+      expect(existsSync(join(testDir, '.github', 'hooks'))).toBe(false);
+      expect(existsSync(join(testDir, 'AGENTS.md'))).toBe(false);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].paths).toContain('.github/skills/');
+      expect(result[0].paths).toContain('.github/agents/');
+      expect(result[0].paths).toContain('.github/hooks/');
+    });
   });
 
   describe('getPurgePaths', () => {

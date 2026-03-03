@@ -11,7 +11,7 @@ These clients share the canonical `.agents/skills/` directory:
 
 | Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
 |--------|--------|------------|-------|----------|------------------|
-| Copilot | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
+| Copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No | `.github/` |
 | Codex | `.agents/skills/` | `AGENTS.md` | No | No | No |
 | OpenCode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
 | Gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
@@ -43,7 +43,7 @@ These clients use their own skills directory:
 | Kiro | `.kiro/skills/` | `AGENTS.md` | No | No |
 
 :::note
-Skills are the cross-client way to share reusable prompts. GitHub overrides (`.github/prompts/`, `copilot-instructions.md`) are copied to the workspace's `.github/` folder for Copilot/VSCode.
+Skills are the cross-client way to share reusable prompts. GitHub overrides (`.github/prompts/`, `.github/agents/`, `.github/hooks/`, `copilot-instructions.md`) are copied to the workspace's `.github/` folder for Copilot/VSCode. Root `agents/` and `hooks/` also map to `.github/agents/` and `.github/hooks/` for Copilot.
 :::
 
 ### VSCode
