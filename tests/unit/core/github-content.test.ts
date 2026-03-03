@@ -39,6 +39,34 @@ describe('copyGitHubContent', () => {
     expect(content).toBe('# Test Prompt');
   });
 
+  it('copies .github/agents/ for copilot client', async () => {
+    await mkdir(join(pluginDir, '.github', 'agents'), { recursive: true });
+    await writeFile(join(pluginDir, '.github', 'agents', 'reviewer.agent.md'), '# Reviewer');
+
+    const results = await copyGitHubContent(pluginDir, workspaceDir, 'copilot');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].action).toBe('copied');
+    expect(existsSync(join(workspaceDir, '.github', 'agents', 'reviewer.agent.md'))).toBe(true);
+
+    const content = await readFile(join(workspaceDir, '.github', 'agents', 'reviewer.agent.md'), 'utf-8');
+    expect(content).toBe('# Reviewer');
+  });
+
+  it('copies .github/hooks/ for copilot client', async () => {
+    await mkdir(join(pluginDir, '.github', 'hooks'), { recursive: true });
+    await writeFile(join(pluginDir, '.github', 'hooks', 'safety.json'), '{"hooks":[]}');
+
+    const results = await copyGitHubContent(pluginDir, workspaceDir, 'copilot');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].action).toBe('copied');
+    expect(existsSync(join(workspaceDir, '.github', 'hooks', 'safety.json'))).toBe(true);
+
+    const content = await readFile(join(workspaceDir, '.github', 'hooks', 'safety.json'), 'utf-8');
+    expect(content).toBe('{"hooks":[]}');
+  });
+
   it('skips clients without githubPath', async () => {
     await mkdir(join(pluginDir, '.github', 'prompts'), { recursive: true });
     await writeFile(join(pluginDir, '.github', 'prompts', 'test.md'), '# Test');
