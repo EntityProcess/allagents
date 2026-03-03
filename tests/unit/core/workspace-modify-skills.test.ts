@@ -7,6 +7,9 @@ import {
   addDisabledSkill,
   removeDisabledSkill,
   getDisabledSkills,
+  addEnabledSkill,
+  removeEnabledSkill,
+  getEnabledSkills,
   removePlugin,
 } from '../../../src/core/workspace-modify.js';
 
@@ -171,6 +174,100 @@ describe('disabledSkills helpers', () => {
 
       const skills = await getDisabledSkills(tmpDir);
       expect(skills).toEqual(['other:skill']);
+    });
+  });
+});
+
+describe('enabledSkills helpers', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'allagents-test-'));
+    await mkdir(join(tmpDir, '.allagents'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  describe('addEnabledSkill', () => {
+    it('adds skill to empty enabledSkills', async () => {
+      const config = { repositories: [], plugins: [], clients: ['claude'] };
+      await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+      const result = await addEnabledSkill('superpowers:brainstorming', tmpDir);
+      expect(result.success).toBe(true);
+      const skills = await getEnabledSkills(tmpDir);
+      expect(skills).toContain('superpowers:brainstorming');
+    });
+
+    it('returns error if skill already enabled', async () => {
+      const config = {
+        repositories: [], plugins: [], clients: ['claude'],
+        enabledSkills: ['superpowers:brainstorming'],
+      };
+      await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+      const result = await addEnabledSkill('superpowers:brainstorming', tmpDir);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('already enabled');
+    });
+  });
+
+  describe('removeEnabledSkill', () => {
+    it('removes skill from enabledSkills', async () => {
+      const config = {
+        repositories: [], plugins: [], clients: ['claude'],
+        enabledSkills: ['superpowers:brainstorming', 'other:skill'],
+      };
+      await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+      const result = await removeEnabledSkill('superpowers:brainstorming', tmpDir);
+      expect(result.success).toBe(true);
+      const skills = await getEnabledSkills(tmpDir);
+      expect(skills).not.toContain('superpowers:brainstorming');
+      expect(skills).toContain('other:skill');
+    });
+
+    it('returns error if skill not in enabledSkills', async () => {
+      const config = { repositories: [], plugins: [], clients: ['claude'] };
+      await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+      const result = await removeEnabledSkill('superpowers:brainstorming', tmpDir);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('already disabled');
+    });
+  });
+
+  describe('getEnabledSkills', () => {
+    it('returns empty array when no enabledSkills', async () => {
+      const config = { repositories: [], plugins: [], clients: ['claude'] };
+      await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+      const skills = await getEnabledSkills(tmpDir);
+      expect(skills).toEqual([]);
+    });
+  });
+
+  describe('removePlugin cleans up enabledSkills', () => {
+    it('removes enabled skills for a plugin@marketplace spec', async () => {
+      const config = {
+        repositories: [], plugins: ['superpowers@official'], clients: ['claude'],
+        enabledSkills: ['superpowers:brainstorming', 'other:skill'],
+      };
+      await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+      const result = await removePlugin('superpowers@official', tmpDir);
+      expect(result.success).toBe(true);
+      const skills = await getEnabledSkills(tmpDir);
+      expect(skills).not.toContain('superpowers:brainstorming');
+      expect(skills).toContain('other:skill');
+    });
+
+    it('clears enabledSkills entirely when all entries belong to removed plugin', async () => {
+      const config = {
+        repositories: [], plugins: ['superpowers@official'], clients: ['claude'],
+        enabledSkills: ['superpowers:brainstorming'],
+      };
+      await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+      const result = await removePlugin('superpowers@official', tmpDir);
+      expect(result.success).toBe(true);
+      const skills = await getEnabledSkills(tmpDir);
+      expect(skills).toEqual([]);
     });
   });
 });

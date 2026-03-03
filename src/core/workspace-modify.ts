@@ -291,6 +291,7 @@ export async function removePlugin(
     const removedEntry = getPluginSource(config.plugins[index] as PluginEntry);
     config.plugins.splice(index, 1);
     pruneDisabledSkillsForPlugin(config, removedEntry);
+    pruneEnabledSkillsForPlugin(config, removedEntry);
 
     // Write back
     const newContent = dump(config, { lineWidth: -1 });
@@ -447,6 +448,110 @@ export async function removeDisabledSkill(
       success: false,
       error: error instanceof Error ? error.message : String(error),
     };
+  }
+}
+
+/**
+ * Get the list of enabled skills from workspace config
+ */
+export async function getEnabledSkills(
+  workspacePath: string = process.cwd(),
+): Promise<string[]> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) return [];
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    return config.enabledSkills ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Add a skill to enabledSkills list (allowlist mode)
+ */
+export async function addEnabledSkill(
+  skillKey: string,
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
+    };
+  }
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const enabledSkills = config.enabledSkills ?? [];
+    if (enabledSkills.includes(skillKey)) {
+      return { success: false, error: `Skill '${skillKey}' is already enabled` };
+    }
+    config.enabledSkills = [...enabledSkills, skillKey];
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Remove a skill from enabledSkills list (allowlist mode)
+ */
+export async function removeEnabledSkill(
+  skillKey: string,
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
+    };
+  }
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const enabledSkills = config.enabledSkills ?? [];
+    if (!enabledSkills.includes(skillKey)) {
+      return { success: false, error: `Skill '${skillKey}' is already disabled` };
+    }
+    config.enabledSkills = enabledSkills.filter((s) => s !== skillKey);
+    if (config.enabledSkills.length === 0) {
+      config.enabledSkills = undefined;
+    }
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Remove enabledSkills entries whose plugin name matches the removed plugin entry.
+ * Exported for reuse by user-workspace.ts.
+ */
+export function pruneEnabledSkillsForPlugin(
+  config: WorkspaceConfig,
+  pluginEntry: string,
+): void {
+  if (!config.enabledSkills?.length) return;
+  const pluginName = extractPluginName(pluginEntry);
+  if (!pluginName) return;
+  const prefix = `${pluginName}:`;
+  config.enabledSkills = config.enabledSkills.filter(
+    (s) => !s.startsWith(prefix),
+  );
+  if (config.enabledSkills.length === 0) {
+    config.enabledSkills = undefined;
   }
 }
 
