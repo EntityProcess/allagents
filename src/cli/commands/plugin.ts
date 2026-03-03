@@ -11,7 +11,7 @@ import {
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { loadSyncState } from '../../core/sync-state.js';
-import { addPlugin, removePlugin, hasPlugin } from '../../core/workspace-modify.js';
+import { addPlugin, removePlugin, hasPlugin, ensureWorkspace } from '../../core/workspace-modify.js';
 import {
   addUserPlugin,
   removeUserPlugin,
@@ -808,6 +808,23 @@ const pluginInstallCmd = command({
     try {
       // Treat as user scope if explicitly requested or if cwd resolves to user config
       const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
+
+      // If no workspace.yaml exists for project scope, prompt for clients first
+      if (!isUser) {
+        const configPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+        if (!existsSync(configPath)) {
+          const { promptForClients } = await import('../tui/prompt-clients.js');
+          const clients = await promptForClients();
+          if (clients === null) {
+            if (isJsonMode()) {
+              jsonOutput({ success: false, command: 'plugin install', error: 'Cancelled' });
+            }
+            return;
+          }
+          await ensureWorkspace(process.cwd(), clients);
+        }
+      }
+
       const result = isUser
         ? await addUserPlugin(plugin)
         : await addPlugin(plugin);

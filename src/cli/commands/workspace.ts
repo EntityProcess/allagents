@@ -65,7 +65,21 @@ const initCmd = command({
   handler: async ({ path, from, client }) => {
     try {
       const targetPath = path ?? '.';
-      const clients = client ? parseClientEntries(client) : undefined;
+      let clients = client ? parseClientEntries(client) : undefined;
+
+      // If no --client flag, prompt interactively
+      if (!clients) {
+        const { promptForClients } = await import('../tui/prompt-clients.js');
+        const prompted = await promptForClients();
+        if (prompted === null) {
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'workspace init', error: 'Cancelled' });
+          }
+          return;
+        }
+        clients = prompted;
+      }
+
       const result = await initWorkspace(targetPath, {
         ...(from ? { from } : {}),
         ...(clients ? { clients } : {}),
