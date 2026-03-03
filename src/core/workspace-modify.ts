@@ -25,12 +25,7 @@ import {
  * Default clients for auto-created project workspace.yaml.
  * Matches the template at src/templates/default/.allagents/workspace.yaml.
  */
-const DEFAULT_PROJECT_CLIENTS: ClientEntry[] = [
-  'claude',
-  'copilot',
-  'codex',
-  'opencode',
-];
+const DEFAULT_PROJECT_CLIENTS: ClientEntry[] = ['universal'];
 
 /**
  * Result of add/remove operations
@@ -71,7 +66,10 @@ export async function setClients(
  * Ensure .allagents/workspace.yaml exists with default config.
  * Creates it if missing, does not overwrite existing.
  */
-export async function ensureWorkspace(workspacePath: string): Promise<void> {
+export async function ensureWorkspace(
+  workspacePath: string,
+  clients?: ClientEntry[],
+): Promise<void> {
   const configDir = join(workspacePath, CONFIG_DIR);
   const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
   if (existsSync(configPath)) return;
@@ -79,7 +77,7 @@ export async function ensureWorkspace(workspacePath: string): Promise<void> {
   const defaultConfig: WorkspaceConfig = {
     repositories: [],
     plugins: [],
-    clients: [...DEFAULT_PROJECT_CLIENTS],
+    clients: clients ?? [...DEFAULT_PROJECT_CLIENTS],
   };
 
   await mkdir(configDir, { recursive: true });
