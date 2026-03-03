@@ -894,7 +894,7 @@ const pluginInstallCmd = command({
             console.error(`Warning: No skills found in plugin ${displayPlugin}`);
           }
         } else {
-          const pluginName = pluginSkills[0]!.pluginName;
+          const pluginName = pluginSkills[0]?.pluginName;
           const availableNames = pluginSkills.map((s) => s.name);
 
           // Validate requested skill names

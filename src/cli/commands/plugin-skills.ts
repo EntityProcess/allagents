@@ -259,18 +259,13 @@ const removeCmd = command({
 
       const skillKey = `${targetSkill.pluginName}:${skill}`;
 
-      let result;
-      if (inAllowlistMode) {
-        // Allowlist mode: remove from enabledSkills to disable
-        result = isUser
+      const result = inAllowlistMode
+        ? isUser
           ? await removeUserEnabledSkill(skillKey)
-          : await removeEnabledSkill(skillKey, workspacePath);
-      } else {
-        // Denylist mode: add to disabledSkills (existing behavior)
-        result = isUser
+          : await removeEnabledSkill(skillKey, workspacePath)
+        : isUser
           ? await addUserDisabledSkill(skillKey)
           : await addDisabledSkill(skillKey, workspacePath);
-      }
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -413,18 +408,13 @@ const addCmd = command({
 
       const skillKey = `${targetSkill.pluginName}:${skill}`;
 
-      let result;
-      if (inAllowlistMode) {
-        // Allowlist mode: add to enabledSkills to enable
-        result = isUser
+      const result = inAllowlistMode
+        ? isUser
           ? await addUserEnabledSkill(skillKey)
-          : await addEnabledSkill(skillKey, workspacePath);
-      } else {
-        // Denylist mode: remove from disabledSkills (existing behavior)
-        result = isUser
+          : await addEnabledSkill(skillKey, workspacePath)
+        : isUser
           ? await removeUserDisabledSkill(skillKey)
           : await removeDisabledSkill(skillKey, workspacePath);
-      }
 
       if (!result.success) {
         if (isJsonMode()) {
