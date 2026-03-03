@@ -64,6 +64,7 @@ import {
 import { updateRepositories } from './workspace-modify.js';
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
+import { syncCodexMcpServers } from './codex-mcp.js';
 import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
 
 /**
@@ -1903,6 +1904,16 @@ export async function syncUserWorkspace(
       warnings.push(...vscodeMcp.warnings);
     }
     mcpResults.vscode = vscodeMcp;
+  }
+
+  // Sync MCP servers to Codex CLI if codex client is configured
+  if (syncClients.includes('codex')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'codex');
+    const codexMcp = await syncCodexMcpServers(validPlugins, { dryRun, trackedServers: trackedMcpServers });
+    if (codexMcp.warnings.length > 0) {
+      warnings.push(...codexMcp.warnings);
+    }
+    mcpResults.codex = codexMcp;
   }
 
   // Run native CLI installations for user scope
