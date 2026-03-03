@@ -1,6 +1,5 @@
 import * as p from '@clack/prompts';
 import { initWorkspace } from '../../../core/workspace.js';
-import type { ClientEntry } from '../../../models/workspace-config.js';
 import { promptForClients } from '../prompt-clients.js';
 
 const { text } = p;
