@@ -17,7 +17,9 @@ export function buildCodexMcpAddArgs(
 
     // Add --env flags if present
     if (config.env && typeof config.env === 'object') {
-      for (const [key, value] of Object.entries(config.env as Record<string, string>)) {
+      for (const [key, value] of Object.entries(
+        config.env as Record<string, string>,
+      )) {
         args.push('--env', `${key}=${value}`);
       }
     }
