@@ -381,7 +381,7 @@ export async function collectPluginSkills(
 
   const filteredDirs = pluginName
     ? hasEnabledEntries
-      ? skillDirs.filter((e) => enabledSkills!.has(`${pluginName}:${e.name}`))
+      ? skillDirs.filter((e) => enabledSkills?.has(`${pluginName}:${e.name}`))
       : disabledSkills
         ? skillDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`))
         : skillDirs

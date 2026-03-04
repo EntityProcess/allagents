@@ -95,7 +95,7 @@ export async function getAllSkillsFromPlugins(
     for (const entry of skillDirs) {
       const skillKey = `${pluginName}:${entry.name}`;
       const isDisabled = hasEnabledEntries
-        ? !enabledSkills!.has(skillKey)
+        ? !enabledSkills?.has(skillKey)
         : disabledSkills.has(skillKey);
 
       skills.push({
