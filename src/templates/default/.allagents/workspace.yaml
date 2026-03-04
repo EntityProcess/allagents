@@ -12,8 +12,4 @@ repositories: []
 plugins: []
 
 clients:
-  - claude
-  - copilot
-  - vscode
-  - codex
-  - opencode
+  - universal
