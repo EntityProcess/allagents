@@ -46,10 +46,9 @@ export function isInteractive(): boolean {
  * Prompt the user to select AI clients using a grouped multiselect.
  * Returns selected clients, or null if cancelled.
  * In non-interactive mode, returns ['universal'] without prompting.
+ * If user deselects everything, falls back to ['universal'].
  */
-export async function promptForClients(
-  currentClients?: ClientType[],
-): Promise<ClientEntry[] | null> {
+export async function promptForClients(): Promise<ClientEntry[] | null> {
   if (!isInteractive()) {
     return ['universal'];
   }
@@ -59,12 +58,17 @@ export async function promptForClients(
   const selected = await groupMultiselect({
     message: 'Which AI clients do you use?',
     options: groups,
-    initialValues: currentClients ?? initialValues,
+    initialValues,
     required: false,
   });
 
   if (p.isCancel(selected)) {
     return null;
+  }
+
+  // Fall back to universal if user deselected everything
+  if (selected.length === 0) {
+    return ['universal'];
   }
 
   return selected as ClientEntry[];
