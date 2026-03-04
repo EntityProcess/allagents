@@ -229,6 +229,7 @@ export const WorkspaceConfigSchema = z.object({
   vscode: VscodeConfigSchema.optional(),
   syncMode: SyncModeSchema.optional(),
   disabledSkills: z.array(z.string()).optional(),
+  enabledSkills: z.array(z.string()).optional(),
 });
 
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;

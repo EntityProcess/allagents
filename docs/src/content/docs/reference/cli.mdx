@@ -93,7 +93,7 @@ The check runs at most once every 24 hours and never blocks startup. Results are
 ```bash
 allagents plugin list [marketplace]
 allagents plugin validate <path>
-allagents plugin install <plugin> [--scope <scope>]
+allagents plugin install <plugin> [--skill <name>] [--scope <scope>]
 allagents plugin uninstall <plugin> [--scope <scope>]
 allagents plugin marketplace add <source> [--name <name>] [--branch <branch>]
 allagents plugin marketplace list
@@ -103,6 +103,25 @@ allagents plugin skills list [--scope <scope>]
 allagents plugin skills remove <skill> [--plugin <plugin>] [--scope <scope>]
 allagents plugin skills add <skill> [--plugin <plugin>] [--scope <scope>]
 ```
+
+### plugin install
+
+Install a plugin into the workspace.
+
+| Flag | Description |
+|------|-------------|
+| `-s, --scope <scope>` | Installation scope: `project` (default) or `user` |
+| `--skill <name>` | Only enable specific skills from the plugin (can be repeated) |
+
+#### `--skill <name>`
+
+Only enable specific skills from the plugin. Can be specified multiple times:
+
+```bash
+allagents plugin install superpowers@marketplace --skill brainstorming --skill tdd
+```
+
+When used, all other skills from the plugin are implicitly disabled. Skills can be added later with `plugin skills add`.
 
 ### plugin skills list
 

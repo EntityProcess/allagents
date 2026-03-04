@@ -6,10 +6,16 @@ import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import {
   addDisabledSkill,
   removeDisabledSkill,
+  getEnabledSkills,
+  removeEnabledSkill,
+  addEnabledSkill,
 } from '../../core/workspace-modify.js';
 import {
   addUserDisabledSkill,
   removeUserDisabledSkill,
+  getUserEnabledSkills,
+  removeUserEnabledSkill,
+  addUserEnabledSkill,
   isUserConfigPath,
 } from '../../core/user-workspace.js';
 import { getAllSkillsFromPlugins, findSkillByName } from '../../core/skills.js';
@@ -244,11 +250,22 @@ const removeCmd = command({
         return;
       }
 
-      // Add to disabled skills
+      // Detect mode: does this plugin have enabledSkills entries?
+      const enabledSkills = isUser
+        ? await getUserEnabledSkills()
+        : await getEnabledSkills(workspacePath);
+      const pluginPrefix = `${targetSkill.pluginName}:`;
+      const inAllowlistMode = enabledSkills.some((s) => s.startsWith(pluginPrefix));
+
       const skillKey = `${targetSkill.pluginName}:${skill}`;
-      const result = isUser
-        ? await addUserDisabledSkill(skillKey)
-        : await addDisabledSkill(skillKey, workspacePath);
+
+      const result = inAllowlistMode
+        ? isUser
+          ? await removeUserEnabledSkill(skillKey)
+          : await removeEnabledSkill(skillKey, workspacePath)
+        : isUser
+          ? await addUserDisabledSkill(skillKey)
+          : await addDisabledSkill(skillKey, workspacePath);
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -382,11 +399,22 @@ const addCmd = command({
         return;
       }
 
-      // Remove from disabled skills
+      // Detect mode: does this plugin have enabledSkills entries?
+      const enabledSkills = isUser
+        ? await getUserEnabledSkills()
+        : await getEnabledSkills(workspacePath);
+      const pluginPrefix = `${targetSkill.pluginName}:`;
+      const inAllowlistMode = enabledSkills.some((s) => s.startsWith(pluginPrefix));
+
       const skillKey = `${targetSkill.pluginName}:${skill}`;
-      const result = isUser
-        ? await removeUserDisabledSkill(skillKey)
-        : await removeDisabledSkill(skillKey, workspacePath);
+
+      const result = inAllowlistMode
+        ? isUser
+          ? await addUserEnabledSkill(skillKey)
+          : await addEnabledSkill(skillKey, workspacePath)
+        : isUser
+          ? await removeUserDisabledSkill(skillKey)
+          : await removeDisabledSkill(skillKey, workspacePath);
 
       if (!result.success) {
         if (isJsonMode()) {

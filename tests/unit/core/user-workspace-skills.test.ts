@@ -40,4 +40,24 @@ describe('user-scope disabledSkills helpers', () => {
     skills = await getUserDisabledSkills();
     expect(skills).not.toContain('superpowers:brainstorming');
   });
+
+  it('adds and removes enabled skills in user config', async () => {
+    const config = { repositories: [], plugins: [], clients: ['copilot'] };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    // Import after setting HOME
+    const { addUserEnabledSkill, removeUserEnabledSkill, getUserEnabledSkills } = await import('../../../src/core/user-workspace.js');
+
+    const addResult = await addUserEnabledSkill('superpowers:brainstorming');
+    expect(addResult.success).toBe(true);
+
+    let skills = await getUserEnabledSkills();
+    expect(skills).toContain('superpowers:brainstorming');
+
+    const removeResult = await removeUserEnabledSkill('superpowers:brainstorming');
+    expect(removeResult.success).toBe(true);
+
+    skills = await getUserEnabledSkills();
+    expect(skills).not.toContain('superpowers:brainstorming');
+  });
 });

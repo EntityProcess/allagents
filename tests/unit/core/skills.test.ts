@@ -59,4 +59,23 @@ describe('getAllSkillsFromPlugins', () => {
     expect(skillA?.disabled).toBe(true);
     expect(skillB?.disabled).toBe(false);
   });
+
+  it('marks skills correctly in enabledSkills (allowlist) mode', async () => {
+    const config = {
+      repositories: [],
+      plugins: [pluginDir],
+      clients: ['claude'],
+      enabledSkills: ['test-plugin:skill-a'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    const skillA = skills.find((s) => s.name === 'skill-a');
+    const skillB = skills.find((s) => s.name === 'skill-b');
+
+    // skill-a is in the allowlist -> enabled (disabled: false)
+    expect(skillA?.disabled).toBe(false);
+    // skill-b is NOT in the allowlist -> disabled (disabled: true)
+    expect(skillB?.disabled).toBe(true);
+  });
 });

@@ -25,17 +25,30 @@ export interface SkillInfo {
 }
 
 /**
- * Resolve a plugin source to its local path
+ * Result of resolving a plugin source
+ */
+interface ResolvedPlugin {
+  path: string;
+  /** Plugin name from marketplace manifest (overrides directory basename) */
+  pluginName?: string | undefined;
+}
+
+/**
+ * Resolve a plugin source to its local path and optional manifest-derived name
  */
 async function resolvePluginPath(
   pluginSource: string,
   workspacePath: string,
-): Promise<string | null> {
+): Promise<ResolvedPlugin | null> {
   if (isPluginSpec(pluginSource)) {
     const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, {
       offline: true,
     });
-    return resolved.success ? resolved.path ?? null : null;
+    if (!resolved.success || !resolved.path) return null;
+    return {
+      path: resolved.path,
+      pluginName: resolved.pluginName,
+    };
   }
 
   if (isGitHubUrl(pluginSource)) {
@@ -45,14 +58,15 @@ async function resolvePluginPath(
       ...(parsed?.branch && { branch: parsed.branch }),
     });
     if (!result.success) return null;
-    return parsed?.subpath
+    const path = parsed?.subpath
       ? join(result.cachePath, parsed.subpath)
       : result.cachePath;
+    return { path };
   }
 
   // Local path
   const resolved = resolve(workspacePath, pluginSource);
-  return existsSync(resolved) ? resolved : null;
+  return existsSync(resolved) ? { path: resolved } : null;
 }
 
 /**
@@ -72,14 +86,16 @@ export async function getAllSkillsFromPlugins(
   const content = await readFile(configPath, 'utf-8');
   const config = load(content) as WorkspaceConfig;
   const disabledSkills = new Set(config.disabledSkills ?? []);
+  const enabledSkills = config.enabledSkills ? new Set(config.enabledSkills) : null;
   const skills: SkillInfo[] = [];
 
   for (const pluginEntry of config.plugins) {
     const pluginSource = getPluginSource(pluginEntry);
-    const pluginPath = await resolvePluginPath(pluginSource, workspacePath);
-    if (!pluginPath) continue;
+    const resolved = await resolvePluginPath(pluginSource, workspacePath);
+    if (!resolved) continue;
 
-    const pluginName = getPluginName(pluginPath);
+    const pluginPath = resolved.path;
+    const pluginName = resolved.pluginName ?? getPluginName(pluginPath);
     const skillsDir = join(pluginPath, 'skills');
 
     if (!existsSync(skillsDir)) continue;
@@ -87,14 +103,22 @@ export async function getAllSkillsFromPlugins(
     const entries = await readdir(skillsDir, { withFileTypes: true });
     const skillDirs = entries.filter((e) => e.isDirectory());
 
+    // Only apply enabledSkills to plugins that actually have entries in the set
+    const hasEnabledEntries = enabledSkills &&
+      [...enabledSkills].some((s) => s.startsWith(`${pluginName}:`));
+
     for (const entry of skillDirs) {
       const skillKey = `${pluginName}:${entry.name}`;
+      const isDisabled = hasEnabledEntries
+        ? !enabledSkills?.has(skillKey)
+        : disabledSkills.has(skillKey);
+
       skills.push({
         name: entry.name,
         pluginName,
         pluginSource,
         path: join(skillsDir, entry.name),
-        disabled: disabledSkills.has(skillKey),
+        disabled: isDisabled,
       });
     }
   }
