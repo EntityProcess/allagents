@@ -25,17 +25,30 @@ export interface SkillInfo {
 }
 
 /**
- * Resolve a plugin source to its local path
+ * Result of resolving a plugin source
+ */
+interface ResolvedPlugin {
+  path: string;
+  /** Plugin name from marketplace manifest (overrides directory basename) */
+  pluginName?: string | undefined;
+}
+
+/**
+ * Resolve a plugin source to its local path and optional manifest-derived name
  */
 async function resolvePluginPath(
   pluginSource: string,
   workspacePath: string,
-): Promise<string | null> {
+): Promise<ResolvedPlugin | null> {
   if (isPluginSpec(pluginSource)) {
     const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, {
       offline: true,
     });
-    return resolved.success ? resolved.path ?? null : null;
+    if (!resolved.success || !resolved.path) return null;
+    return {
+      path: resolved.path,
+      pluginName: resolved.pluginName,
+    };
   }
 
   if (isGitHubUrl(pluginSource)) {
@@ -45,14 +58,15 @@ async function resolvePluginPath(
       ...(parsed?.branch && { branch: parsed.branch }),
     });
     if (!result.success) return null;
-    return parsed?.subpath
+    const path = parsed?.subpath
       ? join(result.cachePath, parsed.subpath)
       : result.cachePath;
+    return { path };
   }
 
   // Local path
   const resolved = resolve(workspacePath, pluginSource);
-  return existsSync(resolved) ? resolved : null;
+  return existsSync(resolved) ? { path: resolved } : null;
 }
 
 /**
@@ -77,10 +91,11 @@ export async function getAllSkillsFromPlugins(
 
   for (const pluginEntry of config.plugins) {
     const pluginSource = getPluginSource(pluginEntry);
-    const pluginPath = await resolvePluginPath(pluginSource, workspacePath);
-    if (!pluginPath) continue;
+    const resolved = await resolvePluginPath(pluginSource, workspacePath);
+    if (!resolved) continue;
 
-    const pluginName = getPluginName(pluginPath);
+    const pluginPath = resolved.path;
+    const pluginName = resolved.pluginName ?? getPluginName(pluginPath);
     const skillsDir = join(pluginPath, 'skills');
 
     if (!existsSync(skillsDir)) continue;

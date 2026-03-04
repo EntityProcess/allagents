@@ -839,8 +839,8 @@ const pluginInstallCmd = command({
           ? await syncUserWorkspace()
           : await syncWorkspace(workspacePath);
 
-        if (!initialSync.success && initialSync.error) {
-          const error = `Initial sync failed: ${initialSync.error}`;
+        if (!initialSync.success) {
+          const error = `Initial sync failed: ${initialSync.error ?? 'Unknown error'}`;
           if (isJsonMode()) {
             jsonOutput({ success: false, command: 'plugin install', error });
             process.exit(1);
