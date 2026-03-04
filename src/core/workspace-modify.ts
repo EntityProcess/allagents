@@ -289,6 +289,7 @@ export async function removePlugin(
     const removedEntry = getPluginSource(config.plugins[index] as PluginEntry);
     config.plugins.splice(index, 1);
     pruneDisabledSkillsForPlugin(config, removedEntry);
+    pruneEnabledSkillsForPlugin(config, removedEntry);
 
     // Write back
     const newContent = dump(config, { lineWidth: -1 });
@@ -313,12 +314,12 @@ export function pruneDisabledSkillsForPlugin(
 ): void {
   if (!config.disabledSkills?.length) return;
 
-  const pluginName = extractPluginName(pluginEntry);
-  if (!pluginName) return;
+  const names = extractPluginNames(pluginEntry);
+  if (names.length === 0) return;
 
-  const prefix = `${pluginName}:`;
+  const prefixes = names.map((n) => `${n}:`);
   config.disabledSkills = config.disabledSkills.filter(
-    (s) => !s.startsWith(prefix),
+    (s) => !prefixes.some((p) => s.startsWith(p)),
   );
   if (config.disabledSkills.length === 0) {
     config.disabledSkills = undefined;
@@ -326,20 +327,29 @@ export function pruneDisabledSkillsForPlugin(
 }
 
 /**
- * Extract the plugin name from a plugin source string.
- * - plugin@marketplace → plugin component
- * - local path / GitHub URL → last path segment (basename)
- * - bare name → the name itself
+ * Extract possible plugin names from a plugin source string.
+ * Returns all candidate names that might be used as the plugin name prefix
+ * in skill keys (e.g., "pluginName:" in "pluginName:skillName").
+ *
+ * For plugin specs (plugin@marketplace), skill keys may use either the
+ * plugin component or the marketplace name (when the marketplace root
+ * IS the plugin directory).
  */
-function extractPluginName(pluginSource: string): string | null {
+function extractPluginNames(pluginSource: string): string[] {
   if (isPluginSpec(pluginSource)) {
-    return parsePluginSpec(pluginSource)?.plugin ?? null;
+    const parsed = parsePluginSpec(pluginSource);
+    if (!parsed) return [];
+    const names = [parsed.plugin];
+    if (parsed.marketplaceName && parsed.marketplaceName !== parsed.plugin) {
+      names.push(parsed.marketplaceName);
+    }
+    return names;
   }
   // Split on both / and \ to handle local paths, URLs, and Windows paths
   const parts = pluginSource.split(/[/\\]/).filter(Boolean);
   const last = parts[parts.length - 1];
-  if (!last) return null;
-  return last.replace(/\.git$/, '');
+  if (!last) return [];
+  return [last.replace(/\.git$/, '')];
 }
 
 /**
@@ -445,6 +455,110 @@ export async function removeDisabledSkill(
       success: false,
       error: error instanceof Error ? error.message : String(error),
     };
+  }
+}
+
+/**
+ * Get the list of enabled skills from workspace config
+ */
+export async function getEnabledSkills(
+  workspacePath: string = process.cwd(),
+): Promise<string[]> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) return [];
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    return config.enabledSkills ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Add a skill to enabledSkills list (allowlist mode)
+ */
+export async function addEnabledSkill(
+  skillKey: string,
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
+    };
+  }
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const enabledSkills = config.enabledSkills ?? [];
+    if (enabledSkills.includes(skillKey)) {
+      return { success: false, error: `Skill '${skillKey}' is already enabled` };
+    }
+    config.enabledSkills = [...enabledSkills, skillKey];
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Remove a skill from enabledSkills list (allowlist mode)
+ */
+export async function removeEnabledSkill(
+  skillKey: string,
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
+    };
+  }
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const enabledSkills = config.enabledSkills ?? [];
+    if (!enabledSkills.includes(skillKey)) {
+      return { success: false, error: `Skill '${skillKey}' is already disabled` };
+    }
+    config.enabledSkills = enabledSkills.filter((s) => s !== skillKey);
+    if (config.enabledSkills.length === 0) {
+      config.enabledSkills = undefined;
+    }
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Remove enabledSkills entries whose plugin name matches the removed plugin entry.
+ * Exported for reuse by user-workspace.ts.
+ */
+export function pruneEnabledSkillsForPlugin(
+  config: WorkspaceConfig,
+  pluginEntry: string,
+): void {
+  if (!config.enabledSkills?.length) return;
+  const names = extractPluginNames(pluginEntry);
+  if (names.length === 0) return;
+  const prefixes = names.map((n) => `${n}:`);
+  config.enabledSkills = config.enabledSkills.filter(
+    (s) => !prefixes.some((p) => s.startsWith(p)),
+  );
+  if (config.enabledSkills.length === 0) {
+    config.enabledSkills = undefined;
   }
 }
 

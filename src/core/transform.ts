@@ -355,6 +355,7 @@ export interface CollectedSkill {
  * @param pluginSource - Original plugin source reference
  * @param disabledSkills - Optional set of disabled skill keys (plugin:skill format)
  * @param pluginName - Optional plugin name for building skill keys
+ * @param enabledSkills - Optional set of enabled skill keys (allowlist mode, takes priority over disabledSkills)
  * @returns Array of collected skill information
  */
 export async function collectPluginSkills(
@@ -362,6 +363,7 @@ export async function collectPluginSkills(
   pluginSource: string,
   disabledSkills?: Set<string>,
   pluginName?: string,
+  enabledSkills?: Set<string>,
 ): Promise<CollectedSkill[]> {
   const skillsDir = join(pluginPath, 'skills');
 
@@ -372,9 +374,17 @@ export async function collectPluginSkills(
   const entries = await readdir(skillsDir, { withFileTypes: true });
   const skillDirs = entries.filter((e) => e.isDirectory());
 
-  // Filter out disabled skills if disabledSkills set is provided
-  const filteredDirs = disabledSkills && pluginName
-    ? skillDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`))
+  // Filter skills: enabledSkills (allowlist) takes priority over disabledSkills (blocklist)
+  // Only apply enabledSkills to plugins that actually have entries in the set
+  const hasEnabledEntries = enabledSkills && pluginName &&
+    [...enabledSkills].some((s) => s.startsWith(`${pluginName}:`));
+
+  const filteredDirs = pluginName
+    ? hasEnabledEntries
+      ? skillDirs.filter((e) => enabledSkills?.has(`${pluginName}:${e.name}`))
+      : disabledSkills
+        ? skillDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`))
+        : skillDirs
     : skillDirs;
 
   return filteredDirs.map((entry) => ({

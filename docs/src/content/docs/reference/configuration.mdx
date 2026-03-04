@@ -55,6 +55,24 @@ Disabled skills are managed via the CLI:
 - `allagents plugin skills add <skill>` - Remove from disabledSkills
 - `allagents plugin skills list` - View all skills with status
 
+### Enabled Skills
+
+The `enabledSkills` array lists skills that should be included in sync (allowlist mode). When configured, **only listed skills are synced** — all others are excluded.
+
+```yaml
+enabledSkills:
+  - superpowers:brainstorming
+  - superpowers:test-driven-development
+```
+
+This is populated automatically when using `plugin install --skill`:
+
+```bash
+allagents plugin install superpowers@marketplace --skill brainstorming
+```
+
+Use either `disabledSkills` (exclude specific skills) or `enabledSkills` (include specific skills), not both for the same plugin. If both are present, `enabledSkills` takes precedence.
+
 ### Workspace File Sync
 
 The `workspace` section enables syncing files from external sources to your workspace root.

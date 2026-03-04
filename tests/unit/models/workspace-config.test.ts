@@ -100,6 +100,27 @@ describe('disabledSkills', () => {
   });
 });
 
+describe('enabledSkills', () => {
+  it('parses enabledSkills field', () => {
+    const config = WorkspaceConfigSchema.parse({
+      repositories: [],
+      plugins: [],
+      clients: ['claude'],
+      enabledSkills: ['superpowers:brainstorming'],
+    });
+    expect(config.enabledSkills).toEqual(['superpowers:brainstorming']);
+  });
+
+  it('enabledSkills defaults to undefined', () => {
+    const config = WorkspaceConfigSchema.parse({
+      repositories: [],
+      plugins: [],
+      clients: ['claude'],
+    });
+    expect(config.enabledSkills).toBeUndefined();
+  });
+});
+
 describe('RepositorySchema', () => {
   it('should accept full repository entry', () => {
     const result = RepositorySchema.safeParse({

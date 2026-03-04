@@ -25,6 +25,7 @@ import {
 import {
   type ModifyResult,
   pruneDisabledSkillsForPlugin,
+  pruneEnabledSkillsForPlugin,
 } from './workspace-modify.js';
 
 /**
@@ -229,6 +230,7 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
     const removedEntry = getPluginSource(config.plugins[index] as PluginEntry);
     config.plugins.splice(index, 1);
     pruneDisabledSkillsForPlugin(config, removedEntry);
+    pruneEnabledSkillsForPlugin(config, removedEntry);
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
   } catch (error) {
@@ -456,6 +458,84 @@ export async function removeUserDisabledSkill(
     config.disabledSkills = disabledSkills.filter((s) => s !== skillKey);
     if (config.disabledSkills.length === 0) {
       config.disabledSkills = undefined;
+    }
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Get enabled skills from user workspace config
+ * @returns Array of enabled skill keys (plugin:skill format)
+ */
+export async function getUserEnabledSkills(): Promise<string[]> {
+  const config = await getUserWorkspaceConfig();
+  return config?.enabledSkills ?? [];
+}
+
+/**
+ * Add a skill to enabledSkills in user workspace config
+ * @param skillKey - Skill key in plugin:skill format
+ */
+export async function addUserEnabledSkill(
+  skillKey: string,
+): Promise<ModifyResult> {
+  await ensureUserWorkspace();
+  const configPath = getUserWorkspaceConfigPath();
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const enabledSkills = config.enabledSkills ?? [];
+
+    if (enabledSkills.includes(skillKey)) {
+      return {
+        success: false,
+        error: `Skill '${skillKey}' is already enabled`,
+      };
+    }
+
+    config.enabledSkills = [...enabledSkills, skillKey];
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Remove a skill from enabledSkills in user workspace config
+ * @param skillKey - Skill key in plugin:skill format
+ */
+export async function removeUserEnabledSkill(
+  skillKey: string,
+): Promise<ModifyResult> {
+  await ensureUserWorkspace();
+  const configPath = getUserWorkspaceConfigPath();
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const enabledSkills = config.enabledSkills ?? [];
+
+    if (!enabledSkills.includes(skillKey)) {
+      return {
+        success: false,
+        error: `Skill '${skillKey}' is already disabled`,
+      };
+    }
+
+    config.enabledSkills = enabledSkills.filter((s) => s !== skillKey);
+    if (config.enabledSkills.length === 0) {
+      config.enabledSkills = undefined;
     }
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
