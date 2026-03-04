@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
@@ -567,8 +567,46 @@ export interface InstalledPluginInfo {
 }
 
 /**
+ * Convert a plugin source string to InstalledPluginInfo.
+ * Handles plugin@marketplace, GitHub URLs, and local paths.
+ */
+function pluginSourceToInfo(
+  plugin: string,
+  scope: PluginScope,
+): InstalledPluginInfo | null {
+  // plugin@marketplace format
+  const parsed = parsePluginSpec(plugin);
+  if (parsed) {
+    return {
+      spec: plugin,
+      name: parsed.plugin,
+      marketplace: parsed.marketplaceName,
+      scope,
+    };
+  }
+
+  // GitHub URL format
+  if (isGitHubUrl(plugin)) {
+    const ghParsed = parseGitHubUrl(plugin);
+    return {
+      spec: plugin,
+      name: ghParsed?.repo ?? basename(plugin),
+      marketplace: '',
+      scope,
+    };
+  }
+
+  // Local path or other format
+  return {
+    spec: plugin,
+    name: basename(plugin),
+    marketplace: '',
+    scope,
+  };
+}
+
+/**
  * Get all installed plugins from user workspace config.
- * Only returns plugin@marketplace format plugins.
  */
 export async function getInstalledUserPlugins(): Promise<
   InstalledPluginInfo[]
@@ -579,22 +617,14 @@ export async function getInstalledUserPlugins(): Promise<
   const result: InstalledPluginInfo[] = [];
   for (const pluginEntry of config.plugins) {
     const plugin = getPluginSource(pluginEntry);
-    const parsed = parsePluginSpec(plugin);
-    if (parsed) {
-      result.push({
-        spec: plugin,
-        name: parsed.plugin,
-        marketplace: parsed.marketplaceName,
-        scope: 'user',
-      });
-    }
+    const info = pluginSourceToInfo(plugin, 'user');
+    if (info) result.push(info);
   }
   return result;
 }
 
 /**
  * Get all installed plugins from project workspace config.
- * Only returns plugin@marketplace format plugins.
  */
 export async function getInstalledProjectPlugins(
   workspacePath: string,
@@ -610,15 +640,8 @@ export async function getInstalledProjectPlugins(
     const result: InstalledPluginInfo[] = [];
     for (const pluginEntry of config.plugins) {
       const plugin = getPluginSource(pluginEntry);
-      const parsed = parsePluginSpec(plugin);
-      if (parsed) {
-        result.push({
-          spec: plugin,
-          name: parsed.plugin,
-          marketplace: parsed.marketplaceName,
-          scope: 'project',
-        });
-      }
+      const info = pluginSourceToInfo(plugin, 'project');
+      if (info) result.push(info);
     }
     return result;
   } catch {

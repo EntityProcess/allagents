@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import { mkdtemp, rm, readFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -8,6 +8,8 @@ import {
   getUserWorkspaceConfig,
   ensureUserWorkspace,
   getUserWorkspaceConfigPath,
+  getInstalledUserPlugins,
+  getInstalledProjectPlugins,
 } from '../../../src/core/user-workspace.js';
 
 describe('user-workspace', () => {
@@ -227,6 +229,102 @@ describe('user-workspace', () => {
 
       const updatedConfig = await getUserWorkspaceConfig();
       expect(updatedConfig!.disabledSkills).toBeUndefined();
+    });
+  });
+
+  describe('getInstalledUserPlugins', () => {
+    test('returns local path plugin', async () => {
+      const pluginDir = join(tempHome, 'my-plugin');
+      await mkdir(pluginDir, { recursive: true });
+      await addUserPlugin(pluginDir);
+
+      const plugins = await getInstalledUserPlugins();
+      expect(plugins).toHaveLength(1);
+      expect(plugins[0].spec).toBe(pluginDir);
+      expect(plugins[0].name).toBe('my-plugin');
+      expect(plugins[0].scope).toBe('user');
+    });
+
+    test('returns marketplace plugin', async () => {
+      await ensureUserWorkspace();
+      const configPath = getUserWorkspaceConfigPath();
+      const { load: yamlLoad, dump: yamlDump } = await import('js-yaml');
+      const content = await readFile(configPath, 'utf-8');
+      const config = yamlLoad(content) as any;
+      config.plugins.push('code-review@my-marketplace');
+      await writeFile(configPath, yamlDump(config, { lineWidth: -1 }), 'utf-8');
+
+      const plugins = await getInstalledUserPlugins();
+      expect(plugins).toHaveLength(1);
+      expect(plugins[0].name).toBe('code-review');
+      expect(plugins[0].marketplace).toBe('my-marketplace');
+    });
+
+    test('returns GitHub URL plugin', async () => {
+      await ensureUserWorkspace();
+      const configPath = getUserWorkspaceConfigPath();
+      const { load: yamlLoad, dump: yamlDump } = await import('js-yaml');
+      const content = await readFile(configPath, 'utf-8');
+      const config = yamlLoad(content) as any;
+      config.plugins.push('https://github.com/owner/my-repo');
+      await writeFile(configPath, yamlDump(config, { lineWidth: -1 }), 'utf-8');
+
+      const plugins = await getInstalledUserPlugins();
+      expect(plugins).toHaveLength(1);
+      expect(plugins[0].spec).toBe('https://github.com/owner/my-repo');
+      expect(plugins[0].name).toBe('my-repo');
+      expect(plugins[0].scope).toBe('user');
+    });
+  });
+
+  describe('getInstalledProjectPlugins', () => {
+    test('returns local path plugin from project config', async () => {
+      const workspaceDir = join(tempHome, 'project');
+      const configDir = join(workspaceDir, '.allagents');
+      await mkdir(configDir, { recursive: true });
+      const { dump: yamlDump } = await import('js-yaml');
+      await writeFile(
+        join(configDir, 'workspace.yaml'),
+        yamlDump({
+          plugins: ['/tmp/my-plugin'],
+          clients: ['claude'],
+        }, { lineWidth: -1 }),
+        'utf-8',
+      );
+
+      const plugins = await getInstalledProjectPlugins(workspaceDir);
+      expect(plugins).toHaveLength(1);
+      expect(plugins[0].spec).toBe('/tmp/my-plugin');
+      expect(plugins[0].name).toBe('my-plugin');
+      expect(plugins[0].scope).toBe('project');
+    });
+
+    test('returns all plugin formats from project config', async () => {
+      const workspaceDir = join(tempHome, 'project');
+      const configDir = join(workspaceDir, '.allagents');
+      await mkdir(configDir, { recursive: true });
+      const { dump: yamlDump } = await import('js-yaml');
+      await writeFile(
+        join(configDir, 'workspace.yaml'),
+        yamlDump({
+          plugins: [
+            'code-review@my-marketplace',
+            'https://github.com/owner/my-repo',
+            '/tmp/local-plugin',
+          ],
+          clients: ['claude'],
+        }, { lineWidth: -1 }),
+        'utf-8',
+      );
+
+      const plugins = await getInstalledProjectPlugins(workspaceDir);
+      expect(plugins).toHaveLength(3);
+      expect(plugins[0].name).toBe('code-review');
+      expect(plugins[0].marketplace).toBe('my-marketplace');
+      expect(plugins[1].name).toBe('my-repo');
+      expect(plugins[1].marketplace).toBe('');
+      expect(plugins[2].name).toBe('local-plugin');
+      expect(plugins[2].marketplace).toBe('');
     });
   });
 });
