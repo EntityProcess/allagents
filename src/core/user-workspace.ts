@@ -573,7 +573,7 @@ export interface InstalledPluginInfo {
 function pluginSourceToInfo(
   plugin: string,
   scope: PluginScope,
-): InstalledPluginInfo | null {
+): InstalledPluginInfo {
   // plugin@marketplace format
   const parsed = parsePluginSpec(plugin);
   if (parsed) {
@@ -617,8 +617,7 @@ export async function getInstalledUserPlugins(): Promise<
   const result: InstalledPluginInfo[] = [];
   for (const pluginEntry of config.plugins) {
     const plugin = getPluginSource(pluginEntry);
-    const info = pluginSourceToInfo(plugin, 'user');
-    if (info) result.push(info);
+    result.push(pluginSourceToInfo(plugin, 'user'));
   }
   return result;
 }
@@ -640,8 +639,7 @@ export async function getInstalledProjectPlugins(
     const result: InstalledPluginInfo[] = [];
     for (const pluginEntry of config.plugins) {
       const plugin = getPluginSource(pluginEntry);
-      const info = pluginSourceToInfo(plugin, 'project');
-      if (info) result.push(info);
+      result.push(pluginSourceToInfo(plugin, 'project'));
     }
     return result;
   } catch {
