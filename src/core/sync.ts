@@ -64,6 +64,7 @@ import {
 import { updateRepositories } from './workspace-modify.js';
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
+import { syncCodexMcpServers } from './codex-mcp.js';
 import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
 
 /**
@@ -136,8 +137,8 @@ export interface SyncResult {
   warnings?: string[];
   /** Informational messages (non-warning) */
   messages?: string[];
-  /** Result of syncing MCP server configs to VS Code */
-  mcpResult?: McpMergeResult;
+  /** Results of syncing MCP server configs, keyed by scope (e.g., 'vscode', 'codex') */
+  mcpResults?: Record<string, McpMergeResult>;
   /** Result of native CLI plugin installations */
   nativeResult?: NativeSyncResult;
 }
@@ -149,8 +150,9 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const warnings = [...(a.warnings || []), ...(b.warnings || [])];
   const messages = [...(a.messages || []), ...(b.messages || [])];
   const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
-  // Use whichever mcpResult is present (only user-scope sync produces one)
-  const mcpResult = a.mcpResult ?? b.mcpResult;
+  const mcpResults = (a.mcpResults || b.mcpResults)
+    ? { ...a.mcpResults, ...b.mcpResults }
+    : undefined;
   // Merge nativeResults when both scopes produce them
   const nativeResult = a.nativeResult && b.nativeResult
     ? {
@@ -170,7 +172,7 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     ...(warnings.length > 0 && { warnings }),
     ...(messages.length > 0 && { messages }),
     ...(purgedPaths.length > 0 && { purgedPaths }),
-    ...(mcpResult && { mcpResult }),
+    ...(mcpResults && { mcpResults }),
     ...(nativeResult && { nativeResult }),
   };
 }
@@ -1476,7 +1478,7 @@ async function persistSyncState(
   nativeResult: NativeSyncResult | undefined,
   extra?: {
     vscodeState?: { hash: string; repos: string[] };
-    mcpTrackedServers?: string[];
+    mcpTrackedServers?: Partial<Record<string, string[]>>;
     clientMappings?: Record<ClientType, ClientMapping>;
   },
 ): Promise<void> {
@@ -1526,7 +1528,7 @@ async function persistSyncState(
     ...(Object.keys(nativePluginsState).length > 0 && { nativePlugins: nativePluginsState }),
     ...(extra?.vscodeState?.hash && { vscodeWorkspaceHash: extra.vscodeState.hash }),
     ...(extra?.vscodeState?.repos && { vscodeWorkspaceRepos: extra.vscodeState.repos }),
-    ...(extra?.mcpTrackedServers && { mcpServers: { vscode: extra.mcpTrackedServers } }),
+    ...(extra?.mcpTrackedServers && { mcpServers: extra.mcpTrackedServers }),
   });
 }
 
@@ -1898,13 +1900,24 @@ export async function syncUserWorkspace(
   const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, []);
 
   // Sync MCP server configs to VS Code if vscode client is configured
-  let mcpResult: McpMergeResult | undefined;
+  const mcpResults: Record<string, McpMergeResult> = {};
   if (syncClients.includes('vscode')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'vscode');
-    mcpResult = syncVscodeMcpConfig(validPlugins, { dryRun, force, trackedServers: trackedMcpServers });
-    if (mcpResult.warnings.length > 0) {
-      warnings.push(...mcpResult.warnings);
+    const vscodeMcp = syncVscodeMcpConfig(validPlugins, { dryRun, force, trackedServers: trackedMcpServers });
+    if (vscodeMcp.warnings.length > 0) {
+      warnings.push(...vscodeMcp.warnings);
     }
+    mcpResults.vscode = vscodeMcp;
+  }
+
+  // Sync MCP servers to Codex CLI if codex client is configured
+  if (syncClients.includes('codex')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'codex');
+    const codexMcp = await syncCodexMcpServers(validPlugins, { dryRun, trackedServers: trackedMcpServers });
+    if (codexMcp.warnings.length > 0) {
+      warnings.push(...codexMcp.warnings);
+    }
+    mcpResults.codex = codexMcp;
   }
 
   // Run native CLI installations for user scope
@@ -1920,7 +1933,11 @@ export async function syncUserWorkspace(
       previousState, {}, nativePluginsByClient, nativeResult,
       {
         clientMappings: USER_CLIENT_MAPPINGS,
-        ...(mcpResult && { mcpTrackedServers: mcpResult.trackedServers }),
+        ...(Object.keys(mcpResults).length > 0 && {
+          mcpTrackedServers: Object.fromEntries(
+            Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
+          ),
+        }),
       },
     );
   }
@@ -1934,7 +1951,7 @@ export async function syncUserWorkspace(
     totalGenerated,
     ...(warnings.length > 0 && { warnings }),
     ...(messages.length > 0 && { messages }),
-    ...(mcpResult && { mcpResult }),
+    ...(Object.keys(mcpResults).length > 0 && { mcpResults }),
     ...(nativeResult && { nativeResult }),
   };
 }

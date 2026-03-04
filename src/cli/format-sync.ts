@@ -1,12 +1,15 @@
+import type { NativeSyncResult } from '../core/native/types.js';
 import type { SyncResult } from '../core/sync.js';
 import type { McpMergeResult } from '../core/vscode-mcp.js';
-import type { NativeSyncResult } from '../core/native/types.js';
 
 /**
  * Format MCP server sync results as display lines.
  * Returns an array of strings (one per line), or empty array if no changes.
  */
-export function formatMcpResult(mcpResult: McpMergeResult): string[] {
+export function formatMcpResult(
+  mcpResult: McpMergeResult,
+  scope?: string,
+): string[] {
   const { added, overwritten, removed, skipped } = mcpResult;
   if (added === 0 && overwritten === 0 && removed === 0 && skipped === 0) {
     return [];
@@ -18,7 +21,8 @@ export function formatMcpResult(mcpResult: McpMergeResult): string[] {
   if (overwritten > 0) parts.push(`${overwritten} updated`);
   if (removed > 0) parts.push(`${removed} removed`);
   if (skipped > 0) parts.push(`${skipped} skipped`);
-  lines.push(`MCP servers: ${parts.join(', ')}`);
+  const label = scope ? `MCP servers (${scope})` : 'MCP servers';
+  lines.push(`${label}: ${parts.join(', ')}`);
 
   for (const name of mcpResult.addedServers) {
     lines.push(`  + ${name}`);
@@ -43,7 +47,9 @@ export function formatNativeResult(nativeResult: NativeSyncResult): string[] {
   const lines: string[] = [];
 
   if (nativeResult.marketplacesAdded.length > 0) {
-    lines.push(`Marketplaces registered: ${nativeResult.marketplacesAdded.join(', ')}`);
+    lines.push(
+      `Marketplaces registered: ${nativeResult.marketplacesAdded.join(', ')}`,
+    );
   }
 
   for (const plugin of nativeResult.pluginsInstalled) {
@@ -71,7 +77,8 @@ export function buildSyncData(result: SyncResult) {
     generated: result.totalGenerated,
     failed: result.totalFailed,
     skipped: result.totalSkipped,
-    ...(result.messages && result.messages.length > 0 && { messages: result.messages }),
+    ...(result.messages &&
+      result.messages.length > 0 && { messages: result.messages }),
     plugins: result.pluginResults.map((pr) => ({
       plugin: pr.plugin,
       success: pr.success,
@@ -82,18 +89,25 @@ export function buildSyncData(result: SyncResult) {
       copyResults: pr.copyResults,
     })),
     purgedPaths: result.purgedPaths ?? [],
-    ...(result.mcpResult && {
-      mcpServers: {
-        added: result.mcpResult.added,
-        skipped: result.mcpResult.skipped,
-        overwritten: result.mcpResult.overwritten,
-        removed: result.mcpResult.removed,
-        addedServers: result.mcpResult.addedServers,
-        skippedServers: result.mcpResult.skippedServers,
-        overwrittenServers: result.mcpResult.overwrittenServers,
-        removedServers: result.mcpResult.removedServers,
-        ...(result.mcpResult.configPath && { configPath: result.mcpResult.configPath }),
-      },
+    ...(result.mcpResults && {
+      mcpServers: Object.fromEntries(
+        Object.entries(result.mcpResults)
+          .filter((entry): entry is [string, McpMergeResult] => entry[1] != null)
+          .map(([scope, r]) => [
+            scope,
+            {
+              added: r.added,
+              skipped: r.skipped,
+              overwritten: r.overwritten,
+              removed: r.removed,
+              addedServers: r.addedServers,
+              skippedServers: r.skippedServers,
+              overwrittenServers: r.overwrittenServers,
+              removedServers: r.removedServers,
+              ...(r.configPath && { configPath: r.configPath }),
+            },
+          ]),
+      ),
     }),
     ...(result.nativeResult && {
       nativePlugins: {
