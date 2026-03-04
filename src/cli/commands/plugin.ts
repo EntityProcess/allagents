@@ -828,65 +828,28 @@ const pluginInstallCmd = command({
         process.exit(1);
       }
 
-      if (isJsonMode()) {
-        const { ok, syncData } = isUser
-          ? await runUserSyncAndPrint()
-          : await runSyncAndPrint();
-        const displayPlugin = result.normalizedPlugin ?? plugin;
+      const displayPlugin = result.normalizedPlugin ?? plugin;
 
-        // If --skill flag provided, handle skill selection before producing JSON output
-        if (skills.length > 0) {
-          if (!ok) {
-            jsonOutput({
-              success: false,
-              command: 'plugin install',
-              error: 'Sync completed with failures',
-              data: { plugin: displayPlugin, scope: isUser ? 'user' : 'project', syncResult: syncData },
-            });
-            process.exit(1);
-          }
-          // Fall through to skill handling below
-        } else {
-          jsonOutput({
-            success: ok,
-            command: 'plugin install',
-            data: {
-              plugin: displayPlugin,
-              scope: isUser ? 'user' : 'project',
-              autoRegistered: result.autoRegistered ?? null,
-              syncResult: syncData,
-            },
-            ...(!ok && { error: 'Sync completed with failures' }),
-          });
-          if (!ok) {
-            process.exit(1);
-          }
-          return;
-        }
-      } else {
-        const displayPlugin = result.normalizedPlugin ?? plugin;
-        if (result.autoRegistered) {
-          console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
-        }
-        console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${displayPlugin}`);
-
-        const { ok: syncOk } = isUser
-          ? await runUserSyncAndPrint()
-          : await runSyncAndPrint();
-        if (!syncOk) {
-          if (skills.length > 0) {
-            // Continue to skill handling even if initial sync had issues
-          } else {
-            process.exit(1);
-          }
-        }
-      }
-
-      // Handle --skill flag: add selected skills to enabledSkills
+      // Handle --skill flag: write enabledSkills BEFORE sync so only one sync pass is needed
       if (skills.length > 0) {
         const workspacePath = isUser ? getHomeDir() : process.cwd();
+
+        // Do an initial sync to fetch the plugin so we can discover its skills
+        const initialSync = isUser
+          ? await syncUserWorkspace()
+          : await syncWorkspace(workspacePath);
+
+        if (!initialSync.success && initialSync.error) {
+          const error = `Initial sync failed: ${initialSync.error}`;
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin install', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+
         const allSkills = await getAllSkillsFromPlugins(workspacePath);
-        const displayPlugin = result.normalizedPlugin ?? plugin;
         const pluginSkills = allSkills.filter((s) => s.pluginSource === displayPlugin);
 
         if (pluginSkills.length === 0) {
@@ -922,33 +885,40 @@ const pluginInstallCmd = command({
 
           if (!isJsonMode()) {
             console.log(`\nEnabled skills: ${skills.join(', ')}`);
-            console.log('Syncing workspace...\n');
           }
-
-          // Re-sync with enabledSkills now active
-          const { ok: reSyncOk, syncData: reSyncData } = isUser
-            ? await runUserSyncAndPrint()
-            : await runSyncAndPrint();
-
-          if (isJsonMode()) {
-            jsonOutput({
-              success: reSyncOk,
-              command: 'plugin install',
-              data: {
-                plugin: displayPlugin,
-                scope: isUser ? 'user' : 'project',
-                enabledSkills: skills,
-                syncResult: reSyncData,
-              },
-              ...(!reSyncOk && { error: 'Sync completed with failures' }),
-            });
-            if (!reSyncOk) process.exit(1);
-            return;
-          }
-
-          if (!reSyncOk) process.exit(1);
         }
       }
+
+      if (!isJsonMode()) {
+        if (result.autoRegistered) {
+          console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
+        }
+        console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${displayPlugin}`);
+      }
+
+      // Single sync pass (enabledSkills already written if --skill was used)
+      const { ok: syncOk, syncData } = isUser
+        ? await runUserSyncAndPrint()
+        : await runSyncAndPrint();
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: syncOk,
+          command: 'plugin install',
+          data: {
+            plugin: displayPlugin,
+            scope: isUser ? 'user' : 'project',
+            autoRegistered: result.autoRegistered ?? null,
+            ...(skills.length > 0 && { enabledSkills: skills }),
+            syncResult: syncData,
+          },
+          ...(!syncOk && { error: 'Sync completed with failures' }),
+        });
+        if (!syncOk) process.exit(1);
+        return;
+      }
+
+      if (!syncOk) process.exit(1);
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {

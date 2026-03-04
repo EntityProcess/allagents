@@ -88,10 +88,14 @@ export async function getAllSkillsFromPlugins(
     const entries = await readdir(skillsDir, { withFileTypes: true });
     const skillDirs = entries.filter((e) => e.isDirectory());
 
+    // Only apply enabledSkills to plugins that actually have entries in the set
+    const hasEnabledEntries = enabledSkills &&
+      [...enabledSkills].some((s) => s.startsWith(`${pluginName}:`));
+
     for (const entry of skillDirs) {
       const skillKey = `${pluginName}:${entry.name}`;
-      const isDisabled = enabledSkills
-        ? !enabledSkills.has(skillKey)
+      const isDisabled = hasEnabledEntries
+        ? !enabledSkills!.has(skillKey)
         : disabledSkills.has(skillKey);
 
       skills.push({

@@ -375,9 +375,13 @@ export async function collectPluginSkills(
   const skillDirs = entries.filter((e) => e.isDirectory());
 
   // Filter skills: enabledSkills (allowlist) takes priority over disabledSkills (blocklist)
+  // Only apply enabledSkills to plugins that actually have entries in the set
+  const hasEnabledEntries = enabledSkills && pluginName &&
+    [...enabledSkills].some((s) => s.startsWith(`${pluginName}:`));
+
   const filteredDirs = pluginName
-    ? enabledSkills
-      ? skillDirs.filter((e) => enabledSkills.has(`${pluginName}:${e.name}`))
+    ? hasEnabledEntries
+      ? skillDirs.filter((e) => enabledSkills!.has(`${pluginName}:${e.name}`))
       : disabledSkills
         ? skillDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`))
         : skillDirs
