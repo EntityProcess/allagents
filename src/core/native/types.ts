@@ -58,6 +58,7 @@ export function executeCommand(
     const proc = spawn(binary, args, {
       cwd: options.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
       env: { ...process.env },
     });
 

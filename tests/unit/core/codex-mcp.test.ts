@@ -178,6 +178,24 @@ describe('syncCodexMcpServers', () => {
     expect(result.warnings.some((w) => w.toLowerCase().includes('codex'))).toBe(true);
   });
 
+  test('skips codex CLI call when no plugins have MCP servers and nothing previously tracked', async () => {
+    // Plugin has no .mcp.json
+    let execCalled = false;
+    const mockExecute = (_binary: string, _args: string[]): NativeCommandResult => {
+      execCalled = true;
+      return { success: true, output: '[]' };
+    };
+
+    const result = await syncCodexMcpServers([makePlugin(pluginDir)], {
+      _mockExecute: mockExecute,
+    });
+
+    expect(execCalled).toBe(false);
+    expect(result.added).toBe(0);
+    expect(result.removed).toBe(0);
+    expect(result.warnings).toHaveLength(0);
+  });
+
   test('dryRun does not call add or remove', async () => {
     writeFileSync(
       join(pluginDir, '.mcp.json'),
