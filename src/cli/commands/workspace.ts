@@ -67,8 +67,9 @@ const initCmd = command({
       const targetPath = path ?? '.';
       let clients = client ? parseClientEntries(client) : undefined;
 
-      // If no --client flag, prompt interactively
-      if (!clients) {
+      // If no --client flag and no --from, prompt interactively.
+      // When --from is used, the remote workspace.yaml defines the clients.
+      if (!clients && !from) {
         const { promptForClients } = await import('../tui/prompt-clients.js');
         const prompted = await promptForClients();
         if (prompted === null) {

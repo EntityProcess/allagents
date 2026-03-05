@@ -1,5 +1,6 @@
 import * as p from '@clack/prompts';
 import { initWorkspace } from '../../../core/workspace.js';
+import type { ClientEntry } from '../../../models/workspace-config.js';
 import { promptForClients } from '../prompt-clients.js';
 
 const { text } = p;
@@ -30,10 +31,15 @@ export async function runInit(): Promise<void> {
       return;
     }
 
-    const selectedClients = await promptForClients();
-
-    if (selectedClients === null) {
-      return;
+    // Skip client prompt when a template source is provided — the remote
+    // workspace.yaml already defines the desired client configuration.
+    let selectedClients: ClientEntry[] | undefined;
+    if (!fromSource) {
+      const prompted = await promptForClients();
+      if (prompted === null) {
+        return;
+      }
+      selectedClients = prompted;
     }
 
     const s = p.spinner();
@@ -41,14 +47,14 @@ export async function runInit(): Promise<void> {
 
     const options: Parameters<typeof initWorkspace>[1] = {
       ...(fromSource ? { from: fromSource } : {}),
-      ...(selectedClients.length > 0 ? { clients: selectedClients } : {}),
+      ...(selectedClients && selectedClients.length > 0 ? { clients: selectedClients } : {}),
     };
     const result = await initWorkspace(targetPath, options);
 
     s.stop('Workspace initialized');
 
     const lines = [`Path: ${result.path}`];
-    if (selectedClients.length > 0) {
+    if (selectedClients && selectedClients.length > 0) {
       lines.push(`Clients: ${selectedClients.join(', ')}`);
     }
     if (result.syncResult) {
