@@ -87,6 +87,11 @@ export async function syncCodexMcpServers(
     trackedServers: [],
   };
 
+  // Skip calling codex CLI entirely when there are no MCP servers to sync and nothing to remove
+  if (pluginServers.size === 0 && previouslyTracked.size === 0) {
+    return result;
+  }
+
   // List existing Codex MCP servers
   const listResult = await exec('codex', ['mcp', 'list', '--json']);
   if (!listResult.success) {
