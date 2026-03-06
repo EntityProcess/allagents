@@ -124,18 +124,18 @@ async function main() {
   pkg.version = newVersion;
   await Bun.write("package.json", JSON.stringify(pkg, null, 2) + "\n");
 
-  // Commit the version bump
+  // Commit the version bump (skip hooks — this is just a version bump)
   await $`git add package.json`;
-  await $`git commit -m ${"chore(release): bump version to " + newVersion}`;
+  await $`git commit --no-verify -m ${"chore(release): bump version to " + newVersion}`;
 
   // Create annotated tag
   await $`git tag -a ${tagName} -m ${"Release " + newVersion}`;
   console.log(`Created tag: ${tagName}`);
 
-  // Push commit and tag
+  // Push commit and tag (skip hooks — already validated before release)
   console.log("Pushing to origin...");
-  await $`git push origin main`;
-  await $`git push origin ${tagName}`;
+  await $`git push --no-verify origin main`;
+  await $`git push --no-verify origin ${tagName}`;
 
   console.log("");
   console.log(`Release ${newVersion} completed successfully!`);

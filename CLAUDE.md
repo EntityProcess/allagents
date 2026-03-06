@@ -101,6 +101,8 @@ bun run build
 
 **How to E2E test:** Create a temporary workspace in `/tmp/`, configure it with a `workspace.yaml` that exercises your change, run the built CLI against it, and verify the filesystem result matches expectations. Clean up after.
 
+**IMPORTANT: Never run `git config` in the repo directory.** If tests need git user config (e.g., for commits in a temp repo), always scope it to the temp directory: `git config --local user.name "Test"` inside the temp dir. Running `git config user.name` or `git config user.email` in the project root will silently override the user's identity for all future commits.
+
 **Include E2E steps in the PR description** so human reviewers can reproduce the test. Document the exact commands you ran and what you verified.
 
 Unit tests with mocks verify internal logic but miss integration bugs. Mocks that don't match real interfaces create false confidence.
