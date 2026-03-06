@@ -36,7 +36,7 @@ export type MarketplaceSourceType = 'github' | 'git' | 'local';
  */
 export interface MarketplaceSource {
   type: MarketplaceSourceType;
-  /** GitHub: "owner/repo", Local: absolute path */
+  /** GitHub: "owner/repo", Git: full URL, Local: absolute path */
   location: string;
 }
 
@@ -188,8 +188,8 @@ export function parseMarketplaceSource(source: string): {
     return null;
   }
 
-  // Non-GitHub git URL (https:// or git:// with a host)
-  if (source.match(/^(https?|git):\/\/.+\/.+/)) {
+  // Non-GitHub git URL (https://, git://, or ssh:// with a host)
+  if (source.match(/^(https?|git|ssh):\/\/.+\/.+/)) {
     const name = source.split('/').filter(Boolean).pop()?.replace(/\.git$/, '') || 'repo';
     return {
       type: 'git',
