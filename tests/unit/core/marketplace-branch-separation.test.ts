@@ -53,7 +53,6 @@ const {
   addMarketplace,
   loadRegistry,
   findMarketplace,
-  saveRegistry,
 } = await import('../../../src/core/marketplace.js');
 
 describe('branch separation — each branch is a separate marketplace', () => {
@@ -142,86 +141,5 @@ describe('branch separation — each branch is a separate marketplace', () => {
     const result2 = await addMarketplace('owner/repo', 'repo-v2-copy', 'feat/v2');
     expect(result2.success).toBe(true);
     expect(result2.marketplace?.name).toBe('repo-v2'); // returns existing
-  });
-});
-
-describe('local marketplace matching by owner/repo path suffix', () => {
-  let originalHome: string | undefined;
-  let testHome: string;
-  let consoleLogSpy: ReturnType<typeof spyOn>;
-
-  beforeEach(() => {
-    originalHome = process.env.HOME;
-    testHome = join(tmpdir(), `marketplace-local-match-test-${Date.now()}`);
-    process.env.HOME = testHome;
-    mkdirSync(join(testHome, '.allagents'), { recursive: true });
-    cloneToCalls.length = 0;
-    consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    process.env.HOME = originalHome;
-    rmSync(testHome, { recursive: true, force: true });
-    consoleLogSpy.mockRestore();
-  });
-
-  it('should find local marketplace when path ends with owner/repo', async () => {
-    // Simulate a local marketplace registered at a path like D:/GitHub/WiseTechGlobal/WTG.AI.Prompts
-    const localPath = join(testHome, 'GitHub', 'WiseTechGlobal', 'WTG.AI.Prompts');
-    mkdirSync(localPath, { recursive: true });
-
-    const registry = await loadRegistry();
-    registry.marketplaces['my-local-mp'] = {
-      name: 'my-local-mp',
-      source: { type: 'local', location: localPath },
-      path: localPath,
-      lastUpdated: new Date().toISOString(),
-    };
-    await saveRegistry(registry);
-
-    // findMarketplace with owner/repo should match via path suffix
-    const found = await findMarketplace('WTG.AI.Prompts', 'WiseTechGlobal/WTG.AI.Prompts');
-    expect(found).not.toBeNull();
-    expect(found?.name).toBe('my-local-mp');
-  });
-
-  it('should not match local marketplace when path does not end with owner/repo', async () => {
-    const localPath = join(testHome, 'repos', 'my-custom-plugins');
-    mkdirSync(localPath, { recursive: true });
-
-    const registry = await loadRegistry();
-    registry.marketplaces['custom-mp'] = {
-      name: 'custom-mp',
-      source: { type: 'local', location: localPath },
-      path: localPath,
-      lastUpdated: new Date().toISOString(),
-    };
-    await saveRegistry(registry);
-
-    // This should NOT match because path doesn't end with WiseTechGlobal/WTG.AI.Prompts
-    const found = await findMarketplace('WTG.AI.Prompts', 'WiseTechGlobal/WTG.AI.Prompts');
-    expect(found).toBeNull();
-  });
-
-  it('should prefer exact source location match over path suffix match', async () => {
-    // Register a GitHub marketplace with exact source
-    const result = await addMarketplace('owner/repo');
-    expect(result.success).toBe(true);
-
-    // Also register a local marketplace whose path ends with owner/repo
-    const localPath = join(testHome, 'GitHub', 'owner', 'repo');
-    mkdirSync(localPath, { recursive: true });
-    const registry = await loadRegistry();
-    registry.marketplaces['local-repo'] = {
-      name: 'local-repo',
-      source: { type: 'local', location: localPath },
-      path: localPath,
-    };
-    await saveRegistry(registry);
-
-    // Exact match (GitHub) should be found first
-    const found = await findMarketplace('repo', 'owner/repo');
-    expect(found).not.toBeNull();
-    expect(found?.name).toBe('test-marketplace'); // GitHub one, not local
   });
 });

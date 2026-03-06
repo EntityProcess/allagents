@@ -137,29 +137,15 @@ function getSourceLocationKey(source: MarketplaceSource): string {
 }
 
 /**
- * Find a marketplace by source location in the registry.
- *
- * For local marketplaces, also matches when the local path ends with the
- * owner/repo pattern (e.g., path "D:/GitHub/WiseTechGlobal/WTG.AI.Prompts"
- * matches source location "WiseTechGlobal/WTG.AI.Prompts"). This allows
- * plugin specs like `plugin@owner/repo` to resolve to a locally-registered
- * clone of that repo.
+ * Find a marketplace by source location in the registry
  */
 function findBySourceLocation(
   registry: MarketplaceRegistry,
   sourceLocation: string,
 ): MarketplaceEntry | null {
   for (const entry of Object.values(registry.marketplaces)) {
-    const key = getSourceLocationKey(entry.source);
-    if (key === sourceLocation) {
+    if (getSourceLocationKey(entry.source) === sourceLocation) {
       return entry;
-    }
-    // Match local marketplaces whose path ends with the owner/repo pattern
-    if (entry.source.type === 'local' && sourceLocation.includes('/')) {
-      const normalizedPath = entry.source.location.replaceAll('\\', '/');
-      if (normalizedPath.endsWith(`/${sourceLocation}`)) {
-        return entry;
-      }
     }
   }
   return null;
