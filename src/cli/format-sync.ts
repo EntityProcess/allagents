@@ -64,7 +64,7 @@ function getPathLookup(): PathEntry[] {
 function classifyDestination(dest: string): { client: string; artifactType: ArtifactType } | null {
   const normalized = dest.replace(/\\/g, '/');
   for (const entry of getPathLookup()) {
-    if (normalized.includes('/' + entry.path) || normalized.startsWith(entry.path)) {
+    if (normalized.includes(`/${entry.path}`) || normalized.startsWith(entry.path)) {
       return { client: entry.client, artifactType: entry.artifactType };
     }
   }
@@ -84,10 +84,11 @@ export function classifyCopyResults(copyResults: CopyResult[]): Map<string, Arti
     if (!classification) continue;
 
     const { client, artifactType } = classification;
-    if (!clientCounts.has(client)) {
-      clientCounts.set(client, { skills: 0, commands: 0, agents: 0, hooks: 0 });
+    let counts = clientCounts.get(client);
+    if (!counts) {
+      counts = { skills: 0, commands: 0, agents: 0, hooks: 0 };
+      clientCounts.set(client, counts);
     }
-    const counts = clientCounts.get(client)!;
     switch (artifactType) {
       case 'skill': counts.skills++; break;
       case 'command': counts.commands++; break;
