@@ -99,6 +99,32 @@ describe('classifyCopyResults', () => {
     expect(result.size).toBe(0);
   });
 
+  test('aliases vscode to copilot in display output', () => {
+    const copyResults: CopyResult[] = [
+      { source: '/plugin/skills/a', destination: '/workspace/.agents/skills/a', action: 'copied' },
+      { source: '/plugin/skills/b', destination: '/workspace/.agents/skills/b', action: 'copied' },
+    ];
+
+    const result = classifyCopyResults(copyResults);
+    // vscode paths (.agents/skills/) should be classified as copilot
+    expect(result.has('vscode')).toBe(false);
+    expect(result.get('copilot')).toEqual({ skills: 2, commands: 0, agents: 0, hooks: 0 });
+  });
+
+  test('merges vscode and copilot artifact counts', () => {
+    const copyResults: CopyResult[] = [
+      // vscode destination (.agents/skills/)
+      { source: '/plugin/skills/a', destination: '/workspace/.agents/skills/a', action: 'copied' },
+      // copilot destinations (.github/skills/ and .github/agents/)
+      { source: '/plugin/skills/b', destination: '/workspace/.github/skills/b', action: 'copied' },
+      { source: '/plugin/agents/c.md', destination: '/workspace/.github/agents/c.md', action: 'copied' },
+    ];
+
+    const result = classifyCopyResults(copyResults);
+    expect(result.has('vscode')).toBe(false);
+    expect(result.get('copilot')).toEqual({ skills: 2, commands: 0, agents: 1, hooks: 0 });
+  });
+
   test('handles user-scope paths', () => {
     const copyResults: CopyResult[] = [
       { source: '/plugin/skills/foo', destination: '/home/user/.codex/skills/foo', action: 'copied' },
