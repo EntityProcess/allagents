@@ -119,3 +119,32 @@ describe('parseMarketplaceSource Windows local paths', () => {
     expect(result!.type).toBe('local');
   });
 });
+
+describe('parseMarketplaceSource git source type', () => {
+  it('should parse non-GitHub git URL as git type', () => {
+    const result = parseMarketplaceSource('https://gitlab.com/owner/repo');
+    expect(result).toEqual({
+      type: 'git',
+      location: 'https://gitlab.com/owner/repo',
+      name: 'repo',
+    });
+  });
+
+  it('should parse generic git URL with .git suffix', () => {
+    const result = parseMarketplaceSource('https://gitlab.com/owner/repo.git');
+    expect(result).toEqual({
+      type: 'git',
+      location: 'https://gitlab.com/owner/repo.git',
+      name: 'repo',
+    });
+  });
+
+  it('should keep GitHub URLs as github type', () => {
+    const result = parseMarketplaceSource('https://github.com/owner/repo');
+    expect(result).toEqual({
+      type: 'github',
+      location: 'owner/repo',
+      name: 'repo',
+    });
+  });
+});

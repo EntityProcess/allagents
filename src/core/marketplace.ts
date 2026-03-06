@@ -29,7 +29,7 @@ export function parseLocation(location: string): {
 /**
  * Source types for marketplaces
  */
-export type MarketplaceSourceType = 'github' | 'local';
+export type MarketplaceSourceType = 'github' | 'git' | 'local';
 
 /**
  * Source configuration for a marketplace
@@ -186,6 +186,16 @@ export function parseMarketplaceSource(source: string): {
       };
     }
     return null;
+  }
+
+  // Non-GitHub git URL (https:// or git:// with a host)
+  if (source.match(/^(https?|git):\/\/.+\/.+/)) {
+    const name = source.split('/').filter(Boolean).pop()?.replace(/\.git$/, '') || 'repo';
+    return {
+      type: 'git',
+      location: source,
+      name,
+    };
   }
 
   // GitHub shorthand: owner/repo (exactly one slash, no backslashes, no protocol)
