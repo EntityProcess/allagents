@@ -29,14 +29,14 @@ export function parseLocation(location: string): {
 /**
  * Source types for marketplaces
  */
-export type MarketplaceSourceType = 'github' | 'local';
+export type MarketplaceSourceType = 'github' | 'git' | 'local';
 
 /**
  * Source configuration for a marketplace
  */
 export interface MarketplaceSource {
   type: MarketplaceSourceType;
-  /** GitHub: "owner/repo", Local: absolute path */
+  /** GitHub: "owner/repo", Git: full URL, Local: absolute path */
   location: string;
 }
 
@@ -188,6 +188,16 @@ export function parseMarketplaceSource(source: string): {
     return null;
   }
 
+  // Non-GitHub git URL (https://, git://, or ssh:// with a host)
+  if (source.match(/^(https?|git|ssh):\/\/.+\/.+/)) {
+    const name = source.split('/').filter(Boolean).pop()?.replace(/\.git$/, '') || 'repo';
+    return {
+      type: 'git',
+      location: source,
+      name,
+    };
+  }
+
   // GitHub shorthand: owner/repo (exactly one slash, no backslashes, no protocol)
   const parts = source.split('/');
   if (
@@ -271,11 +281,13 @@ export async function addMarketplace(
   // Use the full location including branch — each branch is a separate marketplace.
   // For branch-pinned registrations, effectiveBranch overrides parsed.location.
   const sourceLocation = (() => {
-    if (parsed.type !== 'github') return parsed.location;
-    const { owner, repo } = parseLocation(parsed.location);
-    return effectiveBranch
-      ? `${owner}/${repo}/${effectiveBranch}`
-      : `${owner}/${repo}`;
+    if (parsed.type === 'github') {
+      const { owner, repo } = parseLocation(parsed.location);
+      return effectiveBranch
+        ? `${owner}/${repo}/${effectiveBranch}`
+        : `${owner}/${repo}`;
+    }
+    return parsed.location;
   })();
   const existingBySource = findBySourceLocation(registry, sourceLocation);
   if (existingBySource) {
@@ -284,8 +296,8 @@ export async function addMarketplace(
 
   let marketplacePath: string;
 
-  if (parsed.type === 'github') {
-    // Clone GitHub repository
+  if (parsed.type === 'github' || parsed.type === 'git') {
+    // Clone remote repository
     marketplacePath = join(getMarketplacesDir(), name);
 
     // Check if directory already exists (from a previous partial registration)
@@ -299,9 +311,13 @@ export async function addMarketplace(
         await mkdir(parentDir, { recursive: true });
       }
 
-      // Extract owner/repo for GitHub operations (strip branch from location if present)
-      const { owner, repo } = parseLocation(parsed.location);
-      const repoUrl = gitHubUrl(owner, repo);
+      // Get clone URL
+      const repoUrl = parsed.type === 'github'
+        ? (() => {
+            const { owner, repo } = parseLocation(parsed.location);
+            return gitHubUrl(owner, repo);
+          })()
+        : parsed.location;
 
       // Clone repository (with branch if specified)
       try {
@@ -311,7 +327,7 @@ export async function addMarketplace(
           if (error.isAuthError) {
             return {
               success: false,
-              error: `Authentication failed for ${owner}/${repo}.\n  Check your SSH keys or git credentials.`,
+              error: `Authentication failed for ${parsed.location}.\n  Check your SSH keys or git credentials.`,
             };
           }
         }
@@ -319,7 +335,7 @@ export async function addMarketplace(
         if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
           return {
             success: false,
-            error: `Repository not found: ${owner}/${repo}`,
+            error: `Repository not found: ${parsed.location}`,
           };
         }
         return {
@@ -515,7 +531,7 @@ export async function updateMarketplace(
       continue;
     }
 
-    // GitHub marketplace - git pull
+    // Remote marketplace - git pull
     if (!existsSync(marketplace.path)) {
       results.push({
         name: marketplace.name,
@@ -526,10 +542,10 @@ export async function updateMarketplace(
     }
 
     try {
-      // Check if location includes a branch
-      const { branch: storedBranch } = parseLocation(
-        marketplace.source.location,
-      );
+      // Check if location includes a branch (only for github type; git type has no branch in location)
+      const storedBranch = marketplace.source.type === 'github'
+        ? parseLocation(marketplace.source.location).branch
+        : undefined;
       const git = simpleGit(marketplace.path);
 
       let targetBranch: string;
@@ -878,11 +894,9 @@ export interface ResolvePluginSpecResult {
 async function refreshMarketplace(
   marketplace: MarketplaceEntry,
 ): Promise<MarketplaceResult> {
-  if (marketplace.source.type !== 'github') {
+  if (marketplace.source.type === 'local') {
     return { success: true, marketplace };
   }
-
-  const { owner, repo, branch } = parseLocation(marketplace.source.location);
 
   // Remove from registry without cascade
   const registry = await loadRegistry();
@@ -895,7 +909,12 @@ async function refreshMarketplace(
   }
 
   // Re-add with original source (will clone fresh)
-  return addMarketplace(`${owner}/${repo}`, marketplace.name, branch);
+  if (marketplace.source.type === 'github') {
+    const { owner, repo, branch } = parseLocation(marketplace.source.location);
+    return addMarketplace(`${owner}/${repo}`, marketplace.name, branch);
+  }
+  // git type: use the full URL directly
+  return addMarketplace(marketplace.source.location, marketplace.name);
 }
 
 /**
@@ -953,7 +972,7 @@ export async function resolvePluginSpecWithAutoRegister(
   if (
     !didAutoRegister &&
     !options.offline &&
-    marketplace.source.type === 'github' &&
+    marketplace.source.type !== 'local' &&
     !updatedMarketplaceCache.has(marketplace.name)
   ) {
     const results = await updateMarketplace(marketplace.name);
@@ -981,7 +1000,7 @@ export async function resolvePluginSpecWithAutoRegister(
   let resolved = await resolvePluginSpec(spec, resolveOpts);
 
   // If not found and online, refresh the marketplace (re-clone) and retry
-  if (!resolved && !options.offline && marketplace.source.type === 'github') {
+  if (!resolved && !options.offline && marketplace.source.type !== 'local') {
     console.log(
       `Plugin not found in cached marketplace, refreshing '${marketplace.name}'...`,
     );
@@ -1148,20 +1167,24 @@ export async function ensureMarketplacesRegistered(
 }
 
 /**
- * Get the short git commit hash for a marketplace directory.
+ * Get the short git commit hash and date for a marketplace directory.
  * Returns null if the marketplace is not a git repo or has no commits.
  */
 export async function getMarketplaceVersion(
   marketplacePath: string,
-): Promise<string | null> {
+): Promise<{ hash: string; date: Date } | null> {
   if (!existsSync(marketplacePath)) {
     return null;
   }
 
   try {
     const git = simpleGit(marketplacePath);
-    const log = await git.log({ maxCount: 1, format: { hash: '%h' } });
-    return log.latest?.hash || null;
+    const log = await git.log({ maxCount: 1 });
+    if (!log.latest) return null;
+    return {
+      hash: log.latest.hash.slice(0, 7),
+      date: new Date(log.latest.date),
+    };
   } catch {
     return null;
   }

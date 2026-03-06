@@ -612,7 +612,7 @@ export async function runBrowseMarketplaces(
       const options: Array<{ label: string; value: string }> = [
         { label: '+ Add marketplace', value: '__add__' },
         ...marketplaces.map((m) => ({
-          label: `${m.name} (${m.source.type}: ${m.source.location})`,
+          label: `${m.name} (${m.source.type === 'github' ? 'GitHub' : m.source.type === 'git' ? 'Git' : 'Local'}: ${m.source.location})`,
           value: m.name,
         })),
         { label: 'Back', value: '__back__' },
