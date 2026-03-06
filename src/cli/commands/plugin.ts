@@ -41,7 +41,7 @@ import {
   pluginUpdateMeta,
 } from '../metadata/plugin.js';
 import { skillsCmd } from './plugin-skills.js';
-import { formatMcpResult, formatNativeResult, buildSyncData } from '../format-sync.js';
+import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary } from '../format-sync.js';
 import {
   getPluginSource,
   getPluginClients,
@@ -83,9 +83,10 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
         console.log(`  Error: ${pluginResult.error}`);
       }
 
-      const copied = pluginResult.copyResults.filter(
-        (r) => r.action === 'copied',
-      ).length;
+      for (const line of formatPluginArtifacts(pluginResult.copyResults)) {
+        console.log(line);
+      }
+
       const generated = pluginResult.copyResults.filter(
         (r) => r.action === 'generated',
       ).length;
@@ -93,7 +94,6 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
         (r) => r.action === 'failed',
       ).length;
 
-      if (copied > 0) console.log(`  Copied: ${copied} files`);
       if (generated > 0) console.log(`  Generated: ${generated} files`);
       if (failed > 0) {
         console.log(`  Failed: ${failed} files`);
@@ -118,16 +118,9 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
       }
     }
 
-    console.log('\nSync complete:');
-    console.log(`  Total copied: ${result.totalCopied}`);
-    if (result.totalGenerated > 0) {
-      console.log(`  Total generated: ${result.totalGenerated}`);
-    }
-    if (result.totalFailed > 0) {
-      console.log(`  Total failed: ${result.totalFailed}`);
-    }
-    if (result.totalSkipped > 0) {
-      console.log(`  Total skipped: ${result.totalSkipped}`);
+    console.log('');
+    for (const line of formatSyncSummary(result)) {
+      console.log(line);
     }
   }
 
@@ -161,9 +154,10 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
         console.log(`  Error: ${pluginResult.error}`);
       }
 
-      const copied = pluginResult.copyResults.filter(
-        (r) => r.action === 'copied',
-      ).length;
+      for (const line of formatPluginArtifacts(pluginResult.copyResults)) {
+        console.log(line);
+      }
+
       const generated = pluginResult.copyResults.filter(
         (r) => r.action === 'generated',
       ).length;
@@ -171,7 +165,6 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
         (r) => r.action === 'failed',
       ).length;
 
-      if (copied > 0) console.log(`  Copied: ${copied} files`);
       if (generated > 0) console.log(`  Generated: ${generated} files`);
       if (failed > 0) {
         console.log(`  Failed: ${failed} files`);
@@ -210,16 +203,9 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
       }
     }
 
-    console.log('\nUser sync complete:');
-    console.log(`  Total copied: ${result.totalCopied}`);
-    if (result.totalGenerated > 0) {
-      console.log(`  Total generated: ${result.totalGenerated}`);
-    }
-    if (result.totalFailed > 0) {
-      console.log(`  Total failed: ${result.totalFailed}`);
-    }
-    if (result.totalSkipped > 0) {
-      console.log(`  Total skipped: ${result.totalSkipped}`);
+    console.log('');
+    for (const line of formatSyncSummary(result, { label: 'User sync' })) {
+      console.log(line);
     }
   }
 

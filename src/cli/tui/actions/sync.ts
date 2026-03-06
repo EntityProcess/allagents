@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
 import { syncUserWorkspace, syncWorkspace } from '../../../core/sync.js';
-import { formatMcpResult, formatNativeResult } from '../../format-sync.js';
+import { formatMcpResult, formatNativeResult, formatSyncSummary } from '../../format-sync.js';
 import type { TuiContext } from '../context.js';
 
 /**
@@ -24,9 +24,7 @@ export async function runSync(context: TuiContext): Promise<void> {
           (pr) => `${pr.success ? '\u2713' : '\u2717'} ${pr.plugin}`,
         );
         lines.push('');
-        lines.push(
-          `Copied: ${result.totalCopied}  Failed: ${result.totalFailed}  Skipped: ${result.totalSkipped}`,
-        );
+        lines.push(...formatSyncSummary(result));
         if (result.nativeResult) {
           lines.push(...formatNativeResult(result.nativeResult));
         }
@@ -47,9 +45,7 @@ export async function runSync(context: TuiContext): Promise<void> {
           (pr) => `${pr.success ? '\u2713' : '\u2717'} ${pr.plugin}`,
         );
         lines.push('');
-        lines.push(
-          `Copied: ${userResult.totalCopied}  Failed: ${userResult.totalFailed}  Skipped: ${userResult.totalSkipped}`,
-        );
+        lines.push(...formatSyncSummary(userResult));
         if (userResult.mcpResults) {
           for (const [scope, mcpResult] of Object.entries(
             userResult.mcpResults,

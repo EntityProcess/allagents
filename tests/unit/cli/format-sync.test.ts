@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { formatMcpResult, formatNativeResult } from '../../../src/cli/format-sync.js';
+import { formatMcpResult, formatNativeResult, classifyCopyResults, formatArtifactLines, formatPluginArtifacts, formatSyncSummary } from '../../../src/cli/format-sync.js';
+import type { CopyResult } from '../../../src/core/transform.js';
+import type { SyncResult } from '../../../src/core/sync.js';
 import type { McpMergeResult } from '../../../src/core/vscode-mcp.js';
 import type { NativeSyncResult } from '../../../src/core/native/types.js';
 
@@ -66,6 +68,192 @@ describe('formatMcpResult', () => {
     }));
 
     expect(lines.some((l) => l.includes('File modified'))).toBe(false);
+  });
+});
+
+describe('classifyCopyResults', () => {
+  test('classifies skills, commands, agents, hooks by client from destination path', () => {
+    const copyResults: CopyResult[] = [
+      { source: '/plugin/commands/commit.md', destination: '/workspace/.claude/commands/commit.md', action: 'copied' },
+      { source: '/plugin/commands/review.md', destination: '/workspace/.claude/commands/review.md', action: 'copied' },
+      { source: '/plugin/skills/brainstorming', destination: '/workspace/.claude/skills/brainstorming', action: 'copied' },
+      { source: '/plugin/agents/reviewer.md', destination: '/workspace/.claude/agents/reviewer.md', action: 'copied' },
+      { source: '/plugin/hooks', destination: '/workspace/.claude/hooks/', action: 'copied' },
+      { source: '/plugin/agents/reviewer.md', destination: '/workspace/.github/agents/reviewer.md', action: 'copied' },
+      { source: '/plugin/hooks', destination: '/workspace/.github/hooks/', action: 'copied' },
+    ];
+
+    const result = classifyCopyResults(copyResults);
+
+    expect(result.get('claude')).toEqual({ skills: 1, commands: 2, agents: 1, hooks: 1 });
+    expect(result.get('copilot')).toEqual({ skills: 0, commands: 0, agents: 1, hooks: 1 });
+  });
+
+  test('ignores non-copied results', () => {
+    const copyResults: CopyResult[] = [
+      { source: '/plugin/skills/foo', destination: '/workspace/.claude/skills/foo', action: 'failed', error: 'oops' },
+      { source: '/plugin/skills/bar', destination: '/workspace/.claude/skills/bar', action: 'skipped' },
+    ];
+
+    const result = classifyCopyResults(copyResults);
+    expect(result.size).toBe(0);
+  });
+
+  test('handles user-scope paths', () => {
+    const copyResults: CopyResult[] = [
+      { source: '/plugin/skills/foo', destination: '/home/user/.codex/skills/foo', action: 'copied' },
+      { source: '/plugin/skills/bar', destination: '/home/user/.codex/skills/bar', action: 'copied' },
+    ];
+
+    const result = classifyCopyResults(copyResults);
+    expect(result.get('codex')).toEqual({ skills: 2, commands: 0, agents: 0, hooks: 0 });
+  });
+});
+
+describe('formatArtifactLines', () => {
+  test('formats per-client artifact counts', () => {
+    const counts = new Map([
+      ['claude', { skills: 3, commands: 2, agents: 1, hooks: 1 }],
+      ['copilot', { skills: 3, commands: 0, agents: 1, hooks: 0 }],
+    ]);
+
+    const lines = formatArtifactLines(counts);
+    expect(lines).toEqual([
+      '  claude: 2 commands, 3 skills, 1 agent, 1 hook',
+      '  copilot: 3 skills, 1 agent',
+    ]);
+  });
+
+  test('uses singular form for count of 1', () => {
+    const counts = new Map([
+      ['claude', { skills: 1, commands: 1, agents: 1, hooks: 1 }],
+    ]);
+
+    const lines = formatArtifactLines(counts);
+    expect(lines).toEqual(['  claude: 1 command, 1 skill, 1 agent, 1 hook']);
+  });
+
+  test('omits zero-count artifact types', () => {
+    const counts = new Map([
+      ['codex', { skills: 5, commands: 0, agents: 0, hooks: 0 }],
+    ]);
+
+    const lines = formatArtifactLines(counts);
+    expect(lines).toEqual(['  codex: 5 skills']);
+  });
+});
+
+describe('formatPluginArtifacts', () => {
+  test('returns artifact lines for copied results', () => {
+    const copyResults: CopyResult[] = [
+      { source: '/plugin/skills/a', destination: '/workspace/.claude/skills/a', action: 'copied' },
+      { source: '/plugin/skills/b', destination: '/workspace/.claude/skills/b', action: 'copied' },
+    ];
+
+    const lines = formatPluginArtifacts(copyResults);
+    expect(lines).toEqual(['  claude: 2 skills']);
+  });
+
+  test('returns empty for no copied results', () => {
+    expect(formatPluginArtifacts([])).toEqual([]);
+  });
+
+  test('falls back to file count for unclassifiable destinations', () => {
+    const copyResults: CopyResult[] = [
+      { source: '/plugin/something.txt', destination: '/workspace/something.txt', action: 'copied' },
+    ];
+
+    const lines = formatPluginArtifacts(copyResults);
+    expect(lines).toEqual(['  Copied: 1 file']);
+  });
+});
+
+describe('formatSyncSummary', () => {
+  test('shows per-client artifact summary', () => {
+    const result: SyncResult = {
+      success: true,
+      pluginResults: [{
+        plugin: 'test-plugin',
+        resolved: '/tmp/test-plugin',
+        success: true,
+        copyResults: [
+          { source: '/plugin/skills/a', destination: '/workspace/.claude/skills/a', action: 'copied' },
+          { source: '/plugin/agents/b.md', destination: '/workspace/.claude/agents/b.md', action: 'copied' },
+        ],
+      }],
+      totalCopied: 2,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+    };
+
+    const lines = formatSyncSummary(result);
+    expect(lines).toEqual([
+      'Sync complete:',
+      '  claude: 1 skill, 1 agent',
+    ]);
+  });
+
+  test('includes failed and generated counts', () => {
+    const result: SyncResult = {
+      success: false,
+      pluginResults: [{
+        plugin: 'test-plugin',
+        resolved: '/tmp/test-plugin',
+        success: false,
+        copyResults: [
+          { source: '/plugin/skills/a', destination: '/workspace/.claude/skills/a', action: 'copied' },
+          { source: '/plugin/skills/b', destination: '/workspace/.claude/skills/b', action: 'failed', error: 'oops' },
+        ],
+      }],
+      totalCopied: 1,
+      totalFailed: 1,
+      totalSkipped: 0,
+      totalGenerated: 1,
+    };
+
+    const lines = formatSyncSummary(result);
+    expect(lines).toEqual([
+      'Sync complete:',
+      '  claude: 1 skill',
+      '  Total generated: 1',
+      '  Total failed: 1',
+    ]);
+  });
+
+  test('shows dry-run label', () => {
+    const result: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+    };
+
+    const lines = formatSyncSummary(result, { dryRun: true });
+    expect(lines[0]).toBe('Sync complete (dry run):');
+  });
+
+  test('uses custom label', () => {
+    const result: SyncResult = {
+      success: true,
+      pluginResults: [{
+        plugin: 'test',
+        resolved: '/tmp/test',
+        success: true,
+        copyResults: [
+          { source: '/plugin/skills/a', destination: '/home/user/.codex/skills/a', action: 'copied' },
+        ],
+      }],
+      totalCopied: 1,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+    };
+
+    const lines = formatSyncSummary(result, { label: 'User sync' });
+    expect(lines[0]).toBe('User sync complete:');
   });
 });
 
