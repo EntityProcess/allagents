@@ -5,6 +5,14 @@ import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 
+// Env that prevents git from walking up to a parent repo
+const gitEnv = (dir: string) => ({
+  ...process.env,
+  GIT_CEILING_DIRECTORIES: dir,
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+});
+
 // Mock simple-git with a real-ish implementation that delegates to actual git
 mock.module('simple-git', () => ({
   default: (dir: string) => ({
@@ -15,6 +23,7 @@ mock.module('simple-git', () => ({
         const output = execSync(`git log ${maxCount} ${format}`, {
           cwd: dir,
           encoding: 'utf-8',
+          env: gitEnv(dir),
         }).trim();
         const lines = output.split('\n');
         if (lines.length < 2) return { latest: null };
@@ -38,13 +47,14 @@ const { getMarketplaceVersion } = await import(
 describe('getMarketplaceVersion', () => {
   it('should return hash and date for a git repo', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mp-version-'));
+    const env = gitEnv(dir);
     try {
-      execSync('git init', { cwd: dir });
-      execSync('git config user.email "test@test.com"', { cwd: dir });
-      execSync('git config user.name "Test"', { cwd: dir });
+      execSync('git init', { cwd: dir, env });
+      execSync('git config user.email "test@test.com"', { cwd: dir, env });
+      execSync('git config user.name "Test"', { cwd: dir, env });
       writeFileSync(join(dir, 'file.txt'), 'hello');
-      execSync('git add .', { cwd: dir });
-      execSync('git commit -m "initial"', { cwd: dir });
+      execSync('git add .', { cwd: dir, env });
+      execSync('git commit -m "initial"', { cwd: dir, env });
 
       const result = (await getMarketplaceVersion(dir)) as {
         hash: string;
