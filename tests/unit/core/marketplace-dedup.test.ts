@@ -119,11 +119,12 @@ describe('marketplace deduplication', () => {
       expect(results).toHaveLength(2);
       expect(results.every((r) => r.success)).toBe(true);
 
-      // Should only have logged 2 auto-registration messages
+      // Only the first marketplace is truly new — the second finds
+      // the existing entry via manifest name, so no log is emitted.
       const autoRegLogs = logMessages.filter((m) =>
-        m.includes('Auto-registering'),
+        m.includes('Auto-registered'),
       );
-      expect(autoRegLogs).toHaveLength(2);
+      expect(autoRegLogs).toHaveLength(1);
     });
 
     it('should skip already registered marketplaces', async () => {
@@ -141,7 +142,7 @@ describe('marketplace deduplication', () => {
 
       // Should not have logged any auto-registration (already registered)
       const autoRegLogs = logMessages.filter((m) =>
-        m.includes('Auto-registering'),
+        m.includes('Auto-registered'),
       );
       expect(autoRegLogs).toHaveLength(0);
 
@@ -188,7 +189,7 @@ describe('marketplace deduplication', () => {
       // Pre-register marketplaces (like sync.ts does before validateAllPlugins)
       await ensureMarketplacesRegistered(plugins);
       const preRegLogs = logMessages.filter((m) =>
-        m.includes('Auto-registering'),
+        m.includes('Auto-registered'),
       );
       expect(preRegLogs).toHaveLength(1);
 
@@ -202,7 +203,7 @@ describe('marketplace deduplication', () => {
 
       // Should NOT have logged any additional auto-registration messages
       const postRegLogs = logMessages.filter((m) =>
-        m.includes('Auto-registering'),
+        m.includes('Auto-registered'),
       );
       expect(postRegLogs).toHaveLength(0);
     });

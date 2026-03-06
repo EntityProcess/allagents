@@ -66,6 +66,8 @@ export interface MarketplaceResult {
   success: boolean;
   marketplace?: MarketplaceEntry;
   error?: string;
+  /** True when addMarketplace returned an already-registered entry (idempotent) */
+  alreadyRegistered?: boolean;
   /** User-level plugins that were removed during marketplace removal cascade */
   removedUserPlugins?: string[];
   /** User-level plugins that still reference the removed marketplace (returned when cascade is off) */
@@ -277,7 +279,7 @@ export async function addMarketplace(
   })();
   const existingBySource = findBySourceLocation(registry, sourceLocation);
   if (existingBySource) {
-    return { success: true, marketplace: existingBySource };
+    return { success: true, marketplace: existingBySource, alreadyRegistered: true };
   }
 
   let marketplacePath: string;
@@ -349,6 +351,7 @@ export async function addMarketplace(
           return {
             success: true,
             marketplace: existing,
+            alreadyRegistered: true,
           };
         }
         name = manifestName;
@@ -1063,12 +1066,14 @@ async function autoRegisterMarketplace(
         return { success: true, name: existing.name };
       }
 
-      console.log(`Auto-registering GitHub marketplace: ${source}`);
       const result = await addMarketplace(source);
       if (!result.success) {
         return { success: false, error: result.error || 'Unknown error' };
       }
       const name = result.marketplace?.name ?? parts[1];
+      if (!result.alreadyRegistered) {
+        console.log(`Auto-registered GitHub marketplace: ${source}`);
+      }
       registeredSourceCache.set(source, name);
       return { success: true, name };
     }

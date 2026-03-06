@@ -911,7 +911,7 @@ const pluginInstallCmd = command({
 
       if (!isJsonMode()) {
         if (result.autoRegistered) {
-          console.log(`\u2713 Auto-registered marketplace: ${result.autoRegistered}`);
+          console.log(`  Resolved marketplace: ${result.autoRegistered}`);
         }
         console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${displayPlugin}`);
       }
