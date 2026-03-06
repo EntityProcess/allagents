@@ -284,3 +284,21 @@ export function resolveClientMappings(
     vscode: { ...baseMappings.copilot },
   };
 }
+
+/**
+ * Display name aliases for CLI output.
+ * vscode is always displayed as copilot since VS Code's AI features
+ * are delivered through GitHub Copilot.
+ */
+export const CLIENT_DISPLAY_ALIASES: Partial<Record<ClientType, string>> = {
+  vscode: 'copilot',
+};
+
+/**
+ * Get the display name for a client type.
+ * Applies CLIENT_DISPLAY_ALIASES so aliased clients (e.g. vscode → copilot)
+ * show their canonical display name.
+ */
+export function getDisplayName(client: string): string {
+  return CLIENT_DISPLAY_ALIASES[client as ClientType] ?? client;
+}

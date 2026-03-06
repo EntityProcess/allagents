@@ -3,6 +3,7 @@ import {
   CLIENT_MAPPINGS,
   USER_CLIENT_MAPPINGS,
   resolveClientMappings,
+  getDisplayName,
 } from '../../../src/models/client-mapping.js';
 
 describe('CLIENT_MAPPINGS', () => {
@@ -231,5 +232,17 @@ describe('resolveClientMappings', () => {
       expect(resolved.vscode.skillsPath).toBe('.copilot/skills/');
       expect(resolved.vscode.githubPath).toBe('.copilot/');
     });
+  });
+});
+
+describe('getDisplayName', () => {
+  it('should return copilot for vscode', () => {
+    expect(getDisplayName('vscode')).toBe('copilot');
+  });
+
+  it('should return the same name for non-aliased clients', () => {
+    expect(getDisplayName('claude')).toBe('claude');
+    expect(getDisplayName('copilot')).toBe('copilot');
+    expect(getDisplayName('codex')).toBe('codex');
   });
 });
