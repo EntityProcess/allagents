@@ -8,6 +8,7 @@ import {
   findMarketplace,
   parsePluginSpec,
   getAllagentsDir,
+  getMarketplaceVersion,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { loadSyncState } from '../../core/sync-state.js';
@@ -225,10 +226,22 @@ const marketplaceListCmd = command({
       const marketplaces = await listMarketplaces();
 
       if (isJsonMode()) {
+        const enriched = await Promise.all(
+          marketplaces.map(async (mp) => {
+            const version = await getMarketplaceVersion(mp.path);
+            return {
+              ...mp,
+              ...(version && {
+                commitHash: version.hash,
+                commitTimestamp: version.date.toISOString(),
+              }),
+            };
+          }),
+        );
         jsonOutput({
           success: true,
           command: 'plugin marketplace list',
-          data: { marketplaces },
+          data: { marketplaces: enriched },
         });
         return;
       }
@@ -246,18 +259,27 @@ const marketplaceListCmd = command({
       console.log('Registered marketplaces:\n');
 
       for (const mp of marketplaces) {
-        const sourceInfo =
-          mp.source.type === 'github'
-            ? `GitHub: ${mp.source.location}`
-            : `Local: ${mp.source.location}`;
-        const updated = mp.lastUpdated
-          ? new Date(mp.lastUpdated).toLocaleDateString()
-          : 'never';
+        let sourceLabel: string;
+        switch (mp.source.type) {
+          case 'github':
+            sourceLabel = `GitHub: ${mp.source.location}`;
+            break;
+          case 'git':
+            sourceLabel = `Git: ${mp.source.location}`;
+            break;
+          default:
+            sourceLabel = `Local: ${mp.source.location}`;
+        }
 
-        console.log(`  ${mp.name}`);
-        console.log(`    Source: ${sourceInfo}`);
-        console.log(`    Path: ${mp.path}`);
-        console.log(`    Last updated: ${updated}`);
+        console.log(`  ❯ ${mp.name}`);
+        console.log(`    Source: ${sourceLabel}`);
+
+        const version = await getMarketplaceVersion(mp.path);
+        if (version) {
+          const ts = version.date.toISOString().replace('T', ' ').slice(0, 16);
+          console.log(`    Version: ${version.hash} (${ts})`);
+        }
+
         console.log();
       }
 
