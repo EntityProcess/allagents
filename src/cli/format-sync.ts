@@ -2,7 +2,7 @@ import type { NativeSyncResult } from '../core/native/types.js';
 import type { SyncResult } from '../core/sync.js';
 import type { CopyResult } from '../core/transform.js';
 import type { McpMergeResult } from '../core/vscode-mcp.js';
-import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../models/client-mapping.js';
+import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, getDisplayName } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 
 type ArtifactType = 'skill' | 'command' | 'agent' | 'hook';
@@ -85,7 +85,8 @@ export function classifyCopyResults(copyResults: CopyResult[]): Map<string, Arti
     const classification = classifyDestination(result.destination);
     if (!classification) continue;
 
-    const { client, artifactType } = classification;
+    const { artifactType } = classification;
+    const client = getDisplayName(classification.client);
     let counts = clientCounts.get(client);
     if (!counts) {
       counts = { skills: 0, commands: 0, agents: 0, hooks: 0 };
