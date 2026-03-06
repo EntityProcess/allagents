@@ -281,11 +281,13 @@ export async function addMarketplace(
   // Use the full location including branch — each branch is a separate marketplace.
   // For branch-pinned registrations, effectiveBranch overrides parsed.location.
   const sourceLocation = (() => {
-    if (parsed.type !== 'github') return parsed.location;
-    const { owner, repo } = parseLocation(parsed.location);
-    return effectiveBranch
-      ? `${owner}/${repo}/${effectiveBranch}`
-      : `${owner}/${repo}`;
+    if (parsed.type === 'github') {
+      const { owner, repo } = parseLocation(parsed.location);
+      return effectiveBranch
+        ? `${owner}/${repo}/${effectiveBranch}`
+        : `${owner}/${repo}`;
+    }
+    return parsed.location;
   })();
   const existingBySource = findBySourceLocation(registry, sourceLocation);
   if (existingBySource) {
@@ -294,8 +296,8 @@ export async function addMarketplace(
 
   let marketplacePath: string;
 
-  if (parsed.type === 'github') {
-    // Clone GitHub repository
+  if (parsed.type === 'github' || parsed.type === 'git') {
+    // Clone remote repository
     marketplacePath = join(getMarketplacesDir(), name);
 
     // Check if directory already exists (from a previous partial registration)
@@ -309,9 +311,13 @@ export async function addMarketplace(
         await mkdir(parentDir, { recursive: true });
       }
 
-      // Extract owner/repo for GitHub operations (strip branch from location if present)
-      const { owner, repo } = parseLocation(parsed.location);
-      const repoUrl = gitHubUrl(owner, repo);
+      // Get clone URL
+      const repoUrl = parsed.type === 'github'
+        ? (() => {
+            const { owner, repo } = parseLocation(parsed.location);
+            return gitHubUrl(owner, repo);
+          })()
+        : parsed.location;
 
       // Clone repository (with branch if specified)
       try {
@@ -321,7 +327,7 @@ export async function addMarketplace(
           if (error.isAuthError) {
             return {
               success: false,
-              error: `Authentication failed for ${owner}/${repo}.\n  Check your SSH keys or git credentials.`,
+              error: `Authentication failed for ${parsed.location}.\n  Check your SSH keys or git credentials.`,
             };
           }
         }
@@ -329,7 +335,7 @@ export async function addMarketplace(
         if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
           return {
             success: false,
-            error: `Repository not found: ${owner}/${repo}`,
+            error: `Repository not found: ${parsed.location}`,
           };
         }
         return {
