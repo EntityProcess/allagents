@@ -12,10 +12,13 @@ import type {
 import { getPluginSource } from '../models/workspace-config.js';
 import {
   isGitHubUrl,
+  parseGitHubUrl,
   validatePluginSource,
   verifyGitHubUrlExists,
 } from '../utils/plugin-path.js';
+import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import {
+  getMarketplace,
   isPluginSpec,
   parsePluginSpec,
   resolvePluginSpecWithAutoRegister,
@@ -174,12 +177,27 @@ async function addPluginToConfig(
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
 
-    // Check if plugin already exists
+    // Check if plugin already exists (exact match)
     if (config.plugins.some((entry) => getPluginSource(entry) === plugin)) {
       return {
         success: false,
         error: `Plugin already exists in .allagents/workspace.yaml: ${plugin}`,
       };
+    }
+
+    // Check for semantic duplicates (different strings resolving to same repo)
+    const newIdentity = await resolveGitHubIdentity(plugin);
+    if (newIdentity) {
+      for (const existing of config.plugins) {
+        const existingSource = getPluginSource(existing);
+        const existingIdentity = await resolveGitHubIdentity(existingSource);
+        if (existingIdentity === newIdentity) {
+          return {
+            success: false,
+            error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
+          };
+        }
+      }
     }
 
     // Add plugin
@@ -560,6 +578,43 @@ export function pruneEnabledSkillsForPlugin(
   if (config.enabledSkills.length === 0) {
     config.enabledSkills = undefined;
   }
+}
+
+/**
+ * Resolve a plugin source to its GitHub owner/repo identity, if it points to
+ * a GitHub repo (directly or via a marketplace URL source). Returns null for
+ * local-path plugins.
+ */
+export async function resolveGitHubIdentity(
+  pluginSource: string,
+): Promise<string | null> {
+  if (isGitHubUrl(pluginSource)) {
+    const parsed = parseGitHubUrl(pluginSource);
+    return parsed ? `${parsed.owner}/${parsed.repo}`.toLowerCase() : null;
+  }
+
+  if (isPluginSpec(pluginSource)) {
+    const parsed = parsePluginSpec(pluginSource);
+    if (!parsed) return null;
+
+    const marketplace = await getMarketplace(parsed.marketplaceName);
+    if (!marketplace) return null;
+
+    const manifestResult = await parseMarketplaceManifest(marketplace.path);
+    if (!manifestResult.success) return null;
+
+    const entry = manifestResult.data.plugins.find(
+      (p) => p.name === parsed.plugin,
+    );
+    if (!entry || typeof entry.source === 'string') return null;
+
+    const parsedUrl = parseGitHubUrl(entry.source.url);
+    return parsedUrl
+      ? `${parsedUrl.owner}/${parsedUrl.repo}`.toLowerCase()
+      : null;
+  }
+
+  return null;
 }
 
 /**

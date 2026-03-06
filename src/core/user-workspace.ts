@@ -9,14 +9,13 @@ import type {
   WorkspaceConfig,
 } from '../models/workspace-config.js';
 import { getPluginSource } from '../models/workspace-config.js';
-import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import {
   isGitHubUrl,
   parseGitHubUrl,
   validatePluginSource,
   verifyGitHubUrlExists,
 } from '../utils/plugin-path.js';
-import { getAllagentsDir, getMarketplace } from './marketplace.js';
+import { getAllagentsDir } from './marketplace.js';
 import {
   isPluginSpec,
   parsePluginSpec,
@@ -26,6 +25,7 @@ import {
   type ModifyResult,
   pruneDisabledSkillsForPlugin,
   pruneEnabledSkillsForPlugin,
+  resolveGitHubIdentity,
 } from './workspace-modify.js';
 
 /**
@@ -279,43 +279,6 @@ export async function removeUserPluginsForMarketplace(
   config.plugins = config.plugins.filter((entry) => !matching.includes(entry));
   await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
   return matching.map((entry) => getPluginSource(entry));
-}
-
-/**
- * Resolve a plugin source to its GitHub owner/repo identity, if it points to
- * a GitHub repo (directly or via a marketplace URL source). Returns null for
- * local-path plugins.
- */
-export async function resolveGitHubIdentity(
-  pluginSource: string,
-): Promise<string | null> {
-  if (isGitHubUrl(pluginSource)) {
-    const parsed = parseGitHubUrl(pluginSource);
-    return parsed ? `${parsed.owner}/${parsed.repo}`.toLowerCase() : null;
-  }
-
-  if (isPluginSpec(pluginSource)) {
-    const parsed = parsePluginSpec(pluginSource);
-    if (!parsed) return null;
-
-    const marketplace = await getMarketplace(parsed.marketplaceName);
-    if (!marketplace) return null;
-
-    const manifestResult = await parseMarketplaceManifest(marketplace.path);
-    if (!manifestResult.success) return null;
-
-    const entry = manifestResult.data.plugins.find(
-      (p) => p.name === parsed.plugin,
-    );
-    if (!entry || typeof entry.source === 'string') return null;
-
-    const parsedUrl = parseGitHubUrl(entry.source.url);
-    return parsedUrl
-      ? `${parsedUrl.owner}/${parsedUrl.repo}`.toLowerCase()
-      : null;
-  }
-
-  return null;
 }
 
 /**
