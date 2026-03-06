@@ -639,6 +639,12 @@ const pluginListCmd = command({
       // key = "spec:scope" → file-sync client types
       const pluginClients = new Map<string, string[]>();
 
+      // Canonical key for deduplication: uses parsed name+marketplace so different
+      // spec formats (e.g., "plugin@owner/repo" vs "plugin@repo") resolve to the same key
+      function canonicalKey(name: string, marketplace: string, scope: string): string {
+        return `${name}:${marketplace}:${scope}`;
+      }
+
       async function loadConfigClients(
         configPath: string,
         scope: 'user' | 'project',
@@ -671,7 +677,7 @@ const pluginListCmd = command({
       const userSyncState = await loadSyncState(getAllagentsDir());
       const projectSyncState = await loadSyncState(process.cwd());
 
-      // Build merged map: key = "spec:scope"
+      // Build merged map: key = "name:marketplace:scope" for format-independent dedup
       interface MergedPlugin {
         spec: string;
         name: string;
@@ -683,25 +689,28 @@ const pluginListCmd = command({
       const merged = new Map<string, MergedPlugin>();
 
       for (const p of allInstalled) {
-        const key = `${p.spec}:${p.scope}`;
+        const key = canonicalKey(p.name, p.marketplace, p.scope);
         merged.set(key, {
           spec: p.spec,
           name: p.name,
           marketplace: p.marketplace,
           scope: p.scope,
-          fileClients: pluginClients.get(key) ?? [],
+          fileClients: pluginClients.get(`${p.spec}:${p.scope}`) ?? [],
           nativeClients: [],
         });
       }
 
-      // Merge native plugins
+      // Merge native plugins using the same canonical key
       for (const [state, scope] of [
         [userSyncState, 'user'],
         [projectSyncState, 'project'],
       ] as const) {
         for (const [client, specs] of Object.entries(state?.nativePlugins ?? {})) {
           for (const spec of specs) {
-            const key = `${spec}:${scope}`;
+            const parsed = parsePluginSpec(spec);
+            const key = parsed
+              ? canonicalKey(parsed.plugin, parsed.marketplaceName, scope)
+              : `${spec}::${scope}`;
             const existing = merged.get(key);
             if (existing) {
               if (!existing.nativeClients.includes(client)) {
@@ -710,8 +719,8 @@ const pluginListCmd = command({
             } else {
               merged.set(key, {
                 spec,
-                name: spec.split('@')[0] ?? spec,
-                marketplace: spec.split('@')[1] ?? '',
+                name: parsed?.plugin ?? spec,
+                marketplace: parsed?.marketplaceName ?? '',
                 scope,
                 fileClients: [],
                 nativeClients: [client],
