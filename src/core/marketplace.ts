@@ -1022,9 +1022,14 @@ export async function resolvePluginSpecWithAutoRegister(
   }
 
   // Return registeredAs when we auto-registered, when the canonical name differs,
-  // or when the spec used owner/repo format (so "plugin@owner/repo" normalizes to "plugin@name")
+  // or when the spec used owner/repo format without subpath
+  // (so "plugin@owner/repo" normalizes to "plugin@name").
+  // Subpath specs (plugin@owner/repo/subpath) are NOT normalized because the
+  // subpath is needed for resolution and would be lost by the replacement.
   const shouldReturnRegisteredAs =
-    didAutoRegister || marketplace.name !== marketplaceName || owner != null;
+    didAutoRegister ||
+    marketplace.name !== marketplaceName ||
+    (owner != null && subpath == null);
 
   // Include marketplace source for GitHub marketplaces so native CLIs can register them
   const marketplaceSource =

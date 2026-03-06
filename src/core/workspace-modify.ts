@@ -296,6 +296,22 @@ export async function removePlugin(
       );
     }
 
+    // Semantic match: same GitHub repo under a different format
+    if (index === -1) {
+      const identity = await resolveGitHubIdentity(plugin);
+      if (identity) {
+        for (let i = 0; i < config.plugins.length; i++) {
+          const p = config.plugins[i];
+          if (!p) continue;
+          const existing = await resolveGitHubIdentity(getPluginSource(p));
+          if (existing === identity) {
+            index = i;
+            break;
+          }
+        }
+      }
+    }
+
     if (index === -1) {
       return {
         success: false,
