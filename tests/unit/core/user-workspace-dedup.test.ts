@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveGitHubIdentity } from '../../../src/core/user-workspace.js';
+import { resolveGitHubIdentity } from '../../../src/core/workspace-modify.js';
 
 describe('resolveGitHubIdentity', () => {
   test('resolves GitHub URL to owner/repo', async () => {
