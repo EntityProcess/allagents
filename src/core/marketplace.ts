@@ -1021,9 +1021,10 @@ export async function resolvePluginSpecWithAutoRegister(
     };
   }
 
-  // Return registeredAs when we auto-registered OR when the canonical name differs
+  // Return registeredAs when we auto-registered, when the canonical name differs,
+  // or when the spec used owner/repo format (so "plugin@owner/repo" normalizes to "plugin@name")
   const shouldReturnRegisteredAs =
-    didAutoRegister || marketplace.name !== marketplaceName;
+    didAutoRegister || marketplace.name !== marketplaceName || owner != null;
 
   // Include marketplace source for GitHub marketplaces so native CLIs can register them
   const marketplaceSource =
