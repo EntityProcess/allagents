@@ -43,6 +43,6 @@ describe('initWorkspace with force option', () => {
       'clients:\n  - cursor\nplugins: []\nrepositories: []\n',
     );
 
-    expect(initWorkspace(testDir)).rejects.toThrow('Workspace already exists');
+    await expect(initWorkspace(testDir)).rejects.toThrow('Workspace already exists');
   });
 });
