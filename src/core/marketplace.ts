@@ -1158,20 +1158,24 @@ export async function ensureMarketplacesRegistered(
 }
 
 /**
- * Get the short git commit hash for a marketplace directory.
+ * Get the short git commit hash and date for a marketplace directory.
  * Returns null if the marketplace is not a git repo or has no commits.
  */
 export async function getMarketplaceVersion(
   marketplacePath: string,
-): Promise<string | null> {
+): Promise<{ hash: string; date: Date } | null> {
   if (!existsSync(marketplacePath)) {
     return null;
   }
 
   try {
     const git = simpleGit(marketplacePath);
-    const log = await git.log({ maxCount: 1, format: { hash: '%h' } });
-    return log.latest?.hash || null;
+    const log = await git.log({ maxCount: 1 });
+    if (!log.latest) return null;
+    return {
+      hash: log.latest.hash.slice(0, 7),
+      date: new Date(log.latest.date),
+    };
   } catch {
     return null;
   }
