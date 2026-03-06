@@ -204,7 +204,7 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
     }
 
     console.log('');
-    for (const line of formatSyncSummary(result)) {
+    for (const line of formatSyncSummary(result, { label: 'User sync' })) {
       console.log(line);
     }
   }

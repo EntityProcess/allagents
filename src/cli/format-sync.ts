@@ -38,7 +38,9 @@ function buildPathLookup(): PathEntry[] {
       ];
       for (const [path, artifactType] of paths) {
         if (!path) continue;
-        const key = `${path}|${client}`;
+        // Dedup by path+artifactType so the first client to register a path wins
+        // (e.g., vscode and universal both use .agents/skills/)
+        const key = `${path}|${artifactType}`;
         if (seen.has(key)) continue;
         seen.add(key);
         entries.push({ path, client, artifactType });
@@ -137,7 +139,7 @@ export function formatPluginArtifacts(copyResults: CopyResult[], indent = '  '):
   const classified = classifyCopyResults(copied);
   if (classified.size === 0) {
     // Fallback: unclassifiable files
-    return [`${indent}Copied: ${copied.length} files`];
+    return [`${indent}Copied: ${copied.length} ${copied.length === 1 ? 'file' : 'files'}`];
   }
 
   return formatArtifactLines(classified, indent);
@@ -148,14 +150,14 @@ export function formatPluginArtifacts(copyResults: CopyResult[], indent = '  '):
  */
 export function formatSyncSummary(
   result: SyncResult,
-  { dryRun = false }: { dryRun?: boolean } = {},
+  { dryRun = false, label = 'Sync' }: { dryRun?: boolean; label?: string } = {},
 ): string[] {
   const lines: string[] = [];
   const allCopied = result.pluginResults.flatMap((pr) =>
     pr.copyResults.filter((r) => r.action === 'copied'),
   );
 
-  lines.push(`Sync complete${dryRun ? ' (dry run)' : ''}:`);
+  lines.push(`${label} complete${dryRun ? ' (dry run)' : ''}:`);
 
   const classified = classifyCopyResults(allCopied);
   if (classified.size > 0) {

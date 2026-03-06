@@ -164,7 +164,7 @@ describe('formatPluginArtifacts', () => {
     ];
 
     const lines = formatPluginArtifacts(copyResults);
-    expect(lines).toEqual(['  Copied: 1 files']);
+    expect(lines).toEqual(['  Copied: 1 file']);
   });
 });
 
@@ -233,6 +233,27 @@ describe('formatSyncSummary', () => {
 
     const lines = formatSyncSummary(result, { dryRun: true });
     expect(lines[0]).toBe('Sync complete (dry run):');
+  });
+
+  test('uses custom label', () => {
+    const result: SyncResult = {
+      success: true,
+      pluginResults: [{
+        plugin: 'test',
+        resolved: '/tmp/test',
+        success: true,
+        copyResults: [
+          { source: '/plugin/skills/a', destination: '/home/user/.codex/skills/a', action: 'copied' },
+        ],
+      }],
+      totalCopied: 1,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+    };
+
+    const lines = formatSyncSummary(result, { label: 'User sync' });
+    expect(lines[0]).toBe('User sync complete:');
   });
 });
 
