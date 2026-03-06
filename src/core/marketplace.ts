@@ -531,7 +531,7 @@ export async function updateMarketplace(
       continue;
     }
 
-    // GitHub marketplace - git pull
+    // Remote marketplace - git pull
     if (!existsSync(marketplace.path)) {
       results.push({
         name: marketplace.name,
@@ -542,10 +542,10 @@ export async function updateMarketplace(
     }
 
     try {
-      // Check if location includes a branch
-      const { branch: storedBranch } = parseLocation(
-        marketplace.source.location,
-      );
+      // Check if location includes a branch (only for github type; git type has no branch in location)
+      const storedBranch = marketplace.source.type === 'github'
+        ? parseLocation(marketplace.source.location).branch
+        : undefined;
       const git = simpleGit(marketplace.path);
 
       let targetBranch: string;
@@ -894,11 +894,9 @@ export interface ResolvePluginSpecResult {
 async function refreshMarketplace(
   marketplace: MarketplaceEntry,
 ): Promise<MarketplaceResult> {
-  if (marketplace.source.type !== 'github') {
+  if (marketplace.source.type === 'local') {
     return { success: true, marketplace };
   }
-
-  const { owner, repo, branch } = parseLocation(marketplace.source.location);
 
   // Remove from registry without cascade
   const registry = await loadRegistry();
@@ -911,7 +909,12 @@ async function refreshMarketplace(
   }
 
   // Re-add with original source (will clone fresh)
-  return addMarketplace(`${owner}/${repo}`, marketplace.name, branch);
+  if (marketplace.source.type === 'github') {
+    const { owner, repo, branch } = parseLocation(marketplace.source.location);
+    return addMarketplace(`${owner}/${repo}`, marketplace.name, branch);
+  }
+  // git type: use the full URL directly
+  return addMarketplace(marketplace.source.location, marketplace.name);
 }
 
 /**
@@ -969,7 +972,7 @@ export async function resolvePluginSpecWithAutoRegister(
   if (
     !didAutoRegister &&
     !options.offline &&
-    marketplace.source.type === 'github' &&
+    marketplace.source.type !== 'local' &&
     !updatedMarketplaceCache.has(marketplace.name)
   ) {
     const results = await updateMarketplace(marketplace.name);
@@ -997,7 +1000,7 @@ export async function resolvePluginSpecWithAutoRegister(
   let resolved = await resolvePluginSpec(spec, resolveOpts);
 
   // If not found and online, refresh the marketplace (re-clone) and retry
-  if (!resolved && !options.offline && marketplace.source.type === 'github') {
+  if (!resolved && !options.offline && marketplace.source.type !== 'local') {
     console.log(
       `Plugin not found in cached marketplace, refreshing '${marketplace.name}'...`,
     );
