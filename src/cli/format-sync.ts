@@ -1,6 +1,174 @@
 import type { NativeSyncResult } from '../core/native/types.js';
 import type { SyncResult } from '../core/sync.js';
+import type { CopyResult } from '../core/transform.js';
 import type { McpMergeResult } from '../core/vscode-mcp.js';
+import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS } from '../models/client-mapping.js';
+import type { ClientMapping } from '../models/client-mapping.js';
+
+type ArtifactType = 'skill' | 'command' | 'agent' | 'hook';
+
+interface ArtifactCounts {
+  skills: number;
+  commands: number;
+  agents: number;
+  hooks: number;
+}
+
+interface PathEntry {
+  path: string;
+  client: string;
+  artifactType: ArtifactType;
+}
+
+/**
+ * Build a reverse lookup from client mapping paths to client name + artifact type.
+ * Sorted by path length descending so longer (more specific) paths match first.
+ */
+function buildPathLookup(): PathEntry[] {
+  const entries: PathEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const mappings of [CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS]) {
+    for (const [client, mapping] of Object.entries(mappings) as [string, ClientMapping][]) {
+      const paths: [string | undefined, ArtifactType][] = [
+        [mapping.skillsPath, 'skill'],
+        [mapping.commandsPath, 'command'],
+        [mapping.agentsPath, 'agent'],
+        [mapping.hooksPath, 'hook'],
+      ];
+      for (const [path, artifactType] of paths) {
+        if (!path) continue;
+        const key = `${path}|${client}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push({ path, client, artifactType });
+      }
+    }
+  }
+
+  entries.sort((a, b) => b.path.length - a.path.length);
+  return entries;
+}
+
+let cachedLookup: PathEntry[] | null = null;
+
+function getPathLookup(): PathEntry[] {
+  if (!cachedLookup) cachedLookup = buildPathLookup();
+  return cachedLookup;
+}
+
+/**
+ * Classify a CopyResult's destination into client + artifact type
+ * by matching against known client mapping paths.
+ */
+function classifyDestination(dest: string): { client: string; artifactType: ArtifactType } | null {
+  const normalized = dest.replace(/\\/g, '/');
+  for (const entry of getPathLookup()) {
+    if (normalized.includes('/' + entry.path) || normalized.startsWith(entry.path)) {
+      return { client: entry.client, artifactType: entry.artifactType };
+    }
+  }
+  return null;
+}
+
+/**
+ * Classify CopyResults into per-client artifact counts.
+ * Only counts results with action 'copied'.
+ */
+export function classifyCopyResults(copyResults: CopyResult[]): Map<string, ArtifactCounts> {
+  const clientCounts = new Map<string, ArtifactCounts>();
+
+  for (const result of copyResults) {
+    if (result.action !== 'copied') continue;
+    const classification = classifyDestination(result.destination);
+    if (!classification) continue;
+
+    const { client, artifactType } = classification;
+    if (!clientCounts.has(client)) {
+      clientCounts.set(client, { skills: 0, commands: 0, agents: 0, hooks: 0 });
+    }
+    const counts = clientCounts.get(client)!;
+    switch (artifactType) {
+      case 'skill': counts.skills++; break;
+      case 'command': counts.commands++; break;
+      case 'agent': counts.agents++; break;
+      case 'hook': counts.hooks++; break;
+    }
+  }
+
+  return clientCounts;
+}
+
+/**
+ * Format per-client artifact counts as display lines.
+ * Example: "  claude: 2 commands, 3 skills, 1 agent"
+ */
+export function formatArtifactLines(
+  clientCounts: Map<string, ArtifactCounts>,
+  indent = '  ',
+): string[] {
+  const lines: string[] = [];
+
+  for (const [client, counts] of clientCounts) {
+    const parts: string[] = [];
+    if (counts.commands > 0) parts.push(`${counts.commands} ${counts.commands === 1 ? 'command' : 'commands'}`);
+    if (counts.skills > 0) parts.push(`${counts.skills} ${counts.skills === 1 ? 'skill' : 'skills'}`);
+    if (counts.agents > 0) parts.push(`${counts.agents} ${counts.agents === 1 ? 'agent' : 'agents'}`);
+    if (counts.hooks > 0) parts.push(`${counts.hooks} ${counts.hooks === 1 ? 'hook' : 'hooks'}`);
+
+    if (parts.length > 0) {
+      lines.push(`${indent}${client}: ${parts.join(', ')}`);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Format artifact summary for a set of copy results.
+ * Returns formatted lines showing per-client artifact counts,
+ * or falls back to file count if no artifacts could be classified.
+ */
+export function formatPluginArtifacts(copyResults: CopyResult[], indent = '  '): string[] {
+  const copied = copyResults.filter((r) => r.action === 'copied');
+  if (copied.length === 0) return [];
+
+  const classified = classifyCopyResults(copied);
+  if (classified.size === 0) {
+    // Fallback: unclassifiable files
+    return [`${indent}Copied: ${copied.length} files`];
+  }
+
+  return formatArtifactLines(classified, indent);
+}
+
+/**
+ * Format the overall sync summary with per-client artifact counts.
+ */
+export function formatSyncSummary(
+  result: SyncResult,
+  { dryRun = false }: { dryRun?: boolean } = {},
+): string[] {
+  const lines: string[] = [];
+  const allCopied = result.pluginResults.flatMap((pr) =>
+    pr.copyResults.filter((r) => r.action === 'copied'),
+  );
+
+  lines.push(`Sync complete${dryRun ? ' (dry run)' : ''}:`);
+
+  const classified = classifyCopyResults(allCopied);
+  if (classified.size > 0) {
+    lines.push(...formatArtifactLines(classified));
+  } else if (allCopied.length > 0) {
+    lines.push(`  Total ${dryRun ? 'would copy' : 'copied'}: ${result.totalCopied}`);
+  }
+
+  if (result.totalGenerated > 0) lines.push(`  Total generated: ${result.totalGenerated}`);
+  if (result.totalFailed > 0) lines.push(`  Total failed: ${result.totalFailed}`);
+  if (result.totalSkipped > 0) lines.push(`  Total skipped: ${result.totalSkipped}`);
+
+  return lines;
+}
 
 /**
  * Format MCP server sync results as display lines.

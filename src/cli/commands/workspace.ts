@@ -13,7 +13,7 @@ import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
 import { ClientTypeSchema, InstallModeSchema, type ClientEntry, type ClientType, type InstallMode } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
-import { formatMcpResult, formatNativeResult, buildSyncData } from '../format-sync.js';
+import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary } from '../format-sync.js';
 
 
 // =============================================================================
@@ -111,9 +111,9 @@ const initCmd = command({
           }
         }
 
-        console.log(`\nSync complete: ${syncResult.totalCopied} files copied`);
-        if (syncResult.totalFailed > 0) {
-          console.log(`  Failed: ${syncResult.totalFailed}`);
+        console.log('');
+        for (const line of formatSyncSummary(syncResult)) {
+          console.log(line);
         }
       }
     } catch (error) {
@@ -231,11 +231,13 @@ const syncCmd = command({
           console.log(`  Error: ${pluginResult.error}`);
         }
 
-        const copied = pluginResult.copyResults.filter((r) => r.action === 'copied').length;
+        for (const line of formatPluginArtifacts(pluginResult.copyResults)) {
+          console.log(line);
+        }
+
         const generated = pluginResult.copyResults.filter((r) => r.action === 'generated').length;
         const failed = pluginResult.copyResults.filter((r) => r.action === 'failed').length;
 
-        if (copied > 0) console.log(`  Copied: ${copied} files`);
         if (generated > 0) console.log(`  Generated: ${generated} files`);
         if (failed > 0) {
           console.log(`  Failed: ${failed} files`);
@@ -287,11 +289,10 @@ const syncCmd = command({
       }
 
       // Print summary
-      console.log(`\nSync complete${dryRun ? ' (dry run)' : ''}:`);
-      console.log(`  Total ${dryRun ? 'would copy' : 'copied'}: ${result.totalCopied}`);
-      if (result.totalGenerated > 0) console.log(`  Total generated: ${result.totalGenerated}`);
-      if (result.totalFailed > 0) console.log(`  Total failed: ${result.totalFailed}`);
-      if (result.totalSkipped > 0) console.log(`  Total skipped: ${result.totalSkipped}`);
+      console.log('');
+      for (const line of formatSyncSummary(result, { dryRun })) {
+        console.log(line);
+      }
 
       if (!result.success || result.totalFailed > 0) {
         process.exit(1);
