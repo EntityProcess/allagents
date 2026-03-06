@@ -128,13 +128,11 @@ export async function saveRegistry(
 }
 
 /**
- * Get the normalized source location key for a marketplace (owner/repo without branch)
+ * Get the source location key for a marketplace.
+ * Each branch is treated as a separate marketplace, so the full location
+ * (including branch) is used as the key.
  */
 function getSourceLocationKey(source: MarketplaceSource): string {
-  if (source.type === 'github') {
-    const { owner, repo } = parseLocation(source.location);
-    return `${owner}/${repo}`;
-  }
   return source.location;
 }
 
@@ -268,10 +266,15 @@ export async function addMarketplace(
   }
 
   // Check if already registered by source location (idempotent)
-  const sourceLocation =
-    parsed.type === 'github'
-      ? `${parseLocation(parsed.location).owner}/${parseLocation(parsed.location).repo}`
-      : parsed.location;
+  // Use the full location including branch — each branch is a separate marketplace.
+  // For branch-pinned registrations, effectiveBranch overrides parsed.location.
+  const sourceLocation = (() => {
+    if (parsed.type !== 'github') return parsed.location;
+    const { owner, repo } = parseLocation(parsed.location);
+    return effectiveBranch
+      ? `${owner}/${repo}/${effectiveBranch}`
+      : `${owner}/${repo}`;
+  })();
   const existingBySource = findBySourceLocation(registry, sourceLocation);
   if (existingBySource) {
     return { success: true, marketplace: existingBySource };
