@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import chalk from 'chalk';
 import { getHomeDir, CONFIG_DIR } from '../constants.js';
 
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -68,7 +69,7 @@ export function buildNotice(
 ): string | null {
   if (!latestVersion) return null;
   if (!isNewer(latestVersion, currentVersion)) return null;
-  return `  Update available: ${currentVersion} → ${latestVersion}\n  Run \`allagents self update\` to upgrade.`;
+  return chalk.yellow(`Update available: ${currentVersion} → ${latestVersion}\nRun \`allagents self update\` to upgrade.`);
 }
 
 /**
