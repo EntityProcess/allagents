@@ -10,7 +10,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun build ./src/cli/index.ts --outdir ./dist --target node && shx cp -r src/templates dist/",
+    "build": "shx rm -rf dist && bun build ./src/cli/index.ts --outdir ./dist --target node && shx cp -r src/templates dist/",
     "docs:install": "bun install --cwd docs",
     "docs:build": "bun run --cwd docs build",
     "dev": "bun run src/cli/index.ts",
