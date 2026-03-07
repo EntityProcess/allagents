@@ -95,8 +95,9 @@ export async function fetchWorkspaceFromGitHub(
   const repoUrl = gitHubUrl(owner, repo);
 
   // If we have both branch and subpath, try to resolve the correct split
-  // before cloning. The URL parser's heuristic may have guessed wrong about
-  // where the branch name ends and the subpath begins.
+  // before cloning. The URL parser's heuristic may split incorrectly when
+  // path components (like .allagents) are in commonPathDirs but earlier
+  // directories (like templates/) are not.
   let effectiveBranch = branch;
   let effectiveSubpath = subpath;
 
@@ -105,7 +106,7 @@ export async function fetchWorkspaceFromGitHub(
       repoUrl,
       `${branch}/${subpath}`,
     );
-    if (resolved) {
+    if (resolved && resolved.branch !== branch) {
       effectiveBranch = resolved.branch;
       effectiveSubpath = resolved.subpath;
     }

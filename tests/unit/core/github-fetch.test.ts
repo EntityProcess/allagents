@@ -158,10 +158,11 @@ describe('fetchWorkspaceFromGitHub', () => {
       'templates/nodejs/.allagents/workspace.yaml': yamlContent,
     });
 
-    // refExists returns true for 'main' so branch/subpath resolution works
-    refExistsMock.mockImplementation((repoUrl: string, ref: string) =>
-      Promise.resolve(ref === 'main'),
-    );
+    // resolveBranchAndSubpath tries longest branch first:
+    // "main/templates/nodejs" (false), "main/templates" (false), "main" (true)
+    refExistsMock.mockResolvedValueOnce(false);
+    refExistsMock.mockResolvedValueOnce(false);
+    refExistsMock.mockResolvedValueOnce(true);
     cloneToTempMock.mockResolvedValueOnce(tempDir);
 
     const result = await fetchWorkspaceFromGitHub(
@@ -179,10 +180,6 @@ describe('fetchWorkspaceFromGitHub', () => {
       '.allagents/workspace.yaml': yamlContent,
     });
 
-    // refExists returns true for 'main' so branch/subpath resolution works
-    refExistsMock.mockImplementation((repoUrl: string, ref: string) =>
-      Promise.resolve(ref === 'main'),
-    );
     cloneToTempMock.mockResolvedValueOnce(tempDir);
 
     const result = await fetchWorkspaceFromGitHub(
