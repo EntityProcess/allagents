@@ -19,6 +19,10 @@ export interface FetchWorkspaceResult {
   error?: string;
   /** Temp directory containing the cloned repo. Caller must call cleanupTempDir() when done. */
   tempDir?: string;
+  /** Resolved subpath within the repo (after branch resolution and .allagents stripping) */
+  resolvedSubpath?: string;
+  /** Resolved branch name (after branch/subpath resolution) */
+  resolvedBranch?: string;
 }
 
 /**
@@ -164,11 +168,10 @@ export async function fetchWorkspaceFromGitHub(
   for (const filePath of pathsToTry) {
     const content = readFileFromClone(tempDir, filePath);
     if (content) {
-      return {
-        success: true,
-        content,
-        tempDir,
-      };
+      const result: FetchWorkspaceResult = { success: true, content, tempDir };
+      if (basePath) result.resolvedSubpath = basePath;
+      if (effectiveBranch) result.resolvedBranch = effectiveBranch;
+      return result;
     }
   }
 

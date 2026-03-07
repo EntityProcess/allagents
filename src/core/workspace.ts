@@ -71,7 +71,6 @@ export async function initWorkspace(
   // Parsed GitHub URL — shared across source rewriting, template copying, and agent files
   let parsedFromUrl: ReturnType<typeof parseGitHubUrl> | undefined;
   let githubBasePath = ''; // workspace directory path within the repo (e.g., "examples/multi-repo")
-  let githubBaseDir = '';  // same, but with workspace.yaml filename stripped (for source rewriting)
   let githubBranch = 'main';
 
   try {
@@ -98,19 +97,10 @@ export async function initWorkspace(
         githubTempDir = fetchResult.tempDir;
         workspaceYamlContent = fetchResult.content;
 
-        // Parse GitHub URL once — reused for source rewriting, template copying, and agent files
+        // Use resolved values from fetchWorkspaceFromGitHub (already branch-resolved and .allagents-stripped)
         parsedFromUrl = parseGitHubUrl(options.from);
-        githubBasePath = parsedFromUrl?.subpath?.replace(/\/+$/, '') || '';
-        // Strip .allagents if user pointed directly at config dir
-        if (githubBasePath === CONFIG_DIR || githubBasePath.endsWith(`/${CONFIG_DIR}`)) {
-          githubBasePath = githubBasePath === CONFIG_DIR
-            ? ''
-            : githubBasePath.slice(0, -(CONFIG_DIR.length + 1));
-        }
-        githubBaseDir = githubBasePath
-          .replace(/\/?\.allagents\/workspace\.yaml$/, '')
-          .replace(/\/?workspace\.yaml$/, '');
-        githubBranch = parsedFromUrl?.branch || 'main';
+        githubBasePath = fetchResult.resolvedSubpath || '';
+        githubBranch = fetchResult.resolvedBranch || parsedFromUrl?.branch || 'main';
 
         // For GitHub sources, keep workspace.source as-is (it's already a URL or relative to the repo)
         // We need to rewrite relative workspace.source to the full GitHub URL
@@ -122,7 +112,7 @@ export async function initWorkspace(
           if (!isGitHubUrl(source) && !isAbsolute(source)) {
             // Build GitHub URL from the --from location plus the relative source
             if (parsedFromUrl) {
-              const sourcePath = source === '.' ? githubBaseDir : (githubBaseDir ? `${githubBaseDir}/${source}` : source);
+              const sourcePath = source === '.' ? githubBasePath : (githubBasePath ? `${githubBasePath}/${source}` : source);
               workspace.source = `https://github.com/${parsedFromUrl.owner}/${parsedFromUrl.repo}/tree/${githubBranch}/${sourcePath}`;
               workspaceYamlContent = dump(parsed, { lineWidth: -1 });
             }
