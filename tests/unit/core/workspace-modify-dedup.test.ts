@@ -5,14 +5,28 @@ import { tmpdir } from 'node:os';
 import { dump, load } from 'js-yaml';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
 
-// Mock verifyGitHubUrlExists to avoid network calls
-mock.module('../../../src/utils/plugin-path.js', () => {
-  const actual = require('../../../src/utils/plugin-path.js');
-  return {
-    ...actual,
-    verifyGitHubUrlExists: async () => ({ exists: true }),
-  };
-});
+// Mock git module to avoid network calls in verifyGitHubUrlExists
+mock.module('../../../src/core/git.js', () => ({
+  repoExists: async () => true,
+  cloneToTemp: async () => '',
+  cloneTo: async () => {},
+  pull: async () => {},
+  refExists: async () => false,
+  cleanupTempDir: async () => {},
+  gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
+  GitCloneError: class GitCloneError extends Error {
+    url: string;
+    isTimeout: boolean;
+    isAuthError: boolean;
+    constructor(message: string, url: string, isTimeout = false, isAuthError = false) {
+      super(message);
+      this.name = 'GitCloneError';
+      this.url = url;
+      this.isTimeout = isTimeout;
+      this.isAuthError = isAuthError;
+    }
+  },
+}));
 
 const { addPlugin } = await import('../../../src/core/workspace-modify.js');
 
