@@ -30,15 +30,11 @@ setJsonMode(json);
 
 // Kick off update check for non-json, non-agent-help invocations.
 // Reads from local cache (fast), spawns a detached child to refresh if stale.
-// The notice is printed on process exit so it appears after command output,
-// even if the command calls process.exit() directly.
+// The notice is printed before command output so it's immediately visible.
 const isWizard = finalArgs.length === 0 && process.stdout.isTTY && !json;
-let updateNotice: string | null = null;
 if (!agentHelp && !json && !isWizard) {
-  process.on('exit', () => {
-    if (updateNotice) process.stderr.write(`\n${updateNotice}\n`);
-  });
-  getUpdateNotice(packageJson.version).then((n) => { updateNotice = n; });
+  const notice = await getUpdateNotice(packageJson.version);
+  if (notice) process.stderr.write(`${notice}\n\n`);
 }
 
 if (agentHelp) {
