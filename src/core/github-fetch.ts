@@ -19,6 +19,10 @@ export interface FetchWorkspaceResult {
   error?: string;
   /** Temp directory containing the cloned repo. Caller must call cleanupTempDir() when done. */
   tempDir?: string;
+  /** Resolved subpath within the repo (after branch resolution and .allagents stripping) */
+  resolvedSubpath?: string;
+  /** Resolved branch name (after branch/subpath resolution) */
+  resolvedBranch?: string;
 }
 
 /**
@@ -94,12 +98,14 @@ export async function fetchWorkspaceFromGitHub(
   const subpath = parsed.subpath?.replace(/\/+$/, '');
   const repoUrl = gitHubUrl(owner, repo);
 
-  // If we have both branch and subpath and the branch might have slashes,
-  // try to resolve the correct split before cloning
+  // If we have both branch and subpath, try to resolve the correct split
+  // before cloning. The URL parser's heuristic may split incorrectly when
+  // path components (like .allagents) are in commonPathDirs but earlier
+  // directories (like templates/) are not.
   let effectiveBranch = branch;
   let effectiveSubpath = subpath;
 
-  if (branch && subpath && !branch.includes('/')) {
+  if (branch && subpath) {
     const resolved = await resolveBranchAndSubpath(
       repoUrl,
       `${branch}/${subpath}`,
@@ -108,6 +114,14 @@ export async function fetchWorkspaceFromGitHub(
       effectiveBranch = resolved.branch;
       effectiveSubpath = resolved.subpath;
     }
+  }
+
+  // Normalize: if user pointed directly at .allagents folder, strip it.
+  // The workspace.yaml search already looks inside .allagents/ relative to the base path.
+  if (effectiveSubpath === CONFIG_DIR) {
+    effectiveSubpath = undefined;
+  } else if (effectiveSubpath?.endsWith(`/${CONFIG_DIR}`)) {
+    effectiveSubpath = effectiveSubpath.slice(0, -(CONFIG_DIR.length + 1));
   }
 
   // Clone the repository to a temp directory
@@ -154,11 +168,10 @@ export async function fetchWorkspaceFromGitHub(
   for (const filePath of pathsToTry) {
     const content = readFileFromClone(tempDir, filePath);
     if (content) {
-      return {
-        success: true,
-        content,
-        tempDir,
-      };
+      const result: FetchWorkspaceResult = { success: true, content, tempDir };
+      if (basePath) result.resolvedSubpath = basePath;
+      if (effectiveBranch) result.resolvedBranch = effectiveBranch;
+      return result;
     }
   }
 

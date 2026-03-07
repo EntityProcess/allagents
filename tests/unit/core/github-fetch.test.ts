@@ -151,4 +151,43 @@ describe('fetchWorkspaceFromGitHub', () => {
 
     rmSync(tempDir, { recursive: true, force: true });
   });
+
+  it('should handle URL pointing directly to .allagents folder', async () => {
+    const yamlContent = 'clients:\n  - claude';
+    const tempDir = createTempRepo({
+      'templates/nodejs/.allagents/workspace.yaml': yamlContent,
+    });
+
+    // resolveBranchAndSubpath tries longest branch first:
+    // "main/templates/nodejs" (false), "main/templates" (false), "main" (true)
+    refExistsMock.mockResolvedValueOnce(false);
+    refExistsMock.mockResolvedValueOnce(false);
+    refExistsMock.mockResolvedValueOnce(true);
+    cloneToTempMock.mockResolvedValueOnce(tempDir);
+
+    const result = await fetchWorkspaceFromGitHub(
+      'https://github.com/owner/repo/tree/main/templates/nodejs/.allagents',
+    );
+    expect(result.success).toBe(true);
+    expect(result.content).toBe(yamlContent);
+
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('should handle URL pointing to .allagents at repo root', async () => {
+    const yamlContent = 'plugins:\n  - test@marketplace';
+    const tempDir = createTempRepo({
+      '.allagents/workspace.yaml': yamlContent,
+    });
+
+    cloneToTempMock.mockResolvedValueOnce(tempDir);
+
+    const result = await fetchWorkspaceFromGitHub(
+      'https://github.com/owner/repo/tree/main/.allagents',
+    );
+    expect(result.success).toBe(true);
+    expect(result.content).toBe(yamlContent);
+
+    rmSync(tempDir, { recursive: true, force: true });
+  });
 });

@@ -68,6 +68,10 @@ export async function initWorkspace(
 
   // Temp dir from GitHub clone — must be cleaned up at the end
   let githubTempDir: string | undefined;
+  // Parsed GitHub URL — shared across source rewriting, template copying, and agent files
+  let parsedFromUrl: ReturnType<typeof parseGitHubUrl> | undefined;
+  let githubBasePath = ''; // workspace directory path within the repo (e.g., "examples/multi-repo")
+  let githubBranch = 'main';
 
   try {
     // Create target directory if it doesn't exist
@@ -92,6 +96,12 @@ export async function initWorkspace(
         }
         githubTempDir = fetchResult.tempDir;
         workspaceYamlContent = fetchResult.content;
+
+        // Use resolved values from fetchWorkspaceFromGitHub (already branch-resolved and .allagents-stripped)
+        parsedFromUrl = parseGitHubUrl(options.from);
+        githubBasePath = fetchResult.resolvedSubpath || '';
+        githubBranch = fetchResult.resolvedBranch || parsedFromUrl?.branch || 'main';
+
         // For GitHub sources, keep workspace.source as-is (it's already a URL or relative to the repo)
         // We need to rewrite relative workspace.source to the full GitHub URL
         const parsed = load(workspaceYamlContent) as Record<string, unknown>;
@@ -101,17 +111,9 @@ export async function initWorkspace(
           // If workspace.source is a relative path, convert to GitHub URL
           if (!isGitHubUrl(source) && !isAbsolute(source)) {
             // Build GitHub URL from the --from location plus the relative source
-            const parsedUrl = parseGitHubUrl(options.from);
-            if (parsedUrl) {
-              const basePath = parsedUrl.subpath || '';
-              // Remove workspace.yaml from the base path if present
-              const baseDir = basePath.replace(/\/?\.allagents\/workspace\.yaml$/, '')
-                                       .replace(/\/?workspace\.yaml$/, '');
-              // If source is "." (current directory), just use baseDir, otherwise join them
-              const sourcePath = source === '.' ? baseDir : (baseDir ? `${baseDir}/${source}` : source);
-              // Use the branch from the parsed URL, or default to main if not specified
-              const branch = parsedUrl.branch || 'main';
-              workspace.source = `https://github.com/${parsedUrl.owner}/${parsedUrl.repo}/tree/${branch}/${sourcePath}`;
+            if (parsedFromUrl) {
+              const sourcePath = source === '.' ? githubBasePath : (githubBasePath ? `${githubBasePath}/${source}` : source);
+              workspace.source = `https://github.com/${parsedFromUrl.owner}/${parsedFromUrl.repo}/tree/${githubBranch}/${sourcePath}`;
               workspaceYamlContent = dump(parsed, { lineWidth: -1 });
             }
           }
@@ -209,13 +211,9 @@ export async function initWorkspace(
       if (!existsSync(targetTemplatePath)) {
         if (isGitHubUrl(options.from) && githubTempDir) {
           // Read template from cloned repo
-          const parsedUrl = parseGitHubUrl(options.from);
-          if (parsedUrl) {
-            const basePath = parsedUrl.subpath || '';
-            const baseDir = basePath.replace(/\/?\.allagents\/workspace\.yaml$/, '')
-                                     .replace(/\/?workspace\.yaml$/, '');
-            const templatePath = baseDir
-              ? `${baseDir}/${CONFIG_DIR}/${VSCODE_TEMPLATE_FILE}`
+          if (parsedFromUrl) {
+            const templatePath = githubBasePath
+              ? `${githubBasePath}/${CONFIG_DIR}/${VSCODE_TEMPLATE_FILE}`
               : `${CONFIG_DIR}/${VSCODE_TEMPLATE_FILE}`;
             const templateContent = readFileFromClone(githubTempDir, templatePath);
             if (templateContent) {
@@ -243,18 +241,14 @@ export async function initWorkspace(
       const copiedAgentFiles: string[] = [];
 
       if (options.from && isGitHubUrl(options.from) && githubTempDir) {
-        // Read agent files from cloned repo
-        const parsedUrl = parseGitHubUrl(options.from);
-        if (parsedUrl) {
-          const basePath = parsedUrl.subpath || '';
+        if (parsedFromUrl) {
           for (const agentFile of AGENT_FILES) {
             const targetFilePath = join(absoluteTarget, agentFile);
-            // Skip if file already exists in target - don't overwrite user content
             if (existsSync(targetFilePath)) {
               copiedAgentFiles.push(agentFile);
               continue;
             }
-            const filePath = basePath ? `${basePath}/${agentFile}` : agentFile;
+            const filePath = githubBasePath ? `${githubBasePath}/${agentFile}` : agentFile;
             const content = readFileFromClone(githubTempDir, filePath);
             if (content) {
               await writeFile(targetFilePath, content, 'utf-8');
