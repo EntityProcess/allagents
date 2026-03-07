@@ -70,8 +70,8 @@ export async function initWorkspace(
   let githubTempDir: string | undefined;
   // Parsed GitHub URL — shared across source rewriting, template copying, and agent files
   let parsedFromUrl: ReturnType<typeof parseGitHubUrl> | undefined;
-  let githubBasePath = '';
-  let githubBaseDir = '';
+  let githubBasePath = ''; // workspace directory path within the repo (e.g., "examples/multi-repo")
+  let githubBaseDir = '';  // same, but with workspace.yaml filename stripped (for source rewriting)
   let githubBranch = 'main';
 
   try {
@@ -259,7 +259,7 @@ export async function initWorkspace(
               continue;
             }
             const filePath = githubBasePath ? `${githubBasePath}/${agentFile}` : agentFile;
-            const content = readFileFromClone(githubTempDir!, filePath);
+            const content = readFileFromClone(githubTempDir, filePath);
             if (content) {
               await writeFile(targetFilePath, content, 'utf-8');
               copiedAgentFiles.push(agentFile);
