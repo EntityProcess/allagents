@@ -155,7 +155,7 @@ Create `.allagents/template.code-workspace` for VSCode-specific settings, launch
   "settings": {
     "cSpell.words": ["myterm"],
     "chat.agent.maxRequests": 999,
-    "chat.useClaudeSkills": true
+    "chat.useAgentSkills": true
   },
   "launch": {
     "configurations": [
