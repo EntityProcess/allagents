@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, copyFile, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,8 @@ export interface InitOptions {
   from?: string;
   /** Override which clients to include in workspace.yaml */
   clients?: ClientEntry[];
+  /** Overwrite existing workspace.yaml if present */
+  force?: boolean;
 }
 
 /**
@@ -47,9 +49,13 @@ export async function initWorkspace(
 
   // Check if workspace already exists (has .allagents/workspace.yaml)
   if (existsSync(configPath)) {
-    throw new Error(
-      `Workspace already exists: ${absoluteTarget}\n  Found existing ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
-    );
+    if (options.force) {
+      await unlink(configPath);
+    } else {
+      throw new Error(
+        `Workspace already exists: ${absoluteTarget}\n  Found existing ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
+      );
+    }
   }
 
   // Get template path for default template
