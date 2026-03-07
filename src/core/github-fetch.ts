@@ -94,20 +94,29 @@ export async function fetchWorkspaceFromGitHub(
   const subpath = parsed.subpath?.replace(/\/+$/, '');
   const repoUrl = gitHubUrl(owner, repo);
 
-  // If we have both branch and subpath and the branch might have slashes,
-  // try to resolve the correct split before cloning
+  // If we have both branch and subpath, try to resolve the correct split
+  // before cloning. The URL parser's heuristic may have guessed wrong about
+  // where the branch name ends and the subpath begins.
   let effectiveBranch = branch;
   let effectiveSubpath = subpath;
 
-  if (branch && subpath && !branch.includes('/')) {
+  if (branch && subpath) {
     const resolved = await resolveBranchAndSubpath(
       repoUrl,
       `${branch}/${subpath}`,
     );
-    if (resolved && resolved.branch !== branch) {
+    if (resolved) {
       effectiveBranch = resolved.branch;
       effectiveSubpath = resolved.subpath;
     }
+  }
+
+  // Normalize: if user pointed directly at .allagents folder, strip it.
+  // The workspace.yaml search already looks inside .allagents/ relative to the base path.
+  if (effectiveSubpath === CONFIG_DIR) {
+    effectiveSubpath = undefined;
+  } else if (effectiveSubpath?.endsWith(`/${CONFIG_DIR}`)) {
+    effectiveSubpath = effectiveSubpath.slice(0, -(CONFIG_DIR.length + 1));
   }
 
   // Clone the repository to a temp directory
