@@ -546,7 +546,15 @@ export async function listMarketplaces(): Promise<MarketplaceEntry[]> {
  */
 export async function getMarketplace(
   name: string,
+  workspacePath?: string,
 ): Promise<MarketplaceEntry | null> {
+  if (workspacePath) {
+    const { registry } = await loadMergedRegistries(
+      getRegistryPath(),
+      getProjectRegistryPath(workspacePath),
+    );
+    return registry.marketplaces[name] || null;
+  }
   const registry = await loadRegistry();
   return registry.marketplaces[name] || null;
 }
@@ -558,8 +566,11 @@ export async function getMarketplace(
 export async function findMarketplace(
   name: string,
   sourceLocation?: string,
+  workspacePath?: string,
 ): Promise<MarketplaceEntry | null> {
-  const registry = await loadRegistry();
+  const registry = workspacePath
+    ? (await loadMergedRegistries(getRegistryPath(), getProjectRegistryPath(workspacePath))).registry
+    : await loadRegistry();
   if (registry.marketplaces[name]) {
     return registry.marketplaces[name];
   }
@@ -855,6 +866,7 @@ export async function resolvePluginSpec(
     marketplacePathOverride?: string;
     offline?: boolean;
     fetchFn?: (url: string) => Promise<FetchResult>;
+    workspacePath?: string;
   } = {},
 ): Promise<{ path: string; marketplace: string; plugin: string } | null> {
   const parsed = parsePluginSpec(spec);
@@ -869,7 +881,7 @@ export async function resolvePluginSpec(
   // Determine marketplace path: use override or look up from registry
   let marketplacePath: string | null = options.marketplacePathOverride ?? null;
   if (!marketplacePath) {
-    const marketplace = await getMarketplace(marketplaceName);
+    const marketplace = await getMarketplace(marketplaceName, options.workspacePath);
     if (!marketplace) {
       return null;
     }
@@ -995,7 +1007,7 @@ async function refreshMarketplace(
  */
 export async function resolvePluginSpecWithAutoRegister(
   spec: string,
-  options: { offline?: boolean } = {},
+  options: { offline?: boolean; workspacePath?: string } = {},
 ): Promise<ResolvePluginSpecResult> {
   // Parse plugin@marketplace using the parser
   const parsed = parsePluginSpec(spec);
@@ -1011,7 +1023,7 @@ export async function resolvePluginSpecWithAutoRegister(
 
   // Check if marketplace is already registered (by name, then by source location)
   const sourceLocation = owner && repo ? `${owner}/${repo}` : undefined;
-  let marketplace = await findMarketplace(marketplaceName, sourceLocation);
+  let marketplace = await findMarketplace(marketplaceName, sourceLocation, options.workspacePath);
   let didAutoRegister = false;
 
   // If not registered, try auto-registration
@@ -1025,7 +1037,7 @@ export async function resolvePluginSpecWithAutoRegister(
         error: autoRegResult.error || 'Unknown error',
       };
     }
-    marketplace = await getMarketplace(autoRegResult.name ?? marketplaceName);
+    marketplace = await getMarketplace(autoRegResult.name ?? marketplaceName, options.workspacePath);
     didAutoRegister = true;
   }
 
@@ -1063,6 +1075,7 @@ export async function resolvePluginSpecWithAutoRegister(
     ...(subpath && { subpath }),
     marketplaceNameOverride: marketplace.name,
     ...(options.offline != null && { offline: options.offline }),
+    ...(options.workspacePath && { workspacePath: options.workspacePath }),
   };
 
   let resolved = await resolvePluginSpec(spec, resolveOpts);
@@ -1078,6 +1091,7 @@ export async function resolvePluginSpecWithAutoRegister(
       resolved = await resolvePluginSpec(spec, {
         ...(subpath && { subpath }),
         marketplaceNameOverride: marketplace.name,
+        ...(options.workspacePath && { workspacePath: options.workspacePath }),
       });
     }
   }

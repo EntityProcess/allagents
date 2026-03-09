@@ -40,6 +40,8 @@ import {
   addMarketplace,
   removeMarketplace,
   getRegistryPath,
+  getMarketplace,
+  findMarketplace,
 } from '../../../src/core/marketplace.js';
 import type { MarketplaceRegistry } from '../../../src/core/marketplace.js';
 
@@ -476,5 +478,145 @@ describe('removeMarketplace with scope', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('not found');
+  });
+});
+
+describe('runtime resolution with merged registries', () => {
+  let originalHome: string | undefined;
+  let testHome: string;
+  let tmpProject: string;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    testHome = join(tmpdir(), `marketplace-resolve-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    process.env.HOME = testHome;
+    mkdirSync(join(testHome, '.allagents'), { recursive: true });
+
+    tmpProject = join(tmpdir(), `marketplace-resolve-project-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(join(tmpProject, '.allagents'), { recursive: true });
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    rmSync(testHome, { recursive: true, force: true });
+    rmSync(tmpProject, { recursive: true, force: true });
+  });
+
+  it('should find marketplace from project registry via getMarketplace', async () => {
+    const projectRegistryPath = getProjectRegistryPath(tmpProject);
+    const projectRegistry: MarketplaceRegistry = {
+      version: 1,
+      marketplaces: {
+        'project-mp': {
+          name: 'project-mp',
+          source: { type: 'local', location: '/project/mp' },
+          path: '/project/mp',
+        },
+      },
+    };
+    writeFileSync(projectRegistryPath, JSON.stringify(projectRegistry));
+
+    const result = await getMarketplace('project-mp', tmpProject);
+
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe('project-mp');
+    expect(result!.path).toBe('/project/mp');
+  });
+
+  it('should return null from getMarketplace when not in any registry', async () => {
+    const result = await getMarketplace('nonexistent', tmpProject);
+    expect(result).toBeNull();
+  });
+
+  it('should prefer project entry via getMarketplace when both registries have same name', async () => {
+    // Set up user registry
+    const userRegistryPath = getRegistryPath();
+    const userRegistry: MarketplaceRegistry = {
+      version: 1,
+      marketplaces: {
+        'shared': {
+          name: 'shared',
+          source: { type: 'github', location: 'user-org/shared' },
+          path: '/user/shared',
+        },
+      },
+    };
+    writeFileSync(userRegistryPath, JSON.stringify(userRegistry));
+
+    // Set up project registry with same name but different path
+    const projectRegistryPath = getProjectRegistryPath(tmpProject);
+    const projectRegistry: MarketplaceRegistry = {
+      version: 1,
+      marketplaces: {
+        'shared': {
+          name: 'shared',
+          source: { type: 'local', location: '/project/shared' },
+          path: '/project/shared',
+        },
+      },
+    };
+    writeFileSync(projectRegistryPath, JSON.stringify(projectRegistry));
+
+    const result = await getMarketplace('shared', tmpProject);
+
+    expect(result).not.toBeNull();
+    expect(result!.path).toBe('/project/shared');
+    expect(result!.source.location).toBe('/project/shared');
+  });
+
+  it('should prefer project entry via findMarketplace', async () => {
+    // Set up user registry
+    const userRegistryPath = getRegistryPath();
+    const userRegistry: MarketplaceRegistry = {
+      version: 1,
+      marketplaces: {
+        'shared': {
+          name: 'shared',
+          source: { type: 'github', location: 'user-org/shared' },
+          path: '/user/shared',
+        },
+      },
+    };
+    writeFileSync(userRegistryPath, JSON.stringify(userRegistry));
+
+    // Set up project registry with same name
+    const projectRegistryPath = getProjectRegistryPath(tmpProject);
+    const projectRegistry: MarketplaceRegistry = {
+      version: 1,
+      marketplaces: {
+        'shared': {
+          name: 'shared',
+          source: { type: 'local', location: '/project/shared' },
+          path: '/project/shared',
+        },
+      },
+    };
+    writeFileSync(projectRegistryPath, JSON.stringify(projectRegistry));
+
+    const result = await findMarketplace('shared', undefined, tmpProject);
+
+    expect(result).not.toBeNull();
+    expect(result!.path).toBe('/project/shared');
+  });
+
+  it('should fall back to user registry via getMarketplace when not in project', async () => {
+    // Set up user registry only
+    const userRegistryPath = getRegistryPath();
+    const userRegistry: MarketplaceRegistry = {
+      version: 1,
+      marketplaces: {
+        'user-only': {
+          name: 'user-only',
+          source: { type: 'github', location: 'org/user-only' },
+          path: '/user/user-only',
+        },
+      },
+    };
+    writeFileSync(userRegistryPath, JSON.stringify(userRegistry));
+
+    const result = await getMarketplace('user-only', tmpProject);
+
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe('user-only');
   });
 });
