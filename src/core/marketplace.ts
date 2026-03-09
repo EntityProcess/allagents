@@ -586,15 +586,37 @@ export async function findMarketplace(
  */
 export async function updateMarketplace(
   name?: string,
+  workspacePath?: string,
 ): Promise<Array<{ name: string; success: boolean; error?: string }>> {
-  const registry = await loadRegistry();
-  const results: Array<{ name: string; success: boolean; error?: string }> = [];
+  const userRegistry = await loadRegistry();
+  let projectRegistry: MarketplaceRegistry | undefined;
 
-  const toUpdate = name
-    ? registry.marketplaces[name]
-      ? [registry.marketplaces[name]]
+  if (workspacePath) {
+    const projectPath = getProjectRegistryPath(workspacePath);
+    if (existsSync(projectPath)) {
+      projectRegistry = await loadRegistryFromPath(projectPath);
+    }
+  }
+
+  // Merge for lookup, tracking which scope each entry came from
+  const mergedEntries = new Map<string, { entry: MarketplaceEntry; scope: MarketplaceScope }>();
+  for (const entry of Object.values(userRegistry.marketplaces)) {
+    mergedEntries.set(entry.name, { entry, scope: 'user' });
+  }
+  if (projectRegistry) {
+    for (const entry of Object.values(projectRegistry.marketplaces)) {
+      mergedEntries.set(entry.name, { entry, scope: 'project' });
+    }
+  }
+
+  const toUpdateScoped = name
+    ? mergedEntries.has(name)
+      ? [mergedEntries.get(name)!]
       : []
-    : Object.values(registry.marketplaces);
+    : Array.from(mergedEntries.values());
+
+  const toUpdate = toUpdateScoped.map((s) => s.entry);
+  const results: Array<{ name: string; success: boolean; error?: string }> = [];
 
   if (name && toUpdate.length === 0) {
     return [{ name, success: false, error: `Marketplace '${name}' not found` }];
@@ -660,9 +682,8 @@ export async function updateMarketplace(
       await git.checkout(targetBranch);
       await pull(marketplace.path);
 
-      // Update lastUpdated in registry
+      // Update lastUpdated in the entry (mutates in place for scope tracking)
       marketplace.lastUpdated = new Date().toISOString();
-      registry.marketplaces[marketplace.name] = marketplace;
 
       results.push({
         name: marketplace.name,
@@ -677,8 +698,24 @@ export async function updateMarketplace(
     }
   }
 
-  // Save updated timestamps
-  await saveRegistry(registry);
+  // Save updated timestamps back to the appropriate registries
+  let userDirty = false;
+  let projectDirty = false;
+  for (const { entry, scope } of toUpdateScoped) {
+    if (scope === 'user') {
+      userRegistry.marketplaces[entry.name] = entry;
+      userDirty = true;
+    } else if (projectRegistry) {
+      projectRegistry.marketplaces[entry.name] = entry;
+      projectDirty = true;
+    }
+  }
+  if (userDirty) {
+    await saveRegistry(userRegistry);
+  }
+  if (projectDirty && projectRegistry && workspacePath) {
+    await saveRegistryToPath(projectRegistry, getProjectRegistryPath(workspacePath));
+  }
 
   return results;
 }
@@ -754,8 +791,9 @@ export async function getMarketplacePluginsFromManifest(
  */
 export async function listMarketplacePlugins(
   name: string,
+  workspacePath?: string,
 ): Promise<MarketplacePluginsResult> {
-  const marketplace = await getMarketplace(name);
+  const marketplace = await getMarketplace(name, workspacePath);
   if (!marketplace) {
     return { plugins: [], warnings: [] };
   }
@@ -1322,35 +1360,49 @@ export interface ScopedMarketplaceEntry extends MarketplaceEntry {
 }
 
 /**
+ * Result of listing marketplaces with scope annotations
+ */
+export interface ScopedMarketplaceListResult {
+  entries: ScopedMarketplaceEntry[];
+  overrides: string[];
+}
+
+/**
  * List marketplaces from both user and project registries with scope annotations.
  * Project entries override user entries on name collision.
- * Results are sorted by name.
+ * Results are sorted by name. Also returns override names to avoid a second registry read.
  */
 export async function listMarketplacesWithScope(
   userRegistryPath: string,
   projectRegistryPath: string,
-): Promise<ScopedMarketplaceEntry[]> {
+): Promise<ScopedMarketplaceListResult> {
   const [userRegistry, projectRegistry] = await Promise.all([
     loadRegistryFromPath(userRegistryPath),
     loadRegistryFromPath(projectRegistryPath),
   ]);
 
   const projectNames = new Set(Object.keys(projectRegistry.marketplaces));
-  const result: ScopedMarketplaceEntry[] = [];
+  const entries: ScopedMarketplaceEntry[] = [];
+  const overrides: string[] = [];
 
   // Add user entries that aren't overridden by project
   for (const entry of Object.values(userRegistry.marketplaces)) {
-    if (!projectNames.has(entry.name)) {
-      result.push({ ...entry, scope: 'user' });
+    if (projectNames.has(entry.name)) {
+      overrides.push(entry.name);
+    } else {
+      entries.push({ ...entry, scope: 'user' });
     }
   }
 
   // Add all project entries
   for (const entry of Object.values(projectRegistry.marketplaces)) {
-    result.push({ ...entry, scope: 'project' });
+    entries.push({ ...entry, scope: 'project' });
   }
 
-  return result.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    entries: entries.sort((a, b) => a.name.localeCompare(b.name)),
+    overrides,
+  };
 }
 
 /**

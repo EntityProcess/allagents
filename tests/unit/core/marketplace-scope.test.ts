@@ -251,11 +251,12 @@ describe('scope-aware registry loading and saving', () => {
 
       const result = await listMarketplacesWithScope(userPath, projectPath);
 
-      expect(result).toHaveLength(2);
-      expect(result[0].name).toBe('alpha');
-      expect(result[0].scope).toBe('user');
-      expect(result[1].name).toBe('beta');
-      expect(result[1].scope).toBe('project');
+      expect(result.entries).toHaveLength(2);
+      expect(result.entries[0].name).toBe('alpha');
+      expect(result.entries[0].scope).toBe('user');
+      expect(result.entries[1].name).toBe('beta');
+      expect(result.entries[1].scope).toBe('project');
+      expect(result.overrides).toEqual([]);
     });
 
     it('overridden entries show as project scope with project values', async () => {
@@ -289,10 +290,11 @@ describe('scope-aware registry loading and saving', () => {
 
       const result = await listMarketplacesWithScope(userPath, projectPath);
 
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('shared');
-      expect(result[0].scope).toBe('project');
-      expect(result[0].source.location).toBe('/project/shared');
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0].name).toBe('shared');
+      expect(result.entries[0].scope).toBe('project');
+      expect(result.entries[0].source.location).toBe('/project/shared');
+      expect(result.overrides).toEqual(['shared']);
     });
   });
 });

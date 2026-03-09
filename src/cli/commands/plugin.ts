@@ -13,7 +13,6 @@ import {
   getRegistryPath,
   getProjectRegistryPath,
   loadRegistryFromPath,
-  getMarketplaceOverrides,
   type ScopedMarketplaceEntry,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
@@ -243,9 +242,12 @@ const marketplaceListCmd = command({
       }
 
       let marketplaces: ScopedMarketplaceEntry[];
+      let overrideNames: string[] = [];
 
       if (effectiveScope === 'all') {
-        marketplaces = await listMarketplacesWithScope(getRegistryPath(), getProjectRegistryPath(process.cwd()));
+        const scopedResult = await listMarketplacesWithScope(getRegistryPath(), getProjectRegistryPath(process.cwd()));
+        marketplaces = scopedResult.entries;
+        overrideNames = scopedResult.overrides;
       } else if (effectiveScope === 'user') {
         const registry = await loadRegistryFromPath(getRegistryPath());
         marketplaces = Object.values(registry.marketplaces).map((mp) => ({ ...mp, scope: 'user' as const }));
@@ -276,14 +278,8 @@ const marketplaceListCmd = command({
       }
 
       // Emit override warnings when listing all scopes
-      if (effectiveScope === 'all') {
-        const overrideNames = await getMarketplaceOverrides(
-          getRegistryPath(),
-          getProjectRegistryPath(process.cwd()),
-        );
-        for (const name of overrideNames) {
-          console.warn(`Warning: Workspace marketplace '${name}' overrides user marketplace of the same name.`);
-        }
+      for (const overrideName of overrideNames) {
+        console.warn(`Warning: Workspace marketplace '${overrideName}' overrides user marketplace of the same name.`);
       }
 
       if (marketplaces.length === 0) {
@@ -518,7 +514,7 @@ const marketplaceUpdateCmd = command({
         console.log();
       }
 
-      const results = await updateMarketplace(name);
+      const results = await updateMarketplace(name, process.cwd());
 
       if (isJsonMode()) {
         const succeeded = results.filter((r) => r.success).length;
@@ -585,7 +581,7 @@ const marketplaceBrowseCmd = command({
   },
   handler: async ({ name }) => {
     try {
-      if (!await findMarketplace(name)) {
+      if (!await findMarketplace(name, undefined, process.cwd())) {
         const error = `Marketplace '${name}' not found`;
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'plugin marketplace browse', error });
@@ -597,7 +593,7 @@ const marketplaceBrowseCmd = command({
         process.exit(1);
       }
 
-      const result = await listMarketplacePlugins(name);
+      const result = await listMarketplacePlugins(name, process.cwd());
 
       // Build installed lookup
       const userPlugins = await getInstalledUserPlugins();
