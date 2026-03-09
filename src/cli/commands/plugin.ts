@@ -9,6 +9,11 @@ import {
   parsePluginSpec,
   getAllagentsDir,
   getMarketplaceVersion,
+  listMarketplacesWithScope,
+  getRegistryPath,
+  getProjectRegistryPath,
+  loadRegistryFromPath,
+  type ScopedMarketplaceEntry,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { loadSyncState } from '../../core/sync-state.js';
@@ -220,10 +225,33 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
 const marketplaceListCmd = command({
   name: 'list',
   description: buildDescription(marketplaceListMeta),
-  args: {},
-  handler: async () => {
+  args: {
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Scope: user, project, or all (default)' }),
+  },
+  handler: async ({ scope }) => {
     try {
-      const marketplaces = await listMarketplaces();
+      const effectiveScope = scope ?? 'all';
+      if (effectiveScope !== 'all' && effectiveScope !== 'user' && effectiveScope !== 'project') {
+        const msg = `Invalid scope '${scope}'. Must be 'user', 'project', or 'all'.`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace list', error: msg });
+          process.exit(1);
+        }
+        console.error(`Error: ${msg}`);
+        process.exit(1);
+      }
+
+      let marketplaces: ScopedMarketplaceEntry[];
+
+      if (effectiveScope === 'all') {
+        marketplaces = await listMarketplacesWithScope(getRegistryPath(), getProjectRegistryPath(process.cwd()));
+      } else if (effectiveScope === 'user') {
+        const registry = await loadRegistryFromPath(getRegistryPath());
+        marketplaces = Object.values(registry.marketplaces).map((mp) => ({ ...mp, scope: 'user' as const }));
+      } else {
+        const registry = await loadRegistryFromPath(getProjectRegistryPath(process.cwd()));
+        marketplaces = Object.values(registry.marketplaces).map((mp) => ({ ...mp, scope: 'project' as const }));
+      }
 
       if (isJsonMode()) {
         const enriched = await Promise.all(
@@ -271,7 +299,7 @@ const marketplaceListCmd = command({
             sourceLabel = `Local: ${mp.source.location}`;
         }
 
-        console.log(`  ❯ ${mp.name}`);
+        console.log(`  ❯ ${mp.name} (${mp.scope})`);
         console.log(`    Source: ${sourceLabel}`);
 
         const version = await getMarketplaceVersion(mp.path);
