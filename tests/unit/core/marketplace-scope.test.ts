@@ -7,6 +7,8 @@ import {
   loadRegistryFromPath,
   saveRegistryToPath,
   getProjectRegistryPath,
+  loadMergedRegistries,
+  listMarketplacesWithScope,
 } from '../../../src/core/marketplace.js';
 import type { MarketplaceRegistry } from '../../../src/core/marketplace.js';
 
@@ -84,6 +86,179 @@ describe('scope-aware registry loading and saving', () => {
       expect(JSON.parse(content)).toEqual(registry);
       // Verify trailing newline
       expect(content.endsWith('\n')).toBe(true);
+    });
+  });
+
+  describe('loadMergedRegistries', () => {
+    it('merges user and project registries with project taking precedence', async () => {
+      const userPath = join(tmpDir, 'user-marketplaces.json');
+      const projectPath = join(tmpDir, 'project-marketplaces.json');
+
+      const userRegistry: MarketplaceRegistry = {
+        version: 1,
+        marketplaces: {
+          'shared': {
+            name: 'shared',
+            source: { type: 'github', location: 'user-org/shared' },
+            path: '/user/shared',
+          },
+          'user-only': {
+            name: 'user-only',
+            source: { type: 'github', location: 'user-org/user-only' },
+            path: '/user/user-only',
+          },
+        },
+      };
+
+      const projectRegistry: MarketplaceRegistry = {
+        version: 1,
+        marketplaces: {
+          'shared': {
+            name: 'shared',
+            source: { type: 'github', location: 'project-org/shared' },
+            path: '/project/shared',
+          },
+          'project-only': {
+            name: 'project-only',
+            source: { type: 'local', location: '/project/project-only' },
+            path: '/project/project-only',
+          },
+        },
+      };
+
+      writeFileSync(userPath, JSON.stringify(userRegistry));
+      writeFileSync(projectPath, JSON.stringify(projectRegistry));
+
+      const result = await loadMergedRegistries(userPath, projectPath);
+
+      // Project wins on shared name
+      expect(result.registry.marketplaces['shared'].source.location).toBe('project-org/shared');
+      // Both unique entries present
+      expect(result.registry.marketplaces['user-only']).toBeDefined();
+      expect(result.registry.marketplaces['project-only']).toBeDefined();
+      // Overrides list correct
+      expect(result.overrides).toEqual(['shared']);
+    });
+
+    it('works when project registry does not exist', async () => {
+      const userPath = join(tmpDir, 'user-marketplaces.json');
+      const projectPath = join(tmpDir, 'nonexistent.json');
+
+      const userRegistry: MarketplaceRegistry = {
+        version: 1,
+        marketplaces: {
+          'user-mp': {
+            name: 'user-mp',
+            source: { type: 'github', location: 'org/repo' },
+            path: '/user/mp',
+          },
+        },
+      };
+      writeFileSync(userPath, JSON.stringify(userRegistry));
+
+      const result = await loadMergedRegistries(userPath, projectPath);
+
+      expect(result.registry.marketplaces['user-mp']).toBeDefined();
+      expect(result.overrides).toEqual([]);
+    });
+
+    it('works when user registry does not exist', async () => {
+      const userPath = join(tmpDir, 'nonexistent.json');
+      const projectPath = join(tmpDir, 'project-marketplaces.json');
+
+      const projectRegistry: MarketplaceRegistry = {
+        version: 1,
+        marketplaces: {
+          'project-mp': {
+            name: 'project-mp',
+            source: { type: 'local', location: '/local/path' },
+            path: '/local/path',
+          },
+        },
+      };
+      writeFileSync(projectPath, JSON.stringify(projectRegistry));
+
+      const result = await loadMergedRegistries(userPath, projectPath);
+
+      expect(result.registry.marketplaces['project-mp']).toBeDefined();
+      expect(Object.keys(result.registry.marketplaces)).toHaveLength(1);
+    });
+  });
+
+  describe('listMarketplacesWithScope', () => {
+    it('lists entries with correct scope annotations', async () => {
+      const userPath = join(tmpDir, 'user-marketplaces.json');
+      const projectPath = join(tmpDir, 'project-marketplaces.json');
+
+      const userRegistry: MarketplaceRegistry = {
+        version: 1,
+        marketplaces: {
+          'alpha': {
+            name: 'alpha',
+            source: { type: 'github', location: 'org/alpha' },
+            path: '/user/alpha',
+          },
+        },
+      };
+
+      const projectRegistry: MarketplaceRegistry = {
+        version: 1,
+        marketplaces: {
+          'beta': {
+            name: 'beta',
+            source: { type: 'local', location: '/project/beta' },
+            path: '/project/beta',
+          },
+        },
+      };
+
+      writeFileSync(userPath, JSON.stringify(userRegistry));
+      writeFileSync(projectPath, JSON.stringify(projectRegistry));
+
+      const result = await listMarketplacesWithScope(userPath, projectPath);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].name).toBe('alpha');
+      expect(result[0].scope).toBe('user');
+      expect(result[1].name).toBe('beta');
+      expect(result[1].scope).toBe('project');
+    });
+
+    it('overridden entries show as project scope with project values', async () => {
+      const userPath = join(tmpDir, 'user-marketplaces.json');
+      const projectPath = join(tmpDir, 'project-marketplaces.json');
+
+      const userRegistry: MarketplaceRegistry = {
+        version: 1,
+        marketplaces: {
+          'shared': {
+            name: 'shared',
+            source: { type: 'github', location: 'user-org/shared' },
+            path: '/user/shared',
+          },
+        },
+      };
+
+      const projectRegistry: MarketplaceRegistry = {
+        version: 1,
+        marketplaces: {
+          'shared': {
+            name: 'shared',
+            source: { type: 'local', location: '/project/shared' },
+            path: '/project/shared',
+          },
+        },
+      };
+
+      writeFileSync(userPath, JSON.stringify(userRegistry));
+      writeFileSync(projectPath, JSON.stringify(projectRegistry));
+
+      const result = await listMarketplacesWithScope(userPath, projectPath);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('shared');
+      expect(result[0].scope).toBe('project');
+      expect(result[0].source.location).toBe('/project/shared');
     });
   });
 });

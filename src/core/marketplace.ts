@@ -1196,6 +1196,89 @@ export async function ensureMarketplacesRegistered(
 }
 
 /**
+ * Scope of a marketplace entry (user-level or project-level)
+ */
+export type MarketplaceScope = 'user' | 'project';
+
+/**
+ * Result of merging user and project registries
+ */
+export interface MergedRegistriesResult {
+  registry: MarketplaceRegistry;
+  /** Marketplace names where project overrides user */
+  overrides: string[];
+}
+
+/**
+ * Load and merge user and project registries.
+ * Project entries take precedence over user entries on name collision.
+ */
+export async function loadMergedRegistries(
+  userRegistryPath: string,
+  projectRegistryPath: string,
+): Promise<MergedRegistriesResult> {
+  const [userRegistry, projectRegistry] = await Promise.all([
+    loadRegistryFromPath(userRegistryPath),
+    loadRegistryFromPath(projectRegistryPath),
+  ]);
+
+  const merged: MarketplaceRegistry = {
+    version: 1,
+    marketplaces: { ...userRegistry.marketplaces },
+  };
+
+  const overrides: string[] = [];
+
+  for (const [name, entry] of Object.entries(projectRegistry.marketplaces)) {
+    if (merged.marketplaces[name]) {
+      overrides.push(name);
+    }
+    merged.marketplaces[name] = entry;
+  }
+
+  return { registry: merged, overrides };
+}
+
+/**
+ * A marketplace entry annotated with its scope
+ */
+export interface ScopedMarketplaceEntry extends MarketplaceEntry {
+  scope: MarketplaceScope;
+}
+
+/**
+ * List marketplaces from both user and project registries with scope annotations.
+ * Project entries override user entries on name collision.
+ * Results are sorted by name.
+ */
+export async function listMarketplacesWithScope(
+  userRegistryPath: string,
+  projectRegistryPath: string,
+): Promise<ScopedMarketplaceEntry[]> {
+  const [userRegistry, projectRegistry] = await Promise.all([
+    loadRegistryFromPath(userRegistryPath),
+    loadRegistryFromPath(projectRegistryPath),
+  ]);
+
+  const projectNames = new Set(Object.keys(projectRegistry.marketplaces));
+  const result: ScopedMarketplaceEntry[] = [];
+
+  // Add user entries that aren't overridden by project
+  for (const entry of Object.values(userRegistry.marketplaces)) {
+    if (!projectNames.has(entry.name)) {
+      result.push({ ...entry, scope: 'user' });
+    }
+  }
+
+  // Add all project entries
+  for (const entry of Object.values(projectRegistry.marketplaces)) {
+    result.push({ ...entry, scope: 'project' });
+  }
+
+  return result.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
  * Get the short git commit hash and date for a marketplace directory.
  * Returns null if the marketplace is not a git repo or has no commits.
  */
