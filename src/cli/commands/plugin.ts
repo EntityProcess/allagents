@@ -309,14 +309,41 @@ const marketplaceAddCmd = command({
     source: positional({ type: string, displayName: 'source' }),
     name: option({ type: optional(string), long: 'name', short: 'n', description: 'Custom name for the marketplace' }),
     branch: option({ type: optional(string), long: 'branch', short: 'b', description: 'Branch to checkout after cloning' }),
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Scope: user (default) or project' }),
   },
-  handler: async ({ source, name, branch }) => {
+  handler: async ({ source, name, branch, scope }) => {
     try {
+      const effectiveScope = (scope ?? 'user') as import('../../core/marketplace.js').MarketplaceScope;
+      if (effectiveScope !== 'user' && effectiveScope !== 'project') {
+        const msg = `Invalid scope '${scope}'. Must be 'user' or 'project'.`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace add', error: msg });
+          process.exit(1);
+        }
+        console.error(`Error: ${msg}`);
+        process.exit(1);
+      }
+
+      if (effectiveScope === 'project') {
+        if (!existsSync(join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE))) {
+          const msg = 'No workspace found in current directory. Run "allagents workspace init" first.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin marketplace add', error: msg });
+            process.exit(1);
+          }
+          console.error(`Error: ${msg}`);
+          process.exit(1);
+        }
+      }
+
       if (!isJsonMode()) {
         console.log(`Adding marketplace: ${source}...`);
       }
 
-      const result = await addMarketplace(source, name, branch);
+      const result = await addMarketplace(source, name, branch, {
+        scope: effectiveScope,
+        workspacePath: process.cwd(),
+      });
 
       if (!result.success) {
         if (isJsonMode()) {

@@ -250,16 +250,27 @@ export function parseMarketplaceSource(source: string): {
 }
 
 /**
+ * Options for specifying marketplace scope
+ */
+export interface MarketplaceScopeOptions {
+  scope?: MarketplaceScope;
+  workspacePath?: string;
+}
+
+/**
  * Add a marketplace to the registry
  * Idempotent: returns success if marketplace is already registered by source location
  *
  * @param source - Marketplace source (URL, path, or name)
  * @param customName - Optional custom name for the marketplace
+ * @param branch - Optional branch to checkout
+ * @param scopeOptions - Optional scope options (user or project)
  */
 export async function addMarketplace(
   source: string,
   customName?: string,
   branch?: string,
+  scopeOptions?: MarketplaceScopeOptions,
 ): Promise<MarketplaceResult> {
   const parsed = parseMarketplaceSource(source);
 
@@ -290,7 +301,10 @@ export async function addMarketplace(
   }
 
   let name = customName || parsed.name;
-  const registry = await loadRegistry();
+  const registryPath = scopeOptions?.scope === 'project' && scopeOptions?.workspacePath
+    ? getProjectRegistryPath(scopeOptions.workspacePath)
+    : getRegistryPath();
+  const registry = await loadRegistryFromPath(registryPath);
 
   // Check if already registered by name
   if (registry.marketplaces[name]) {
@@ -422,7 +436,7 @@ export async function addMarketplace(
 
   // Save to registry
   registry.marketplaces[name] = entry;
-  await saveRegistry(registry);
+  await saveRegistryToPath(registry, registryPath);
 
   return {
     success: true,

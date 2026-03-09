@@ -1,7 +1,35 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+
+// Mock git module before importing marketplace (needed for addMarketplace tests)
+mock.module('../../../src/core/git.js', () => ({
+  cloneTo: mock((url: string, dest: string) => {
+    mkdirSync(dest, { recursive: true });
+    return Promise.resolve();
+  }),
+  gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
+  GitCloneError: class GitCloneError extends Error {
+    url: string;
+    isTimeout: boolean;
+    isAuthError: boolean;
+    constructor(message: string, url: string, isTimeout = false, isAuthError = false) {
+      super(message);
+      this.url = url;
+      this.isTimeout = isTimeout;
+      this.isAuthError = isAuthError;
+    }
+  },
+  pull: mock(() => Promise.resolve()),
+}));
+
+mock.module('simple-git', () => ({
+  default: () => ({
+    raw: mock(() => Promise.resolve('')),
+    checkout: mock(() => Promise.resolve()),
+  }),
+}));
 
 import {
   loadRegistryFromPath,
@@ -9,6 +37,8 @@ import {
   getProjectRegistryPath,
   loadMergedRegistries,
   listMarketplacesWithScope,
+  addMarketplace,
+  getRegistryPath,
 } from '../../../src/core/marketplace.js';
 import type { MarketplaceRegistry } from '../../../src/core/marketplace.js';
 
@@ -260,5 +290,68 @@ describe('scope-aware registry loading and saving', () => {
       expect(result[0].scope).toBe('project');
       expect(result[0].source.location).toBe('/project/shared');
     });
+  });
+});
+
+describe('addMarketplace with scope', () => {
+  let originalHome: string | undefined;
+  let testHome: string;
+  let tmpProject: string;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    testHome = join(tmpdir(), `marketplace-scope-add-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    process.env.HOME = testHome;
+    mkdirSync(join(testHome, '.allagents'), { recursive: true });
+
+    tmpProject = join(tmpdir(), `marketplace-scope-project-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(join(tmpProject, '.allagents'), { recursive: true });
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    rmSync(testHome, { recursive: true, force: true });
+    rmSync(tmpProject, { recursive: true, force: true });
+  });
+
+  it('should add local marketplace to project scope', async () => {
+    // Create a local marketplace directory
+    const localMarketplace = join(tmpProject, 'my-local-marketplace');
+    mkdirSync(localMarketplace, { recursive: true });
+
+    const result = await addMarketplace(localMarketplace, undefined, undefined, {
+      scope: 'project',
+      workspacePath: tmpProject,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.marketplace?.name).toBe('my-local-marketplace');
+
+    // Verify project registry was written
+    const projectRegistryPath = getProjectRegistryPath(tmpProject);
+    expect(existsSync(projectRegistryPath)).toBe(true);
+    const projectRegistry = JSON.parse(readFileSync(projectRegistryPath, 'utf-8'));
+    expect(projectRegistry.marketplaces['my-local-marketplace']).toBeDefined();
+
+    // Verify user registry was NOT written to
+    const userRegistryPath = getRegistryPath();
+    expect(existsSync(userRegistryPath)).toBe(false);
+  });
+
+  it('should default to user scope when no scope provided', async () => {
+    // Create a local marketplace directory
+    const localMarketplace = join(testHome, 'default-scope-marketplace');
+    mkdirSync(localMarketplace, { recursive: true });
+
+    const result = await addMarketplace(localMarketplace);
+
+    expect(result.success).toBe(true);
+    expect(result.marketplace?.name).toBe('default-scope-marketplace');
+
+    // Verify user registry was written
+    const userRegistryPath = getRegistryPath();
+    expect(existsSync(userRegistryPath)).toBe(true);
+    const userRegistry = JSON.parse(readFileSync(userRegistryPath, 'utf-8'));
+    expect(userRegistry.marketplaces['default-scope-marketplace']).toBeDefined();
   });
 });
