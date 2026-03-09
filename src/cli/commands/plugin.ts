@@ -14,6 +14,7 @@ import {
   getProjectRegistryPath,
   loadRegistryFromPath,
   type ScopedMarketplaceEntry,
+  getMarketplaceOverrides,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { loadSyncState } from '../../core/sync-state.js';
