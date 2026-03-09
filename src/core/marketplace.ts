@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import { getHomeDir } from '../constants.js';
 import {
@@ -96,11 +96,18 @@ export function getRegistryPath(): string {
 }
 
 /**
- * Load marketplace registry from disk
+ * Get the project-level registry file path
  */
-export async function loadRegistry(): Promise<MarketplaceRegistry> {
-  const registryPath = getRegistryPath();
+export function getProjectRegistryPath(workspacePath: string): string {
+  return join(workspacePath, '.allagents', 'marketplaces.json');
+}
 
+/**
+ * Load marketplace registry from a specific file path
+ */
+export async function loadRegistryFromPath(
+  registryPath: string,
+): Promise<MarketplaceRegistry> {
   if (!existsSync(registryPath)) {
     return { version: 1, marketplaces: {} };
   }
@@ -114,19 +121,35 @@ export async function loadRegistry(): Promise<MarketplaceRegistry> {
 }
 
 /**
- * Save marketplace registry to disk
+ * Save marketplace registry to a specific file path
  */
-export async function saveRegistry(
+export async function saveRegistryToPath(
   registry: MarketplaceRegistry,
+  registryPath: string,
 ): Promise<void> {
-  const registryPath = getRegistryPath();
-  const dir = getAllagentsDir();
+  const dir = dirname(registryPath);
 
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });
   }
 
   await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+}
+
+/**
+ * Load marketplace registry from disk
+ */
+export async function loadRegistry(): Promise<MarketplaceRegistry> {
+  return loadRegistryFromPath(getRegistryPath());
+}
+
+/**
+ * Save marketplace registry to disk
+ */
+export async function saveRegistry(
+  registry: MarketplaceRegistry,
+): Promise<void> {
+  return saveRegistryToPath(registry, getRegistryPath());
 }
 
 /**
