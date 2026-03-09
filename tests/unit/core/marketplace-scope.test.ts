@@ -42,6 +42,7 @@ import {
   getRegistryPath,
   getMarketplace,
   findMarketplace,
+  getMarketplaceOverrides,
 } from '../../../src/core/marketplace.js';
 import type { MarketplaceRegistry } from '../../../src/core/marketplace.js';
 
@@ -618,5 +619,96 @@ describe('runtime resolution with merged registries', () => {
 
     expect(result).not.toBeNull();
     expect(result!.name).toBe('user-only');
+  });
+});
+
+describe('getMarketplaceOverrides', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = join(tmpdir(), `marketplace-overrides-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tmpDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('should return override names when project overrides user', async () => {
+    const userPath = join(tmpDir, 'user-marketplaces.json');
+    const projectPath = join(tmpDir, 'project-marketplaces.json');
+
+    const userRegistry: MarketplaceRegistry = {
+      version: 1,
+      marketplaces: {
+        'shared': {
+          name: 'shared',
+          source: { type: 'github', location: 'user-org/shared' },
+          path: '/user/shared',
+        },
+        'user-only': {
+          name: 'user-only',
+          source: { type: 'github', location: 'user-org/user-only' },
+          path: '/user/user-only',
+        },
+      },
+    };
+
+    const projectRegistry: MarketplaceRegistry = {
+      version: 1,
+      marketplaces: {
+        'shared': {
+          name: 'shared',
+          source: { type: 'local', location: '/project/shared' },
+          path: '/project/shared',
+        },
+      },
+    };
+
+    writeFileSync(userPath, JSON.stringify(userRegistry));
+    writeFileSync(projectPath, JSON.stringify(projectRegistry));
+
+    const overrides = await getMarketplaceOverrides(userPath, projectPath);
+    expect(overrides).toEqual(['shared']);
+  });
+
+  it('should return empty when no project registry exists', async () => {
+    const userPath = join(tmpDir, 'user-marketplaces.json');
+    const projectPath = join(tmpDir, 'nonexistent.json');
+
+    writeFileSync(userPath, JSON.stringify({ version: 1, marketplaces: {} }));
+
+    const overrides = await getMarketplaceOverrides(userPath, projectPath);
+    expect(overrides).toEqual([]);
+  });
+
+  it('should return empty when no overlapping names', async () => {
+    const userPath = join(tmpDir, 'user-marketplaces.json');
+    const projectPath = join(tmpDir, 'project-marketplaces.json');
+
+    writeFileSync(userPath, JSON.stringify({
+      version: 1,
+      marketplaces: {
+        'user-mp': {
+          name: 'user-mp',
+          source: { type: 'github', location: 'org/user-mp' },
+          path: '/user/mp',
+        },
+      },
+    }));
+
+    writeFileSync(projectPath, JSON.stringify({
+      version: 1,
+      marketplaces: {
+        'project-mp': {
+          name: 'project-mp',
+          source: { type: 'local', location: '/project/mp' },
+          path: '/project/mp',
+        },
+      },
+    }));
+
+    const overrides = await getMarketplaceOverrides(userPath, projectPath);
+    expect(overrides).toEqual([]);
   });
 });

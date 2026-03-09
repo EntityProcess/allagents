@@ -1299,6 +1299,22 @@ export async function loadMergedRegistries(
 }
 
 /**
+ * Check for marketplace overrides where a project registry entry
+ * shadows a user registry entry of the same name.
+ * Returns the list of overridden marketplace names.
+ */
+export async function getMarketplaceOverrides(
+  userRegistryPath: string,
+  projectRegistryPath: string,
+): Promise<string[]> {
+  if (!existsSync(projectRegistryPath)) {
+    return [];
+  }
+  const { overrides } = await loadMergedRegistries(userRegistryPath, projectRegistryPath);
+  return overrides;
+}
+
+/**
  * A marketplace entry annotated with its scope
  */
 export interface ScopedMarketplaceEntry extends MarketplaceEntry {

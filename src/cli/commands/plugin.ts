@@ -13,6 +13,7 @@ import {
   getRegistryPath,
   getProjectRegistryPath,
   loadRegistryFromPath,
+  getMarketplaceOverrides,
   type ScopedMarketplaceEntry,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
@@ -272,6 +273,17 @@ const marketplaceListCmd = command({
           data: { marketplaces: enriched },
         });
         return;
+      }
+
+      // Emit override warnings when listing all scopes
+      if (effectiveScope === 'all') {
+        const overrideNames = await getMarketplaceOverrides(
+          getRegistryPath(),
+          getProjectRegistryPath(process.cwd()),
+        );
+        for (const name of overrideNames) {
+          console.warn(`Warning: Workspace marketplace '${name}' overrides user marketplace of the same name.`);
+        }
       }
 
       if (marketplaces.length === 0) {
@@ -919,6 +931,17 @@ const pluginInstallCmd = command({
             return;
           }
           await ensureWorkspace(process.cwd(), clients);
+        }
+      }
+
+      // Emit override warnings for project-scope installs
+      if (!isUser) {
+        const overrideNames = await getMarketplaceOverrides(
+          getRegistryPath(),
+          getProjectRegistryPath(process.cwd()),
+        );
+        for (const name of overrideNames) {
+          console.warn(`Warning: Workspace marketplace '${name}' overrides user marketplace of the same name.`);
         }
       }
 
