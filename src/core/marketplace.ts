@@ -467,6 +467,18 @@ export async function removeMarketplace(
   } = {},
 ): Promise<MarketplaceResult> {
   const scope = options.scope ?? 'all';
+
+  // Guard: project scope requires workspacePath
+  if ((scope === 'project' || scope === 'all') && !options.workspacePath && !options.userRegistryPath) {
+    if (scope === 'project') {
+      return {
+        success: false,
+        error: 'workspacePath is required when scope is "project"',
+      };
+    }
+    // scope === 'all' without workspacePath: fall back to user-only removal
+  }
+
   const userRegPath = options.userRegistryPath ?? getRegistryPath();
   let removedEntry: MarketplaceEntry | undefined;
 
@@ -1093,7 +1105,7 @@ export async function resolvePluginSpecWithAutoRegister(
     marketplace.source.type !== 'local' &&
     !updatedMarketplaceCache.has(marketplace.name)
   ) {
-    const results = await updateMarketplace(marketplace.name);
+    const results = await updateMarketplace(marketplace.name, options.workspacePath);
     const result = results[0];
     if (result?.success) {
       updatedMarketplaceCache.add(marketplace.name);
