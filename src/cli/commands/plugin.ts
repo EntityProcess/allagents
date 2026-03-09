@@ -421,10 +421,25 @@ const marketplaceRemoveCmd = command({
   description: buildDescription(marketplaceRemoveMeta),
   args: {
     name: positional({ type: string, displayName: 'name' }),
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Scope: user, project, or all (default)' }),
   },
-  handler: async ({ name }) => {
+  handler: async ({ name, scope }) => {
     try {
-      const result = await removeMarketplace(name);
+      const effectiveScope = (scope ?? 'all') as import('../../core/marketplace.js').MarketplaceScope | 'all';
+      if (effectiveScope !== 'user' && effectiveScope !== 'project' && effectiveScope !== 'all') {
+        const msg = `Invalid scope '${scope}'. Must be 'user', 'project', or 'all'.`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace remove', error: msg });
+          process.exit(1);
+        }
+        console.error(`Error: ${msg}`);
+        process.exit(1);
+      }
+
+      const result = await removeMarketplace(name, {
+        scope: effectiveScope,
+        workspacePath: process.cwd(),
+      });
 
       if (!result.success) {
         if (isJsonMode()) {

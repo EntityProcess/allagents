@@ -38,6 +38,7 @@ import {
   loadMergedRegistries,
   listMarketplacesWithScope,
   addMarketplace,
+  removeMarketplace,
   getRegistryPath,
 } from '../../../src/core/marketplace.js';
 import type { MarketplaceRegistry } from '../../../src/core/marketplace.js';
@@ -353,5 +354,127 @@ describe('addMarketplace with scope', () => {
     expect(existsSync(userRegistryPath)).toBe(true);
     const userRegistry = JSON.parse(readFileSync(userRegistryPath, 'utf-8'));
     expect(userRegistry.marketplaces['default-scope-marketplace']).toBeDefined();
+  });
+});
+
+describe('removeMarketplace with scope', () => {
+  let originalHome: string | undefined;
+  let testHome: string;
+  let tmpProject: string;
+  let userRegistryPath: string;
+  let projectRegistryPath: string;
+
+  const sharedEntry = (path: string) => ({
+    name: 'shared',
+    source: { type: 'local' as const, location: path },
+    path,
+  });
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    testHome = join(tmpdir(), `marketplace-scope-remove-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    process.env.HOME = testHome;
+    mkdirSync(join(testHome, '.allagents'), { recursive: true });
+
+    tmpProject = join(tmpdir(), `marketplace-scope-remove-project-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(join(tmpProject, '.allagents'), { recursive: true });
+
+    userRegistryPath = getRegistryPath();
+    projectRegistryPath = getProjectRegistryPath(tmpProject);
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    rmSync(testHome, { recursive: true, force: true });
+    rmSync(tmpProject, { recursive: true, force: true });
+  });
+
+  it('should remove only from project scope when scope is project', async () => {
+    const userPath = join(testHome, 'shared-user');
+    const projectPath = join(tmpProject, 'shared-project');
+    mkdirSync(userPath, { recursive: true });
+    mkdirSync(projectPath, { recursive: true });
+
+    // Set up both registries with 'shared'
+    await saveRegistryToPath({ version: 1, marketplaces: { shared: sharedEntry(userPath) } }, userRegistryPath);
+    await saveRegistryToPath({ version: 1, marketplaces: { shared: sharedEntry(projectPath) } }, projectRegistryPath);
+
+    const result = await removeMarketplace('shared', {
+      scope: 'project',
+      workspacePath: tmpProject,
+      userRegistryPath,
+    });
+
+    expect(result.success).toBe(true);
+
+    // Project registry should be empty
+    const projReg = await loadRegistryFromPath(projectRegistryPath);
+    expect(projReg.marketplaces['shared']).toBeUndefined();
+
+    // User registry should still have 'shared'
+    const userReg = await loadRegistryFromPath(userRegistryPath);
+    expect(userReg.marketplaces['shared']).toBeDefined();
+  });
+
+  it('should remove only from user scope when scope is user', async () => {
+    const userPath = join(testHome, 'shared-user');
+    const projectPath = join(tmpProject, 'shared-project');
+    mkdirSync(userPath, { recursive: true });
+    mkdirSync(projectPath, { recursive: true });
+
+    await saveRegistryToPath({ version: 1, marketplaces: { shared: sharedEntry(userPath) } }, userRegistryPath);
+    await saveRegistryToPath({ version: 1, marketplaces: { shared: sharedEntry(projectPath) } }, projectRegistryPath);
+
+    const result = await removeMarketplace('shared', {
+      scope: 'user',
+      workspacePath: tmpProject,
+      userRegistryPath,
+    });
+
+    expect(result.success).toBe(true);
+
+    // User registry should be empty
+    const userReg = await loadRegistryFromPath(userRegistryPath);
+    expect(userReg.marketplaces['shared']).toBeUndefined();
+
+    // Project registry should still have 'shared'
+    const projReg = await loadRegistryFromPath(projectRegistryPath);
+    expect(projReg.marketplaces['shared']).toBeDefined();
+  });
+
+  it('should remove from both scopes when scope is all', async () => {
+    const userPath = join(testHome, 'shared-user');
+    const projectPath = join(tmpProject, 'shared-project');
+    mkdirSync(userPath, { recursive: true });
+    mkdirSync(projectPath, { recursive: true });
+
+    await saveRegistryToPath({ version: 1, marketplaces: { shared: sharedEntry(userPath) } }, userRegistryPath);
+    await saveRegistryToPath({ version: 1, marketplaces: { shared: sharedEntry(projectPath) } }, projectRegistryPath);
+
+    const result = await removeMarketplace('shared', {
+      scope: 'all',
+      workspacePath: tmpProject,
+      userRegistryPath,
+    });
+
+    expect(result.success).toBe(true);
+
+    // Both registries should be empty
+    const userReg = await loadRegistryFromPath(userRegistryPath);
+    expect(userReg.marketplaces['shared']).toBeUndefined();
+
+    const projReg = await loadRegistryFromPath(projectRegistryPath);
+    expect(projReg.marketplaces['shared']).toBeUndefined();
+  });
+
+  it('should return error when marketplace not found in any scope', async () => {
+    const result = await removeMarketplace('nonexistent', {
+      scope: 'all',
+      workspacePath: tmpProject,
+      userRegistryPath,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not found');
   });
 });

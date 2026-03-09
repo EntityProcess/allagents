@@ -450,27 +450,58 @@ export async function addMarketplace(
  * By default, user-level plugins referencing the marketplace are **retained**
  * (listed in `retainedUserPlugins`). Pass `{ cascade: true }` to remove them
  * (listed in `removedUserPlugins`).
+ *
+ * @param name - Marketplace name to remove
+ * @param options.cascade - Remove user-level plugins referencing this marketplace
+ * @param options.scope - Scope to remove from: 'user', 'project', or 'all' (default)
+ * @param options.workspacePath - Project path (required for project/all scope)
+ * @param options.userRegistryPath - Override user registry path (for testing)
  */
 export async function removeMarketplace(
   name: string,
-  options: { cascade?: boolean } = {},
+  options: {
+    cascade?: boolean;
+    scope?: MarketplaceScope | 'all';
+    workspacePath?: string;
+    userRegistryPath?: string;
+  } = {},
 ): Promise<MarketplaceResult> {
-  const registry = await loadRegistry();
+  const scope = options.scope ?? 'all';
+  const userRegPath = options.userRegistryPath ?? getRegistryPath();
+  let removedEntry: MarketplaceEntry | undefined;
 
-  if (!registry.marketplaces[name]) {
+  // Remove from user scope
+  if (scope === 'user' || scope === 'all') {
+    const userRegistry = await loadRegistryFromPath(userRegPath);
+    if (userRegistry.marketplaces[name]) {
+      removedEntry = userRegistry.marketplaces[name];
+      delete userRegistry.marketplaces[name];
+      await saveRegistryToPath(userRegistry, userRegPath);
+      if (removedEntry.source.type !== 'local' && existsSync(removedEntry.path)) {
+        await rm(removedEntry.path, { recursive: true, force: true });
+      }
+    }
+  }
+
+  // Remove from project scope
+  if ((scope === 'project' || scope === 'all') && options.workspacePath) {
+    const projectRegPath = getProjectRegistryPath(options.workspacePath);
+    const projectRegistry = await loadRegistryFromPath(projectRegPath);
+    if (projectRegistry.marketplaces[name]) {
+      removedEntry = projectRegistry.marketplaces[name];
+      delete projectRegistry.marketplaces[name];
+      await saveRegistryToPath(projectRegistry, projectRegPath);
+      if (removedEntry.source.type !== 'local' && existsSync(removedEntry.path)) {
+        await rm(removedEntry.path, { recursive: true, force: true });
+      }
+    }
+  }
+
+  if (!removedEntry) {
     return {
       success: false,
       error: `Marketplace '${name}' not found in registry`,
     };
-  }
-
-  const entry = registry.marketplaces[name];
-  delete registry.marketplaces[name];
-  await saveRegistry(registry);
-
-  // Delete the cached directory (only for cloned GitHub marketplaces, not local paths)
-  if (entry.source.type !== 'local' && existsSync(entry.path)) {
-    await rm(entry.path, { recursive: true, force: true });
   }
 
   if (options.cascade) {
@@ -482,7 +513,7 @@ export async function removeMarketplace(
 
     return {
       success: true,
-      marketplace: entry,
+      marketplace: removedEntry,
       removedUserPlugins,
     };
   }
@@ -495,7 +526,7 @@ export async function removeMarketplace(
 
   return {
     success: true,
-    marketplace: entry,
+    marketplace: removedEntry,
     retainedUserPlugins,
   };
 }
