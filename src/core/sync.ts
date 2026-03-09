@@ -45,6 +45,9 @@ import {
   resolvePluginSpecWithAutoRegister,
   ensureMarketplacesRegistered,
   parsePluginSpec,
+  getMarketplaceOverrides,
+  getRegistryPath,
+  getProjectRegistryPath,
 } from './marketplace.js';
 import {
   loadSyncState,
@@ -829,6 +832,7 @@ async function validatePlugin(
   if (isPluginSpec(pluginSource)) {
     const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, {
       offline,
+      workspacePath,
     });
     if (!resolved.success) {
       return {
@@ -1570,6 +1574,15 @@ export async function syncWorkspace(
         ? error.message
         : `Failed to parse ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
     );
+  }
+
+  // Check for marketplace overrides (project shadowing user)
+  const overrides = await getMarketplaceOverrides(
+    getRegistryPath(),
+    getProjectRegistryPath(workspacePath),
+  );
+  for (const name of overrides) {
+    console.warn(`Warning: Workspace marketplace '${name}' overrides user marketplace of the same name.`);
   }
 
   // Check if repositories are configured — when empty/absent, skip agent file

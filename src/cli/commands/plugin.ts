@@ -9,6 +9,12 @@ import {
   parsePluginSpec,
   getAllagentsDir,
   getMarketplaceVersion,
+  listMarketplacesWithScope,
+  getRegistryPath,
+  getProjectRegistryPath,
+  loadRegistryFromPath,
+  type ScopedMarketplaceEntry,
+  getMarketplaceOverrides,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { loadSyncState } from '../../core/sync-state.js';
@@ -220,10 +226,36 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
 const marketplaceListCmd = command({
   name: 'list',
   description: buildDescription(marketplaceListMeta),
-  args: {},
-  handler: async () => {
+  args: {
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Filter by scope: user or project' }),
+  },
+  handler: async ({ scope }) => {
     try {
-      const marketplaces = await listMarketplaces();
+      if (scope && scope !== 'user' && scope !== 'project') {
+        const msg = `Invalid scope '${scope}'. Must be 'user' or 'project'.`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace list', error: msg });
+          process.exit(1);
+        }
+        console.error(`Error: ${msg}`);
+        process.exit(1);
+      }
+
+      let marketplaces: ScopedMarketplaceEntry[];
+      let overrideNames: string[] = [];
+
+      if (!scope) {
+        // Default: show all scopes merged
+        const scopedResult = await listMarketplacesWithScope(getRegistryPath(), getProjectRegistryPath(process.cwd()));
+        marketplaces = scopedResult.entries;
+        overrideNames = scopedResult.overrides;
+      } else if (scope === 'user') {
+        const registry = await loadRegistryFromPath(getRegistryPath());
+        marketplaces = Object.values(registry.marketplaces).map((mp) => ({ ...mp, scope: 'user' as const }));
+      } else {
+        const registry = await loadRegistryFromPath(getProjectRegistryPath(process.cwd()));
+        marketplaces = Object.values(registry.marketplaces).map((mp) => ({ ...mp, scope: 'project' as const }));
+      }
 
       if (isJsonMode()) {
         const enriched = await Promise.all(
@@ -244,6 +276,11 @@ const marketplaceListCmd = command({
           data: { marketplaces: enriched },
         });
         return;
+      }
+
+      // Emit override warnings when listing all scopes
+      for (const overrideName of overrideNames) {
+        console.warn(`Warning: Workspace marketplace '${overrideName}' overrides user marketplace of the same name.`);
       }
 
       if (marketplaces.length === 0) {
@@ -271,7 +308,7 @@ const marketplaceListCmd = command({
             sourceLabel = `Local: ${mp.source.location}`;
         }
 
-        console.log(`  ❯ ${mp.name}`);
+        console.log(`  ❯ ${mp.name} (${mp.scope})`);
         console.log(`    Source: ${sourceLabel}`);
 
         const version = await getMarketplaceVersion(mp.path);
@@ -309,14 +346,41 @@ const marketplaceAddCmd = command({
     source: positional({ type: string, displayName: 'source' }),
     name: option({ type: optional(string), long: 'name', short: 'n', description: 'Custom name for the marketplace' }),
     branch: option({ type: optional(string), long: 'branch', short: 'b', description: 'Branch to checkout after cloning' }),
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Scope: user (default) or project' }),
   },
-  handler: async ({ source, name, branch }) => {
+  handler: async ({ source, name, branch, scope }) => {
     try {
+      const effectiveScope = (scope ?? 'user') as import('../../core/marketplace.js').MarketplaceScope;
+      if (effectiveScope !== 'user' && effectiveScope !== 'project') {
+        const msg = `Invalid scope '${scope}'. Must be 'user' or 'project'.`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace add', error: msg });
+          process.exit(1);
+        }
+        console.error(`Error: ${msg}`);
+        process.exit(1);
+      }
+
+      if (effectiveScope === 'project') {
+        if (!existsSync(join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE))) {
+          const msg = 'No workspace found in current directory. Run "allagents workspace init" first.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin marketplace add', error: msg });
+            process.exit(1);
+          }
+          console.error(`Error: ${msg}`);
+          process.exit(1);
+        }
+      }
+
       if (!isJsonMode()) {
         console.log(`Adding marketplace: ${source}...`);
       }
 
-      const result = await addMarketplace(source, name, branch);
+      const result = await addMarketplace(source, name, branch, {
+        scope: effectiveScope,
+        workspacePath: process.cwd(),
+      });
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -366,10 +430,27 @@ const marketplaceRemoveCmd = command({
   description: buildDescription(marketplaceRemoveMeta),
   args: {
     name: positional({ type: string, displayName: 'name' }),
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Filter by scope: user or project (default: removes from both)' }),
   },
-  handler: async ({ name }) => {
+  handler: async ({ name, scope }) => {
     try {
-      const result = await removeMarketplace(name);
+      if (scope && scope !== 'user' && scope !== 'project') {
+        const msg = `Invalid scope '${scope}'. Must be 'user' or 'project'.`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin marketplace remove', error: msg });
+          process.exit(1);
+        }
+        console.error(`Error: ${msg}`);
+        process.exit(1);
+      }
+
+      // No --scope: remove from both; --scope user/project: remove from that scope only
+      const effectiveScope = (scope ?? 'all') as import('../../core/marketplace.js').MarketplaceScope | 'all';
+
+      const result = await removeMarketplace(name, {
+        scope: effectiveScope,
+        workspacePath: process.cwd(),
+      });
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -436,7 +517,7 @@ const marketplaceUpdateCmd = command({
         console.log();
       }
 
-      const results = await updateMarketplace(name);
+      const results = await updateMarketplace(name, process.cwd());
 
       if (isJsonMode()) {
         const succeeded = results.filter((r) => r.success).length;
@@ -503,7 +584,7 @@ const marketplaceBrowseCmd = command({
   },
   handler: async ({ name }) => {
     try {
-      if (!await findMarketplace(name)) {
+      if (!await findMarketplace(name, undefined, process.cwd())) {
         const error = `Marketplace '${name}' not found`;
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'plugin marketplace browse', error });
@@ -515,7 +596,7 @@ const marketplaceBrowseCmd = command({
         process.exit(1);
       }
 
-      const result = await listMarketplacePlugins(name);
+      const result = await listMarketplacePlugins(name, process.cwd());
 
       // Build installed lookup
       const userPlugins = await getInstalledUserPlugins();
@@ -849,6 +930,17 @@ const pluginInstallCmd = command({
             return;
           }
           await ensureWorkspace(process.cwd(), clients);
+        }
+      }
+
+      // Emit override warnings for project-scope installs
+      if (!isUser) {
+        const overrideNames = await getMarketplaceOverrides(
+          getRegistryPath(),
+          getProjectRegistryPath(process.cwd()),
+        );
+        for (const name of overrideNames) {
+          console.warn(`Warning: Workspace marketplace '${name}' overrides user marketplace of the same name.`);
         }
       }
 
