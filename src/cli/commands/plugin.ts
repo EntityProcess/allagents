@@ -227,13 +227,12 @@ const marketplaceListCmd = command({
   name: 'list',
   description: buildDescription(marketplaceListMeta),
   args: {
-    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Scope: user, project, or all (default)' }),
+    scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Filter by scope: user or project' }),
   },
   handler: async ({ scope }) => {
     try {
-      const effectiveScope = scope ?? 'all';
-      if (effectiveScope !== 'all' && effectiveScope !== 'user' && effectiveScope !== 'project') {
-        const msg = `Invalid scope '${scope}'. Must be 'user', 'project', or 'all'.`;
+      if (scope && scope !== 'user' && scope !== 'project') {
+        const msg = `Invalid scope '${scope}'. Must be 'user' or 'project'.`;
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'plugin marketplace list', error: msg });
           process.exit(1);
@@ -245,11 +244,12 @@ const marketplaceListCmd = command({
       let marketplaces: ScopedMarketplaceEntry[];
       let overrideNames: string[] = [];
 
-      if (effectiveScope === 'all') {
+      if (!scope) {
+        // Default: show all scopes merged
         const scopedResult = await listMarketplacesWithScope(getRegistryPath(), getProjectRegistryPath(process.cwd()));
         marketplaces = scopedResult.entries;
         overrideNames = scopedResult.overrides;
-      } else if (effectiveScope === 'user') {
+      } else if (scope === 'user') {
         const registry = await loadRegistryFromPath(getRegistryPath());
         marketplaces = Object.values(registry.marketplaces).map((mp) => ({ ...mp, scope: 'user' as const }));
       } else {
