@@ -309,7 +309,7 @@ const marketplaceAddCmd = command({
     source: positional({ type: string, displayName: 'source' }),
     name: option({ type: optional(string), long: 'name', short: 'n', description: 'Custom name for the marketplace' }),
     branch: option({ type: optional(string), long: 'branch', short: 'b', description: 'Branch to checkout after cloning' }),
-    force: option({ type: flag, long: 'force', short: 'f', description: 'Replace marketplace if it already exists' }),
+    force: flag({ long: 'force', short: 'f', description: 'Replace marketplace if it already exists' }),
   },
   handler: async ({ source, name, branch, force }) => {
     try {
