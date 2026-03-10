@@ -508,4 +508,87 @@ describe('addMarketplace with force parameter', () => {
     expect(result.success).toBe(true);
     expect(result.replaced).toBeUndefined();
   });
+
+  it('addMarketplace with force replaces existing marketplace by different source', async () => {
+    const marketplacePath1 = join(testDir, 'local-marketplace');
+    const marketplacePath2 = join(testDir, 'local-marketplace-alt');
+
+    // Setup second marketplace with same manifest name
+    mkdirSync(join(marketplacePath2, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(marketplacePath2, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'test-marketplace',
+        description: 'Test Marketplace Alternative',
+        plugins: [],
+      }),
+    );
+
+    // Setup: add initial marketplace with name 'test-marketplace'
+    const result1 = await addMarketplace(marketplacePath1);
+    expect(result1.success).toBe(true);
+
+    // Action: add same name with different source and force=true
+    const result2 = await addMarketplace(marketplacePath2, undefined, undefined, true);
+
+    // Assert: second add succeeds with replaced=true
+    expect(result2.success).toBe(true);
+    expect(result2.replaced).toBe(true);
+
+    // Verify: only one marketplace with that name exists
+    const registry = await loadRegistry();
+    expect(registry.marketplaces['test-marketplace']).toBeDefined();
+    expect(Object.keys(registry.marketplaces).filter((k) => k === 'test-marketplace').length).toBe(1);
+    // Verify the path was updated to the new marketplace
+    expect(registry.marketplaces['test-marketplace'].path).toBe(marketplacePath2);
+  });
+
+  it('addMarketplace with force on first add returns replaced=undefined', async () => {
+    const marketplacePath = join(testDir, 'local-marketplace');
+    const result = await addMarketplace(marketplacePath, undefined, undefined, true);
+
+    expect(result.success).toBe(true);
+    expect(result.replaced).toBeUndefined();
+  });
+
+  it('addMarketplace without force errors when name already exists', async () => {
+    const marketplacePath1 = join(testDir, 'local-marketplace');
+    const marketplacePath2 = join(testDir, 'local-marketplace-diff');
+
+    // Setup second marketplace with same manifest name
+    mkdirSync(join(marketplacePath2, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(marketplacePath2, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'test-marketplace',
+        description: 'Test Marketplace Different',
+        plugins: [],
+      }),
+    );
+
+    // Setup: add initial marketplace
+    await addMarketplace(marketplacePath1);
+
+    // Action: try to add different source with same name, without force
+    const result = await addMarketplace(marketplacePath2, undefined, undefined, false);
+
+    // Assert: fails with error
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('already exists');
+    expect(result.replaced).toBeUndefined();
+  });
+
+  it('addMarketplace is idempotent when adding same source twice without force', async () => {
+    const marketplacePath = join(testDir, 'local-marketplace');
+
+    // First add
+    const result1 = await addMarketplace(marketplacePath);
+    expect(result1.success).toBe(true);
+
+    // Second add with same source
+    const result2 = await addMarketplace(marketplacePath);
+    expect(result2.success).toBe(true);
+    expect(result2.alreadyRegistered).toBe(true);
+    expect(result2.replaced).toBeUndefined();
+  });
 });
