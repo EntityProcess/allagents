@@ -629,9 +629,10 @@ export async function updateMarketplace(
   }
 
   const toUpdateScoped = name
-    ? mergedEntries.has(name)
-      ? [mergedEntries.get(name)!]
-      : []
+    ? (() => {
+        const entry = mergedEntries.get(name);
+        return entry ? [entry] : [];
+      })()
     : Array.from(mergedEntries.values());
 
   const toUpdate = toUpdateScoped.map((s) => s.entry);

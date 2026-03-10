@@ -325,7 +325,7 @@ describe('addMarketplace with scope', () => {
     const localMarketplace = join(tmpProject, 'my-local-marketplace');
     mkdirSync(localMarketplace, { recursive: true });
 
-    const result = await addMarketplace(localMarketplace, undefined, undefined, {
+    const result = await addMarketplace(localMarketplace, undefined, undefined, false, {
       scope: 'project',
       workspacePath: tmpProject,
     });
