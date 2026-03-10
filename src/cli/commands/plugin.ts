@@ -1,4 +1,4 @@
-import { command, positional, option, string, optional, multioption, array } from 'cmd-ts';
+import { command, positional, option, string, optional, multioption, array, flag } from 'cmd-ts';
 import {
   addMarketplace,
   listMarketplaces,
@@ -309,14 +309,15 @@ const marketplaceAddCmd = command({
     source: positional({ type: string, displayName: 'source' }),
     name: option({ type: optional(string), long: 'name', short: 'n', description: 'Custom name for the marketplace' }),
     branch: option({ type: optional(string), long: 'branch', short: 'b', description: 'Branch to checkout after cloning' }),
+    force: option({ type: flag, long: 'force', short: 'f', description: 'Replace marketplace if it already exists' }),
   },
-  handler: async ({ source, name, branch }) => {
+  handler: async ({ source, name, branch, force }) => {
     try {
       if (!isJsonMode()) {
         console.log(`Adding marketplace: ${source}...`);
       }
 
-      const result = await addMarketplace(source, name, branch);
+      const result = await addMarketplace(source, name, branch, force);
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -327,6 +328,10 @@ const marketplaceAddCmd = command({
         process.exit(1);
       }
 
+      if (result.replaced && !isJsonMode()) {
+        console.log(`Marketplace '${result.marketplace?.name}' already exists. Replacing with new source.`);
+      }
+
       if (isJsonMode()) {
         jsonOutput({
           success: true,
@@ -335,6 +340,7 @@ const marketplaceAddCmd = command({
             marketplace: {
               name: result.marketplace?.name,
               path: result.marketplace?.path,
+              replaced: result.replaced,
             },
           },
         });
