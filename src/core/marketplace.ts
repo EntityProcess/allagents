@@ -359,6 +359,15 @@ export async function addMarketplace(
     if (manifestResult.success && manifestResult.data.name) {
       const manifestName = manifestResult.data.name;
       if (manifestName !== name) {
+        // If the manifest name is already registered, return idempotent response (unless forcing)
+        const existing = registry.marketplaces[manifestName];
+        if (existing && !force) {
+          return {
+            success: true,
+            marketplace: existing,
+            alreadyRegistered: true,
+          };
+        }
         name = manifestName;
       }
     }

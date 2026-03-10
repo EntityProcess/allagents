@@ -488,10 +488,11 @@ describe('addMarketplace with force parameter', () => {
     const result1 = await addMarketplace(marketplacePath1);
     expect(result1.success).toBe(true);
 
-    // Second add with different source but same name, without force should fail
+    // Second add with different source but same manifest name, without force should be idempotent
     const result2 = await addMarketplace(marketplacePath2);
-    expect(result2.success).toBe(false);
-    expect(result2.error).toContain('already exists');
+    expect(result2.success).toBe(true);
+    expect(result2.alreadyRegistered).toBe(true);
+    expect(result2.replaced).toBeUndefined();
 
     // Third add with force should succeed and return replaced=true
     const result3 = await addMarketplace(marketplacePath2, undefined, undefined, true);
@@ -543,15 +544,7 @@ describe('addMarketplace with force parameter', () => {
     expect(registry.marketplaces['test-marketplace'].path).toBe(marketplacePath2);
   });
 
-  it('addMarketplace with force on first add returns replaced=undefined', async () => {
-    const marketplacePath = join(testDir, 'local-marketplace');
-    const result = await addMarketplace(marketplacePath, undefined, undefined, true);
-
-    expect(result.success).toBe(true);
-    expect(result.replaced).toBeUndefined();
-  });
-
-  it('addMarketplace without force errors when name already exists', async () => {
+  it('addMarketplace is idempotent for same manifest name from different sources', async () => {
     const marketplacePath1 = join(testDir, 'local-marketplace');
     const marketplacePath2 = join(testDir, 'local-marketplace-diff');
 
@@ -572,9 +565,17 @@ describe('addMarketplace with force parameter', () => {
     // Action: try to add different source with same name, without force
     const result = await addMarketplace(marketplacePath2, undefined, undefined, false);
 
-    // Assert: fails with error
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('already exists');
+    // Assert: returns idempotent success (same manifest name already registered)
+    expect(result.success).toBe(true);
+    expect(result.alreadyRegistered).toBe(true);
+    expect(result.replaced).toBeUndefined();
+  });
+
+  it('addMarketplace with force on first add returns replaced=undefined', async () => {
+    const marketplacePath = join(testDir, 'local-marketplace');
+    const result = await addMarketplace(marketplacePath, undefined, undefined, true);
+
+    expect(result.success).toBe(true);
     expect(result.replaced).toBeUndefined();
   });
 
