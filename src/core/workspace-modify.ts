@@ -212,7 +212,8 @@ async function addPluginToConfig(
     }
 
     // Remove existing entry if force and found
-    if (force && existingExactIndex !== -1) {
+    const wasReplaced = force && existingExactIndex !== -1;
+    if (wasReplaced) {
       config.plugins.splice(existingExactIndex, 1);
     }
 
@@ -223,12 +224,17 @@ async function addPluginToConfig(
     const newContent = dump(config, { lineWidth: -1 });
     await writeFile(configPath, newContent, 'utf-8');
 
-    return {
+    const result: ModifyResult = {
       success: true,
-      ...(autoRegistered && { autoRegistered }),
       normalizedPlugin: plugin,
-      replaced: force && existingExactIndex !== -1,
     };
+    if (autoRegistered) {
+      result.autoRegistered = autoRegistered;
+    }
+    if (wasReplaced) {
+      result.replaced = true;
+    }
+    return result;
   } catch (error) {
     return {
       success: false,
