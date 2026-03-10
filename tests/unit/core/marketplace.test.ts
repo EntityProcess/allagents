@@ -7,6 +7,11 @@ import {
   isPluginSpec,
   getMarketplacePluginsFromManifest,
   resolvePluginSpec,
+  addMarketplace,
+  loadRegistry,
+  saveRegistry,
+  getRegistryPath,
+  getAllagentsDir,
 } from '../../../src/core/marketplace.js';
 
 describe('parsePluginSpec', () => {
@@ -402,5 +407,99 @@ describe('resolvePluginSpec offline mode', () => {
     // Cleanup
     rmSync(cachePath, { recursive: true, force: true });
     rmSync(testDir, { recursive: true, force: true });
+  });
+});
+
+describe('addMarketplace with force parameter', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = mkdtempSync(join(tmpdir(), 'mp-addmarketplace-'));
+    // Create a local test marketplace directory with manifest
+    const marketplacePath = join(testDir, 'local-marketplace');
+    mkdirSync(join(marketplacePath, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(marketplacePath, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'test-marketplace',
+        description: 'Test Marketplace',
+        plugins: [],
+      }),
+    );
+
+    // Clean up any existing test-marketplace from registry
+    const registry = await loadRegistry();
+    if (registry.marketplaces['test-marketplace']) {
+      delete registry.marketplaces['test-marketplace'];
+      await saveRegistry(registry);
+    }
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('should add a local marketplace and not set replaced flag on first add', async () => {
+    const marketplacePath = join(testDir, 'local-marketplace');
+
+    const result = await addMarketplace(marketplacePath);
+    expect(result.success).toBe(true);
+    expect(result.marketplace).not.toBeNull();
+    expect(result.replaced).toBeUndefined();
+  });
+
+  it('should be idempotent when adding same source twice without force', async () => {
+    const marketplacePath = join(testDir, 'local-marketplace');
+
+    // First add should succeed
+    const result1 = await addMarketplace(marketplacePath);
+    expect(result1.success).toBe(true);
+    expect(result1.alreadyRegistered).toBeUndefined();
+
+    // Second add with same source should return alreadyRegistered=true (idempotent)
+    const result2 = await addMarketplace(marketplacePath);
+    expect(result2.success).toBe(true);
+    expect(result2.alreadyRegistered).toBe(true);
+    expect(result2.replaced).toBeUndefined();
+  });
+
+  it('should replace existing marketplace by name when adding different source with force=true', async () => {
+    const marketplacePath1 = join(testDir, 'local-marketplace');
+    const marketplacePath2 = join(testDir, 'local-marketplace-2');
+
+    // Setup second marketplace with same manifest name
+    mkdirSync(join(marketplacePath2, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(marketplacePath2, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'test-marketplace',
+        description: 'Test Marketplace 2',
+        plugins: [],
+      }),
+    );
+
+    // First add should succeed
+    const result1 = await addMarketplace(marketplacePath1);
+    expect(result1.success).toBe(true);
+
+    // Second add with different source but same name, without force should fail
+    const result2 = await addMarketplace(marketplacePath2);
+    expect(result2.success).toBe(false);
+    expect(result2.error).toContain('already exists');
+
+    // Third add with force should succeed and return replaced=true
+    const result3 = await addMarketplace(marketplacePath2, undefined, undefined, true);
+    expect(result3.success).toBe(true);
+    expect(result3.replaced).toBe(true);
+    expect(result3.marketplace).not.toBeNull();
+  });
+
+  it('should keep replaced=undefined when adding new marketplace with force=true', async () => {
+    const marketplacePath = join(testDir, 'local-marketplace');
+
+    // First add with force=true should not have replaced flag
+    const result = await addMarketplace(marketplacePath, undefined, undefined, true);
+    expect(result.success).toBe(true);
+    expect(result.replaced).toBeUndefined();
   });
 });
