@@ -435,8 +435,14 @@ describe('addMarketplace with force parameter', () => {
     }
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     rmSync(testDir, { recursive: true, force: true });
+    // Clean up registry entry to prevent test pollution
+    const registry = await loadRegistry();
+    if (registry.marketplaces['test-marketplace']) {
+      delete registry.marketplaces['test-marketplace'];
+      await saveRegistry(registry);
+    }
   });
 
   it('should add a local marketplace and not set replaced flag on first add', async () => {
