@@ -110,7 +110,7 @@ export async function getUserWorkspaceConfig(): Promise<WorkspaceConfig | null> 
  * 2. GitHub URL (e.g., "https://github.com/owner/repo")
  * 3. Local path (e.g., "/home/user/my-plugin")
  */
-export async function addUserPlugin(plugin: string): Promise<ModifyResult> {
+export async function addUserPlugin(plugin: string, force?: boolean): Promise<ModifyResult> {
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
 
@@ -127,6 +127,7 @@ export async function addUserPlugin(plugin: string): Promise<ModifyResult> {
       normalizedPlugin,
       configPath,
       resolved.registeredAs,
+      force,
     );
   }
 
@@ -156,7 +157,7 @@ export async function addUserPlugin(plugin: string): Promise<ModifyResult> {
     }
   }
 
-  return addPluginToUserConfig(plugin, configPath);
+  return addPluginToUserConfig(plugin, configPath, undefined, force);
 }
 
 /**
@@ -288,30 +289,49 @@ async function addPluginToUserConfig(
   plugin: string,
   configPath: string,
   autoRegistered?: string,
+  force?: boolean,
 ): Promise<ModifyResult> {
   try {
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
 
-    if (config.plugins.some((entry) => getPluginSource(entry) === plugin)) {
-      return {
-        success: false,
-        error: `Plugin already exists in user config: ${plugin}`,
-      };
+    // Check for exact match
+    const exactIndex = config.plugins.findIndex((entry) => getPluginSource(entry) === plugin);
+    if (exactIndex !== -1) {
+      if (!force) {
+        return {
+          success: false,
+          error: `Plugin already exists in user config: ${plugin}`,
+        };
+      }
+      // Force: remove the old one before adding the new one
+      config.plugins.splice(exactIndex, 1);
     }
 
     // Check for semantic duplicates (different strings resolving to same repo)
     const newIdentity = await resolveGitHubIdentity(plugin);
     if (newIdentity) {
-      for (const existing of config.plugins) {
+      let semanticIndex = -1;
+      for (let i = 0; i < config.plugins.length; i++) {
+        const existing = config.plugins[i];
+        if (!existing) continue;
         const existingSource = getPluginSource(existing);
         const existingIdentity = await resolveGitHubIdentity(existingSource);
         if (existingIdentity === newIdentity) {
+          semanticIndex = i;
+          break;
+        }
+      }
+      if (semanticIndex !== -1) {
+        if (!force) {
+          const existingSource = getPluginSource(config.plugins[semanticIndex] as PluginEntry);
           return {
             success: false,
             error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
           };
         }
+        // Force: remove the semantic duplicate
+        config.plugins.splice(semanticIndex, 1);
       }
     }
 
@@ -321,6 +341,7 @@ async function addPluginToUserConfig(
       success: true,
       ...(autoRegistered && { autoRegistered }),
       normalizedPlugin: plugin,
+      ...(force && { replaced: exactIndex !== -1 }),
     };
   } catch (error) {
     return {

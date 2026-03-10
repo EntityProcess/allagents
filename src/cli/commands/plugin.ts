@@ -836,8 +836,9 @@ const pluginInstallCmd = command({
       long: 'skill',
       description: 'Only enable specific skills (can be repeated)',
     }),
+    force: flag({ long: 'force', short: 'f', description: 'Replace plugin if it already exists' }),
   },
-  handler: async ({ plugin, scope, skills }) => {
+  handler: async ({ plugin, scope, skills, force }) => {
     try {
       // Treat as user scope if explicitly requested or if cwd resolves to user config
       const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
@@ -859,8 +860,8 @@ const pluginInstallCmd = command({
       }
 
       const result = isUser
-        ? await addUserPlugin(plugin)
-        : await addPlugin(plugin);
+        ? await addUserPlugin(plugin, force)
+        : await addPlugin(plugin, process.cwd(), force);
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -932,6 +933,10 @@ const pluginInstallCmd = command({
         }
       }
 
+      if (result.replaced && !isJsonMode()) {
+        console.log(`Plugin '${displayPlugin}' already exists. Replacing with new source.`);
+      }
+
       if (!isJsonMode()) {
         if (result.autoRegistered) {
           console.log(`  Resolved marketplace: ${result.autoRegistered}`);
@@ -953,6 +958,7 @@ const pluginInstallCmd = command({
             scope: isUser ? 'user' : 'project',
             autoRegistered: result.autoRegistered ?? null,
             ...(skills.length > 0 && { enabledSkills: skills }),
+            replaced: result.replaced ?? false,
             syncResult: syncData,
           },
           ...(!syncOk && { error: 'Sync completed with failures' }),
