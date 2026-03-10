@@ -38,6 +38,7 @@ export interface ModifyResult {
   error?: string;
   autoRegistered?: string; // marketplace name if auto-registered
   normalizedPlugin?: string; // plugin spec after normalization (e.g., plugin@manifest-name)
+  replaced?: boolean; // true if an existing plugin was replaced with --force
 }
 
 /**
@@ -100,11 +101,13 @@ export async function ensureWorkspace(
  *
  * @param plugin - Plugin source
  * @param workspacePath - Path to workspace directory (default: cwd)
+ * @param force - If true, replace existing plugin with same source
  * @returns Result with success status
  */
 export async function addPlugin(
   plugin: string,
   workspacePath: string = process.cwd(),
+  force?: boolean,
 ): Promise<ModifyResult> {
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
@@ -128,6 +131,7 @@ export async function addPlugin(
         : plugin,
       configPath,
       resolved.registeredAs,
+      force,
     );
   }
 
@@ -161,7 +165,7 @@ export async function addPlugin(
     }
   }
 
-  return await addPluginToConfig(plugin, configPath);
+  return await addPluginToConfig(plugin, configPath, undefined, force);
 }
 
 /**
@@ -171,6 +175,7 @@ async function addPluginToConfig(
   plugin: string,
   configPath: string,
   autoRegistered?: string,
+  force?: boolean,
 ): Promise<ModifyResult> {
   try {
     // Read current config
@@ -178,26 +183,37 @@ async function addPluginToConfig(
     const config = load(content) as WorkspaceConfig;
 
     // Check if plugin already exists (exact match)
-    if (config.plugins.some((entry) => getPluginSource(entry) === plugin)) {
-      return {
-        success: false,
-        error: `Plugin already exists in .allagents/workspace.yaml: ${plugin}`,
-      };
+    const existingExactIndex = config.plugins.findIndex((entry) => getPluginSource(entry) === plugin);
+    if (existingExactIndex !== -1) {
+      if (!force) {
+        return {
+          success: false,
+          error: `Plugin already exists in .allagents/workspace.yaml: ${plugin}`,
+        };
+      }
+      // With force, we'll remove and re-add below
     }
 
-    // Check for semantic duplicates (different strings resolving to same repo)
-    const newIdentity = await resolveGitHubIdentity(plugin);
-    if (newIdentity) {
-      for (const existing of config.plugins) {
-        const existingSource = getPluginSource(existing);
-        const existingIdentity = await resolveGitHubIdentity(existingSource);
-        if (existingIdentity === newIdentity) {
-          return {
-            success: false,
-            error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
-          };
+    // Check for semantic duplicates (only if not forcing)
+    if (!force) {
+      const newIdentity = await resolveGitHubIdentity(plugin);
+      if (newIdentity) {
+        for (const existing of config.plugins) {
+          const existingSource = getPluginSource(existing);
+          const existingIdentity = await resolveGitHubIdentity(existingSource);
+          if (existingIdentity === newIdentity) {
+            return {
+              success: false,
+              error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
+            };
+          }
         }
       }
+    }
+
+    // Remove existing entry if force and found
+    if (force && existingExactIndex !== -1) {
+      config.plugins.splice(existingExactIndex, 1);
     }
 
     // Add plugin
@@ -211,6 +227,7 @@ async function addPluginToConfig(
       success: true,
       ...(autoRegistered && { autoRegistered }),
       normalizedPlugin: plugin,
+      replaced: force && existingExactIndex !== -1,
     };
   } catch (error) {
     return {
