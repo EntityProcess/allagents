@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 
 // Mock git module before importing marketplace (needed for addMarketplace tests)
 mock.module('../../../src/core/git.js', () => ({
-  cloneTo: mock((url: string, dest: string) => {
+  cloneTo: mock((_url: string, dest: string) => {
     mkdirSync(dest, { recursive: true });
     return Promise.resolve();
   }),
@@ -325,7 +325,7 @@ describe('addMarketplace with scope', () => {
     const localMarketplace = join(tmpProject, 'my-local-marketplace');
     mkdirSync(localMarketplace, { recursive: true });
 
-    const result = await addMarketplace(localMarketplace, undefined, undefined, {
+    const result = await addMarketplace(localMarketplace, undefined, undefined, false, {
       scope: 'project',
       workspacePath: tmpProject,
     });

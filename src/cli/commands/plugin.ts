@@ -1,4 +1,4 @@
-import { command, positional, option, string, optional, multioption, array } from 'cmd-ts';
+import { command, positional, option, string, optional, multioption, array, flag } from 'cmd-ts';
 import {
   addMarketplace,
   listMarketplaces,
@@ -346,9 +346,10 @@ const marketplaceAddCmd = command({
     source: positional({ type: string, displayName: 'source' }),
     name: option({ type: optional(string), long: 'name', short: 'n', description: 'Custom name for the marketplace' }),
     branch: option({ type: optional(string), long: 'branch', short: 'b', description: 'Branch to checkout after cloning' }),
+    force: flag({ long: 'force', short: 'f', description: 'Replace marketplace if it already exists' }),
     scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Scope: user (default) or project' }),
   },
-  handler: async ({ source, name, branch, scope }) => {
+  handler: async ({ source, name, branch, force, scope }) => {
     try {
       const effectiveScope = (scope ?? 'user') as import('../../core/marketplace.js').MarketplaceScope;
       if (effectiveScope !== 'user' && effectiveScope !== 'project') {
@@ -377,7 +378,7 @@ const marketplaceAddCmd = command({
         console.log(`Adding marketplace: ${source}...`);
       }
 
-      const result = await addMarketplace(source, name, branch, {
+      const result = await addMarketplace(source, name, branch, force, {
         scope: effectiveScope,
         workspacePath: process.cwd(),
       });
@@ -391,6 +392,10 @@ const marketplaceAddCmd = command({
         process.exit(1);
       }
 
+      if (result.replaced && !isJsonMode()) {
+        console.log(`Marketplace '${result.marketplace?.name}' already exists. Replacing with new source.`);
+      }
+
       if (isJsonMode()) {
         jsonOutput({
           success: true,
@@ -399,6 +404,7 @@ const marketplaceAddCmd = command({
             marketplace: {
               name: result.marketplace?.name,
               path: result.marketplace?.path,
+              replaced: result.replaced,
             },
           },
         });
@@ -911,8 +917,9 @@ const pluginInstallCmd = command({
       long: 'skill',
       description: 'Only enable specific skills (can be repeated)',
     }),
+    force: flag({ long: 'force', short: 'f', description: 'Replace plugin if it already exists' }),
   },
-  handler: async ({ plugin, scope, skills }) => {
+  handler: async ({ plugin, scope, skills, force }) => {
     try {
       // Treat as user scope if explicitly requested or if cwd resolves to user config
       const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
@@ -945,8 +952,8 @@ const pluginInstallCmd = command({
       }
 
       const result = isUser
-        ? await addUserPlugin(plugin)
-        : await addPlugin(plugin);
+        ? await addUserPlugin(plugin, force)
+        : await addPlugin(plugin, process.cwd(), force);
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -1018,6 +1025,10 @@ const pluginInstallCmd = command({
         }
       }
 
+      if (result.replaced && !isJsonMode()) {
+        console.log(`Plugin '${displayPlugin}' already exists. Replacing with new source.`);
+      }
+
       if (!isJsonMode()) {
         if (result.autoRegistered) {
           console.log(`  Resolved marketplace: ${result.autoRegistered}`);
@@ -1039,6 +1050,7 @@ const pluginInstallCmd = command({
             scope: isUser ? 'user' : 'project',
             autoRegistered: result.autoRegistered ?? null,
             ...(skills.length > 0 && { enabledSkills: skills }),
+            replaced: result.replaced ?? false,
             syncResult: syncData,
           },
           ...(!syncOk && { error: 'Sync completed with failures' }),

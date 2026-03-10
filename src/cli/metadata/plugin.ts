@@ -33,6 +33,7 @@ export const marketplaceAddMeta: AgentCommandMeta = {
   options: [
     { flag: '--name', short: '-n', type: 'string', description: 'Custom name for the marketplace' },
     { flag: '--branch', short: '-b', type: 'string', description: 'Branch to checkout after cloning (requires --name)' },
+    { flag: '--force', short: '-f', type: 'boolean', description: 'Replace marketplace if it already exists' },
   ],
   outputSchema: {
     marketplace: { name: 'string', path: 'string' },
@@ -151,11 +152,13 @@ export const pluginInstallMeta: AgentCommandMeta = {
   ],
   options: [
     { flag: '--scope', short: '-s', type: 'string', description: 'Installation scope: "project" (default) or "user"' },
+    { flag: '--force', short: '-f', type: 'boolean', description: 'Replace plugin if it already exists' },
   ],
   outputSchema: {
     plugin: 'string',
     scope: 'string',
     autoRegistered: 'string | null',
+    replaced: 'boolean | undefined',
     syncResult: {
       copied: 'number',
       generated: 'number',

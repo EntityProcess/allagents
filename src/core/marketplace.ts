@@ -68,6 +68,8 @@ export interface MarketplaceResult {
   error?: string;
   /** True when addMarketplace returned an already-registered entry (idempotent) */
   alreadyRegistered?: boolean;
+  /** True when addMarketplace replaced an existing marketplace with force=true */
+  replaced?: boolean;
   /** User-level plugins that were removed during marketplace removal cascade */
   removedUserPlugins?: string[];
   /** User-level plugins that still reference the removed marketplace (returned when cascade is off) */
@@ -263,13 +265,15 @@ export interface MarketplaceScopeOptions {
  *
  * @param source - Marketplace source (URL, path, or name)
  * @param customName - Optional custom name for the marketplace
- * @param branch - Optional branch to checkout
+ * @param branch - Optional branch for GitHub marketplaces
+ * @param force - If true, replace existing marketplace with same name instead of erroring
  * @param scopeOptions - Optional scope options (user or project)
  */
 export async function addMarketplace(
   source: string,
   customName?: string,
   branch?: string,
+  force?: boolean,
   scopeOptions?: MarketplaceScopeOptions,
 ): Promise<MarketplaceResult> {
   const parsed = parseMarketplaceSource(source);
@@ -306,14 +310,6 @@ export async function addMarketplace(
     : getRegistryPath();
   const registry = await loadRegistryFromPath(registryPath);
 
-  // Check if already registered by name
-  if (registry.marketplaces[name]) {
-    return {
-      success: false,
-      error: `Marketplace '${name}' already exists. Use 'update' to refresh it.`,
-    };
-  }
-
   // Check if already registered by source location (idempotent)
   // Use the full location including branch — each branch is a separate marketplace.
   // For branch-pinned registrations, effectiveBranch overrides parsed.location.
@@ -327,7 +323,8 @@ export async function addMarketplace(
     return parsed.location;
   })();
   const existingBySource = findBySourceLocation(registry, sourceLocation);
-  if (existingBySource) {
+  // Skip idempotency check when force=true to allow overwriting by name
+  if (existingBySource && !force) {
     return { success: true, marketplace: existingBySource, alreadyRegistered: true };
   }
 
@@ -398,9 +395,9 @@ export async function addMarketplace(
     if (manifestResult.success && manifestResult.data.name) {
       const manifestName = manifestResult.data.name;
       if (manifestName !== name) {
-        // If the manifest name is already registered, return the existing entry
+        // If the manifest name is already registered, return idempotent response (unless forcing)
         const existing = registry.marketplaces[manifestName];
-        if (existing) {
+        if (existing && !force) {
           return {
             success: true,
             marketplace: existing,
@@ -410,6 +407,15 @@ export async function addMarketplace(
         name = manifestName;
       }
     }
+  }
+
+  // Check if already registered by name (after manifest parsing to use final name)
+  const wasAlreadyRegistered = !!registry.marketplaces[name];
+  if (wasAlreadyRegistered && !force) {
+    return {
+      success: false,
+      error: `Marketplace '${name}' already exists. Use 'update' to refresh it.`,
+    };
   }
 
   // Build location: for GitHub, use owner/repo for default branch, owner/repo/branch for non-default
@@ -441,6 +447,7 @@ export async function addMarketplace(
   return {
     success: true,
     marketplace: entry,
+    ...(wasAlreadyRegistered && force && { replaced: true }),
   };
 }
 
@@ -622,9 +629,10 @@ export async function updateMarketplace(
   }
 
   const toUpdateScoped = name
-    ? mergedEntries.has(name)
-      ? [mergedEntries.get(name)!]
-      : []
+    ? (() => {
+        const entry = mergedEntries.get(name);
+        return entry ? [entry] : [];
+      })()
     : Array.from(mergedEntries.values());
 
   const toUpdate = toUpdateScoped.map((s) => s.entry);
