@@ -126,6 +126,16 @@ export function deduplicateClientsByPath(
 /**
  * Result of a sync operation
  */
+/**
+ * A named artifact (skill, command, hook, or agent) that was deleted during sync
+ * because it was no longer provided by any plugin.
+ */
+export interface DeletedArtifact {
+  client: ClientType;
+  type: 'skill' | 'command' | 'agent' | 'hook';
+  name: string;
+}
+
 export interface SyncResult {
   success: boolean;
   pluginResults: PluginSyncResult[];
@@ -135,6 +145,8 @@ export interface SyncResult {
   totalGenerated: number;
   /** Paths that were/would be purged per client */
   purgedPaths?: PurgePaths[];
+  /** Named artifacts that were deleted and not re-synced by any plugin */
+  deletedArtifacts?: DeletedArtifact[];
   error?: string;
   /** Warnings for plugins that were skipped during sync */
   warnings?: string[];
@@ -153,6 +165,7 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const warnings = [...(a.warnings || []), ...(b.warnings || [])];
   const messages = [...(a.messages || []), ...(b.messages || [])];
   const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
+  const deletedArtifacts = [...(a.deletedArtifacts || []), ...(b.deletedArtifacts || [])];
   const mcpResults = (a.mcpResults || b.mcpResults)
     ? { ...a.mcpResults, ...b.mcpResults }
     : undefined;
@@ -175,6 +188,7 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     ...(warnings.length > 0 && { warnings }),
     ...(messages.length > 0 && { messages }),
     ...(purgedPaths.length > 0 && { purgedPaths }),
+    ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
     ...(mcpResults && { mcpResults }),
     ...(nativeResult && { nativeResult }),
   };
@@ -817,8 +831,94 @@ export function collectSyncedPaths(
 }
 
 /**
+ * Classify a single sync-state path into a named artifact for a given client.
+ * Returns null for paths that are not top-level artifacts or not part of the
+ * managed artifact directories (e.g. files nested inside a skill directory are
+ * skipped – the skill directory entry itself is sufficient).
+ */
+function classifyDeletedPath(
+  path: string,
+  client: ClientType,
+  mapping: ClientMapping,
+): DeletedArtifact | null {
+  // Skills are tracked as "<skillsPath><name>/" (trailing slash) by collectSyncedPaths.
+  // Files inside a skill directory are also stored, but we skip them to avoid duplicates.
+  if (mapping.skillsPath && path.startsWith(mapping.skillsPath)) {
+    const rest = path.slice(mapping.skillsPath.length);
+    if (rest.endsWith('/') && !rest.slice(0, -1).includes('/')) {
+      return { client, type: 'skill', name: rest.slice(0, -1) };
+    }
+    return null;
+  }
+
+  if (mapping.commandsPath && path.startsWith(mapping.commandsPath)) {
+    const rest = path.slice(mapping.commandsPath.length);
+    const topLevel = rest.split('/')[0];
+    if (!topLevel) return null;
+    return { client, type: 'command', name: topLevel.replace(/\.md$/i, '') };
+  }
+
+  if (mapping.hooksPath && path.startsWith(mapping.hooksPath)) {
+    const rest = path.slice(mapping.hooksPath.length);
+    const topLevel = rest.split('/')[0];
+    if (!topLevel) return null;
+    return { client, type: 'hook', name: topLevel.replace(/\.md$/i, '') };
+  }
+
+  if (mapping.agentsPath && path.startsWith(mapping.agentsPath)) {
+    const rest = path.slice(mapping.agentsPath.length);
+    const topLevel = rest.split('/')[0];
+    if (!topLevel) return null;
+    return { client, type: 'agent', name: topLevel.replace(/\.md$/i, '') };
+  }
+
+  return null;
+}
+
+/**
+ * Compute which named artifacts were deleted during sync by comparing the
+ * previous sync state with the paths that were re-synced in this run.
+ *
+ * An artifact is considered deleted when it existed in the previous state but
+ * is not present in the new state (i.e. no plugin re-provided it).
+ */
+export function computeDeletedArtifacts(
+  previousState: SyncState | null,
+  newStatePaths: Partial<Record<ClientType, string[]>>,
+  clients: ClientType[],
+  clientMappings: Record<string, ClientMapping>,
+): DeletedArtifact[] {
+  if (!previousState) return [];
+
+  const deleted: DeletedArtifact[] = [];
+  const seen = new Set<string>();
+
+  for (const client of clients) {
+    const oldPaths = previousState.files[client] ?? [];
+    const newPaths = new Set(newStatePaths[client] ?? []);
+    const mapping = clientMappings[client];
+    if (!mapping) continue;
+
+    for (const path of oldPaths) {
+      if (newPaths.has(path)) continue;
+
+      const artifact = classifyDeletedPath(path, client, mapping);
+      if (!artifact) continue;
+
+      const key = `${client}:${artifact.type}:${artifact.name}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deleted.push(artifact);
+      }
+    }
+  }
+
+  return deleted;
+}
+
+
+/**
  * Validate a single plugin by resolving its path without copying
- * @param pluginSource - Plugin source
  * @param workspacePath - Path to workspace directory
  * @param offline - Skip fetching from remote and use cached version
  * @returns Validation result with resolved path
@@ -1806,6 +1906,12 @@ export async function syncWorkspace(
   const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, workspaceFileResults);
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
 
+  // Compute deleted artifacts: compare previous state vs what was just synced
+  const allCopyResultsForState = [...pluginResults.flatMap((r) => r.copyResults), ...workspaceFileResults];
+  const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
+  const newStatePaths = collectSyncedPaths(allCopyResultsForState, workspacePath, syncClients, resolvedMappings);
+  const deletedArtifacts = computeDeletedArtifacts(previousState, newStatePaths, syncClients, resolvedMappings);
+
   // Persist sync state (skip in dry-run mode)
   const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
   if (!dryRun) {
@@ -1824,6 +1930,7 @@ export async function syncWorkspace(
     totalSkipped,
     totalGenerated,
     purgedPaths,
+    ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
     ...(warnings.length > 0 && { warnings }),
     ...(messages.length > 0 && { messages }),
     ...(nativeResult && { nativeResult }),
@@ -1938,6 +2045,12 @@ export async function syncUserWorkspace(
     validPlugins, previousState, 'user', homeDir, dryRun, warnings, messages,
   );
 
+  // Compute deleted artifacts: compare previous state vs what was just synced
+  const allCopyResultsForState = pluginResults.flatMap((r) => r.copyResults);
+  const resolvedUserMappings = resolveClientMappings(syncClients, USER_CLIENT_MAPPINGS);
+  const newStatePaths = collectSyncedPaths(allCopyResultsForState, homeDir, syncClients, resolvedUserMappings);
+  const deletedArtifacts = computeDeletedArtifacts(previousState, newStatePaths, syncClients, resolvedUserMappings);
+
   // Save sync state (including MCP servers and native plugins)
   if (!dryRun) {
     const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
@@ -1962,6 +2075,7 @@ export async function syncUserWorkspace(
     totalFailed,
     totalSkipped,
     totalGenerated,
+    ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
     ...(warnings.length > 0 && { warnings }),
     ...(messages.length > 0 && { messages }),
     ...(Object.keys(mcpResults).length > 0 && { mcpResults }),

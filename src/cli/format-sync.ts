@@ -1,5 +1,5 @@
 import type { NativeSyncResult } from '../core/native/types.js';
-import type { SyncResult } from '../core/sync.js';
+import type { SyncResult, DeletedArtifact } from '../core/sync.js';
 import type { CopyResult } from '../core/transform.js';
 import type { McpMergeResult } from '../core/vscode-mcp.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, getDisplayName } from '../models/client-mapping.js';
@@ -171,7 +171,33 @@ export function formatSyncSummary(
   if (result.totalFailed > 0) lines.push(`  Total failed: ${result.totalFailed}`);
   if (result.totalSkipped > 0) lines.push(`  Total skipped: ${result.totalSkipped}`);
 
+  if (result.deletedArtifacts && result.deletedArtifacts.length > 0) {
+    lines.push(...formatDeletedArtifacts(result.deletedArtifacts));
+  }
+
   return lines;
+}
+
+/**
+ * Format deleted artifacts as display lines grouped by client.
+ * Example: "  Deleted (Claude): skill 'old-skill', command 'deprecated-cmd'"
+ */
+export function formatDeletedArtifacts(artifacts: DeletedArtifact[]): string[] {
+  const byClient = new Map<string, DeletedArtifact[]>();
+  for (const artifact of artifacts) {
+    const displayName = getDisplayName(artifact.client);
+    let list = byClient.get(displayName);
+    if (!list) {
+      list = [];
+      byClient.set(displayName, list);
+    }
+    list.push(artifact);
+  }
+
+  return Array.from(byClient.entries()).map(([displayClient, items]) => {
+    const names = items.map((a) => `${a.type} '${a.name}'`).join(', ');
+    return `  Deleted (${displayClient}): ${names}`;
+  });
 }
 
 /**
@@ -261,6 +287,7 @@ export function buildSyncData(result: SyncResult) {
       copyResults: pr.copyResults,
     })),
     purgedPaths: result.purgedPaths ?? [],
+    deletedArtifacts: result.deletedArtifacts ?? [],
     ...(result.mcpResults && {
       mcpServers: Object.fromEntries(
         Object.entries(result.mcpResults)
