@@ -214,6 +214,17 @@ allagents plugin list [marketplace]
 allagents plugin validate <path>
 ```
 
+### GitHub Overrides
+
+For **Copilot** and **VSCode**, AllAgents copies GitHub-specific files from a plugin's `.github/` folder into the workspace's `.github/` directory:
+
+- `.github/prompts/` — prompt files
+- `.github/agents/` — agent overrides
+- `.github/hooks/` — hook overrides
+- `copilot-instructions.md` — root Copilot instructions
+
+Root `agents/` and `hooks/` directories in a plugin also map to `.github/agents/` and `.github/hooks/` for Copilot/VSCode.
+
 ## .allagents/workspace.yaml
 
 The workspace configuration file lives in `.allagents/workspace.yaml` and defines repositories, plugins, workspace files, and target clients:
@@ -302,16 +313,16 @@ AllAgents supports 23 AI coding assistants:
 
 #### Universal Clients (share `.agents/skills/`)
 
-| Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
-|--------|--------|------------|-------|----------|------------------|
-| copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No | `.github/` |
-| codex | `.agents/skills/` | `AGENTS.md` | No | No | No |
-| opencode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
-| gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
-| ampcode | `.agents/skills/` | `AGENTS.md` | No | No | No |
-| vscode | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
-| replit | `.agents/skills/` | `AGENTS.md` | No | No | No |
-| kimi | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| Client | Skills | Agent File | Hooks | Commands |
+|--------|--------|------------|-------|----------|
+| copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No |
+| codex | `.agents/skills/` | `AGENTS.md` | No | No |
+| opencode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` |
+| gemini | `.agents/skills/` | `GEMINI.md` | No | No |
+| ampcode | `.agents/skills/` | `AGENTS.md` | No | No |
+| vscode | `.agents/skills/` | `AGENTS.md` | No | No |
+| replit | `.agents/skills/` | `AGENTS.md` | No | No |
+| kimi | `.agents/skills/` | `AGENTS.md` | No | No |
 
 #### Provider-Specific Clients
 
@@ -333,7 +344,7 @@ AllAgents supports 23 AI coding assistants:
 | openhands | `.openhands/skills/` | `AGENTS.md` | No | No |
 | kiro | `.kiro/skills/` | `AGENTS.md` | No | No |
 
-> **Note:** Universal clients share the same `.agents/skills/` directory. GitHub overrides (`.github/prompts/`, `.github/agents/`, `.github/hooks/`, `copilot-instructions.md`) are copied to Copilot/VSCode's `.github/` folder. Root `agents/` and `hooks/` also map to `.github/agents/` and `.github/hooks/` for Copilot.
+> **Note:** Universal clients share the same `.agents/skills/` directory. See [GitHub Overrides](#github-overrides) for how Copilot and VSCode handle `.github/` content.
 
 ## Marketplace Structure
 
