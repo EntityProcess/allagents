@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { formatMcpResult, formatNativeResult, classifyCopyResults, formatArtifactLines, formatPluginArtifacts, formatSyncSummary } from '../../../src/cli/format-sync.js';
+import { formatMcpResult, formatNativeResult, classifyCopyResults, formatArtifactLines, formatPluginArtifacts, formatSyncSummary, formatDeletedArtifacts } from '../../../src/cli/format-sync.js';
 import type { CopyResult } from '../../../src/core/transform.js';
-import type { SyncResult } from '../../../src/core/sync.js';
+import type { SyncResult, DeletedArtifact } from '../../../src/core/sync.js';
 import type { McpMergeResult } from '../../../src/core/vscode-mcp.js';
 import type { NativeSyncResult } from '../../../src/core/native/types.js';
 
@@ -297,5 +297,89 @@ describe('formatNativeResult', () => {
     expect(formatNativeResult(result)).toEqual([
       '  ✗ [copilot] glow@wtg-ai-prompts: boom',
     ]);
+  });
+});
+
+describe('formatDeletedArtifacts', () => {
+  test('returns empty array when no artifacts deleted', () => {
+    expect(formatDeletedArtifacts([])).toEqual([]);
+  });
+
+  test('formats a single deleted skill', () => {
+    const artifacts: DeletedArtifact[] = [
+      { client: 'claude', type: 'skill', name: 'browser-automation' },
+    ];
+    expect(formatDeletedArtifacts(artifacts)).toEqual([
+      "  Deleted (claude): skill 'browser-automation'",
+    ]);
+  });
+
+  test('formats multiple deleted artifacts for same client', () => {
+    const artifacts: DeletedArtifact[] = [
+      { client: 'claude', type: 'skill', name: 'old-skill' },
+      { client: 'claude', type: 'command', name: 'deprecated-cmd' },
+    ];
+    const lines = formatDeletedArtifacts(artifacts);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe("  Deleted (claude): skill 'old-skill', command 'deprecated-cmd'");
+  });
+
+  test('formats deleted artifacts for multiple clients', () => {
+    const artifacts: DeletedArtifact[] = [
+      { client: 'claude', type: 'skill', name: 'skill-a' },
+      { client: 'copilot', type: 'skill', name: 'skill-b' },
+    ];
+    const lines = formatDeletedArtifacts(artifacts);
+    expect(lines).toHaveLength(2);
+    expect(lines).toContain("  Deleted (claude): skill 'skill-a'");
+    expect(lines).toContain("  Deleted (copilot): skill 'skill-b'");
+  });
+});
+
+describe('formatSyncSummary with deletedArtifacts', () => {
+  test('shows deleted artifacts when present', () => {
+    const result: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      deletedArtifacts: [
+        { client: 'claude', type: 'skill', name: 'removed-skill' },
+      ],
+    };
+
+    const lines = formatSyncSummary(result);
+    expect(lines).toContain("  Deleted (claude): skill 'removed-skill'");
+  });
+
+  test('does not show deleted section when deletedArtifacts is empty', () => {
+    const result: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      deletedArtifacts: [],
+    };
+
+    const lines = formatSyncSummary(result);
+    expect(lines.some((l) => l.includes('Deleted'))).toBe(false);
+  });
+
+  test('does not show deleted section when deletedArtifacts is undefined', () => {
+    const result: SyncResult = {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+    };
+
+    const lines = formatSyncSummary(result);
+    expect(lines.some((l) => l.includes('Deleted'))).toBe(false);
   });
 });
