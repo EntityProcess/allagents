@@ -6,7 +6,6 @@ import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import {
   addDisabledSkill,
   removeDisabledSkill,
-  getEnabledSkills,
   removeEnabledSkill,
   addEnabledSkill,
   addPlugin,
@@ -14,7 +13,6 @@ import {
 import {
   addUserDisabledSkill,
   removeUserDisabledSkill,
-  getUserEnabledSkills,
   removeUserEnabledSkill,
   addUserEnabledSkill,
   isUserConfigPath,
@@ -252,22 +250,11 @@ const removeCmd = command({
         return;
       }
 
-      // Detect mode: does this plugin have enabledSkills entries?
-      const enabledSkills = isUser
-        ? await getUserEnabledSkills()
-        : await getEnabledSkills(workspacePath);
-      const pluginPrefix = `${targetSkill.pluginName}:`;
-      const inAllowlistMode = enabledSkills.some((s) => s.startsWith(pluginPrefix));
-
       const skillKey = `${targetSkill.pluginName}:${skill}`;
 
-      const result = inAllowlistMode
-        ? isUser
-          ? await removeUserEnabledSkill(skillKey)
-          : await removeEnabledSkill(skillKey, workspacePath)
-        : isUser
-          ? await addUserDisabledSkill(skillKey)
-          : await addDisabledSkill(skillKey, workspacePath);
+      const result = targetSkill.pluginSkillsMode === 'allowlist'
+        ? isUser ? await removeUserEnabledSkill(skillKey) : await removeEnabledSkill(skillKey, workspacePath)
+        : isUser ? await addUserDisabledSkill(skillKey) : await addDisabledSkill(skillKey, workspacePath);
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -449,22 +436,11 @@ const addCmd = command({
         return;
       }
 
-      // Detect mode: does this plugin have enabledSkills entries?
-      const enabledSkills = isUser
-        ? await getUserEnabledSkills()
-        : await getEnabledSkills(workspacePath);
-      const pluginPrefix = `${targetSkill.pluginName}:`;
-      const inAllowlistMode = enabledSkills.some((s) => s.startsWith(pluginPrefix));
-
       const skillKey = `${targetSkill.pluginName}:${skill}`;
 
-      const result = inAllowlistMode
-        ? isUser
-          ? await addUserEnabledSkill(skillKey)
-          : await addEnabledSkill(skillKey, workspacePath)
-        : isUser
-          ? await removeUserDisabledSkill(skillKey)
-          : await removeDisabledSkill(skillKey, workspacePath);
+      const result = targetSkill.pluginSkillsMode === 'blocklist'
+        ? isUser ? await removeUserDisabledSkill(skillKey) : await removeDisabledSkill(skillKey, workspacePath)
+        : isUser ? await addUserEnabledSkill(skillKey) : await addEnabledSkill(skillKey, workspacePath);
 
       if (!result.success) {
         if (isJsonMode()) {

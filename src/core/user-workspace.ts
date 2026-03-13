@@ -23,6 +23,9 @@ import {
 } from './marketplace.js';
 import {
   type ModifyResult,
+  ensureObjectPluginEntry,
+  extractPluginNames,
+  findPluginEntryByName,
   pruneDisabledSkillsForPlugin,
   pruneEnabledSkillsForPlugin,
   resolveGitHubIdentity,
@@ -110,7 +113,10 @@ export async function getUserWorkspaceConfig(): Promise<WorkspaceConfig | null> 
  * 2. GitHub URL (e.g., "https://github.com/owner/repo")
  * 3. Local path (e.g., "/home/user/my-plugin")
  */
-export async function addUserPlugin(plugin: string, force?: boolean): Promise<ModifyResult> {
+export async function addUserPlugin(
+  plugin: string,
+  force?: boolean,
+): Promise<ModifyResult> {
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
 
@@ -170,7 +176,8 @@ export async function hasUserPlugin(plugin: string): Promise<boolean> {
   if (!config) return false;
 
   // Exact match first
-  if (config.plugins.some((entry) => getPluginSource(entry) === plugin)) return true;
+  if (config.plugins.some((entry) => getPluginSource(entry) === plugin))
+    return true;
 
   // Partial match
   return config.plugins.some((entry) => {
@@ -197,12 +204,10 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
 
     // Partial match: plugin name without marketplace suffix
     if (index === -1) {
-      index = config.plugins.findIndex(
-        (entry) => {
-          const source = getPluginSource(entry);
-          return source.startsWith(`${plugin}@`) || source === plugin;
-        },
-      );
+      index = config.plugins.findIndex((entry) => {
+        const source = getPluginSource(entry);
+        return source.startsWith(`${plugin}@`) || source === plugin;
+      });
     }
 
     // Semantic match: same GitHub repo under a different format
@@ -296,7 +301,9 @@ async function addPluginToUserConfig(
     const config = load(content) as WorkspaceConfig;
 
     // Check for exact match
-    const exactIndex = config.plugins.findIndex((entry) => getPluginSource(entry) === plugin);
+    const exactIndex = config.plugins.findIndex(
+      (entry) => getPluginSource(entry) === plugin,
+    );
     if (exactIndex !== -1) {
       if (!force) {
         return {
@@ -324,7 +331,9 @@ async function addPluginToUserConfig(
       }
       if (semanticIndex !== -1) {
         if (!force) {
-          const existingSource = getPluginSource(config.plugins[semanticIndex] as PluginEntry);
+          const existingSource = getPluginSource(
+            config.plugins[semanticIndex] as PluginEntry,
+          );
           return {
             success: false,
             error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
@@ -375,17 +384,54 @@ export async function setUserClients(
   }
 }
 
+/** Parse "pluginName:skillName" into its two parts, or return null on bad format. */
+function parseSkillKey(
+  skillKey: string,
+): { pluginName: string; skillName: string } | null {
+  const colonIdx = skillKey.indexOf(':');
+  if (colonIdx === -1) return null;
+  return {
+    pluginName: skillKey.slice(0, colonIdx),
+    skillName: skillKey.slice(colonIdx + 1),
+  };
+}
+
 /**
- * Get disabled skills from user workspace config
+ * Get disabled skills from user workspace config.
+ * Reads from inline plugin entry `skills.exclude` arrays (blocklist mode).
+ * Also includes legacy top-level `disabledSkills` for backward compatibility.
  * @returns Array of disabled skill keys (plugin:skill format)
  */
 export async function getUserDisabledSkills(): Promise<string[]> {
   const config = await getUserWorkspaceConfig();
-  return config?.disabledSkills ?? [];
+  if (!config) return [];
+
+  const result: string[] = [];
+  for (const entry of config.plugins) {
+    if (
+      typeof entry === 'string' ||
+      !entry.skills ||
+      Array.isArray(entry.skills)
+    )
+      continue;
+    const pluginName = extractPluginNames(getPluginSource(entry))[0];
+    if (!pluginName) continue;
+    for (const skillName of entry.skills.exclude) {
+      result.push(`${pluginName}:${skillName}`);
+    }
+  }
+
+  // Include legacy top-level disabledSkills
+  for (const s of config.disabledSkills ?? []) {
+    if (!result.includes(s)) result.push(s);
+  }
+
+  return result;
 }
 
 /**
- * Add a skill to disabledSkills in user workspace config
+ * Add a skill to the plugin entry's `skills.exclude` list (blocklist mode) in user workspace config.
+ * Converts a string shorthand plugin entry to object form if needed.
  * @param skillKey - Skill key in plugin:skill format
  */
 export async function addUserDisabledSkill(
@@ -394,19 +440,45 @@ export async function addUserDisabledSkill(
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
 
+  const parsed = parseSkillKey(skillKey);
+  if (!parsed) {
+    return {
+      success: false,
+      error: `Invalid skill key format: '${skillKey}' (expected pluginName:skillName)`,
+    };
+  }
+  const { pluginName, skillName } = parsed;
+
   try {
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
-    const disabledSkills = config.disabledSkills ?? [];
 
-    if (disabledSkills.includes(skillKey)) {
+    const index = findPluginEntryByName(config, pluginName);
+    if (index === -1) {
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
+    }
+
+    const entry = ensureObjectPluginEntry(config, index);
+
+    if (Array.isArray(entry.skills)) {
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' is in allowlist mode; use removeUserEnabledSkill to disable a skill`,
+      };
+    }
+
+    const existing = entry.skills?.exclude ?? [];
+    if (existing.includes(skillName)) {
       return {
         success: false,
         error: `Skill '${skillKey}' is already disabled`,
       };
     }
 
-    config.disabledSkills = [...disabledSkills, skillKey];
+    entry.skills = { exclude: [...existing, skillName] };
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
   } catch (error) {
@@ -418,7 +490,7 @@ export async function addUserDisabledSkill(
 }
 
 /**
- * Remove a skill from disabledSkills in user workspace config
+ * Remove a skill from the plugin entry's `skills.exclude` list (blocklist mode) in user workspace config.
  * @param skillKey - Skill key in plugin:skill format
  */
 export async function removeUserDisabledSkill(
@@ -427,22 +499,52 @@ export async function removeUserDisabledSkill(
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
 
+  const parsed = parseSkillKey(skillKey);
+  if (!parsed) {
+    return {
+      success: false,
+      error: `Invalid skill key format: '${skillKey}' (expected pluginName:skillName)`,
+    };
+  }
+  const { pluginName, skillName } = parsed;
+
   try {
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
-    const disabledSkills = config.disabledSkills ?? [];
 
-    if (!disabledSkills.includes(skillKey)) {
+    const index = findPluginEntryByName(config, pluginName);
+    if (index === -1) {
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
+    }
+
+    const entry = config.plugins[index];
+    if (!entry) {
+      return { success: false, error: `Plugin '${pluginName}' not found in user workspace config` };
+    }
+    if (
+      typeof entry === 'string' ||
+      !entry.skills ||
+      Array.isArray(entry.skills)
+    ) {
       return {
         success: false,
         error: `Skill '${skillKey}' is already enabled`,
       };
     }
 
-    config.disabledSkills = disabledSkills.filter((s) => s !== skillKey);
-    if (config.disabledSkills.length === 0) {
-      config.disabledSkills = undefined;
+    if (!entry.skills.exclude.includes(skillName)) {
+      return {
+        success: false,
+        error: `Skill '${skillKey}' is already enabled`,
+      };
     }
+
+    const newExclude = entry.skills.exclude.filter((s) => s !== skillName);
+    entry.skills = newExclude.length > 0 ? { exclude: newExclude } : undefined;
+
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
   } catch (error) {
@@ -454,16 +556,36 @@ export async function removeUserDisabledSkill(
 }
 
 /**
- * Get enabled skills from user workspace config
+ * Get enabled skills from user workspace config.
+ * Reads from inline plugin entry `skills` arrays (allowlist mode).
+ * Also includes legacy top-level `enabledSkills` for backward compatibility.
  * @returns Array of enabled skill keys (plugin:skill format)
  */
 export async function getUserEnabledSkills(): Promise<string[]> {
   const config = await getUserWorkspaceConfig();
-  return config?.enabledSkills ?? [];
+  if (!config) return [];
+
+  const result: string[] = [];
+  for (const entry of config.plugins) {
+    if (typeof entry === 'string' || !Array.isArray(entry.skills)) continue;
+    const pluginName = extractPluginNames(getPluginSource(entry))[0];
+    if (!pluginName) continue;
+    for (const skillName of entry.skills) {
+      result.push(`${pluginName}:${skillName}`);
+    }
+  }
+
+  // Include legacy top-level enabledSkills
+  for (const s of config.enabledSkills ?? []) {
+    if (!result.includes(s)) result.push(s);
+  }
+
+  return result;
 }
 
 /**
- * Add a skill to enabledSkills in user workspace config
+ * Add a skill to the plugin entry's `skills` allowlist in user workspace config.
+ * Converts a string shorthand plugin entry to object form if needed.
  * @param skillKey - Skill key in plugin:skill format
  */
 export async function addUserEnabledSkill(
@@ -472,19 +594,45 @@ export async function addUserEnabledSkill(
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
 
+  const parsed = parseSkillKey(skillKey);
+  if (!parsed) {
+    return {
+      success: false,
+      error: `Invalid skill key format: '${skillKey}' (expected pluginName:skillName)`,
+    };
+  }
+  const { pluginName, skillName } = parsed;
+
   try {
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
-    const enabledSkills = config.enabledSkills ?? [];
 
-    if (enabledSkills.includes(skillKey)) {
+    const index = findPluginEntryByName(config, pluginName);
+    if (index === -1) {
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
+    }
+
+    const entry = ensureObjectPluginEntry(config, index);
+
+    if (entry.skills && !Array.isArray(entry.skills)) {
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' is in blocklist mode; use removeUserDisabledSkill to enable a skill`,
+      };
+    }
+
+    const existing = (entry.skills as string[] | undefined) ?? [];
+    if (existing.includes(skillName)) {
       return {
         success: false,
         error: `Skill '${skillKey}' is already enabled`,
       };
     }
 
-    config.enabledSkills = [...enabledSkills, skillKey];
+    entry.skills = [...existing, skillName];
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
   } catch (error) {
@@ -496,7 +644,7 @@ export async function addUserEnabledSkill(
 }
 
 /**
- * Remove a skill from enabledSkills in user workspace config
+ * Remove a skill from the plugin entry's `skills` allowlist in user workspace config.
  * @param skillKey - Skill key in plugin:skill format
  */
 export async function removeUserEnabledSkill(
@@ -505,22 +653,52 @@ export async function removeUserEnabledSkill(
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
 
+  const parsed = parseSkillKey(skillKey);
+  if (!parsed) {
+    return {
+      success: false,
+      error: `Invalid skill key format: '${skillKey}' (expected pluginName:skillName)`,
+    };
+  }
+  const { pluginName, skillName } = parsed;
+
   try {
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
-    const enabledSkills = config.enabledSkills ?? [];
 
-    if (!enabledSkills.includes(skillKey)) {
+    const index = findPluginEntryByName(config, pluginName);
+    if (index === -1) {
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
+    }
+
+    const entry = config.plugins[index];
+    if (!entry) {
+      return { success: false, error: `Plugin '${pluginName}' not found in user workspace config` };
+    }
+    if (
+      typeof entry === 'string' ||
+      !entry.skills ||
+      !Array.isArray(entry.skills)
+    ) {
       return {
         success: false,
         error: `Skill '${skillKey}' is already disabled`,
       };
     }
 
-    config.enabledSkills = enabledSkills.filter((s) => s !== skillKey);
-    if (config.enabledSkills.length === 0) {
-      config.enabledSkills = undefined;
+    if (!entry.skills.includes(skillName)) {
+      return {
+        success: false,
+        error: `Skill '${skillKey}' is already disabled`,
+      };
     }
+
+    const newSkills = entry.skills.filter((s) => s !== skillName);
+    entry.skills = newSkills.length > 0 ? newSkills : undefined;
+
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
   } catch (error) {
@@ -628,5 +806,94 @@ export async function getInstalledProjectPlugins(
     return result;
   } catch {
     return [];
+  }
+}
+
+// MIGRATION: v1→v2 skill schema. Remove this block after v3 is released.
+/**
+ * Migrate the user workspace config (~/.allagents/workspace.yaml) from v1 skill
+ * schema to v2.
+ *
+ * v1: top-level `enabledSkills`/`disabledSkills` arrays of "pluginName:skillName" strings.
+ * v2: per-plugin `skills` field (allowlist array or `{ exclude: [...] }` blocklist).
+ *
+ * Idempotent: if `version >= 2`, returns immediately without touching the file.
+ * Also upgrades configs that have neither field (first-time users) by setting version:2.
+ */
+export async function migrateUserWorkspaceSkillsV1toV2(): Promise<void> {
+  const configPath = getUserWorkspaceConfigPath();
+  if (!existsSync(configPath)) return;
+
+  let config: WorkspaceConfig;
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    config = load(content) as WorkspaceConfig;
+  } catch {
+    return;
+  }
+
+  if (!config || (config.version !== undefined && config.version >= 2)) return;
+
+  const enabledSkills: string[] = config.enabledSkills ?? [];
+  const disabledSkills: string[] = config.disabledSkills ?? [];
+
+  const enabledByPlugin = new Map<string, string[]>();
+  for (const skillKey of enabledSkills) {
+    const colonIdx = skillKey.indexOf(':');
+    if (colonIdx === -1) continue;
+    const pluginName = skillKey.slice(0, colonIdx);
+    const skillName = skillKey.slice(colonIdx + 1);
+    const list = enabledByPlugin.get(pluginName) ?? [];
+    list.push(skillName);
+    enabledByPlugin.set(pluginName, list);
+  }
+
+  const disabledByPlugin = new Map<string, string[]>();
+  for (const skillKey of disabledSkills) {
+    const colonIdx = skillKey.indexOf(':');
+    if (colonIdx === -1) continue;
+    const pluginName = skillKey.slice(0, colonIdx);
+    const skillName = skillKey.slice(colonIdx + 1);
+    const list = disabledByPlugin.get(pluginName) ?? [];
+    list.push(skillName);
+    disabledByPlugin.set(pluginName, list);
+  }
+
+  for (const [pluginName, skillNames] of enabledByPlugin) {
+    const index = findPluginEntryByName(config, pluginName);
+    if (index === -1) {
+      console.warn(
+        `[migrate v1→v2] No user plugin found for '${pluginName}', skipping`,
+      );
+      continue;
+    }
+    const entry = ensureObjectPluginEntry(config, index);
+    entry.skills = skillNames;
+  }
+
+  for (const [pluginName, skillNames] of disabledByPlugin) {
+    const index = findPluginEntryByName(config, pluginName);
+    if (index === -1) {
+      console.warn(
+        `[migrate v1→v2] No user plugin found for '${pluginName}', skipping`,
+      );
+      continue;
+    }
+    const entry = ensureObjectPluginEntry(config, index);
+    if (!Array.isArray(entry.skills)) {
+      entry.skills = { exclude: skillNames };
+    }
+  }
+
+  config.enabledSkills = undefined;
+  config.disabledSkills = undefined;
+  config.version = 2;
+
+  try {
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+  } catch (error) {
+    console.warn(
+      `[migrate v1→v2] Failed to write migrated user config: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }

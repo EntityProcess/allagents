@@ -27,7 +27,7 @@ describe('disabledSkills helpers', () => {
 
   describe('addDisabledSkill', () => {
     it('adds skill to empty disabledSkills', async () => {
-      const config = { repositories: [], plugins: [], clients: ['claude'] };
+      const config = { repositories: [], plugins: ['superpowers'], clients: ['claude'] };
       await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
 
       const result = await addDisabledSkill('superpowers:brainstorming', tmpDir);
@@ -40,9 +40,8 @@ describe('disabledSkills helpers', () => {
     it('returns error if skill already disabled', async () => {
       const config = {
         repositories: [],
-        plugins: [],
+        plugins: [{ source: 'superpowers', skills: { exclude: ['brainstorming'] } }],
         clients: ['claude'],
-        disabledSkills: ['superpowers:brainstorming'],
       };
       await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
 
@@ -56,9 +55,11 @@ describe('disabledSkills helpers', () => {
     it('removes skill from disabledSkills', async () => {
       const config = {
         repositories: [],
-        plugins: [],
+        plugins: [
+          { source: 'superpowers', skills: { exclude: ['brainstorming'] } },
+          { source: 'other', skills: { exclude: ['skill'] } },
+        ],
         clients: ['claude'],
-        disabledSkills: ['superpowers:brainstorming', 'other:skill'],
       };
       await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
 
@@ -71,7 +72,7 @@ describe('disabledSkills helpers', () => {
     });
 
     it('returns error if skill not in disabledSkills', async () => {
-      const config = { repositories: [], plugins: [], clients: ['claude'] };
+      const config = { repositories: [], plugins: ['superpowers'], clients: ['claude'] };
       await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
 
       const result = await removeDisabledSkill('superpowers:brainstorming', tmpDir);
@@ -192,7 +193,7 @@ describe('enabledSkills helpers', () => {
 
   describe('addEnabledSkill', () => {
     it('adds skill to empty enabledSkills', async () => {
-      const config = { repositories: [], plugins: [], clients: ['claude'] };
+      const config = { repositories: [], plugins: ['superpowers'], clients: ['claude'] };
       await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
       const result = await addEnabledSkill('superpowers:brainstorming', tmpDir);
       expect(result.success).toBe(true);
@@ -202,8 +203,9 @@ describe('enabledSkills helpers', () => {
 
     it('returns error if skill already enabled', async () => {
       const config = {
-        repositories: [], plugins: [], clients: ['claude'],
-        enabledSkills: ['superpowers:brainstorming'],
+        repositories: [],
+        plugins: [{ source: 'superpowers', skills: ['brainstorming'] }],
+        clients: ['claude'],
       };
       await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
       const result = await addEnabledSkill('superpowers:brainstorming', tmpDir);
@@ -215,8 +217,12 @@ describe('enabledSkills helpers', () => {
   describe('removeEnabledSkill', () => {
     it('removes skill from enabledSkills', async () => {
       const config = {
-        repositories: [], plugins: [], clients: ['claude'],
-        enabledSkills: ['superpowers:brainstorming', 'other:skill'],
+        repositories: [],
+        plugins: [
+          { source: 'superpowers', skills: ['brainstorming'] },
+          { source: 'other', skills: ['skill'] },
+        ],
+        clients: ['claude'],
       };
       await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
       const result = await removeEnabledSkill('superpowers:brainstorming', tmpDir);
@@ -227,7 +233,7 @@ describe('enabledSkills helpers', () => {
     });
 
     it('returns error if skill not in enabledSkills', async () => {
-      const config = { repositories: [], plugins: [], clients: ['claude'] };
+      const config = { repositories: [], plugins: ['superpowers'], clients: ['claude'] };
       await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
       const result = await removeEnabledSkill('superpowers:brainstorming', tmpDir);
       expect(result.success).toBe(false);

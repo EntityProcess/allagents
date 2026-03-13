@@ -22,7 +22,7 @@ describe('user-scope disabledSkills helpers', () => {
   });
 
   it('adds and removes disabled skills in user config', async () => {
-    const config = { repositories: [], plugins: [], clients: ['copilot'] };
+    const config = { repositories: [], plugins: ['superpowers'], clients: ['copilot'] };
     await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
 
     // Import after setting HOME
@@ -42,7 +42,7 @@ describe('user-scope disabledSkills helpers', () => {
   });
 
   it('adds and removes enabled skills in user config', async () => {
-    const config = { repositories: [], plugins: [], clients: ['copilot'] };
+    const config = { repositories: [], plugins: ['superpowers'], clients: ['copilot'] };
     await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
 
     // Import after setting HOME
