@@ -9,6 +9,7 @@ import {
   getEnabledSkills,
   removeEnabledSkill,
   addEnabledSkill,
+  addPlugin,
 } from '../../core/workspace-modify.js';
 import {
   addUserDisabledSkill,
@@ -17,6 +18,7 @@ import {
   removeUserEnabledSkill,
   addUserEnabledSkill,
   isUserConfigPath,
+  addUserPlugin,
 } from '../../core/user-workspace.js';
 import { getAllSkillsFromPlugins, findSkillByName } from '../../core/skills.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
@@ -337,25 +339,73 @@ const addCmd = command({
       short: 'p',
       description: 'Plugin name (required if skill exists in multiple plugins)',
     }),
+    from: option({
+      type: optional(string),
+      long: 'from',
+      short: 'f',
+      description: 'Plugin source to install if the skill is not already available',
+    }),
   },
-  handler: async ({ skill, scope, plugin }) => {
+  handler: async ({ skill, scope, plugin, from }) => {
     try {
       const isUser = scope === 'user' || (!scope && resolveScope(process.cwd()) === 'user');
       const workspacePath = isUser ? getHomeDir() : process.cwd();
 
       // Find the skill
-      const matches = await findSkillByName(skill, workspacePath);
+      let matches = await findSkillByName(skill, workspacePath);
 
       if (matches.length === 0) {
-        const allSkills = await getAllSkillsFromPlugins(workspacePath);
-        const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
-        const error = `Skill '${skill}' not found in any installed plugin.\n\nAvailable skills: ${skillNames || 'none'}`;
-        if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills add', error });
+        if (from) {
+          // Install the plugin first, then re-search for the skill
+          if (!isJsonMode()) {
+            console.log(`Skill '${skill}' not found. Installing plugin: ${from}...`);
+          }
+
+          const installResult = isUser
+            ? await addUserPlugin(from)
+            : await addPlugin(from, workspacePath);
+
+          if (!installResult.success) {
+            const error = `Failed to install plugin '${from}': ${installResult.error ?? 'Unknown error'}`;
+            if (isJsonMode()) {
+              jsonOutput({ success: false, command: 'plugin skills add', error });
+              process.exit(1);
+            }
+            console.error(`Error: ${error}`);
+            process.exit(1);
+          }
+
+          // Initial sync to materialise the newly installed plugin's files
+          if (!isJsonMode()) {
+            console.log('Running initial sync...\n');
+          }
+          await (isUser ? syncUserWorkspace() : syncWorkspace(workspacePath));
+
+          // Re-search for the skill in the now-installed plugin
+          matches = await findSkillByName(skill, workspacePath);
+
+          if (matches.length === 0) {
+            const allSkills = await getAllSkillsFromPlugins(workspacePath);
+            const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
+            const error = `Skill '${skill}' not found in plugin '${from}'. The plugin may not use the allagents skills/ directory structure (flat SKILL.md repos from the npx skills ecosystem are not yet supported). (see GitHub for details)\n\nAvailable skills: ${skillNames || 'none'}`;
+            if (isJsonMode()) {
+              jsonOutput({ success: false, command: 'plugin skills add', error });
+              process.exit(1);
+            }
+            console.error(`Error: ${error}`);
+            process.exit(1);
+          }
+        } else {
+          const allSkills = await getAllSkillsFromPlugins(workspacePath);
+          const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
+          const error = `Skill '${skill}' not found in any installed plugin.\n\nAvailable skills: ${skillNames || 'none'}`;
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
           process.exit(1);
         }
-        console.error(`Error: ${error}`);
-        process.exit(1);
       }
 
       // Handle ambiguity
