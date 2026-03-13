@@ -3,7 +3,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
-import { getPluginSource, type WorkspaceConfig } from '../models/workspace-config.js';
+import { getPluginSource, type WorkspaceConfig, type PluginSkillsConfig } from '../models/workspace-config.js';
 import { fetchPlugin, getPluginName } from './plugin.js';
 import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
 import { isPluginSpec, resolvePluginSpecWithAutoRegister } from './marketplace.js';
@@ -22,6 +22,12 @@ export interface SkillInfo {
   path: string;
   /** Whether the skill is disabled */
   disabled: boolean;
+  /**
+   * The inline skills mode for the plugin this skill belongs to.
+   * 'allowlist' = plugin has `skills: [...]`, 'blocklist' = plugin has `skills: { exclude: [...] }`,
+   * 'none' = no inline skills field (all skills enabled by default).
+   */
+  pluginSkillsMode: 'allowlist' | 'blocklist' | 'none';
 }
 
 /**
@@ -85,8 +91,12 @@ export async function getAllSkillsFromPlugins(
 
   const content = await readFile(configPath, 'utf-8');
   const config = load(content) as WorkspaceConfig;
-  const disabledSkills = new Set(config.disabledSkills ?? []);
-  const enabledSkills = config.enabledSkills ? new Set(config.enabledSkills) : null;
+
+  // v1 fallback: use top-level disabledSkills/enabledSkills only for configs that haven't migrated
+  const isV1Fallback = config.version === undefined || config.version < 2;
+  const disabledSkills = isV1Fallback ? new Set(config.disabledSkills ?? []) : new Set<string>();
+  const enabledSkills = isV1Fallback && config.enabledSkills ? new Set(config.enabledSkills) : null;
+
   const skills: SkillInfo[] = [];
 
   for (const pluginEntry of config.plugins) {
@@ -98,12 +108,15 @@ export async function getAllSkillsFromPlugins(
     const pluginName = resolved.pluginName ?? getPluginName(pluginPath);
     const skillsDir = join(pluginPath, 'skills');
 
-    // Only apply enabledSkills to plugins that actually have entries in the set
-    const hasEnabledEntries = enabledSkills &&
-      [...enabledSkills].some((s) => s.startsWith(`${pluginName}:`));
+    // Inline plugin-level skills config (v2+); undefined = all enabled (or use v1 fallback below)
+    const pluginSkillsConfig: PluginSkillsConfig | undefined =
+      typeof pluginEntry === 'string' ? undefined : pluginEntry.skills;
+
+    // v1 fallback: only apply enabledSkills to plugins with entries in the set
+    const hasEnabledEntries = !pluginSkillsConfig && enabledSkills &&
+      [...enabledSkills].some((s) => s.startsWith(`${pluginName}`));
 
     let skillEntries: { name: string; skillPath: string }[];
-
     if (existsSync(skillsDir)) {
       // Standard layout: plugin/skills/<skill-name>/
       const entries = await readdir(skillsDir, { withFileTypes: true });
@@ -124,11 +137,32 @@ export async function getAllSkillsFromPlugins(
       skillEntries = flatSkills;
     }
 
+    const pluginSkillsMode: SkillInfo['pluginSkillsMode'] =
+      pluginSkillsConfig === undefined ? 'none'
+      : Array.isArray(pluginSkillsConfig) ? 'allowlist'
+      : 'blocklist';
+
     for (const { name, skillPath } of skillEntries) {
       const skillKey = `${pluginName}:${name}`;
-      const isDisabled = hasEnabledEntries
-        ? !enabledSkills?.has(skillKey)
-        : disabledSkills.has(skillKey);
+      let isDisabled: boolean;
+
+      if (pluginSkillsConfig !== undefined) {
+        // Inline skills config takes priority (v2+)
+        if (Array.isArray(pluginSkillsConfig)) {
+          // allowlist: disabled if NOT in array
+          isDisabled = !pluginSkillsConfig.includes(name);
+        } else {
+          // blocklist: disabled if IS in exclude array
+          isDisabled = pluginSkillsConfig.exclude.includes(name);
+        }
+      } else if (isV1Fallback) {
+        // v1 fallback: top-level disabledSkills/enabledSkills
+        isDisabled = hasEnabledEntries
+          ? !enabledSkills?.has(skillKey)
+          : disabledSkills.has(skillKey);
+      } else {
+        isDisabled = false;
+      }
 
       skills.push({
         name,
@@ -136,6 +170,7 @@ export async function getAllSkillsFromPlugins(
         pluginSource,
         path: skillPath,
         disabled: isDisabled,
+        pluginSkillsMode,
       });
     }
   }

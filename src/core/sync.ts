@@ -10,6 +10,7 @@ import type {
   PluginEntry,
   WorkspaceFile,
   SyncMode,
+  PluginSkillsConfig,
 } from '../models/workspace-config.js';
 import {
   getPluginClients,
@@ -57,14 +58,14 @@ import {
   getPreviouslySyncedNativePlugins,
 } from './sync-state.js';
 import type { SyncState } from '../models/sync-state.js';
-import { getUserWorkspaceConfig } from './user-workspace.js';
+import { getUserWorkspaceConfig, migrateUserWorkspaceSkillsV1toV2 } from './user-workspace.js';
 import {
   generateVscodeWorkspace,
   getWorkspaceOutputPath,
   computeWorkspaceHash,
   reconcileVscodeWorkspaceFolders,
 } from './vscode-workspace.js';
-import { updateRepositories } from './workspace-modify.js';
+import { updateRepositories, migrateWorkspaceSkillsV1toV2 } from './workspace-modify.js';
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import { syncCodexMcpServers } from './codex-mcp.js';
@@ -244,6 +245,8 @@ export interface ValidatedPlugin {
   marketplaceSource?: string;
   /** Glob patterns of files to exclude when syncing (from workspace.yaml) */
   exclude?: string[];
+  /** Inline skill selection config from plugin entry (v2+) */
+  pluginSkillsConfig?: PluginSkillsConfig;
 }
 
 interface PluginSyncPlan {
@@ -253,6 +256,8 @@ interface PluginSyncPlan {
   nativeClients: ClientType[];
   /** Glob patterns of files to exclude when syncing (from workspace.yaml) */
   exclude?: string[];
+  /** Inline skill selection config from plugin entry (v2+) */
+  pluginSkillsConfig?: PluginSkillsConfig;
 }
 
 /**
@@ -1058,7 +1063,14 @@ function buildPluginSyncPlans(
     }
 
     const exclude = getPluginExclude(plugin);
-    return { source, clients: fileClients, nativeClients, ...(exclude && { exclude }) };
+    const pluginSkillsConfig = typeof plugin === 'string' ? undefined : plugin.skills;
+    return {
+      source,
+      clients: fileClients,
+      nativeClients,
+      ...(exclude && { exclude }),
+      ...(pluginSkillsConfig !== undefined && { pluginSkillsConfig }),
+    };
   });
 
   return { plans, warnings };
@@ -1077,10 +1089,11 @@ async function validateAllPlugins(
   offline: boolean,
 ): Promise<ValidatedPlugin[]> {
   return Promise.all(
-    plans.map(async ({ source, clients, nativeClients, exclude }) => {
+    plans.map(async ({ source, clients, nativeClients, exclude, pluginSkillsConfig }) => {
       const validated = await validatePlugin(source, workspacePath, offline);
       const result: ValidatedPlugin = { ...validated, clients, nativeClients };
       if (exclude) result.exclude = exclude;
+      if (pluginSkillsConfig !== undefined) result.pluginSkillsConfig = pluginSkillsConfig;
       return result;
     }),
   );
@@ -1214,7 +1227,8 @@ interface CollectedSkillEntry {
  * Collect all skills from all validated plugins
  * This is the first pass of two-pass name resolution
  * @param validatedPlugins - Array of validated plugins with resolved paths
- * @param disabledSkills - Optional set of disabled skill keys
+ * @param disabledSkills - Optional set of disabled skill keys (v1 fallback)
+ * @param enabledSkills - Optional set of enabled skill keys (v1 fallback)
  * @returns Array of collected skill entries
  */
 async function collectAllSkills(
@@ -1232,6 +1246,7 @@ async function collectAllSkills(
       disabledSkills,
       pluginName,
       enabledSkills,
+      plugin.pluginSkillsConfig,
     );
 
     for (const skill of skills) {
@@ -1653,6 +1668,9 @@ export async function syncWorkspace(
   workspacePath: string = process.cwd(),
   options: SyncOptions = {},
 ): Promise<SyncResult> {
+  // MIGRATION: v1→v2 - remove after v3 release
+  await migrateWorkspaceSkillsV1toV2(workspacePath);
+
   const { offline = false, dryRun = false, workspaceSourceBase, skipAgentFiles = false } = options;
   const configDir = join(workspacePath, CONFIG_DIR);
   const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
@@ -1787,8 +1805,10 @@ export async function syncWorkspace(
 
   // Step 3b: Two-pass skill name resolution
   // Pass 1: Collect all skills from all plugins (excluding disabled/non-enabled skills)
-  const disabledSkillsSet = new Set(config.disabledSkills ?? []);
-  const enabledSkillsSet = config.enabledSkills ? new Set(config.enabledSkills) : undefined;
+  // v1 fallback: only use top-level disabledSkills/enabledSkills for configs that haven't migrated
+  const isV1Fallback = config.version === undefined || config.version < 2;
+  const disabledSkillsSet = isV1Fallback ? new Set(config.disabledSkills ?? []) : undefined;
+  const enabledSkillsSet = isV1Fallback && config.enabledSkills ? new Set(config.enabledSkills) : undefined;
   const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet);
 
   // Build per-plugin skill name maps (handles conflicts automatically)
@@ -1947,6 +1967,9 @@ export async function syncWorkspace(
 export async function syncUserWorkspace(
   options: { offline?: boolean; dryRun?: boolean; force?: boolean } = {},
 ): Promise<SyncResult> {
+  // MIGRATION: v1→v2 - remove after v3 release
+  await migrateUserWorkspaceSkillsV1toV2();
+
   const homeDir = resolve(getHomeDir());
   const config = await getUserWorkspaceConfig();
 
@@ -2000,8 +2023,10 @@ export async function syncUserWorkspace(
   }
 
   // Two-pass skill name resolution (excluding disabled/non-enabled skills)
-  const disabledSkillsSet = new Set(config.disabledSkills ?? []);
-  const enabledSkillsSet = config.enabledSkills ? new Set(config.enabledSkills) : undefined;
+  // v1 fallback: only use top-level disabledSkills/enabledSkills for configs that haven't migrated
+  const isV1FallbackUser = config.version === undefined || config.version < 2;
+  const disabledSkillsSet = isV1FallbackUser ? new Set(config.disabledSkills ?? []) : undefined;
+  const enabledSkillsSet = isV1FallbackUser && config.enabledSkills ? new Set(config.enabledSkills) : undefined;
   const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet);
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
 

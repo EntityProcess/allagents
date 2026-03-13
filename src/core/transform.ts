@@ -5,7 +5,7 @@ import micromatch from 'micromatch';
 import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
 import { CLIENT_MAPPINGS, isUniversalClient } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
-import type { ClientType, WorkspaceFile, SyncMode } from '../models/workspace-config.js';
+import type { ClientType, WorkspaceFile, SyncMode, PluginSkillsConfig } from '../models/workspace-config.js';
 import { generateWorkspaceRules, type WorkspaceRepository } from '../constants.js';
 import { parseFileSource } from '../utils/plugin-path.js';
 import { createSymlink } from '../utils/symlink.js';
@@ -353,9 +353,10 @@ export interface CollectedSkill {
  * Used for the first pass of two-pass name resolution
  * @param pluginPath - Resolved path to plugin directory
  * @param pluginSource - Original plugin source reference
- * @param disabledSkills - Optional set of disabled skill keys (plugin:skill format)
+ * @param disabledSkills - Optional set of disabled skill keys (plugin:skill format); used as v1 fallback
  * @param pluginName - Optional plugin name for building skill keys
- * @param enabledSkills - Optional set of enabled skill keys (allowlist mode, takes priority over disabledSkills)
+ * @param enabledSkills - Optional set of enabled skill keys (allowlist mode); used as v1 fallback
+ * @param pluginSkillsConfig - Optional inline plugin-level skills config (v2+); takes priority over disabledSkills/enabledSkills
  * @returns Array of collected skill information
  */
 export async function collectPluginSkills(
@@ -364,12 +365,12 @@ export async function collectPluginSkills(
   disabledSkills?: Set<string>,
   pluginName?: string,
   enabledSkills?: Set<string>,
+  pluginSkillsConfig?: PluginSkillsConfig,
 ): Promise<CollectedSkill[]> {
   const skillsDir = join(pluginPath, 'skills');
 
-  // Filter skills: enabledSkills (allowlist) takes priority over disabledSkills (blocklist)
-  // Only apply enabledSkills to plugins that actually have entries in the set
-  const hasEnabledEntries = enabledSkills && pluginName &&
+  // v1 fallback: only apply enabledSkills to plugins that actually have entries in the set
+  const hasEnabledEntries = !pluginSkillsConfig && enabledSkills && pluginName &&
     [...enabledSkills].some((s) => s.startsWith(`${pluginName}:`));
 
   let candidateDirs: { name: string; path: string }[];
@@ -394,13 +395,28 @@ export async function collectPluginSkills(
     candidateDirs = flatDirs;
   }
 
-  const filteredDirs = pluginName
-    ? hasEnabledEntries
-      ? candidateDirs.filter((e) => enabledSkills?.has(`${pluginName}:${e.name}`))
-      : disabledSkills
-        ? candidateDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`))
-        : candidateDirs
-    : candidateDirs;
+  let filteredDirs: typeof candidateDirs;
+  if (pluginSkillsConfig !== undefined) {
+    // Inline config takes priority (v2+)
+    if (Array.isArray(pluginSkillsConfig)) {
+      // allowlist: keep only skills in the array
+      filteredDirs = candidateDirs.filter((e) => pluginSkillsConfig.includes(e.name));
+    } else {
+      // blocklist: exclude skills in the exclude array
+      filteredDirs = candidateDirs.filter((e) => !pluginSkillsConfig.exclude.includes(e.name));
+    }
+  } else if (pluginName) {
+    // v1 fallback: use disabledSkills/enabledSkills
+    if (hasEnabledEntries) {
+      filteredDirs = candidateDirs.filter((e) => enabledSkills?.has(`${pluginName}:${e.name}`));
+    } else if (disabledSkills) {
+      filteredDirs = candidateDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`));
+    } else {
+      filteredDirs = candidateDirs;
+    }
+  } else {
+    filteredDirs = candidateDirs;
+  }
 
   return filteredDirs.map((entry) => ({
     folderName: entry.name,

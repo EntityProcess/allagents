@@ -114,6 +114,18 @@ export const ClientEntrySchema = z.union([
 export type ClientEntry = z.infer<typeof ClientEntrySchema>;
 
 /**
+ * Skill selection config for a plugin entry.
+ * - Array: allowlist — only these skills are enabled.
+ * - Object with `exclude`: blocklist — all skills except these are enabled.
+ */
+export const PluginSkillsConfigSchema = z.union([
+  z.array(z.string()),
+  z.object({ exclude: z.array(z.string()) }),
+]);
+
+export type PluginSkillsConfig = z.infer<typeof PluginSkillsConfigSchema>;
+
+/**
  * Plugin entry in workspace.yaml
  * Supports string shorthand and object form with optional client override.
  */
@@ -124,6 +136,7 @@ export const PluginEntrySchema = z.union([
     clients: z.array(ClientTypeSchema).optional(),
     install: InstallModeSchema.optional(),
     exclude: z.array(z.string()).optional(),
+    skills: PluginSkillsConfigSchema.optional(),
   }),
 ]);
 
@@ -222,13 +235,16 @@ export type SyncMode = z.infer<typeof SyncModeSchema>;
  * Complete workspace configuration (workspace.yaml)
  */
 export const WorkspaceConfigSchema = z.object({
+  version: z.number().optional(),
   workspace: WorkspaceSchema.optional(),
   repositories: z.array(RepositorySchema),
   plugins: z.array(PluginEntrySchema),
   clients: z.array(ClientEntrySchema),
   vscode: VscodeConfigSchema.optional(),
   syncMode: SyncModeSchema.optional(),
+  /** @deprecated Use inline skills field on plugin entry instead. Will be removed in v3. */
   disabledSkills: z.array(z.string()).optional(),
+  /** @deprecated Use inline skills field on plugin entry instead. Will be removed in v3. */
   enabledSkills: z.array(z.string()).optional(),
 });
 
