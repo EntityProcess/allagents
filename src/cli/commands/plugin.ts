@@ -955,7 +955,19 @@ const pluginInstallCmd = command({
         ? await addUserPlugin(plugin, force)
         : await addPlugin(plugin, process.cwd(), force);
 
-      if (!result.success) {
+      const pluginAlreadyExists =
+        !result.success && !!result.error?.includes('Plugin already exists');
+
+      if (!result.success && !pluginAlreadyExists) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin install', error: result.error ?? 'Unknown error' });
+          process.exit(1);
+        }
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+
+      if (pluginAlreadyExists && skills.length === 0) {
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'plugin install', error: result.error ?? 'Unknown error' });
           process.exit(1);
@@ -970,7 +982,9 @@ const pluginInstallCmd = command({
       if (skills.length > 0) {
         const workspacePath = isUser ? getHomeDir() : process.cwd();
 
-        // Do an initial sync to fetch the plugin so we can discover its skills
+        // If plugin was just installed, do an initial sync to fetch the plugin so we can discover its skills.
+        // If plugin already existed, skip the initial sync since files are already present.
+        if (!pluginAlreadyExists) {
         const initialSync = isUser
           ? await syncUserWorkspace()
           : await syncWorkspace(workspacePath);
@@ -984,6 +998,7 @@ const pluginInstallCmd = command({
           console.error(`Error: ${error}`);
           process.exit(1);
         }
+        } // end if (!pluginAlreadyExists)
 
         const allSkills = await getAllSkillsFromPlugins(workspacePath);
         const pluginSkills = allSkills.filter((s) => s.pluginSource === displayPlugin);

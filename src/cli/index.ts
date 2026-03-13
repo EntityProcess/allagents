@@ -5,6 +5,7 @@ import { conciseSubcommands } from './help.js';
 import { workspaceCmd } from './commands/workspace.js';
 import { pluginCmd } from './commands/plugin.js';
 import { selfCmd } from './commands/self.js';
+import { skillsCmd } from './commands/plugin-skills.js';
 import { extractJsonFlag, setJsonMode } from './json-output.js';
 import { extractAgentHelpFlag, printAgentHelp } from './agent-help.js';
 import { getUpdateNotice } from './update-check.js';
@@ -20,6 +21,7 @@ const app = conciseSubcommands({
     workspace: workspaceCmd,
     plugin: pluginCmd,
     self: selfCmd,
+    skills: skillsCmd,
   },
 });
 
