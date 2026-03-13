@@ -98,26 +98,43 @@ export async function getAllSkillsFromPlugins(
     const pluginName = resolved.pluginName ?? getPluginName(pluginPath);
     const skillsDir = join(pluginPath, 'skills');
 
-    if (!existsSync(skillsDir)) continue;
-
-    const entries = await readdir(skillsDir, { withFileTypes: true });
-    const skillDirs = entries.filter((e) => e.isDirectory());
-
     // Only apply enabledSkills to plugins that actually have entries in the set
     const hasEnabledEntries = enabledSkills &&
       [...enabledSkills].some((s) => s.startsWith(`${pluginName}:`));
 
-    for (const entry of skillDirs) {
-      const skillKey = `${pluginName}:${entry.name}`;
+    let skillEntries: { name: string; skillPath: string }[];
+
+    if (existsSync(skillsDir)) {
+      // Standard layout: plugin/skills/<skill-name>/
+      const entries = await readdir(skillsDir, { withFileTypes: true });
+      skillEntries = entries
+        .filter((e) => e.isDirectory())
+        .map((e) => ({ name: e.name, skillPath: join(skillsDir, e.name) }));
+    } else {
+      // Flat layout: plugin/<skill-name>/SKILL.md
+      const entries = await readdir(pluginPath, { withFileTypes: true });
+      const flatSkills: { name: string; skillPath: string }[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillMdPath = join(pluginPath, entry.name, 'SKILL.md');
+        if (existsSync(skillMdPath)) {
+          flatSkills.push({ name: entry.name, skillPath: join(pluginPath, entry.name) });
+        }
+      }
+      skillEntries = flatSkills;
+    }
+
+    for (const { name, skillPath } of skillEntries) {
+      const skillKey = `${pluginName}:${name}`;
       const isDisabled = hasEnabledEntries
         ? !enabledSkills?.has(skillKey)
         : disabledSkills.has(skillKey);
 
       skills.push({
-        name: entry.name,
+        name,
         pluginName,
         pluginSource,
-        path: join(skillsDir, entry.name),
+        path: skillPath,
         disabled: isDisabled,
       });
     }

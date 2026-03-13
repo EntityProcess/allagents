@@ -367,29 +367,44 @@ export async function collectPluginSkills(
 ): Promise<CollectedSkill[]> {
   const skillsDir = join(pluginPath, 'skills');
 
-  if (!existsSync(skillsDir)) {
-    return [];
-  }
-
-  const entries = await readdir(skillsDir, { withFileTypes: true });
-  const skillDirs = entries.filter((e) => e.isDirectory());
-
   // Filter skills: enabledSkills (allowlist) takes priority over disabledSkills (blocklist)
   // Only apply enabledSkills to plugins that actually have entries in the set
   const hasEnabledEntries = enabledSkills && pluginName &&
     [...enabledSkills].some((s) => s.startsWith(`${pluginName}:`));
 
+  let candidateDirs: { name: string; path: string }[];
+
+  if (existsSync(skillsDir)) {
+    // Standard layout: plugin/skills/<skill-name>/
+    const entries = await readdir(skillsDir, { withFileTypes: true });
+    candidateDirs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => ({ name: e.name, path: join(skillsDir, e.name) }));
+  } else {
+    // Flat layout: plugin/<skill-name>/SKILL.md
+    const entries = await readdir(pluginPath, { withFileTypes: true });
+    const flatDirs: { name: string; path: string }[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const skillMdPath = join(pluginPath, entry.name, 'SKILL.md');
+      if (existsSync(skillMdPath)) {
+        flatDirs.push({ name: entry.name, path: join(pluginPath, entry.name) });
+      }
+    }
+    candidateDirs = flatDirs;
+  }
+
   const filteredDirs = pluginName
     ? hasEnabledEntries
-      ? skillDirs.filter((e) => enabledSkills?.has(`${pluginName}:${e.name}`))
+      ? candidateDirs.filter((e) => enabledSkills?.has(`${pluginName}:${e.name}`))
       : disabledSkills
-        ? skillDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`))
-        : skillDirs
-    : skillDirs;
+        ? candidateDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`))
+        : candidateDirs
+    : candidateDirs;
 
   return filteredDirs.map((entry) => ({
     folderName: entry.name,
-    skillPath: join(skillsDir, entry.name),
+    skillPath: entry.path,
     pluginPath,
     pluginSource,
   }));
