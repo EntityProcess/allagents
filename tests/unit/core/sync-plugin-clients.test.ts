@@ -80,7 +80,7 @@ clients:
     expect(existsSync(join(testDir, '.github', 'skills', 'fallback-skill'))).toBe(true);
   });
 
-  it('partial sync ignores plugins that do not target the selected client', async () => {
+  it('ignores plugins that do not target a client not in workspace config', async () => {
     await createPlugin(testDir, 'copilot-plugin', 'copilot-skill');
 
     await writeFile(
@@ -101,13 +101,13 @@ clients:
       'utf-8',
     );
 
-    const result = await syncWorkspace(testDir, { clients: ['copilot'] });
+    const result = await syncWorkspace(testDir);
     expect(result.success).toBe(true);
     expect(result.totalFailed).toBe(0);
     expect(existsSync(join(testDir, '.github', 'skills', 'copilot-skill'))).toBe(true);
   });
 
-  it('tracks plugin-level-only client in sync state and allows partial sync for it', async () => {
+  it('tracks plugin-level-only client in sync state', async () => {
     await createPlugin(testDir, 'codex-plugin', 'codex-skill');
 
     await writeFile(
@@ -136,10 +136,6 @@ syncMode: copy
     const state = JSON.parse(stateContent) as { files: Record<string, string[]> };
     expect(state.files.codex).toBeDefined();
     expect(state.files.codex?.length).toBeGreaterThan(0);
-
-    const partial = await syncWorkspace(testDir, { clients: ['codex'] });
-    expect(partial.success).toBe(true);
-    expect(partial.totalFailed).toBe(0);
   });
 
   it('warns when a plugin has no effective clients due to empty workspace and plugin clients', async () => {

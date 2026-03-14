@@ -93,7 +93,7 @@ describe('agent command metadata', () => {
   test('workspace sync has expected options', () => {
     const syncCmd = allCommands.find((c) => c.command === 'workspace sync')!;
     expect(syncCmd.options).toBeInstanceOf(Array);
-    expect(syncCmd.options!.length).toBe(4);
+    expect(syncCmd.options!.length).toBe(3);
 
     const dryRun = syncCmd.options!.find((o) => o.flag === '--dry-run');
     expect(dryRun).toBeDefined();
@@ -101,9 +101,7 @@ describe('agent command metadata', () => {
     expect(dryRun!.short).toBe('-n');
 
     const client = syncCmd.options!.find((o) => o.flag === '--client');
-    expect(client).toBeDefined();
-    expect(client!.type).toBe('string');
-    expect(client!.short).toBe('-c');
+    expect(client).toBeUndefined();
 
     const verbose = syncCmd.options!.find((o) => o.flag === '--verbose');
     expect(verbose).toBeDefined();
