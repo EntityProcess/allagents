@@ -816,6 +816,61 @@ export async function removeEnabledSkill(
 }
 
 /**
+ * Set the skills mode for a plugin entry.
+ * 'allowlist' sets `skills = [skillNames]` (only listed skills enabled; empty array = all disabled).
+ * 'blocklist' sets `skills = { exclude: [skillNames] }` or `undefined` if empty (= all enabled).
+ * @param pluginName - Plugin name to modify
+ * @param mode - Target mode: 'allowlist' or 'blocklist'
+ * @param skillNames - For allowlist: enabled skill names. For blocklist: disabled skill names.
+ * @param workspacePath - Path to workspace directory (default: cwd)
+ */
+export async function setPluginSkillsMode(
+  pluginName: string,
+  mode: 'allowlist' | 'blocklist',
+  skillNames: string[],
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
+    };
+  }
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+
+    const index = findPluginEntryByName(config, pluginName);
+    if (index === -1) {
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in workspace config`,
+      };
+    }
+
+    const entry = ensureObjectPluginEntry(config, index);
+
+    if (mode === 'allowlist') {
+      // Always set the array to preserve allowlist mode, even if empty
+      entry.skills = [...skillNames];
+    } else {
+      // For blocklist, clear the field if no exclusions (= all enabled)
+      entry.skills = skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
+    }
+
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
  * Remove enabledSkills entries whose plugin name matches the removed plugin entry.
  * Exported for reuse by user-workspace.ts.
  */
