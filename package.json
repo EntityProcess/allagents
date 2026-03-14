@@ -27,7 +27,8 @@
     "prepare": "bun run build && (test -d .git && bunx prek install -t pre-push || true)",
     "release": "bun run scripts/release.ts",
     "release:next": "bun run scripts/release.ts next",
-    "publish:next": "bun run build && bun publish --tag next"
+    "publish:next": "bun run build && bun publish --tag next",
+    "promote:latest": "bun scripts/tag-channel.ts latest"
   },
   "keywords": [
     "cli",
