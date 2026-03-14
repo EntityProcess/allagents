@@ -133,6 +133,25 @@ describe('sync', () => {
       expect(result.error).toContain(`${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found`);
     });
 
+    it('should warn when no clients are configured', async () => {
+      await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+      await writeFile(
+        join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+        `
+repositories: []
+plugins: []
+clients: []
+`,
+      );
+
+      const result = await syncWorkspace(testDir);
+
+      expect(result.success).toBe(true);
+      expect(result.totalCopied).toBe(0);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0]).toContain('No clients configured');
+    });
+
     it('should fail if plugin does not exist and leave workspace unchanged', async () => {
       // Setup: Create .allagents/workspace.yaml with non-existent plugin
       await mkdir(join(testDir, CONFIG_DIR), { recursive: true });

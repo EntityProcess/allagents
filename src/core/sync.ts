@@ -1736,6 +1736,21 @@ export async function syncWorkspace(
   const filteredPlans = pluginPlans.filter((plan) => plan.clients.length > 0 || plan.nativeClients.length > 0);
   const syncClients = collectSyncClients(workspaceClients, filteredPlans);
 
+  // Warn when no clients are configured — the sync will succeed but create no artifacts
+  if (syncClients.length === 0) {
+    return {
+      success: true,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      warnings: [
+        'No clients configured in workspace.yaml — no artifacts were synced. Add clients to workspace.yaml or run \'allagents workspace init\' to configure.',
+      ],
+    };
+  }
+
   // Step 0: Pre-register unique marketplaces to avoid race conditions during parallel validation
   await ensureMarketplacesRegistered(filteredPlans.map((plan) => plan.source));
 

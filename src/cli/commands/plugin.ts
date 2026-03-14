@@ -125,6 +125,13 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
       }
     }
 
+    if (result.warnings && result.warnings.length > 0) {
+      console.log('\nWarnings:');
+      for (const warning of result.warnings) {
+        console.log(`  \u26A0 ${warning}`);
+      }
+    }
+
     console.log('');
     for (const line of formatSyncSummary(result)) {
       console.log(line);
