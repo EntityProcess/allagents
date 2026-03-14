@@ -1,6 +1,6 @@
 {
   "name": "allagents",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "CLI tool for managing multi-repo AI agent workspaces with plugin synchronization",
   "type": "module",
   "bin": {
