@@ -195,7 +195,17 @@ export function formatDeletedArtifacts(artifacts: DeletedArtifact[]): string[] {
   }
 
   return Array.from(byClient.entries()).map(([displayClient, items]) => {
-    const names = items.map((a) => `${a.type} '${a.name}'`).join(', ');
+    // Deduplicate by type:name within each display group.
+    // Multiple internal clients (e.g. vscode + copilot) can map to the same
+    // display name, producing duplicate entries for the same artifact.
+    const seen = new Set<string>();
+    const unique = items.filter((a) => {
+      const key = `${a.type}:${a.name}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const names = unique.map((a) => `${a.type} '${a.name}'`).join(', ');
     return `  Deleted (${displayClient}): ${names}`;
   });
 }
