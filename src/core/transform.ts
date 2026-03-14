@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, dirname, relative } from 'node:path';
+import { join, basename, dirname, relative } from 'node:path';
 import micromatch from 'micromatch';
 import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
 import { CLIENT_MAPPINGS, isUniversalClient } from '../models/client-mapping.js';
@@ -10,6 +10,7 @@ import { generateWorkspaceRules, type WorkspaceRepository } from '../constants.j
 import { parseFileSource } from '../utils/plugin-path.js';
 import { createSymlink } from '../utils/symlink.js';
 import { adjustLinksInContent } from '../utils/link-adjuster.js';
+import { parseSkillMetadata } from '../validators/skill.js';
 
 /**
  * Agent instruction files that receive WORKSPACE-RULES injection
@@ -256,8 +257,51 @@ export async function copySkills(
     return results;
   }
 
-  const sourceDir = join(pluginPath, 'skills');
-  if (!existsSync(sourceDir)) {
+  // Discover skill sources across all layouts
+  const skillsDir = join(pluginPath, 'skills');
+  let skillSources: { name: string; sourcePath: string; isRootLevel: boolean }[];
+
+  if (existsSync(skillsDir)) {
+    // Standard layout: plugin/skills/<skill-name>/
+    const entries = await readdir(skillsDir, { withFileTypes: true });
+    skillSources = entries
+      .filter((e) => e.isDirectory())
+      .filter((e) => !isExcluded(pluginPath, join(skillsDir, e.name), options.exclude))
+      .map((e) => ({ name: e.name, sourcePath: join(skillsDir, e.name), isRootLevel: false }));
+  } else {
+    // Flat layout: plugin/<skill-name>/SKILL.md
+    const entries = await readdir(pluginPath, { withFileTypes: true });
+    const flatSkills: { name: string; sourcePath: string; isRootLevel: boolean }[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const skillMdPath = join(pluginPath, entry.name, 'SKILL.md');
+      if (existsSync(skillMdPath)) {
+        flatSkills.push({ name: entry.name, sourcePath: join(pluginPath, entry.name), isRootLevel: false });
+      }
+    }
+
+    if (flatSkills.length > 0) {
+      skillSources = flatSkills;
+    } else {
+      // Root-level single-skill layout: plugin/SKILL.md
+      const rootSkillMd = join(pluginPath, 'SKILL.md');
+      if (existsSync(rootSkillMd)) {
+        const content = await readFile(rootSkillMd, 'utf-8');
+        const metadata = parseSkillMetadata(content);
+        const skillName = metadata?.name ?? basename(pluginPath);
+        skillSources = [{ name: skillName, sourcePath: pluginPath, isRootLevel: true }];
+      } else {
+        return results;
+      }
+    }
+  }
+
+  // When skillNameMap is provided, only copy skills that are in the map
+  if (skillNameMap) {
+    skillSources = skillSources.filter((s) => skillNameMap.has(s.name));
+  }
+
+  if (skillSources.length === 0) {
     return results;
   }
 
@@ -266,29 +310,18 @@ export async function copySkills(
     await mkdir(destDir, { recursive: true });
   }
 
-  const entries = await readdir(sourceDir, { withFileTypes: true });
-  let skillDirs = entries.filter((e) => e.isDirectory())
-    .filter((e) => !isExcluded(pluginPath, join(sourceDir, e.name), options.exclude));
-
-  // When skillNameMap is provided, only copy skills that are in the map
-  // (disabled skills are excluded from the map during collection)
-  if (skillNameMap) {
-    skillDirs = skillDirs.filter((e) => skillNameMap.has(e.name));
-  }
-
   // Determine if we should use symlinks for this client
   const useSymlinks = syncMode === 'symlink' && !isUniversalClient(client) && canonicalSkillsPath;
 
   // Process skill directories in parallel for better performance
-  const copyPromises = skillDirs.map(async (entry): Promise<CopyResult> => {
-    const skillSourcePath = join(sourceDir, entry.name);
+  const copyPromises = skillSources.map(async (skill): Promise<CopyResult> => {
     // Use resolved name from skillNameMap if available, otherwise use folder name
-    const resolvedName = skillNameMap?.get(entry.name) ?? entry.name;
+    const resolvedName = skillNameMap?.get(skill.name) ?? skill.name;
     const skillDestPath = join(destDir, resolvedName);
 
     if (dryRun) {
       return {
-        source: skillSourcePath,
+        source: skill.sourcePath,
         destination: skillDestPath,
         action: 'copied',
       };
@@ -307,23 +340,26 @@ export async function copySkills(
         };
       }
       // Symlink failed, fall back to copy
-      // Log warning? For now, just fall through to copy
     }
 
     try {
-      if (options.exclude && options.exclude.length > 0) {
-        await copyDirectoryWithExclusions(skillSourcePath, skillDestPath, pluginPath, options.exclude);
+      if (skill.isRootLevel) {
+        // Root-level: copy only the SKILL.md into a new skill directory
+        await mkdir(skillDestPath, { recursive: true });
+        await cp(join(skill.sourcePath, 'SKILL.md'), join(skillDestPath, 'SKILL.md'));
+      } else if (options.exclude && options.exclude.length > 0) {
+        await copyDirectoryWithExclusions(skill.sourcePath, skillDestPath, pluginPath, options.exclude);
       } else {
-        await cp(skillSourcePath, skillDestPath, { recursive: true });
+        await cp(skill.sourcePath, skillDestPath, { recursive: true });
       }
       return {
-        source: skillSourcePath,
+        source: skill.sourcePath,
         destination: skillDestPath,
         action: 'copied',
       };
     } catch (error) {
       return {
-        source: skillSourcePath,
+        source: skill.sourcePath,
         destination: skillDestPath,
         action: 'failed',
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -392,7 +428,21 @@ export async function collectPluginSkills(
         flatDirs.push({ name: entry.name, path: join(pluginPath, entry.name) });
       }
     }
-    candidateDirs = flatDirs;
+
+    if (flatDirs.length > 0) {
+      candidateDirs = flatDirs;
+    } else {
+      // Root-level single-skill layout: plugin/SKILL.md
+      const rootSkillMd = join(pluginPath, 'SKILL.md');
+      if (existsSync(rootSkillMd)) {
+        const content = await readFile(rootSkillMd, 'utf-8');
+        const metadata = parseSkillMetadata(content);
+        const skillName = metadata?.name ?? basename(pluginPath);
+        candidateDirs = [{ name: skillName, path: pluginPath }];
+      } else {
+        candidateDirs = [];
+      }
+    }
   }
 
   let filteredDirs: typeof candidateDirs;
