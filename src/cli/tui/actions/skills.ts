@@ -1,5 +1,5 @@
 import * as p from '@clack/prompts';
-import { getAllSkillsFromPlugins, type SkillInfo } from '../../../core/skills.js';
+import { getAllSkillsFromPlugins, discoverSkillNames, type SkillInfo } from '../../../core/skills.js';
 import {
   addDisabledSkill,
   removeDisabledSkill,
@@ -10,11 +10,16 @@ import {
   isUserConfigPath,
 } from '../../../core/user-workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
+import {
+  listMarketplaces,
+  listMarketplacePlugins,
+} from '../../../core/marketplace.js';
 import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
+import { installSelectedPlugin } from './plugins.js';
 
-const { multiselect } = p;
+const { multiselect, select } = p;
 
 interface ScopedSkill extends SkillInfo {
   scope: 'user' | 'project';
@@ -65,100 +70,246 @@ async function loadAllSkills(context: TuiContext): Promise<ScopedSkill[]> {
 }
 
 /**
+ * Marketplace skill info for display
+ */
+interface MarketplaceSkillPreview {
+  skillName: string;
+  pluginName: string;
+  marketplaceName: string;
+  pluginRef: string;
+  pluginDescription?: string | undefined;
+}
+
+/**
+ * Load skills available from all configured marketplaces.
+ * Scans each marketplace plugin's local directory for skills.
+ */
+async function loadMarketplaceSkills(cache?: TuiCache): Promise<MarketplaceSkillPreview[]> {
+  const previews: MarketplaceSkillPreview[] = [];
+
+  try {
+    const cachedMarketplaces = cache?.getMarketplaces();
+    const marketplaces = cachedMarketplaces ?? await listMarketplaces();
+    if (!cachedMarketplaces) cache?.setMarketplaces(marketplaces);
+
+    for (const marketplace of marketplaces) {
+      const cachedPlugins = cache?.getMarketplacePlugins(marketplace.name);
+      const result = cachedPlugins ?? await listMarketplacePlugins(marketplace.name);
+      if (!cachedPlugins) cache?.setMarketplacePlugins(marketplace.name, result);
+
+      for (const plugin of result.plugins) {
+        const skillNames = await discoverSkillNames(plugin.path);
+        for (const skillName of skillNames) {
+          const preview: MarketplaceSkillPreview = {
+            skillName,
+            pluginName: plugin.name,
+            marketplaceName: marketplace.name,
+            pluginRef: `${plugin.name}@${marketplace.name}`,
+          };
+          if (plugin.description) preview.pluginDescription = plugin.description;
+          previews.push(preview);
+        }
+      }
+    }
+  } catch {
+    // Marketplace unavailable — degrade gracefully
+  }
+
+  return previews;
+}
+
+/**
  * Skills — lets user toggle which skills are enabled/disabled via multiselect.
+ * When no skills are installed, shows marketplace skills for discovery.
  */
 export async function runSkills(context: TuiContext, cache?: TuiCache): Promise<void> {
   try {
     const skills = await loadAllSkills(context);
 
     if (skills.length === 0) {
-      p.note('No skills found. Install a plugin with skills first.', 'Skills');
+      // No skills installed — show marketplace skills for discovery
+      await runBrowseMarketplaceSkills(context, cache);
       return;
     }
 
-    // Build multiselect options grouped by plugin
-    const options = skills.map((s) => ({
-      label: `${s.name} (${s.pluginName}) [${s.scope}]`,
-      value: s.key,
-    }));
+    // Skills exist — show toggle + browse option
+    while (true) {
+      const action = await select({
+        message: 'Skills',
+        options: [
+          { label: 'Toggle installed skills', value: 'toggle' as const },
+          { label: 'Browse marketplace skills...', value: 'browse' as const },
+          { label: 'Back', value: 'back' as const },
+        ],
+      });
 
-    // Pre-select enabled skills (not disabled)
-    const initialValues = skills.filter((s) => !s.disabled).map((s) => s.key);
-
-    const selected = await multiselect({
-      message: 'Toggle skills (selected = enabled)',
-      options,
-      initialValues,
-      required: false,
-    });
-
-    if (p.isCancel(selected)) {
-      return;
-    }
-
-    const selectedSet = new Set(selected);
-
-    // Compute diff
-    const toDisable = skills.filter((s) => !s.disabled && !selectedSet.has(s.key));
-    const toEnable = skills.filter((s) => s.disabled && selectedSet.has(s.key));
-
-    if (toDisable.length === 0 && toEnable.length === 0) {
-      p.note('No changes made.', 'Skills');
-      return;
-    }
-
-    const s = p.spinner();
-    s.start('Updating skills...');
-
-    let changedProject = false;
-    let changedUser = false;
-
-    // Disable newly unchecked skills
-    for (const skill of toDisable) {
-      if (skill.scope === 'user') {
-        await addUserDisabledSkill(skill.skillKey);
-        changedUser = true;
-      } else if (context.workspacePath) {
-        await addDisabledSkill(skill.skillKey, context.workspacePath);
-        changedProject = true;
+      if (p.isCancel(action) || action === 'back') {
+        return;
       }
-    }
 
-    // Enable newly checked skills
-    for (const skill of toEnable) {
-      if (skill.scope === 'user') {
-        await removeUserDisabledSkill(skill.skillKey);
-        changedUser = true;
-      } else if (context.workspacePath) {
-        await removeDisabledSkill(skill.skillKey, context.workspacePath);
-        changedProject = true;
+      if (action === 'browse') {
+        await runBrowseMarketplaceSkills(context, cache);
+        continue;
       }
-    }
 
-    s.stop('Skills updated');
-
-    // Auto-sync affected scopes
-    const syncS = p.spinner();
-    syncS.start('Syncing...');
-    if (changedProject && context.workspacePath) {
-      await syncWorkspace(context.workspacePath);
+      // Toggle skills
+      await runToggleSkills(skills, context, cache);
+      return;
     }
-    if (changedUser) {
-      await syncUserWorkspace();
-    }
-    syncS.stop('Sync complete');
-    cache?.invalidate();
-
-    const changes: string[] = [];
-    for (const skill of toEnable) {
-      changes.push(`✓ Enabled: ${skill.name} (${skill.pluginName}) [${skill.scope}]`);
-    }
-    for (const skill of toDisable) {
-      changes.push(`✗ Disabled: ${skill.name} (${skill.pluginName}) [${skill.scope}]`);
-    }
-    p.note(changes.join('\n'), 'Updated');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     p.note(message, 'Error');
   }
+}
+
+/**
+ * Toggle installed skills via multiselect.
+ */
+async function runToggleSkills(
+  skills: ScopedSkill[],
+  context: TuiContext,
+  cache?: TuiCache,
+): Promise<void> {
+  // Build multiselect options grouped by plugin
+  const options = skills.map((s) => ({
+    label: `${s.name} (${s.pluginName}) [${s.scope}]`,
+    value: s.key,
+  }));
+
+  // Pre-select enabled skills (not disabled)
+  const initialValues = skills.filter((s) => !s.disabled).map((s) => s.key);
+
+  const selected = await multiselect({
+    message: 'Toggle skills (selected = enabled)',
+    options,
+    initialValues,
+    required: false,
+  });
+
+  if (p.isCancel(selected)) {
+    return;
+  }
+
+  const selectedSet = new Set(selected);
+
+  // Compute diff
+  const toDisable = skills.filter((s) => !s.disabled && !selectedSet.has(s.key));
+  const toEnable = skills.filter((s) => s.disabled && selectedSet.has(s.key));
+
+  if (toDisable.length === 0 && toEnable.length === 0) {
+    p.note('No changes made.', 'Skills');
+    return;
+  }
+
+  const s = p.spinner();
+  s.start('Updating skills...');
+
+  let changedProject = false;
+  let changedUser = false;
+
+  // Disable newly unchecked skills
+  for (const skill of toDisable) {
+    if (skill.scope === 'user') {
+      await addUserDisabledSkill(skill.skillKey);
+      changedUser = true;
+    } else if (context.workspacePath) {
+      await addDisabledSkill(skill.skillKey, context.workspacePath);
+      changedProject = true;
+    }
+  }
+
+  // Enable newly checked skills
+  for (const skill of toEnable) {
+    if (skill.scope === 'user') {
+      await removeUserDisabledSkill(skill.skillKey);
+      changedUser = true;
+    } else if (context.workspacePath) {
+      await removeDisabledSkill(skill.skillKey, context.workspacePath);
+      changedProject = true;
+    }
+  }
+
+  s.stop('Skills updated');
+
+  // Auto-sync affected scopes
+  const syncS = p.spinner();
+  syncS.start('Syncing...');
+  if (changedProject && context.workspacePath) {
+    await syncWorkspace(context.workspacePath);
+  }
+  if (changedUser) {
+    await syncUserWorkspace();
+  }
+  syncS.stop('Sync complete');
+  cache?.invalidate();
+
+  const changes: string[] = [];
+  for (const skill of toEnable) {
+    changes.push(`✓ Enabled: ${skill.name} (${skill.pluginName}) [${skill.scope}]`);
+  }
+  for (const skill of toDisable) {
+    changes.push(`✗ Disabled: ${skill.name} (${skill.pluginName}) [${skill.scope}]`);
+  }
+  p.note(changes.join('\n'), 'Updated');
+}
+
+/**
+ * Browse skills available from configured marketplaces.
+ * Shows a skill-centric view grouped by plugin. Selecting a skill installs its plugin.
+ */
+async function runBrowseMarketplaceSkills(
+  context: TuiContext,
+  cache?: TuiCache,
+): Promise<void> {
+  const s = p.spinner();
+  s.start('Loading marketplace skills...');
+  const marketplaceSkills = await loadMarketplaceSkills(cache);
+  s.stop('Marketplace skills loaded');
+
+  if (marketplaceSkills.length === 0) {
+    p.note(
+      'No skills found in configured marketplaces.\nUse "Manage marketplaces" to add one first.',
+      'Skills',
+    );
+    return;
+  }
+
+  // Group by plugin for display
+  const byPlugin = new Map<string, { ref: string; description?: string | undefined; skills: string[] }>();
+  for (const skill of marketplaceSkills) {
+    const existing = byPlugin.get(skill.pluginRef);
+    if (existing) {
+      existing.skills.push(skill.skillName);
+    } else {
+      const entry: { ref: string; description?: string | undefined; skills: string[] } = {
+        ref: skill.pluginRef,
+        skills: [skill.skillName],
+      };
+      if (skill.pluginDescription) entry.description = skill.pluginDescription;
+      byPlugin.set(skill.pluginRef, entry);
+    }
+  }
+
+  // Build select options — one per plugin, showing its skills
+  const options: Array<{ label: string; value: string }> = [];
+  for (const [pluginRef, data] of byPlugin) {
+    const skillList = data.skills.join(', ');
+    const desc = data.description ? ` - ${data.description}` : '';
+    options.push({
+      label: `${pluginRef}${desc}\n    Skills: ${skillList}`,
+      value: pluginRef,
+    });
+  }
+  options.push({ label: 'Back', value: '__back__' });
+
+  const selected = await select({
+    message: 'Select a plugin to install',
+    options,
+  });
+
+  if (p.isCancel(selected) || selected === '__back__') {
+    return;
+  }
+
+  await installSelectedPlugin(selected, context, cache);
 }

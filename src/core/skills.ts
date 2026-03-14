@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, basename, resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { getPluginSource, type WorkspaceConfig, type PluginSkillsConfig } from '../models/workspace-config.js';
@@ -190,4 +190,46 @@ export async function findSkillByName(
 ): Promise<SkillInfo[]> {
   const allSkills = await getAllSkillsFromPlugins(workspacePath);
   return allSkills.filter((s) => s.name === skillName);
+}
+
+/**
+ * Discover skill names from a plugin directory without workspace config.
+ * Used for marketplace plugin preview — shows what skills a plugin provides.
+ * @param pluginPath - Path to plugin directory
+ * @returns Array of skill names
+ */
+export async function discoverSkillNames(pluginPath: string): Promise<string[]> {
+  if (!existsSync(pluginPath)) return [];
+
+  const skillsDir = join(pluginPath, 'skills');
+  if (existsSync(skillsDir)) {
+    const entries = await readdir(skillsDir, { withFileTypes: true });
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  }
+
+  // Flat layout: subdirs with SKILL.md
+  const entries = await readdir(pluginPath, { withFileTypes: true });
+  const flatSkills: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (existsSync(join(pluginPath, entry.name, 'SKILL.md'))) {
+      flatSkills.push(entry.name);
+    }
+  }
+  if (flatSkills.length > 0) return flatSkills;
+
+  // Root-level SKILL.md
+  const rootSkillMd = join(pluginPath, 'SKILL.md');
+  if (existsSync(rootSkillMd)) {
+    try {
+      const content = await readFile(rootSkillMd, 'utf-8');
+      const { parseSkillMetadata } = await import('../validators/skill.js');
+      const metadata = parseSkillMetadata(content);
+      return [metadata?.name ?? basename(pluginPath)];
+    } catch {
+      return [basename(pluginPath)];
+    }
+  }
+
+  return [];
 }
