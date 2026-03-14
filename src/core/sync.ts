@@ -1032,6 +1032,13 @@ function buildPluginSyncPlans(
   const plans = plugins.map((plugin) => {
     const source = getPluginSource(plugin);
     const pluginClientTypes = getPluginClients(plugin) ?? workspaceClientTypes;
+
+    if (pluginClientTypes.length === 0) {
+      warnings.push(
+        `${source} has no clients configured and was not synced. Add clients to workspace.yaml or specify clients on the plugin entry.`,
+      );
+    }
+
     const effectiveClients = selected
       ? pluginClientTypes.filter((c) => selected.has(c))
       : pluginClientTypes;
