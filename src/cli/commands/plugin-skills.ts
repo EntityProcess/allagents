@@ -374,7 +374,7 @@ const addCmd = command({
           if (matches.length === 0) {
             const allSkills = await getAllSkillsFromPlugins(workspacePath);
             const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
-            const error = `Skill '${skill}' not found in plugin '${from}'. The plugin may not use the allagents skills/ directory structure (flat SKILL.md repos from the npx skills ecosystem are not yet supported). (see GitHub for details)\n\nAvailable skills: ${skillNames || 'none'}`;
+            const error = `Skill '${skill}' not found in plugin '${from}'.\n\nAvailable skills: ${skillNames || 'none'}\n\nTip: run \`allagents skills list\` to see all installed skills.`;
             if (isJsonMode()) {
               jsonOutput({ success: false, command: 'plugin skills add', error });
               process.exit(1);
