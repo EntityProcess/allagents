@@ -24,7 +24,7 @@ import {
 import { updatePlugin } from '../../../core/plugin.js';
 import { parseMarketplaceManifest } from '../../../utils/marketplace-manifest-parser.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
-import { getAllSkillsFromPlugins } from '../../../core/skills.js';
+import { getAllSkillsFromPlugins, discoverSkillNames } from '../../../core/skills.js';
 import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
@@ -87,7 +87,7 @@ async function getCachedMarketplacePlugins(
  * Shared helper: determine scope, install a plugin, sync, and show success.
  * Returns true if installed successfully, false if cancelled or failed.
  */
-async function installSelectedPlugin(
+export async function installSelectedPlugin(
   pluginRef: string,
   context: TuiContext,
   cache?: TuiCache,
@@ -558,16 +558,18 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
       return;
     }
 
-    // Collect plugins from all marketplaces
+    // Collect plugins from all marketplaces with skill preview
     const allPlugins: Array<{ label: string; value: string }> = [];
     for (const marketplace of marketplaces) {
       const result = await getCachedMarketplacePlugins(marketplace.name, cache);
       for (const plugin of result.plugins) {
-        const label = plugin.description
-          ? `${plugin.name} - ${plugin.description}`
-          : plugin.name;
+        const skillNames = await discoverSkillNames(plugin.path);
+        const desc = plugin.description ? ` - ${plugin.description}` : '';
+        const skillInfo = skillNames.length > 0
+          ? `\n    Skills: ${skillNames.join(', ')}`
+          : '';
         allPlugins.push({
-          label: `${label} (${marketplace.name})`,
+          label: `${plugin.name}${desc} (${marketplace.name})${skillInfo}`,
           value: `${plugin.name}@${marketplace.name}`,
         });
       }
