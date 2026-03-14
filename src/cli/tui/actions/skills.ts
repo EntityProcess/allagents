@@ -3,10 +3,14 @@ import { getAllSkillsFromPlugins, discoverSkillNames, type SkillInfo } from '../
 import {
   addDisabledSkill,
   removeDisabledSkill,
+  addEnabledSkill,
+  removeEnabledSkill,
 } from '../../../core/workspace-modify.js';
 import {
   addUserDisabledSkill,
   removeUserDisabledSkill,
+  addUserEnabledSkill,
+  removeUserEnabledSkill,
   isUserConfigPath,
 } from '../../../core/user-workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
@@ -209,24 +213,40 @@ async function runToggleSkills(
 
   // Disable newly unchecked skills
   for (const skill of toDisable) {
-    if (skill.scope === 'user') {
-      await addUserDisabledSkill(skill.skillKey);
-      changedUser = true;
-    } else if (context.workspacePath) {
-      await addDisabledSkill(skill.skillKey, context.workspacePath);
-      changedProject = true;
+    if (skill.pluginSkillsMode === 'allowlist') {
+      if (skill.scope === 'user') {
+        await removeUserEnabledSkill(skill.skillKey);
+      } else if (context.workspacePath) {
+        await removeEnabledSkill(skill.skillKey, context.workspacePath);
+      }
+    } else {
+      if (skill.scope === 'user') {
+        await addUserDisabledSkill(skill.skillKey);
+      } else if (context.workspacePath) {
+        await addDisabledSkill(skill.skillKey, context.workspacePath);
+      }
     }
+    if (skill.scope === 'user') changedUser = true;
+    else changedProject = true;
   }
 
   // Enable newly checked skills
   for (const skill of toEnable) {
-    if (skill.scope === 'user') {
-      await removeUserDisabledSkill(skill.skillKey);
-      changedUser = true;
-    } else if (context.workspacePath) {
-      await removeDisabledSkill(skill.skillKey, context.workspacePath);
-      changedProject = true;
+    if (skill.pluginSkillsMode === 'allowlist') {
+      if (skill.scope === 'user') {
+        await addUserEnabledSkill(skill.skillKey);
+      } else if (context.workspacePath) {
+        await addEnabledSkill(skill.skillKey, context.workspacePath);
+      }
+    } else {
+      if (skill.scope === 'user') {
+        await removeUserDisabledSkill(skill.skillKey);
+      } else if (context.workspacePath) {
+        await removeDisabledSkill(skill.skillKey, context.workspacePath);
+      }
     }
+    if (skill.scope === 'user') changedUser = true;
+    else changedProject = true;
   }
 
   s.stop('Skills updated');
