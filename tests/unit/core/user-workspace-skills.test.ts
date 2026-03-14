@@ -61,3 +61,90 @@ describe('user-scope disabledSkills helpers', () => {
     expect(skills).not.toContain('superpowers:brainstorming');
   });
 });
+
+describe('setUserPluginSkillsMode', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'allagents-user-test-'));
+    process.env.HOME = tmpDir;
+    await mkdir(join(tmpDir, '.allagents'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    process.env.HOME = originalHome;
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('converts blocklist to allowlist with enabled skill names', async () => {
+    const config = {
+      repositories: [],
+      plugins: [{ source: 'superpowers', skills: { exclude: ['brainstorming'] } }],
+      clients: ['copilot'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const { setUserPluginSkillsMode, getUserEnabledSkills, getUserDisabledSkills } = await import('../../../src/core/user-workspace.js');
+
+    const result = await setUserPluginSkillsMode('superpowers', 'allowlist', ['debugging', 'tdd']);
+    expect(result.success).toBe(true);
+
+    const enabled = await getUserEnabledSkills();
+    expect(enabled).toContain('superpowers:debugging');
+    expect(enabled).toContain('superpowers:tdd');
+
+    const disabled = await getUserDisabledSkills();
+    expect(disabled).toEqual([]);
+  });
+
+  it('converts allowlist to blocklist with disabled skill names', async () => {
+    const config = {
+      repositories: [],
+      plugins: [{ source: 'superpowers', skills: ['debugging', 'tdd'] }],
+      clients: ['copilot'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const { setUserPluginSkillsMode, getUserDisabledSkills } = await import('../../../src/core/user-workspace.js');
+
+    const result = await setUserPluginSkillsMode('superpowers', 'blocklist', ['brainstorming']);
+    expect(result.success).toBe(true);
+
+    const disabled = await getUserDisabledSkills();
+    expect(disabled).toContain('superpowers:brainstorming');
+  });
+
+  it('converts allowlist to blocklist with empty list clears skills field', async () => {
+    const config = {
+      repositories: [],
+      plugins: [{ source: 'superpowers', skills: ['debugging'] }],
+      clients: ['copilot'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const { setUserPluginSkillsMode, getUserDisabledSkills, getUserEnabledSkills } = await import('../../../src/core/user-workspace.js');
+
+    const result = await setUserPluginSkillsMode('superpowers', 'blocklist', []);
+    expect(result.success).toBe(true);
+
+    const disabled = await getUserDisabledSkills();
+    expect(disabled).toEqual([]);
+    const enabled = await getUserEnabledSkills();
+    expect(enabled).toEqual([]);
+  });
+
+  it('returns error for unknown plugin', async () => {
+    const config = {
+      repositories: [],
+      plugins: ['superpowers'],
+      clients: ['copilot'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const { setUserPluginSkillsMode } = await import('../../../src/core/user-workspace.js');
+
+    const result = await setUserPluginSkillsMode('nonexistent', 'allowlist', ['skill']);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not found');
+  });
+});
