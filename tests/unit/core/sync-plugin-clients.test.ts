@@ -141,4 +141,33 @@ syncMode: copy
     expect(partial.success).toBe(true);
     expect(partial.totalFailed).toBe(0);
   });
+
+  it('warns when a plugin has no effective clients due to empty workspace and plugin clients', async () => {
+    await createPlugin(testDir, 'plugin-with-clients', 'skill-a');
+    await createPlugin(testDir, 'plugin-without-clients', 'skill-b');
+
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      `
+repositories: []
+plugins:
+  - source: ./plugin-with-clients
+    clients:
+      - claude
+  - ./plugin-without-clients
+clients: []
+syncMode: copy
+`,
+      'utf-8',
+    );
+
+    const result = await syncWorkspace(testDir);
+    expect(result.success).toBe(true);
+    expect(existsSync(join(testDir, '.claude', 'skills', 'skill-a'))).toBe(true);
+    expect(existsSync(join(testDir, '.claude', 'skills', 'skill-b'))).toBe(false);
+    expect(result.warnings).toBeDefined();
+    expect(
+      result.warnings?.some((w) => w.includes('plugin-without-clients') && w.includes('no clients configured')),
+    ).toBe(true);
+  });
 });
