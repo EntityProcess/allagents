@@ -179,35 +179,26 @@ export function formatSyncSummary(
 }
 
 /**
- * Format deleted artifacts as display lines grouped by client.
- * Example: "  Deleted (Claude): skill 'old-skill', command 'deprecated-cmd'"
+ * Format deleted artifacts as a single deduplicated line.
+ * Artifacts are deduplicated by type:name across all clients since
+ * the user cares about what was removed, not which client directories
+ * contained it.
+ * Example: "  Deleted: skill 'old-skill', command 'deprecated-cmd'"
  */
 export function formatDeletedArtifacts(artifacts: DeletedArtifact[]): string[] {
-  const byClient = new Map<string, DeletedArtifact[]>();
-  for (const artifact of artifacts) {
-    const displayName = getDisplayName(artifact.client);
-    let list = byClient.get(displayName);
-    if (!list) {
-      list = [];
-      byClient.set(displayName, list);
-    }
-    list.push(artifact);
+  const seen = new Set<string>();
+  const unique: DeletedArtifact[] = [];
+  for (const a of artifacts) {
+    const key = `${a.type}:${a.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(a);
   }
 
-  return Array.from(byClient.entries()).map(([displayClient, items]) => {
-    // Deduplicate by type:name within each display group.
-    // Multiple internal clients (e.g. vscode + copilot) can map to the same
-    // display name, producing duplicate entries for the same artifact.
-    const seen = new Set<string>();
-    const unique = items.filter((a) => {
-      const key = `${a.type}:${a.name}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    const names = unique.map((a) => `${a.type} '${a.name}'`).join(', ');
-    return `  Deleted (${displayClient}): ${names}`;
-  });
+  if (unique.length === 0) return [];
+
+  const names = unique.map((a) => `${a.type} '${a.name}'`).join(', ');
+  return [`  Deleted: ${names}`];
 }
 
 /**
