@@ -78,4 +78,61 @@ describe('getAllSkillsFromPlugins', () => {
     // skill-b is NOT in the allowlist -> disabled (disabled: true)
     expect(skillB?.disabled).toBe(true);
   });
+
+  it('discovers root-level SKILL.md with frontmatter name', async () => {
+    const rootSkillPlugin = join(tmpDir, 'root-skill-plugin');
+    await mkdir(rootSkillPlugin, { recursive: true });
+    await writeFile(
+      join(rootSkillPlugin, 'SKILL.md'),
+      '---\nname: my-skill\ndescription: A test skill\n---\n# My Skill',
+    );
+
+    const config = {
+      repositories: [],
+      plugins: [rootSkillPlugin],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]!.name).toBe('my-skill');
+    expect(skills[0]!.pluginName).toBe('root-skill-plugin');
+    expect(skills[0]!.path).toBe(rootSkillPlugin);
+  });
+
+  it('falls back to directory name when root SKILL.md has no frontmatter name', async () => {
+    const rootSkillPlugin = join(tmpDir, 'fallback-name-plugin');
+    await mkdir(rootSkillPlugin, { recursive: true });
+    await writeFile(join(rootSkillPlugin, 'SKILL.md'), '# Just content, no frontmatter');
+
+    const config = {
+      repositories: [],
+      plugins: [rootSkillPlugin],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]!.name).toBe('fallback-name-plugin');
+  });
+
+  it('prefers flat layout over root-level SKILL.md', async () => {
+    const mixedPlugin = join(tmpDir, 'mixed-plugin');
+    await mkdir(join(mixedPlugin, 'sub-skill'), { recursive: true });
+    await writeFile(join(mixedPlugin, 'SKILL.md'), '---\nname: root\ndescription: root\n---\n');
+    await writeFile(join(mixedPlugin, 'sub-skill/SKILL.md'), '# Sub skill');
+
+    const config = {
+      repositories: [],
+      plugins: [mixedPlugin],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]!.name).toBe('sub-skill');
+  });
 });

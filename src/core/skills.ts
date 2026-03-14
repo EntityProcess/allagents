@@ -1,12 +1,13 @@
 import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, basename, resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { getPluginSource, type WorkspaceConfig, type PluginSkillsConfig } from '../models/workspace-config.js';
 import { fetchPlugin, getPluginName } from './plugin.js';
 import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
 import { isPluginSpec, resolvePluginSpecWithAutoRegister } from './marketplace.js';
+import { parseSkillMetadata } from '../validators/skill.js';
 
 /**
  * Information about a skill from an installed plugin
@@ -134,7 +135,21 @@ export async function getAllSkillsFromPlugins(
           flatSkills.push({ name: entry.name, skillPath: join(pluginPath, entry.name) });
         }
       }
-      skillEntries = flatSkills;
+
+      if (flatSkills.length > 0) {
+        skillEntries = flatSkills;
+      } else {
+        // Root-level single-skill layout: plugin/SKILL.md
+        const rootSkillMd = join(pluginPath, 'SKILL.md');
+        if (existsSync(rootSkillMd)) {
+          const skillContent = await readFile(rootSkillMd, 'utf-8');
+          const metadata = parseSkillMetadata(skillContent);
+          const skillName = metadata?.name ?? basename(pluginPath);
+          skillEntries = [{ name: skillName, skillPath: pluginPath }];
+        } else {
+          skillEntries = [];
+        }
+      }
     }
 
     const pluginSkillsMode: SkillInfo['pluginSkillsMode'] =
