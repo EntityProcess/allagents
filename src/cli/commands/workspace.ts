@@ -144,15 +144,11 @@ const syncCmd = command({
     dryRun: flag({ long: 'dry-run', short: 'n', description: 'Simulate sync without making changes' }),
     force: flag({ long: 'force', short: 'f', description: 'Overwrite existing MCP server entries that differ from plugin config' }),
     verbose: flag({ long: 'verbose', short: 'v', description: 'Show informational sync messages' }),
-    client: option({ type: optional(string), long: 'client', short: 'c', description: 'Sync only the specified client (e.g., opencode, claude)' }),
   },
-  handler: async ({ offline, dryRun, force, verbose, client }) => {
+  handler: async ({ offline, dryRun, force, verbose }) => {
     try {
       if (!isJsonMode() && dryRun) {
         console.log('Dry run mode - no changes will be made\n');
-      }
-      if (!isJsonMode() && client) {
-        console.log(`Syncing client: ${client}\n`);
       }
 
       const userConfigExists = !!(await getUserWorkspaceConfig());
@@ -189,7 +185,6 @@ const syncCmd = command({
         const projectResult = await syncWorkspace(process.cwd(), {
           offline,
           dryRun,
-          ...(client && { clients: [client] }),
         });
         combined = combined ? mergeSyncResults(combined, projectResult) : projectResult;
       }

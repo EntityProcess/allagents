@@ -220,8 +220,6 @@ export interface SyncOptions {
    * instead of the target workspace. If not provided, defaults to workspacePath.
    */
   workspaceSourceBase?: string;
-  /** Override which clients to sync. If provided, only these clients are synced instead of all configured clients. */
-  clients?: string[];
   /** Skip updating AGENTS.md and other generated agent files. Use for plugin-only updates. */
   skipAgentFiles?: boolean;
 }
@@ -459,7 +457,6 @@ export async function selectivePurgeWorkspace(
   workspacePath: string,
   state: SyncState | null,
   clients: ClientType[],
-  options?: { partialSync?: boolean },
 ): Promise<PurgePaths[]> {
   // First sync - no state, skip purge entirely (safe overlay)
   if (!state) {
@@ -474,11 +471,7 @@ export async function selectivePurgeWorkspace(
   // Include both current clients AND clients that were removed from config.
   // Removed clients must be purged to avoid orphaned files on disk when a user
   // removes a client from workspace.yaml (e.g., removes 'copilot' from clients list).
-  // However, during partial sync (--client flag), only purge the targeted clients
-  // to avoid removing files for clients that aren't being synced.
-  const clientsToProcess = options?.partialSync
-    ? clients
-    : [...new Set([...clients, ...previousClients])];
+  const clientsToProcess = [...new Set([...clients, ...previousClients])];
 
   for (const client of clientsToProcess) {
     const previousFiles = getPreviouslySyncedFiles(state, client);
@@ -1017,16 +1010,13 @@ async function validatePlugin(
 /**
  * Build plugin sync plans with effective clients per plugin.
  * Effective clients are plugin.clients when provided, otherwise workspace clients.
- * When a partial client filter is provided, it is applied after effective client resolution.
  */
 function buildPluginSyncPlans(
   plugins: PluginEntry[],
   clientEntries: ClientEntry[],
   scope: 'user' | 'project',
-  selectedClients?: ClientType[],
 ): { plans: PluginSyncPlan[]; warnings: string[] } {
   const warnings: string[] = [];
-  const selected = selectedClients ? new Set(selectedClients) : null;
   const workspaceClientTypes = getClientTypes(clientEntries);
 
   const plans = plugins.map((plugin) => {
@@ -1039,9 +1029,7 @@ function buildPluginSyncPlans(
       );
     }
 
-    const effectiveClients = selected
-      ? pluginClientTypes.filter((c) => selected.has(c))
-      : pluginClientTypes;
+    const effectiveClients = pluginClientTypes;
 
     // Split into file and native clients based on resolved install mode
     const fileClients: ClientType[] = [];
@@ -1359,25 +1347,6 @@ function failedSyncResult(error: string, overrides?: Partial<SyncResult>): SyncR
   };
 }
 
-function validateRequestedClients(
-  requestedClients: string[],
-  configClientTypes: ClientType[],
-  plugins: PluginEntry[],
-): string | null {
-  const availableClients = new Set<ClientType>(configClientTypes);
-  for (const plugin of plugins) {
-    for (const client of getPluginClients(plugin) ?? []) {
-      availableClients.add(client);
-    }
-  }
-  const invalidClients = requestedClients.filter(
-    (c) => !availableClients.has(c as ClientType),
-  );
-  if (invalidClients.length > 0) {
-    return `Client(s) not configured in workspace.yaml: ${invalidClients.join(', ')}\n  Configured clients: ${Array.from(availableClients).join(', ')}`;
-  }
-  return null;
-}
 
 function countCopyResults(
   pluginResults: PluginSyncResult[],
@@ -1598,8 +1567,6 @@ async function persistSyncState(
   pluginResults: PluginSyncResult[],
   workspaceFileResults: CopyResult[],
   syncClients: ClientType[],
-  previousState: SyncState | null,
-  options: SyncOptions,
   nativePluginsByClient: Map<ClientType, string[]>,
   nativeResult: NativeSyncResult | undefined,
   extra?: {
@@ -1617,15 +1584,6 @@ async function persistSyncState(
   const resolvedMappings = resolveClientMappings(syncClients, mappings);
   const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, syncClients, resolvedMappings);
 
-  // When syncing a subset of clients, merge with existing state for non-targeted clients
-  if (options.clients && previousState) {
-    for (const [client, files] of Object.entries(previousState.files)) {
-      if (!syncClients.includes(client as ClientType)) {
-        syncedFiles[client as ClientType] = files;
-      }
-    }
-  }
-
   // Build native plugin tracking per-client
   const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
   const installedSet = new Set(nativeResult?.pluginsInstalled ?? []);
@@ -1637,15 +1595,6 @@ async function persistSyncState(
       .filter((s): s is string => s !== null && installedSet.has(s));
     if (clientSpecs.length > 0) {
       nativePluginsState[client] = clientSpecs;
-    }
-  }
-
-  // Preserve native state for clients not in current sync
-  if (options.clients && previousState?.nativePlugins) {
-    for (const [client, plugins] of Object.entries(previousState.nativePlugins)) {
-      if (!syncClients.includes(client as ClientType)) {
-        nativePluginsState[client as ClientType] = plugins;
-      }
     }
   }
 
@@ -1714,32 +1663,12 @@ export async function syncWorkspace(
   // creation and WORKSPACE-RULES injection (same pattern as initWorkspace)
   const hasRepositories = (config.repositories?.length ?? 0) > 0;
 
-  // Extract ClientType[] from potentially mixed ClientEntry[] array
-  const configClientTypes = getClientTypes(config.clients);
-
-  // Filter clients if override provided
-  const workspaceClients = options.clients
-    ? config.clients.filter((c) => {
-        const name = typeof c === 'string' ? c : c.name;
-        return options.clients?.includes(name);
-      })
-    : config.clients;
-
-  // Validate requested clients are in config
-  if (options.clients) {
-    const clientError = validateRequestedClients(options.clients, configClientTypes, config.plugins);
-    if (clientError) {
-      return failedSyncResult(clientError);
-    }
-  }
-
-  const selectedClients = options.clients as ClientType[] | undefined;
   const { plans: pluginPlans, warnings: planWarnings } = buildPluginSyncPlans(
     config.plugins,
-    config.clients,      // ClientEntry[] now
+    config.clients,
     'project',
-    selectedClients,
   );
+  const workspaceClients = config.clients;
   const filteredPlans = pluginPlans.filter((plan) => plan.clients.length > 0 || plan.nativeClients.length > 0);
   const syncClients = collectSyncClients(workspaceClients, filteredPlans);
 
@@ -1820,9 +1749,7 @@ export async function syncWorkspace(
 
   // Step 3: Selective purge - only remove files we previously synced (skip in dry-run mode)
   if (!dryRun) {
-    await selectivePurgeWorkspace(workspacePath, previousState, syncClients, {
-      partialSync: !!options.clients,
-    });
+    await selectivePurgeWorkspace(workspacePath, previousState, syncClients);
   }
 
   // Step 3b: Two-pass skill name resolution
@@ -1959,7 +1886,7 @@ export async function syncWorkspace(
   if (!dryRun) {
     await persistSyncState(
       workspacePath, pluginResults, workspaceFileResults, syncClients,
-      previousState, options, nativePluginsByClient, nativeResult,
+      nativePluginsByClient, nativeResult,
       vscodeState ? { vscodeState } : undefined,
     );
   }
@@ -2103,7 +2030,7 @@ export async function syncUserWorkspace(
     const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
     await persistSyncState(
       homeDir, pluginResults, [], syncClients,
-      previousState, {}, nativePluginsByClient, nativeResult,
+      nativePluginsByClient, nativeResult,
       {
         clientMappings: USER_CLIENT_MAPPINGS,
         ...(Object.keys(mcpResults).length > 0 && {
