@@ -117,4 +117,38 @@ describe('computeDeletedArtifacts', () => {
     const result = computeDeletedArtifacts(previousState, newStatePaths, ['claude'], CLIENT_MAPPINGS);
     expect(result).toEqual([]);
   });
+
+  it('excludes skills that are available in installed plugins but just disabled', () => {
+    const previousState = makeState({
+      claude: [
+        '.claude/skills/enabled-skill/',
+        '.claude/skills/disabled-skill/',
+        '.claude/commands/old-cmd.md',
+      ],
+    });
+    const newStatePaths = {
+      claude: ['.claude/skills/enabled-skill/'],
+    };
+    // 'disabled-skill' still exists in the plugin, just not synced
+    const availableSkillNames = new Set(['enabled-skill', 'disabled-skill']);
+    const result = computeDeletedArtifacts(
+      previousState, newStatePaths, ['claude'], CLIENT_MAPPINGS, availableSkillNames,
+    );
+    // disabled-skill should NOT appear as deleted, but old-cmd should
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({ client: 'claude', type: 'command', name: 'old-cmd' });
+  });
+
+  it('reports skills as deleted when they are not in availableSkillNames (plugin uninstalled)', () => {
+    const previousState = makeState({
+      claude: ['.claude/skills/removed-skill/'],
+    });
+    const newStatePaths = { claude: [] };
+    // Empty set = no plugins provide this skill anymore
+    const availableSkillNames = new Set<string>();
+    const result = computeDeletedArtifacts(
+      previousState, newStatePaths, ['claude'], CLIENT_MAPPINGS, availableSkillNames,
+    );
+    expect(result).toEqual([{ client: 'claude', type: 'skill', name: 'removed-skill' }]);
+  });
 });

@@ -310,42 +310,40 @@ describe('formatDeletedArtifacts', () => {
       { client: 'claude', type: 'skill', name: 'browser-automation' },
     ];
     expect(formatDeletedArtifacts(artifacts)).toEqual([
-      "  Deleted (claude): skill 'browser-automation'",
+      "  Deleted: skill 'browser-automation'",
     ]);
   });
 
-  test('formats multiple deleted artifacts for same client', () => {
+  test('formats multiple deleted artifacts', () => {
     const artifacts: DeletedArtifact[] = [
       { client: 'claude', type: 'skill', name: 'old-skill' },
       { client: 'claude', type: 'command', name: 'deprecated-cmd' },
     ];
     const lines = formatDeletedArtifacts(artifacts);
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toBe("  Deleted (claude): skill 'old-skill', command 'deprecated-cmd'");
+    expect(lines[0]).toBe("  Deleted: skill 'old-skill', command 'deprecated-cmd'");
   });
 
-  test('formats deleted artifacts for multiple clients', () => {
+  test('deduplicates same artifact across different clients', () => {
     const artifacts: DeletedArtifact[] = [
-      { client: 'claude', type: 'skill', name: 'skill-a' },
-      { client: 'copilot', type: 'skill', name: 'skill-b' },
-    ];
-    const lines = formatDeletedArtifacts(artifacts);
-    expect(lines).toHaveLength(2);
-    expect(lines).toContain("  Deleted (claude): skill 'skill-a'");
-    expect(lines).toContain("  Deleted (copilot): skill 'skill-b'");
-  });
-
-  test('deduplicates artifacts when multiple internal clients map to the same display name', () => {
-    // vscode and copilot both display as "copilot"
-    const artifacts: DeletedArtifact[] = [
-      { client: 'vscode', type: 'skill', name: 'my-skill' },
+      { client: 'claude', type: 'skill', name: 'my-skill' },
       { client: 'copilot', type: 'skill', name: 'my-skill' },
-      { client: 'vscode', type: 'command', name: 'my-cmd' },
-      { client: 'copilot', type: 'command', name: 'my-cmd' },
+      { client: 'universal', type: 'skill', name: 'my-skill' },
     ];
     const lines = formatDeletedArtifacts(artifacts);
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toBe("  Deleted (copilot): skill 'my-skill', command 'my-cmd'");
+    expect(lines[0]).toBe("  Deleted: skill 'my-skill'");
+  });
+
+  test('shows distinct artifacts from multiple clients without duplication', () => {
+    const artifacts: DeletedArtifact[] = [
+      { client: 'claude', type: 'skill', name: 'skill-a' },
+      { client: 'copilot', type: 'skill', name: 'skill-a' },
+      { client: 'claude', type: 'command', name: 'cmd-b' },
+    ];
+    const lines = formatDeletedArtifacts(artifacts);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe("  Deleted: skill 'skill-a', command 'cmd-b'");
   });
 });
 
@@ -364,7 +362,7 @@ describe('formatSyncSummary with deletedArtifacts', () => {
     };
 
     const lines = formatSyncSummary(result);
-    expect(lines).toContain("  Deleted (claude): skill 'removed-skill'");
+    expect(lines).toContain("  Deleted: skill 'removed-skill'");
   });
 
   test('does not show deleted section when deletedArtifacts is empty', () => {

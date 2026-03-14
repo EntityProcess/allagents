@@ -879,12 +879,16 @@ function classifyDeletedPath(
  *
  * An artifact is considered deleted when it existed in the previous state but
  * is not present in the new state (i.e. no plugin re-provided it).
+ *
+ * Skills that are still available in installed plugins but just not synced
+ * (disabled via --skill) are excluded — they are not truly deleted.
  */
 export function computeDeletedArtifacts(
   previousState: SyncState | null,
   newStatePaths: Partial<Record<ClientType, string[]>>,
   clients: ClientType[],
   clientMappings: Record<string, ClientMapping>,
+  availableSkillNames?: Set<string>,
 ): DeletedArtifact[] {
   if (!previousState) return [];
 
@@ -903,6 +907,9 @@ export function computeDeletedArtifacts(
       const artifact = classifyDeletedPath(path, client, mapping);
       if (!artifact) continue;
 
+      // Skip skills that still exist in installed plugins but are just disabled
+      if (artifact.type === 'skill' && availableSkillNames?.has(artifact.name)) continue;
+
       const key = `${client}:${artifact.type}:${artifact.name}`;
       if (!seen.has(key)) {
         seen.add(key);
@@ -912,6 +919,24 @@ export function computeDeletedArtifacts(
   }
 
   return deleted;
+}
+
+/**
+ * Collect all skill folder names from installed plugins, regardless of
+ * enabled/disabled state. Used by computeDeletedArtifacts to distinguish
+ * truly deleted skills from ones that are just disabled.
+ */
+async function collectAvailableSkillNames(
+  validPlugins: ValidatedPlugin[],
+): Promise<Set<string>> {
+  const names = new Set<string>();
+  for (const plugin of validPlugins) {
+    const skills = await collectPluginSkills(plugin.resolved, plugin.plugin);
+    for (const skill of skills) {
+      names.add(skill.folderName);
+    }
+  }
+  return names;
 }
 
 
@@ -1876,10 +1901,13 @@ export async function syncWorkspace(
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
 
   // Compute deleted artifacts: compare previous state vs what was just synced
+  // Collect all skill names from installed plugins (including disabled) so that
+  // skills that are still available but just not synced are not reported as deleted.
+  const availableSkillNames = await collectAvailableSkillNames(validPlugins);
   const allCopyResultsForState = [...pluginResults.flatMap((r) => r.copyResults), ...workspaceFileResults];
   const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
   const newStatePaths = collectSyncedPaths(allCopyResultsForState, workspacePath, syncClients, resolvedMappings);
-  const deletedArtifacts = computeDeletedArtifacts(previousState, newStatePaths, syncClients, resolvedMappings);
+  const deletedArtifacts = computeDeletedArtifacts(previousState, newStatePaths, syncClients, resolvedMappings, availableSkillNames);
 
   // Persist sync state (skip in dry-run mode)
   const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
@@ -2020,10 +2048,11 @@ export async function syncUserWorkspace(
   );
 
   // Compute deleted artifacts: compare previous state vs what was just synced
+  const availableUserSkillNames = await collectAvailableSkillNames(validPlugins);
   const allCopyResultsForState = pluginResults.flatMap((r) => r.copyResults);
   const resolvedUserMappings = resolveClientMappings(syncClients, USER_CLIENT_MAPPINGS);
   const newStatePaths = collectSyncedPaths(allCopyResultsForState, homeDir, syncClients, resolvedUserMappings);
-  const deletedArtifacts = computeDeletedArtifacts(previousState, newStatePaths, syncClients, resolvedUserMappings);
+  const deletedArtifacts = computeDeletedArtifacts(previousState, newStatePaths, syncClients, resolvedUserMappings, availableUserSkillNames);
 
   // Save sync state (including MCP servers and native plugins)
   if (!dryRun) {
