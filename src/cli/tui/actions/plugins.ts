@@ -1,10 +1,13 @@
 import * as p from '@clack/prompts';
-import { addPlugin, removePlugin, addDisabledSkill, removeDisabledSkill } from '../../../core/workspace-modify.js';
+import { addPlugin, removePlugin, addDisabledSkill, removeDisabledSkill, addEnabledSkill, removeEnabledSkill, setPluginSkillsMode } from '../../../core/workspace-modify.js';
 import {
   addUserPlugin,
   removeUserPlugin,
   addUserDisabledSkill,
   removeUserDisabledSkill,
+  addUserEnabledSkill,
+  removeUserEnabledSkill,
+  setUserPluginSkillsMode,
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
   getUserPluginsForMarketplace,
@@ -355,6 +358,26 @@ export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise
 }
 
 /**
+ * Determine the current skills mode for a plugin.
+ * Returns 'allowlist' if the plugin uses an explicit skill list,
+ * or 'blocklist' if it uses exclude or has no skills config.
+ */
+async function getPluginSkillsMode(
+  pluginSource: string,
+  scope: 'project' | 'user',
+  workspacePath: string,
+): Promise<'allowlist' | 'blocklist'> {
+  const effectivePath = scope === 'user' ? getHomeDir() : workspacePath;
+  const allSkills = await getAllSkillsFromPlugins(effectivePath);
+  const pluginSkills = allSkills.filter((s) => s.pluginSource === pluginSource);
+  const first = pluginSkills[0];
+  if (first && first.pluginSkillsMode === 'allowlist') {
+    return 'allowlist';
+  }
+  return 'blocklist';
+}
+
+/**
  * Plugin detail screen.
  * Shows actions for a specific installed plugin: browse skills, remove.
  */
@@ -367,10 +390,17 @@ async function runPluginDetail(
   const pluginSource = pluginKey.replace(/^(project|user):/, '');
 
   while (true) {
+    const workspacePath = context.workspacePath ?? process.cwd();
+    const currentMode = await getPluginSkillsMode(pluginSource, scope, workspacePath);
+    const autoEnableLabel = currentMode === 'allowlist'
+      ? 'Auto-enable new skills: OFF'
+      : 'Auto-enable new skills: ON';
+
     const action = await select({
       message: `Plugin: ${pluginSource} [${scope}]`,
       options: [
         { label: 'Browse skills', value: 'browse' as const },
+        { label: autoEnableLabel, value: 'toggle_auto_enable' as const },
         { label: 'Update', value: 'update' as const },
         { label: 'Remove', value: 'remove' as const },
         { label: 'Back', value: 'back' as const },
@@ -383,6 +413,64 @@ async function runPluginDetail(
 
     if (action === 'browse') {
       await runBrowsePluginSkills(pluginSource, scope, context, cache);
+      continue;
+    }
+
+    if (action === 'toggle_auto_enable') {
+      const effectivePath = scope === 'user' ? getHomeDir() : workspacePath;
+      const allSkills = await getAllSkillsFromPlugins(effectivePath);
+      const pluginSkills = allSkills.filter((s) => s.pluginSource === pluginSource);
+
+      const firstSkill = pluginSkills[0];
+      if (!firstSkill) {
+        p.note('No skills found in this plugin.', 'Skills');
+        continue;
+      }
+
+      const pluginName = firstSkill.pluginName;
+      const s = p.spinner();
+
+      if (currentMode === 'allowlist') {
+        // Switching to blocklist (OFF → ON): collect currently disabled skills
+        const disabledNames = pluginSkills.filter((sk) => sk.disabled).map((sk) => sk.name);
+        s.start('Switching to auto-enable...');
+        const result = scope === 'user'
+          ? await setUserPluginSkillsMode(pluginName, 'blocklist', disabledNames)
+          : await setPluginSkillsMode(pluginName, 'blocklist', disabledNames, workspacePath);
+        if (!result.success) {
+          s.stop('Failed');
+          p.note(result.error ?? 'Unknown error', 'Error');
+          continue;
+        }
+      } else {
+        // Switching to allowlist (ON → OFF): collect currently enabled skills
+        const enabledNames = pluginSkills.filter((sk) => !sk.disabled).map((sk) => sk.name);
+        s.start('Switching to manual approval...');
+        const result = scope === 'user'
+          ? await setUserPluginSkillsMode(pluginName, 'allowlist', enabledNames)
+          : await setPluginSkillsMode(pluginName, 'allowlist', enabledNames, workspacePath);
+        if (!result.success) {
+          s.stop('Failed');
+          p.note(result.error ?? 'Unknown error', 'Error');
+          continue;
+        }
+      }
+
+      s.stop('Mode updated');
+
+      // Sync
+      const syncS = p.spinner();
+      syncS.start('Syncing...');
+      if (scope === 'project' && context.workspacePath) {
+        await syncWorkspace(context.workspacePath);
+      } else {
+        await syncUserWorkspace();
+      }
+      syncS.stop('Sync complete');
+      cache?.invalidate();
+
+      const newMode = currentMode === 'allowlist' ? 'ON' : 'OFF';
+      p.note(`Auto-enable new skills: ${newMode}`, 'Updated');
       continue;
     }
 
@@ -442,7 +530,7 @@ async function runPluginDetail(
  * Browse skills from a specific plugin.
  * Shows all skills from the plugin with their status (enabled/disabled).
  */
-async function runBrowsePluginSkills(
+export async function runBrowsePluginSkills(
   pluginSource: string,
   scope: 'project' | 'user',
   context: TuiContext,
@@ -497,20 +585,36 @@ async function runBrowsePluginSkills(
     // Disable newly unchecked skills
     for (const skill of toDisable) {
       const skillKey = `${skill.pluginName}:${skill.name}`;
-      if (scope === 'user') {
-        await addUserDisabledSkill(skillKey);
-      } else if (context.workspacePath) {
-        await addDisabledSkill(skillKey, context.workspacePath);
+      if (skill.pluginSkillsMode === 'allowlist') {
+        if (scope === 'user') {
+          await removeUserEnabledSkill(skillKey);
+        } else if (context.workspacePath) {
+          await removeEnabledSkill(skillKey, context.workspacePath);
+        }
+      } else {
+        if (scope === 'user') {
+          await addUserDisabledSkill(skillKey);
+        } else if (context.workspacePath) {
+          await addDisabledSkill(skillKey, context.workspacePath);
+        }
       }
     }
 
     // Enable newly checked skills
     for (const skill of toEnable) {
       const skillKey = `${skill.pluginName}:${skill.name}`;
-      if (scope === 'user') {
-        await removeUserDisabledSkill(skillKey);
-      } else if (context.workspacePath) {
-        await removeDisabledSkill(skillKey, context.workspacePath);
+      if (skill.pluginSkillsMode === 'allowlist') {
+        if (scope === 'user') {
+          await addUserEnabledSkill(skillKey);
+        } else if (context.workspacePath) {
+          await addEnabledSkill(skillKey, context.workspacePath);
+        }
+      } else {
+        if (scope === 'user') {
+          await removeUserDisabledSkill(skillKey);
+        } else if (context.workspacePath) {
+          await removeDisabledSkill(skillKey, context.workspacePath);
+        }
       }
     }
 

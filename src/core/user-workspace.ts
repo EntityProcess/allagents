@@ -710,6 +710,54 @@ export async function removeUserEnabledSkill(
 }
 
 /**
+ * Set the skills mode for a plugin entry in user workspace config.
+ * 'allowlist' sets `skills = [skillNames]` (only listed skills enabled; empty array = all disabled).
+ * 'blocklist' sets `skills = { exclude: [skillNames] }` or `undefined` if empty (= all enabled).
+ * @param pluginName - Plugin name to modify
+ * @param mode - Target mode: 'allowlist' or 'blocklist'
+ * @param skillNames - For allowlist: enabled skill names. For blocklist: disabled skill names.
+ */
+export async function setUserPluginSkillsMode(
+  pluginName: string,
+  mode: 'allowlist' | 'blocklist',
+  skillNames: string[],
+): Promise<ModifyResult> {
+  await ensureUserWorkspace();
+  const configPath = getUserWorkspaceConfigPath();
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+
+    const index = findPluginEntryByName(config, pluginName);
+    if (index === -1) {
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
+    }
+
+    const entry = ensureObjectPluginEntry(config, index);
+
+    if (mode === 'allowlist') {
+      // Always set the array to preserve allowlist mode, even if empty
+      entry.skills = [...skillNames];
+    } else {
+      // For blocklist, clear the field if no exclusions (= all enabled)
+      entry.skills = skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
+    }
+
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
  * Scope where a plugin is installed
  */
 export type PluginScope = 'user' | 'project';

@@ -11,6 +11,7 @@ import {
   removeEnabledSkill,
   getEnabledSkills,
   removePlugin,
+  setPluginSkillsMode,
 } from '../../../src/core/workspace-modify.js';
 
 describe('disabledSkills helpers', () => {
@@ -275,5 +276,119 @@ describe('enabledSkills helpers', () => {
       const skills = await getEnabledSkills(tmpDir);
       expect(skills).toEqual([]);
     });
+  });
+});
+
+describe('setPluginSkillsMode', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'allagents-test-'));
+    await mkdir(join(tmpDir, '.allagents'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('converts blocklist to allowlist with enabled skill names', async () => {
+    const config = {
+      repositories: [],
+      plugins: [{ source: 'superpowers', skills: { exclude: ['brainstorming'] } }],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const result = await setPluginSkillsMode('superpowers', 'allowlist', ['debugging', 'tdd'], tmpDir);
+    expect(result.success).toBe(true);
+
+    const enabled = await getEnabledSkills(tmpDir);
+    expect(enabled).toContain('superpowers:debugging');
+    expect(enabled).toContain('superpowers:tdd');
+    expect(enabled).not.toContain('superpowers:brainstorming');
+
+    const disabled = await getDisabledSkills(tmpDir);
+    expect(disabled).toEqual([]);
+  });
+
+  it('converts allowlist to blocklist with disabled skill names', async () => {
+    const config = {
+      repositories: [],
+      plugins: [{ source: 'superpowers', skills: ['debugging', 'tdd'] }],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const result = await setPluginSkillsMode('superpowers', 'blocklist', ['brainstorming'], tmpDir);
+    expect(result.success).toBe(true);
+
+    const disabled = await getDisabledSkills(tmpDir);
+    expect(disabled).toContain('superpowers:brainstorming');
+
+    const enabled = await getEnabledSkills(tmpDir);
+    expect(enabled).toEqual([]);
+  });
+
+  it('converts no-config to allowlist', async () => {
+    const config = {
+      repositories: [],
+      plugins: ['superpowers'],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const result = await setPluginSkillsMode('superpowers', 'allowlist', ['debugging'], tmpDir);
+    expect(result.success).toBe(true);
+
+    const enabled = await getEnabledSkills(tmpDir);
+    expect(enabled).toContain('superpowers:debugging');
+  });
+
+  it('converts allowlist to blocklist with empty disabled list clears skills field', async () => {
+    const config = {
+      repositories: [],
+      plugins: [{ source: 'superpowers', skills: ['debugging', 'tdd'] }],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const result = await setPluginSkillsMode('superpowers', 'blocklist', [], tmpDir);
+    expect(result.success).toBe(true);
+
+    const disabled = await getDisabledSkills(tmpDir);
+    expect(disabled).toEqual([]);
+    const enabled = await getEnabledSkills(tmpDir);
+    expect(enabled).toEqual([]);
+  });
+
+  it('preserves allowlist mode with empty skill list', async () => {
+    const config = {
+      repositories: [],
+      plugins: [{ source: 'superpowers', skills: ['debugging'] }],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const result = await setPluginSkillsMode('superpowers', 'allowlist', [], tmpDir);
+    expect(result.success).toBe(true);
+
+    const enabled = await getEnabledSkills(tmpDir);
+    expect(enabled).toEqual([]);
+
+    const addResult = await addEnabledSkill('superpowers:debugging', tmpDir);
+    expect(addResult.success).toBe(true);
+  });
+
+  it('returns error for unknown plugin', async () => {
+    const config = {
+      repositories: [],
+      plugins: ['superpowers'],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const result = await setPluginSkillsMode('nonexistent', 'allowlist', ['skill'], tmpDir);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not found');
   });
 });
