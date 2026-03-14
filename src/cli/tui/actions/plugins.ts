@@ -528,7 +528,7 @@ async function runPluginDetail(
  * Browse skills from a specific plugin.
  * Shows all skills from the plugin with their status (enabled/disabled).
  */
-async function runBrowsePluginSkills(
+export async function runBrowsePluginSkills(
   pluginSource: string,
   scope: 'project' | 'user',
   context: TuiContext,
@@ -583,20 +583,36 @@ async function runBrowsePluginSkills(
     // Disable newly unchecked skills
     for (const skill of toDisable) {
       const skillKey = `${skill.pluginName}:${skill.name}`;
-      if (scope === 'user') {
-        await addUserDisabledSkill(skillKey);
-      } else if (context.workspacePath) {
-        await addDisabledSkill(skillKey, context.workspacePath);
+      if (skill.pluginSkillsMode === 'allowlist') {
+        if (scope === 'user') {
+          await removeUserEnabledSkill(skillKey);
+        } else if (context.workspacePath) {
+          await removeEnabledSkill(skillKey, context.workspacePath);
+        }
+      } else {
+        if (scope === 'user') {
+          await addUserDisabledSkill(skillKey);
+        } else if (context.workspacePath) {
+          await addDisabledSkill(skillKey, context.workspacePath);
+        }
       }
     }
 
     // Enable newly checked skills
     for (const skill of toEnable) {
       const skillKey = `${skill.pluginName}:${skill.name}`;
-      if (scope === 'user') {
-        await removeUserDisabledSkill(skillKey);
-      } else if (context.workspacePath) {
-        await removeDisabledSkill(skillKey, context.workspacePath);
+      if (skill.pluginSkillsMode === 'allowlist') {
+        if (scope === 'user') {
+          await addUserEnabledSkill(skillKey);
+        } else if (context.workspacePath) {
+          await addEnabledSkill(skillKey, context.workspacePath);
+        }
+      } else {
+        if (scope === 'user') {
+          await removeUserDisabledSkill(skillKey);
+        } else if (context.workspacePath) {
+          await removeDisabledSkill(skillKey, context.workspacePath);
+        }
       }
     }
 
