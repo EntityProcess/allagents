@@ -334,6 +334,19 @@ describe('formatDeletedArtifacts', () => {
     expect(lines).toContain("  Deleted (claude): skill 'skill-a'");
     expect(lines).toContain("  Deleted (copilot): skill 'skill-b'");
   });
+
+  test('deduplicates artifacts when multiple internal clients map to the same display name', () => {
+    // vscode and copilot both display as "copilot"
+    const artifacts: DeletedArtifact[] = [
+      { client: 'vscode', type: 'skill', name: 'my-skill' },
+      { client: 'copilot', type: 'skill', name: 'my-skill' },
+      { client: 'vscode', type: 'command', name: 'my-cmd' },
+      { client: 'copilot', type: 'command', name: 'my-cmd' },
+    ];
+    const lines = formatDeletedArtifacts(artifacts);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe("  Deleted (copilot): skill 'my-skill', command 'my-cmd'");
+  });
 });
 
 describe('formatSyncSummary with deletedArtifacts', () => {
