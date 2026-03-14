@@ -44,11 +44,11 @@ CLI tool for managing multi-repo AI agent workspaces with plugin synchronization
 ## Installation
 
 ```bash
-# Using bun
-bun install -g allagents
+# Using npm
+npm install -g allagents
 
-# Or run directly
-bunx allagents
+# Or run directly without installing
+npx allagents
 ```
 
 ## Quick Start
