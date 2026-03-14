@@ -370,7 +370,8 @@ async function getPluginSkillsMode(
   const effectivePath = scope === 'user' ? getHomeDir() : workspacePath;
   const allSkills = await getAllSkillsFromPlugins(effectivePath);
   const pluginSkills = allSkills.filter((s) => s.pluginSource === pluginSource);
-  if (pluginSkills.length > 0 && pluginSkills[0].pluginSkillsMode === 'allowlist') {
+  const first = pluginSkills[0];
+  if (first && first.pluginSkillsMode === 'allowlist') {
     return 'allowlist';
   }
   return 'blocklist';
@@ -420,12 +421,13 @@ async function runPluginDetail(
       const allSkills = await getAllSkillsFromPlugins(effectivePath);
       const pluginSkills = allSkills.filter((s) => s.pluginSource === pluginSource);
 
-      if (pluginSkills.length === 0) {
+      const firstSkill = pluginSkills[0];
+      if (!firstSkill) {
         p.note('No skills found in this plugin.', 'Skills');
         continue;
       }
 
-      const pluginName = pluginSkills[0].pluginName;
+      const pluginName = firstSkill.pluginName;
       const s = p.spinner();
 
       if (currentMode === 'allowlist') {
