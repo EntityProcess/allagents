@@ -5,6 +5,7 @@ import {
   removeDisabledSkill,
   addEnabledSkill,
   removeEnabledSkill,
+  hasPlugin,
 } from '../../../core/workspace-modify.js';
 import {
   addUserDisabledSkill,
@@ -12,6 +13,7 @@ import {
   addUserEnabledSkill,
   removeUserEnabledSkill,
   isUserConfigPath,
+  hasUserPlugin,
 } from '../../../core/user-workspace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
 import {
@@ -21,7 +23,7 @@ import {
 import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
-import { installSelectedPlugin } from './plugins.js';
+import { installSelectedPlugin, runBrowsePluginSkills } from './plugins.js';
 
 const { multiselect, select } = p;
 
@@ -323,7 +325,7 @@ async function runBrowseMarketplaceSkills(
   options.push({ label: 'Back', value: '__back__' });
 
   const selected = await select({
-    message: 'Select a plugin to install',
+    message: 'Select a plugin',
     options,
   });
 
@@ -331,5 +333,24 @@ async function runBrowseMarketplaceSkills(
     return;
   }
 
-  await installSelectedPlugin(selected, context, cache);
+  // Check if plugin is already installed in either scope
+  const workspacePath = context.workspacePath ?? process.cwd();
+  const isInstalledProject = context.workspacePath ? await hasPlugin(selected, workspacePath) : false;
+  const isInstalledUser = await hasUserPlugin(selected);
+
+  if (isInstalledProject || isInstalledUser) {
+    // Plugin already installed — go straight to skill toggle
+    const scope = isInstalledUser ? 'user' : 'project';
+    await runBrowsePluginSkills(selected, scope, context, cache);
+    return;
+  }
+
+  // Not installed — install first, then show skill toggle
+  const installed = await installSelectedPlugin(selected, context, cache);
+  if (installed) {
+    // Determine which scope it was installed to by checking again
+    const nowInstalledUser = await hasUserPlugin(selected);
+    const scope = nowInstalledUser ? 'user' : 'project';
+    await runBrowsePluginSkills(selected, scope, context, cache);
+  }
 }
