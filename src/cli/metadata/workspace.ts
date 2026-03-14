@@ -38,7 +38,6 @@ export const syncMeta: AgentCommandMeta = {
   examples: [
     'allagents workspace sync',
     'allagents workspace sync --dry-run',
-    'allagents workspace sync --client claude',
     'allagents workspace sync --offline',
     'allagents workspace sync --verbose',
   ],
@@ -48,7 +47,6 @@ export const syncMeta: AgentCommandMeta = {
     { flag: '--offline', type: 'boolean', description: 'Use cached plugins without fetching latest from remote' },
     { flag: '--dry-run', short: '-n', type: 'boolean', description: 'Simulate sync without making changes' },
     { flag: '--verbose', short: '-v', type: 'boolean', description: 'Show informational sync messages' },
-    { flag: '--client', short: '-c', type: 'string', description: 'Sync only the specified client (e.g., opencode, claude)' },
   ],
   outputSchema: {
     copied: 'number',
