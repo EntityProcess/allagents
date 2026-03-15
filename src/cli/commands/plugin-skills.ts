@@ -385,10 +385,36 @@ const addCmd = command({
       description: 'Plugin source to install if the skill is not already available',
     }),
   },
-  handler: async ({ skill, scope, plugin, from }) => {
+  handler: async ({ skill: skillArg, scope, plugin, from: fromArg }) => {
     try {
+      let skill = skillArg;
+      let from = fromArg;
+
       const isUser = scope === 'user' || (!scope && resolveScope(process.cwd()) === 'user');
       const workspacePath = isUser ? getHomeDir() : process.cwd();
+
+      // Auto-detect GitHub URL as skill argument
+      const urlResolved = resolveSkillFromUrl(skill);
+      if (urlResolved) {
+        if (from) {
+          const error =
+            'Cannot use --from when the skill argument is a GitHub URL. The URL is used as the plugin source automatically.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+        from = urlResolved.from;
+
+        // For URLs without subpath, try to read skill name from SKILL.md frontmatter
+        if (urlResolved.parsed && !urlResolved.parsed.subpath) {
+          skill = await resolveSkillNameFromRepo(skill, urlResolved.parsed, urlResolved.skill);
+        } else {
+          skill = urlResolved.skill;
+        }
+      }
 
       // Find the skill
       let matches = await findSkillByName(skill, workspacePath);
