@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import chalk from 'chalk';
 import { command, positional, option, string, optional } from 'cmd-ts';
@@ -27,6 +28,9 @@ import {
   skillsAddMeta,
 } from '../metadata/plugin-skills.js';
 import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
+import { isGitHubUrl, parseGitHubUrl } from '../../utils/plugin-path.js';
+import { fetchPlugin } from '../../core/plugin.js';
+import { parseSkillMetadata } from '../../validators/skill.js';
 
 /**
  * Check if a directory has a project-level .allagents config
@@ -43,6 +47,54 @@ function resolveScope(cwd: string): 'user' | 'project' {
   if (isUserConfigPath(cwd)) return 'user';
   if (hasProjectConfig(cwd)) return 'project';
   return 'user';
+}
+
+/**
+ * If the skill argument is a GitHub URL, extract the skill name and return
+ * it along with the URL as the plugin source. Returns null if not a URL.
+ *
+ * With subpath: skill name = last path segment
+ * Without subpath: skill name = repo name (caller should use resolveSkillNameFromRepo to check frontmatter)
+ */
+export function resolveSkillFromUrl(
+  skill: string,
+): { skill: string; from: string; parsed: ReturnType<typeof parseGitHubUrl> } | null {
+  if (!isGitHubUrl(skill)) return null;
+
+  const parsed = parseGitHubUrl(skill);
+  if (!parsed) return null;
+
+  if (parsed.subpath) {
+    const segments = parsed.subpath.split('/').filter(Boolean);
+    const name = segments[segments.length - 1];
+    if (!name) return null;
+    return { skill: name, from: skill, parsed };
+  }
+
+  return { skill: parsed.repo, from: skill, parsed };
+}
+
+/**
+ * For a no-subpath GitHub URL, fetch the repo and read SKILL.md frontmatter
+ * to get the real skill name. Falls back to the provided default name.
+ */
+export async function resolveSkillNameFromRepo(
+  url: string,
+  parsed: NonNullable<ReturnType<typeof parseGitHubUrl>>,
+  fallbackName: string,
+): Promise<string> {
+  const fetchResult = await fetchPlugin(url, {
+    ...(parsed.branch && { branch: parsed.branch }),
+  });
+  if (!fetchResult.success) return fallbackName;
+
+  try {
+    const skillMd = await readFile(join(fetchResult.cachePath, 'SKILL.md'), 'utf-8');
+    const metadata = parseSkillMetadata(skillMd);
+    return metadata?.name ?? fallbackName;
+  } catch {
+    return fallbackName;
+  }
 }
 
 /**
@@ -333,10 +385,36 @@ const addCmd = command({
       description: 'Plugin source to install if the skill is not already available',
     }),
   },
-  handler: async ({ skill, scope, plugin, from }) => {
+  handler: async ({ skill: skillArg, scope, plugin, from: fromArg }) => {
     try {
+      let skill = skillArg;
+      let from = fromArg;
+
       const isUser = scope === 'user' || (!scope && resolveScope(process.cwd()) === 'user');
       const workspacePath = isUser ? getHomeDir() : process.cwd();
+
+      // Auto-detect GitHub URL as skill argument
+      const urlResolved = resolveSkillFromUrl(skill);
+      if (urlResolved) {
+        if (from) {
+          const error =
+            'Cannot use --from when the skill argument is a GitHub URL. The URL is used as the plugin source automatically.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+        from = urlResolved.from;
+
+        // For URLs without subpath, try to read skill name from SKILL.md frontmatter
+        if (urlResolved.parsed && !urlResolved.parsed.subpath) {
+          skill = await resolveSkillNameFromRepo(skill, urlResolved.parsed, urlResolved.skill);
+        } else {
+          skill = urlResolved.skill;
+        }
+      }
 
       // Find the skill
       let matches = await findSkillByName(skill, workspacePath);
