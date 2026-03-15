@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, mock } from 'bun:test';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { resolveSkillFromUrl } from '../../../src/cli/commands/plugin-skills.js';
 
 describe('resolveSkillFromUrl', () => {
@@ -43,5 +46,67 @@ describe('resolveSkillFromUrl', () => {
     const result = resolveSkillFromUrl('gh:owner/my-skill-repo');
     expect(result?.skill).toBe('my-skill-repo');
     expect(result?.from).toBe('gh:owner/my-skill-repo');
+  });
+});
+
+describe('resolveSkillNameFromRepo', () => {
+  it('returns frontmatter name when SKILL.md exists with name', async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), 'skill-test-'));
+    try {
+      await writeFile(
+        join(tmpDir, 'SKILL.md'),
+        '---\nname: my-awesome-skill\ndescription: A test skill\n---\n# Skill\n',
+      );
+
+      mock.module('../../../src/core/plugin.js', () => ({
+        fetchPlugin: async () => ({ success: true, action: 'fetched' as const, cachePath: tmpDir }),
+        getPluginName: () => 'test-plugin',
+      }));
+
+      const { resolveSkillNameFromRepo } = await import('../../../src/cli/commands/plugin-skills.js');
+      const result = await resolveSkillNameFromRepo(
+        'https://github.com/owner/repo',
+        { owner: 'owner', repo: 'repo' },
+        'fallback-name',
+      );
+      expect(result).toBe('my-awesome-skill');
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns fallback name when SKILL.md does not exist', async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), 'skill-test-'));
+    try {
+      mock.module('../../../src/core/plugin.js', () => ({
+        fetchPlugin: async () => ({ success: true, action: 'fetched' as const, cachePath: tmpDir }),
+        getPluginName: () => 'test-plugin',
+      }));
+
+      const { resolveSkillNameFromRepo } = await import('../../../src/cli/commands/plugin-skills.js');
+      const result = await resolveSkillNameFromRepo(
+        'https://github.com/owner/repo',
+        { owner: 'owner', repo: 'repo' },
+        'fallback-name',
+      );
+      expect(result).toBe('fallback-name');
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns fallback name when fetchPlugin fails', async () => {
+    mock.module('../../../src/core/plugin.js', () => ({
+      fetchPlugin: async () => ({ success: false, action: 'skipped' as const, cachePath: '', error: 'network error' }),
+      getPluginName: () => 'test-plugin',
+    }));
+
+    const { resolveSkillNameFromRepo } = await import('../../../src/cli/commands/plugin-skills.js');
+    const result = await resolveSkillNameFromRepo(
+      'https://github.com/owner/repo',
+      { owner: 'owner', repo: 'repo' },
+      'fallback-name',
+    );
+    expect(result).toBe('fallback-name');
   });
 });
