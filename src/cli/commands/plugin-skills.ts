@@ -10,6 +10,7 @@ import {
   removeEnabledSkill,
   addEnabledSkill,
   addPlugin,
+  setPluginSkillsMode,
 } from '../../core/workspace-modify.js';
 import {
   addUserDisabledSkill,
@@ -18,8 +19,9 @@ import {
   addUserEnabledSkill,
   isUserConfigPath,
   addUserPlugin,
+  setUserPluginSkillsMode,
 } from '../../core/user-workspace.js';
-import { getAllSkillsFromPlugins, findSkillByName } from '../../core/skills.js';
+import { getAllSkillsFromPlugins, findSkillByName, discoverSkillNames } from '../../core/skills.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import {
@@ -29,8 +31,15 @@ import {
 } from '../metadata/plugin-skills.js';
 import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
 import { isGitHubUrl, parseGitHubUrl } from '../../utils/plugin-path.js';
-import { fetchPlugin } from '../../core/plugin.js';
+import { fetchPlugin, getPluginName } from '../../core/plugin.js';
 import { parseSkillMetadata } from '../../validators/skill.js';
+import {
+  addMarketplace,
+  findMarketplace,
+  listMarketplacePlugins,
+  updateMarketplace,
+} from '../../core/marketplace.js';
+import { parseMarketplaceManifest } from '../../utils/marketplace-manifest-parser.js';
 
 /**
  * Check if a directory has a project-level .allagents config
@@ -359,6 +368,254 @@ const removeCmd = command({
 });
 
 // =============================================================================
+// Install skill from --from source (marketplace-aware)
+// =============================================================================
+
+type InstallSkillResult =
+  | { success: true; pluginName: string; syncResult: { copied: number; failed: number } }
+  | { success: false; error: string };
+
+/**
+ * Install a skill from a --from source. If the source is a marketplace
+ * (has .claude-plugin/marketplace.json), register/update the marketplace,
+ * find the plugin containing the skill, and install it via plugin@marketplace.
+ * Otherwise, install the source directly as a plugin.
+ *
+ * In both cases, set the plugin to allowlist mode with only the requested skill.
+ */
+async function installSkillFromSource(opts: {
+  skill: string;
+  from: string;
+  isUser: boolean;
+  workspacePath: string;
+}): Promise<InstallSkillResult> {
+  const { skill, from, isUser, workspacePath } = opts;
+
+  if (!isJsonMode()) {
+    console.log(`Skill '${skill}' not found. Installing from: ${from}...`);
+  }
+
+  // Fetch the source to a local cache so we can inspect it
+  const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
+  const fetchResult = await fetchPlugin(from, {
+    ...(parsed?.branch && { branch: parsed.branch }),
+  });
+  if (!fetchResult.success) {
+    return { success: false, error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}` };
+  }
+
+  // Check if the source is a marketplace
+  const manifestResult = await parseMarketplaceManifest(fetchResult.cachePath);
+
+  if (manifestResult.success) {
+    return installSkillViaMarketplace({ skill, from, isUser, workspacePath });
+  }
+
+  // Not a marketplace — install as a direct plugin
+  return installSkillDirect({ skill, from, isUser, workspacePath, cachePath: fetchResult.cachePath });
+}
+
+/**
+ * Source is a marketplace: register it, find the plugin with the skill, install via spec.
+ */
+async function installSkillViaMarketplace(opts: {
+  skill: string;
+  from: string;
+  isUser: boolean;
+  workspacePath: string;
+}): Promise<InstallSkillResult> {
+  const { skill, from, isUser, workspacePath } = opts;
+
+  if (!isJsonMode()) {
+    console.log('Detected marketplace. Registering...');
+  }
+
+  const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
+  const scopeOptions = isUser
+    ? undefined
+    : { scope: 'project' as const, workspacePath };
+
+  // Resolve the marketplace name: try registering, or look up existing by source
+  let marketplaceName: string | undefined;
+
+  const mktResult = await addMarketplace(
+    from,
+    parsed?.branch ? `${parsed.repo}-${parsed.branch}` : undefined,
+    parsed?.branch ?? undefined,
+    undefined,
+    scopeOptions,
+  );
+
+  if (mktResult.success) {
+    marketplaceName = mktResult.marketplace?.name;
+  } else if (mktResult.error?.includes('already exists') || mktResult.alreadyRegistered) {
+    // Already registered — look up the canonical name and update
+    const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
+    const existing = await findMarketplace(
+      parsed?.repo ?? from,
+      sourceLocation,
+      isUser ? undefined : workspacePath,
+    );
+    if (existing) {
+      marketplaceName = existing.name;
+      if (!isJsonMode()) {
+        console.log(`Marketplace '${marketplaceName}' already registered. Updating...`);
+      }
+      await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
+    }
+  }
+
+  if (!marketplaceName) {
+    return { success: false, error: `Failed to register marketplace: ${mktResult.error ?? 'Unknown error'}` };
+  }
+
+  // List plugins in the marketplace and scan each for the requested skill
+  const mktPlugins = await listMarketplacePlugins(marketplaceName, isUser ? undefined : workspacePath);
+  if (mktPlugins.plugins.length === 0) {
+    return { success: false, error: `No plugins found in marketplace '${marketplaceName}'.` };
+  }
+
+  let targetPluginName: string | null = null;
+  const allAvailableSkills: string[] = [];
+  for (const mktPlugin of mktPlugins.plugins) {
+    const skillNames = await discoverSkillNames(mktPlugin.path);
+    allAvailableSkills.push(...skillNames);
+    if (!targetPluginName && skillNames.includes(skill)) {
+      targetPluginName = mktPlugin.name;
+    }
+  }
+
+  if (!targetPluginName) {
+    return {
+      success: false,
+      error: `Skill '${skill}' not found in marketplace '${marketplaceName}'.\n\nAvailable skills: ${allAvailableSkills.join(', ') || 'none'}`,
+    };
+  }
+
+  // Install the specific plugin via plugin@marketplace spec
+  const pluginSpec = `${targetPluginName}@${marketplaceName}`;
+  if (!isJsonMode()) {
+    console.log(`Found skill '${skill}' in plugin '${targetPluginName}'. Installing ${pluginSpec}...`);
+  }
+
+  const installResult = isUser
+    ? await addUserPlugin(pluginSpec)
+    : await addPlugin(pluginSpec, workspacePath);
+
+  if (!installResult.success) {
+    // Plugin may already be installed — that's fine, we just need to add the skill
+    if (!installResult.error?.includes('already exists') && !installResult.error?.includes('duplicates existing')) {
+      return { success: false, error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}` };
+    }
+    if (!isJsonMode()) {
+      console.log(`Plugin '${pluginSpec}' already installed.`);
+    }
+  }
+
+  // Set allowlist or add skill to existing allowlist
+  return applySkillAllowlist({ skill, pluginName: targetPluginName, isUser, workspacePath });
+}
+
+/**
+ * Source is not a marketplace — install the GitHub URL / path directly as a plugin.
+ */
+async function installSkillDirect(opts: {
+  skill: string;
+  from: string;
+  isUser: boolean;
+  workspacePath: string;
+  cachePath: string;
+}): Promise<InstallSkillResult> {
+  const { skill, from, isUser, workspacePath, cachePath } = opts;
+
+  // Verify the skill exists in the cached plugin before installing
+  const availableSkills = await discoverSkillNames(cachePath);
+  if (!availableSkills.includes(skill)) {
+    return {
+      success: false,
+      error: `Skill '${skill}' not found in plugin '${from}'.\n\nAvailable skills: ${availableSkills.join(', ') || 'none'}\n\nTip: run \`allagents skills list\` to see all installed skills.`,
+    };
+  }
+
+  const installResult = isUser
+    ? await addUserPlugin(from)
+    : await addPlugin(from, workspacePath);
+
+  if (!installResult.success) {
+    if (!installResult.error?.includes('already exists') && !installResult.error?.includes('duplicates existing')) {
+      return { success: false, error: `Failed to install plugin '${from}': ${installResult.error ?? 'Unknown error'}` };
+    }
+    if (!isJsonMode()) {
+      console.log('Plugin already installed.');
+    }
+  }
+
+  const pluginName = getPluginName(cachePath);
+  return applySkillAllowlist({ skill, pluginName, isUser, workspacePath });
+}
+
+/**
+ * Set or extend the plugin's skill allowlist with the requested skill, then sync.
+ */
+async function applySkillAllowlist(opts: {
+  skill: string;
+  pluginName: string;
+  isUser: boolean;
+  workspacePath: string;
+}): Promise<InstallSkillResult> {
+  const { skill, pluginName, isUser, workspacePath } = opts;
+
+  // Check current state: if plugin already has an allowlist, add to it; otherwise create one
+  const allSkills = await getAllSkillsFromPlugins(workspacePath);
+  const pluginSkills = allSkills.filter((s) => s.pluginName === pluginName);
+  const currentMode = pluginSkills[0]?.pluginSkillsMode ?? 'none';
+
+  if (currentMode === 'allowlist') {
+    // Add to existing allowlist
+    const skillKey = `${pluginName}:${skill}`;
+    const addResult = isUser
+      ? await addUserEnabledSkill(skillKey)
+      : await addEnabledSkill(skillKey, workspacePath);
+
+    if (!addResult.success) {
+      // Already in allowlist = already enabled
+      if (!addResult.error?.includes('already enabled')) {
+        return { success: false, error: `Failed to enable skill: ${addResult.error ?? 'Unknown error'}` };
+      }
+    }
+  } else {
+    // No allowlist yet — create one with just this skill
+    const setModeResult = isUser
+      ? await setUserPluginSkillsMode(pluginName, 'allowlist', [skill])
+      : await setPluginSkillsMode(pluginName, 'allowlist', [skill], workspacePath);
+
+    if (!setModeResult.success) {
+      return { success: false, error: `Failed to configure skill allowlist: ${setModeResult.error ?? 'Unknown error'}` };
+    }
+  }
+
+  // Sync to apply the allowlist
+  if (!isJsonMode()) {
+    console.log(`\u2713 Enabled skill: ${skill} (${pluginName})`);
+    console.log('\nSyncing workspace...\n');
+  }
+
+  const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+  if (!syncResult.success) {
+    return { success: false, error: 'Sync failed' };
+  }
+
+  return {
+    success: true,
+    pluginName,
+    syncResult: {
+      copied: syncResult.totalCopied,
+      failed: syncResult.totalFailed,
+    },
+  };
+}
+
+// =============================================================================
 // plugin skills add
 // =============================================================================
 
@@ -418,60 +675,53 @@ const addCmd = command({
       }
 
       // Find the skill
-      let matches = await findSkillByName(skill, workspacePath);
+      const matches = await findSkillByName(skill, workspacePath);
 
       if (matches.length === 0) {
         if (from) {
-          // Install the plugin first, then re-search for the skill
-          if (!isJsonMode()) {
-            console.log(`Skill '${skill}' not found. Installing plugin: ${from}...`);
-          }
+          // Install the plugin from --from source, then enable only the requested skill
+          const installFromResult = await installSkillFromSource({
+            skill,
+            from,
+            isUser,
+            workspacePath,
+          });
 
-          const installResult = isUser
-            ? await addUserPlugin(from)
-            : await addPlugin(from, workspacePath);
-
-          if (!installResult.success) {
-            const error = `Failed to install plugin '${from}': ${installResult.error ?? 'Unknown error'}`;
+          if (!installFromResult.success) {
             if (isJsonMode()) {
-              jsonOutput({ success: false, command: 'plugin skills add', error });
+              jsonOutput({ success: false, command: 'plugin skills add', error: installFromResult.error });
               process.exit(1);
             }
-            console.error(`Error: ${error}`);
+            console.error(`Error: ${installFromResult.error}`);
             process.exit(1);
           }
 
-          // Initial sync to materialise the newly installed plugin's files
-          if (!isJsonMode()) {
-            console.log('Running initial sync...\n');
-          }
-          await (isUser ? syncUserWorkspace() : syncWorkspace(workspacePath));
-
-          // Re-search for the skill in the now-installed plugin
-          matches = await findSkillByName(skill, workspacePath);
-
-          if (matches.length === 0) {
-            const allSkills = await getAllSkillsFromPlugins(workspacePath);
-            const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
-            const error = `Skill '${skill}' not found in plugin '${from}'.\n\nAvailable skills: ${skillNames || 'none'}\n\nTip: run \`allagents skills list\` to see all installed skills.`;
-            if (isJsonMode()) {
-              jsonOutput({ success: false, command: 'plugin skills add', error });
-              process.exit(1);
-            }
-            console.error(`Error: ${error}`);
-            process.exit(1);
-          }
-        } else {
-          const allSkills = await getAllSkillsFromPlugins(workspacePath);
-          const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
-          const error = `Skill '${skill}' not found in any installed plugin.\n\nAvailable skills: ${skillNames || 'none'}`;
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error });
-            process.exit(1);
+            jsonOutput({
+              success: true,
+              command: 'plugin skills add',
+              data: {
+                skill,
+                plugin: installFromResult.pluginName,
+                syncResult: installFromResult.syncResult,
+              },
+            });
+            return;
           }
-          console.error(`Error: ${error}`);
+
+          console.log('Sync complete.');
+          return;
+        }
+
+        const allSkills = await getAllSkillsFromPlugins(workspacePath);
+        const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
+        const error = `Skill '${skill}' not found in any installed plugin.\n\nAvailable skills: ${skillNames || 'none'}`;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin skills add', error });
           process.exit(1);
         }
+        console.error(`Error: ${error}`);
+        process.exit(1);
       }
 
       // Handle ambiguity

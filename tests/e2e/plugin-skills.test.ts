@@ -4,9 +4,17 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dump } from 'js-yaml';
+import { readFile } from 'node:fs/promises';
+import { load } from 'js-yaml';
 import { syncWorkspace } from '../../src/core/sync.js';
 import { getAllSkillsFromPlugins, findSkillByName } from '../../src/core/skills.js';
-import { addDisabledSkill, removeDisabledSkill } from '../../src/core/workspace-modify.js';
+import {
+  addDisabledSkill,
+  removeDisabledSkill,
+  setPluginSkillsMode,
+  addEnabledSkill,
+} from '../../src/core/workspace-modify.js';
+import type { WorkspaceConfig } from '../../src/models/workspace-config.js';
 
 describe('plugin skills e2e', () => {
   let tmpDir: string;
@@ -99,5 +107,47 @@ description: Test skill B
   it('handles non-existent skill gracefully', async () => {
     const matches = await findSkillByName('non-existent-skill', tmpDir);
     expect(matches).toHaveLength(0);
+  });
+
+  it('allowlist mode enables only the listed skill', async () => {
+    // Set plugin to allowlist mode with only skill-a
+    const result = await setPluginSkillsMode('test-plugin', 'allowlist', ['skill-a'], tmpDir);
+    expect(result.success).toBe(true);
+
+    // Sync — only skill-a should be synced
+    await syncWorkspace(tmpDir);
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-a'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-b'))).toBe(false);
+
+    // Verify skill listing reflects the allowlist
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    const skillA = skills.find((s) => s.name === 'skill-a');
+    const skillB = skills.find((s) => s.name === 'skill-b');
+    expect(skillA?.disabled).toBe(false);
+    expect(skillB?.disabled).toBe(true);
+    expect(skillA?.pluginSkillsMode).toBe('allowlist');
+  });
+
+  it('adding a second skill to an allowlisted plugin extends the allowlist', async () => {
+    // Start with allowlist containing only skill-a
+    await setPluginSkillsMode('test-plugin', 'allowlist', ['skill-a'], tmpDir);
+
+    // Add skill-b to the allowlist
+    const addResult = await addEnabledSkill('test-plugin:skill-b', tmpDir);
+    expect(addResult.success).toBe(true);
+
+    // Sync — both skills should now be synced
+    await syncWorkspace(tmpDir);
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-a'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.claude/skills/skill-b'))).toBe(true);
+
+    // Verify the config has both skills in the allowlist
+    const content = await readFile(join(tmpDir, '.allagents/workspace.yaml'), 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const pluginEntry = config.plugins.find((p) => typeof p !== 'string' && Array.isArray(p.skills));
+    expect(pluginEntry).toBeDefined();
+    if (typeof pluginEntry !== 'string' && pluginEntry) {
+      expect(pluginEntry.skills).toEqual(['skill-a', 'skill-b']);
+    }
   });
 });
