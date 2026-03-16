@@ -481,7 +481,7 @@ async function installSkillViaMarketplace(opts: {
     // Use manifest skill paths when available (last path segment = skill name),
     // fall back to filesystem discovery
     const skillNames = mktPlugin.skills
-      ? mktPlugin.skills.map((s) => s.split('/').pop()!).filter(Boolean)
+      ? mktPlugin.skills.map((s) => s.split('/').pop() ?? '').filter(Boolean)
       : await discoverSkillNames(mktPlugin.path);
     allAvailableSkills.push(...skillNames);
     if (!targetPluginName && skillNames.includes(skill)) {
