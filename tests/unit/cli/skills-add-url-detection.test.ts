@@ -1,8 +1,9 @@
-import { describe, it, expect, mock } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveSkillFromUrl } from '../../../src/cli/commands/plugin-skills.js';
+import { resolveSkillFromUrl, resolveSkillNameFromRepo } from '../../../src/cli/commands/plugin-skills.js';
+import type { FetchResult } from '../../../src/core/plugin.js';
 
 describe('resolveSkillFromUrl', () => {
   it('returns null for non-URL skill names', () => {
@@ -50,6 +51,9 @@ describe('resolveSkillFromUrl', () => {
 });
 
 describe('resolveSkillNameFromRepo', () => {
+  const fakeFetch = (result: FetchResult) =>
+    (async () => result) as unknown as typeof import('../../../src/core/plugin.js').fetchPlugin;
+
   it('returns frontmatter name when SKILL.md exists with name', async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), 'skill-test-'));
     try {
@@ -58,16 +62,11 @@ describe('resolveSkillNameFromRepo', () => {
         '---\nname: my-awesome-skill\ndescription: A test skill\n---\n# Skill\n',
       );
 
-      mock.module('../../../src/core/plugin.js', () => ({
-        fetchPlugin: async () => ({ success: true, action: 'fetched' as const, cachePath: tmpDir }),
-        getPluginName: () => 'test-plugin',
-      }));
-
-      const { resolveSkillNameFromRepo } = await import('../../../src/cli/commands/plugin-skills.js');
       const result = await resolveSkillNameFromRepo(
         'https://github.com/owner/repo',
         { owner: 'owner', repo: 'repo' },
         'fallback-name',
+        fakeFetch({ success: true, action: 'fetched', cachePath: tmpDir }),
       );
       expect(result).toBe('my-awesome-skill');
     } finally {
@@ -78,16 +77,11 @@ describe('resolveSkillNameFromRepo', () => {
   it('returns fallback name when SKILL.md does not exist', async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), 'skill-test-'));
     try {
-      mock.module('../../../src/core/plugin.js', () => ({
-        fetchPlugin: async () => ({ success: true, action: 'fetched' as const, cachePath: tmpDir }),
-        getPluginName: () => 'test-plugin',
-      }));
-
-      const { resolveSkillNameFromRepo } = await import('../../../src/cli/commands/plugin-skills.js');
       const result = await resolveSkillNameFromRepo(
         'https://github.com/owner/repo',
         { owner: 'owner', repo: 'repo' },
         'fallback-name',
+        fakeFetch({ success: true, action: 'fetched', cachePath: tmpDir }),
       );
       expect(result).toBe('fallback-name');
     } finally {
@@ -96,16 +90,11 @@ describe('resolveSkillNameFromRepo', () => {
   });
 
   it('returns fallback name when fetchPlugin fails', async () => {
-    mock.module('../../../src/core/plugin.js', () => ({
-      fetchPlugin: async () => ({ success: false, action: 'skipped' as const, cachePath: '', error: 'network error' }),
-      getPluginName: () => 'test-plugin',
-    }));
-
-    const { resolveSkillNameFromRepo } = await import('../../../src/cli/commands/plugin-skills.js');
     const result = await resolveSkillNameFromRepo(
       'https://github.com/owner/repo',
       { owner: 'owner', repo: 'repo' },
       'fallback-name',
+      fakeFetch({ success: false, action: 'skipped', cachePath: '', error: 'network error' }),
     );
     expect(result).toBe('fallback-name');
   });

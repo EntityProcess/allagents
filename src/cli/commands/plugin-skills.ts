@@ -82,8 +82,9 @@ export async function resolveSkillNameFromRepo(
   url: string,
   parsed: NonNullable<ReturnType<typeof parseGitHubUrl>>,
   fallbackName: string,
+  fetchFn: typeof fetchPlugin = fetchPlugin,
 ): Promise<string> {
-  const fetchResult = await fetchPlugin(url, {
+  const fetchResult = await fetchFn(url, {
     ...(parsed.branch && { branch: parsed.branch }),
   });
   if (!fetchResult.success) return fallbackName;

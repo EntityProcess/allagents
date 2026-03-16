@@ -52,6 +52,20 @@ After sync:
 └── testing/                     # unchanged (unique)
 ```
 
+## Adding Skills
+
+You can add a specific skill from a GitHub repo without installing the full plugin first:
+
+```bash
+# Add a skill by name, specifying the plugin source
+allagents skills add reddit --from ReScienceLab/opc-skills
+
+# Or pass a GitHub URL directly
+allagents skills add https://github.com/owner/repo/tree/main/skills/my-skill
+```
+
+This installs the plugin and enables only the specified skill. See the [CLI reference](/reference/cli/#plugin-skills-add) for all source formats.
+
 ## Disabling Individual Skills
 
 You can disable specific skills from a plugin without uninstalling the entire plugin:
