@@ -478,7 +478,11 @@ async function installSkillViaMarketplace(opts: {
   let targetPluginName: string | null = null;
   const allAvailableSkills: string[] = [];
   for (const mktPlugin of mktPlugins.plugins) {
-    const skillNames = await discoverSkillNames(mktPlugin.path);
+    // Use manifest skill paths when available (last path segment = skill name),
+    // fall back to filesystem discovery
+    const skillNames = mktPlugin.skills
+      ? mktPlugin.skills.map((s) => s.split('/').pop()!).filter(Boolean)
+      : await discoverSkillNames(mktPlugin.path);
     allAvailableSkills.push(...skillNames);
     if (!targetPluginName && skillNames.includes(skill)) {
       targetPluginName = mktPlugin.name;

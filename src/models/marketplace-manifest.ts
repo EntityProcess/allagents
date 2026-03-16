@@ -67,6 +67,7 @@ export const MarketplacePluginEntrySchema = z.object({
   homepage: z.string().optional(),
   strict: z.boolean().optional(),
   tags: z.array(z.string()).optional(),
+  skills: z.array(z.string()).optional(),
   lspServers: z.record(LspServerSchema).optional(),
 });
 

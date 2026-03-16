@@ -169,6 +169,7 @@ function extractPluginEntry(
     ...(typeof obj.version === 'string' && { version: obj.version }),
     ...(typeof obj.category === 'string' && { category: obj.category }),
     ...(typeof obj.homepage === 'string' && { homepage: obj.homepage }),
+    ...(Array.isArray(obj.skills) && obj.skills.every((s: unknown) => typeof s === 'string') && { skills: obj.skills as string[] }),
   };
 }
 

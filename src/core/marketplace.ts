@@ -758,6 +758,7 @@ export interface MarketplacePluginInfo {
   category?: string;
   homepage?: string;
   source?: string;
+  skills?: string[];
 }
 
 /**
@@ -798,6 +799,7 @@ export async function getMarketplacePluginsFromManifest(
     };
     if (plugin.category) info.category = plugin.category;
     if (plugin.homepage) info.homepage = plugin.homepage;
+    if (plugin.skills) info.skills = plugin.skills;
     return info;
   });
 
