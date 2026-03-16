@@ -43,19 +43,39 @@ export const skillsRemoveMeta: AgentCommandMeta = {
 
 export const skillsAddMeta: AgentCommandMeta = {
   command: 'plugin skills add',
-  description: 'Re-enable a previously disabled skill',
-  whenToUse: 'To re-enable a skill that was previously disabled',
+  description: 'Add a skill from a plugin, or re-enable a previously disabled skill',
+  whenToUse:
+    'To add a skill from a GitHub repo or marketplace plugin, or to re-enable a skill that was previously disabled',
   examples: [
-    'allagents plugin skills add brainstorming',
-    'allagents plugin skills add brainstorming --plugin superpowers',
+    'allagents skills add reddit --from ReScienceLab/opc-skills',
+    'allagents skills add https://github.com/owner/repo/tree/main/skills/my-skill',
+    'allagents skills add brainstorming',
+    'allagents skills add brainstorming --plugin superpowers',
   ],
   expectedOutput: 'Confirms skill was enabled and runs sync',
   positionals: [
-    { name: 'skill', type: 'string', required: true, description: 'Skill name to enable' },
+    {
+      name: 'skill',
+      type: 'string',
+      required: true,
+      description: 'Skill name to add, or a GitHub URL pointing to a skill',
+    },
   ],
   options: [
     { flag: '--scope', short: '-s', type: 'string', description: 'Scope: "project" (default) or "user"' },
-    { flag: '--plugin', short: '-p', type: 'string', description: 'Plugin name (required if skill exists in multiple plugins)' },
+    {
+      flag: '--plugin',
+      short: '-p',
+      type: 'string',
+      description: 'Plugin name (required if skill exists in multiple plugins)',
+    },
+    {
+      flag: '--from',
+      short: '-f',
+      type: 'string',
+      description:
+        'Plugin source (GitHub URL, owner/repo, or plugin@marketplace) to install if the skill is not already available',
+    },
   ],
   outputSchema: {
     skill: 'string',
