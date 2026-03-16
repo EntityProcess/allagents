@@ -214,6 +214,25 @@ allagents plugin list [marketplace]
 allagents plugin validate <path>
 ```
 
+### Skills Commands
+
+```bash
+# Add a specific skill from a GitHub repo
+allagents skills add reddit --from ReScienceLab/opc-skills
+
+# Add a skill via GitHub URL (skill name extracted from path)
+allagents skills add https://github.com/owner/repo/tree/main/skills/my-skill
+
+# List all skills and their enabled/disabled status
+allagents skills list
+
+# Disable a skill without uninstalling its plugin
+allagents skills remove brainstorming
+
+# Re-enable a previously disabled skill
+allagents skills add brainstorming
+```
+
 ### GitHub Overrides
 
 For **Copilot** and **VSCode**, AllAgents copies GitHub-specific files from a plugin's `.github/` folder into the workspace's `.github/` directory:
