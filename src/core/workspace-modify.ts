@@ -813,7 +813,7 @@ export async function removeEnabledSkill(
     }
 
     const newSkills = entry.skills.filter((s) => s !== skillName);
-    entry.skills = newSkills.length > 0 ? newSkills : undefined;
+    entry.skills = newSkills;
 
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
