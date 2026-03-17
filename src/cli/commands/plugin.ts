@@ -18,7 +18,7 @@ import {
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { loadSyncState } from '../../core/sync-state.js';
-import { addPlugin, removePlugin, hasPlugin, ensureWorkspace, addEnabledSkill } from '../../core/workspace-modify.js';
+import { addPlugin, removePlugin, hasPlugin, ensureWorkspace, addEnabledSkill, extractPluginNames } from '../../core/workspace-modify.js';
 import {
   addUserPlugin,
   removeUserPlugin,
@@ -1008,7 +1008,10 @@ const pluginInstallCmd = command({
         } // end if (!pluginAlreadyExists)
 
         const allSkills = await getAllSkillsFromPlugins(workspacePath);
-        const pluginSkills = allSkills.filter((s) => s.pluginSource === displayPlugin);
+        const displayNames = extractPluginNames(displayPlugin);
+        const pluginSkills = allSkills.filter((s) =>
+          s.pluginSource === displayPlugin || displayNames.includes(s.pluginName),
+        );
 
         if (pluginSkills.length === 0) {
           if (!isJsonMode()) {

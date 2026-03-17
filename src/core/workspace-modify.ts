@@ -403,6 +403,16 @@ export function extractPluginNames(pluginSource: string): string[] {
     }
     return names;
   }
+  // For GitHub URLs, include both repo name and {owner}-{repo} (cache directory) format
+  if (isGitHubUrl(pluginSource)) {
+    const parsed = parseGitHubUrl(pluginSource);
+    if (parsed) {
+      const names = [parsed.repo];
+      const ownerRepo = `${parsed.owner}-${parsed.repo}`;
+      if (ownerRepo !== parsed.repo) names.push(ownerRepo);
+      return names;
+    }
+  }
   // Split on both / and \ to handle local paths, URLs, and Windows paths
   const parts = pluginSource.split(/[/\\]/).filter(Boolean);
   const last = parts[parts.length - 1];

@@ -50,12 +50,11 @@ function hasProjectConfig(dir: string): boolean {
 
 /**
  * Determine effective scope when no --scope flag is provided.
- * Defaults to user scope unless cwd has a project config.
+ * Defaults to project scope unless cwd is the user config directory.
  */
 function resolveScope(cwd: string): 'user' | 'project' {
   if (isUserConfigPath(cwd)) return 'user';
-  if (hasProjectConfig(cwd)) return 'project';
-  return 'user';
+  return 'project';
 }
 
 /**
