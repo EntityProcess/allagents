@@ -128,6 +128,42 @@ description: Test skill B
     expect(skillA?.pluginSkillsMode).toBe('allowlist');
   });
 
+  it('skill operations work when plugin source is a GitHub URL', async () => {
+    // Simulate: workspace.yaml has a GitHub URL as plugin source
+    // The cache directory name (owner-repo) differs from the URL-derived name (repo)
+    const urlPluginDir = join(tmpDir, 'github-owner-repo');
+    await mkdir(join(urlPluginDir, 'skills/my-skill'), { recursive: true });
+    await writeFile(join(urlPluginDir, 'skills/my-skill/SKILL.md'), `---
+name: my-skill
+description: Test skill
+---
+# My Skill
+`);
+
+    // Write config with a plugin source that looks like a GitHub URL would resolve to
+    const config: WorkspaceConfig = {
+      repositories: [],
+      plugins: [urlPluginDir],
+      clients: ['claude'],
+      version: 2,
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    // The skill's pluginName will be 'github-owner-repo' (from directory basename)
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    const skill = skills.find((s) => s.name === 'my-skill');
+    expect(skill).toBeDefined();
+    expect(skill?.pluginName).toBe('github-owner-repo');
+
+    // Disable using the cache-derived name should work
+    const disableResult = await addDisabledSkill('github-owner-repo:my-skill', tmpDir);
+    expect(disableResult.success).toBe(true);
+
+    // Re-enable should also work
+    const enableResult = await removeDisabledSkill('github-owner-repo:my-skill', tmpDir);
+    expect(enableResult.success).toBe(true);
+  });
+
   it('adding a second skill to an allowlisted plugin extends the allowlist', async () => {
     // Start with allowlist containing only skill-a
     await setPluginSkillsMode('test-plugin', 'allowlist', ['skill-a'], tmpDir);
