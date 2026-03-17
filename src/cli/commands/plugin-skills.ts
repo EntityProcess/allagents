@@ -392,7 +392,7 @@ async function installSkillFromSource(opts: {
   const { skill, from, isUser, workspacePath } = opts;
 
   if (!isJsonMode()) {
-    console.log(`Skill '${skill}' not found. Installing from: ${from}...`);
+    console.log(`Installing skill '${skill}' from ${from}...`);
   }
 
   // Fetch the source to a local cache so we can inspect it
@@ -426,47 +426,41 @@ async function installSkillViaMarketplace(opts: {
 }): Promise<InstallSkillResult> {
   const { skill, from, isUser, workspacePath } = opts;
 
-  if (!isJsonMode()) {
-    console.log('Detected marketplace. Registering...');
-  }
-
   const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
-  const scopeOptions = isUser
-    ? undefined
-    : { scope: 'project' as const, workspacePath };
+  const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
 
-  // Resolve the marketplace name: try registering, or look up existing by source
+  // Check if the marketplace is already registered at any scope (user or project)
   let marketplaceName: string | undefined;
-
-  const mktResult = await addMarketplace(
-    from,
-    parsed?.branch ? `${parsed.repo}-${parsed.branch}` : undefined,
-    parsed?.branch ?? undefined,
-    undefined,
-    scopeOptions,
+  const existingAnyScope = await findMarketplace(
+    parsed?.repo ?? from,
+    sourceLocation,
+    isUser ? undefined : workspacePath,
   );
 
-  if (mktResult.success) {
-    marketplaceName = mktResult.marketplace?.name;
-  } else if (mktResult.error?.includes('already exists') || mktResult.alreadyRegistered) {
-    // Already registered — look up the canonical name and update
-    const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
-    const existing = await findMarketplace(
-      parsed?.repo ?? from,
-      sourceLocation,
-      isUser ? undefined : workspacePath,
+  if (existingAnyScope) {
+    marketplaceName = existingAnyScope.name;
+    await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
+  } else {
+    // Register at the target scope
+    const scopeOptions = isUser
+      ? undefined
+      : { scope: 'project' as const, workspacePath };
+
+    const mktResult = await addMarketplace(
+      from,
+      parsed?.branch ? `${parsed.repo}-${parsed.branch}` : undefined,
+      parsed?.branch ?? undefined,
+      undefined,
+      scopeOptions,
     );
-    if (existing) {
-      marketplaceName = existing.name;
-      if (!isJsonMode()) {
-        console.log(`Marketplace '${marketplaceName}' already registered. Updating...`);
-      }
-      await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
+
+    if (mktResult.success) {
+      marketplaceName = mktResult.marketplace?.name;
     }
   }
 
   if (!marketplaceName) {
-    return { success: false, error: `Failed to register marketplace: ${mktResult.error ?? 'Unknown error'}` };
+    return { success: false, error: `Failed to register marketplace from '${from}'` };
   }
 
   // List plugins in the marketplace and scan each for the requested skill
@@ -498,9 +492,6 @@ async function installSkillViaMarketplace(opts: {
 
   // Install the specific plugin via plugin@marketplace spec
   const pluginSpec = `${targetPluginName}@${marketplaceName}`;
-  if (!isJsonMode()) {
-    console.log(`Found skill '${skill}' in plugin '${targetPluginName}'. Installing ${pluginSpec}...`);
-  }
 
   const installResult = isUser
     ? await addUserPlugin(pluginSpec)
@@ -510,9 +501,6 @@ async function installSkillViaMarketplace(opts: {
     // Plugin may already be installed — that's fine, we just need to add the skill
     if (!installResult.error?.includes('already exists') && !installResult.error?.includes('duplicates existing')) {
       return { success: false, error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}` };
-    }
-    if (!isJsonMode()) {
-      console.log(`Plugin '${pluginSpec}' already installed.`);
     }
   }
 
