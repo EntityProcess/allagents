@@ -50,11 +50,12 @@ function hasProjectConfig(dir: string): boolean {
 
 /**
  * Determine effective scope when no --scope flag is provided.
- * Defaults to project scope unless cwd is the user config directory.
+ * Defaults to user scope unless cwd has a project config.
  */
 function resolveScope(cwd: string): 'user' | 'project' {
   if (isUserConfigPath(cwd)) return 'user';
-  return 'project';
+  if (hasProjectConfig(cwd)) return 'project';
+  return 'user';
 }
 
 /**
@@ -651,9 +652,6 @@ const addCmd = command({
       let skill = skillArg;
       let from = fromArg;
 
-      const isUser = scope === 'user' || (!scope && resolveScope(process.cwd()) === 'user');
-      const workspacePath = isUser ? getHomeDir() : process.cwd();
-
       // Auto-detect GitHub URL as skill argument
       const urlResolved = resolveSkillFromUrl(skill);
       if (urlResolved) {
@@ -676,6 +674,11 @@ const addCmd = command({
           skill = urlResolved.skill;
         }
       }
+
+      // When --from is used (installing a new plugin), default to project scope
+      const hasFromSource = Boolean(from);
+      const isUser = scope === 'user' || (!scope && !hasFromSource && resolveScope(process.cwd()) === 'user');
+      const workspacePath = isUser ? getHomeDir() : process.cwd();
 
       // Find the skill
       const matches = await findSkillByName(skill, workspacePath);
