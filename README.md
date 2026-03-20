@@ -332,38 +332,38 @@ AllAgents supports 23 AI coding assistants:
 
 #### Universal Clients (share `.agents/skills/`)
 
-| Client | Skills | Agent File | Hooks | Commands |
-|--------|--------|------------|-------|----------|
-| copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No |
-| codex | `.agents/skills/` | `AGENTS.md` | No | No |
-| opencode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` |
-| gemini | `.agents/skills/` | `GEMINI.md` | No | No |
-| ampcode | `.agents/skills/` | `AGENTS.md` | No | No |
-| vscode | `.agents/skills/` | `AGENTS.md` | No | No |
-| replit | `.agents/skills/` | `AGENTS.md` | No | No |
-| kimi | `.agents/skills/` | `AGENTS.md` | No | No |
+| Client | Skills | Agent File | Hooks | Commands | MCP |
+|--------|--------|------------|-------|----------|-----|
+| copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No | `.vscode/mcp.json` · `~/.config/Code/User/mcp.json` |
+| codex | `.agents/skills/` | `AGENTS.md` | No | No | `.codex/config.toml` · `codex mcp` CLI |
+| opencode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
+| gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
+| ampcode | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| vscode | `.agents/skills/` | `AGENTS.md` | No | No | `.vscode/mcp.json` · `~/.config/Code/User/mcp.json` |
+| replit | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| kimi | `.agents/skills/` | `AGENTS.md` | No | No | No |
 
 #### Provider-Specific Clients
 
-| Client | Skills | Agent File | Hooks | Commands |
-|--------|--------|------------|-------|----------|
-| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
-| cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
-| factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
-| openclaw | `skills/` | `AGENTS.md` | No | No |
-| windsurf | `.windsurf/skills/` | `AGENTS.md` | No | No |
-| cline | `.cline/skills/` | `AGENTS.md` | No | No |
-| continue | `.continue/skills/` | `AGENTS.md` | No | No |
-| roo | `.roo/skills/` | `AGENTS.md` | No | No |
-| kilo | `.kilocode/skills/` | `AGENTS.md` | No | No |
-| trae | `.trae/skills/` | `AGENTS.md` | No | No |
-| augment | `.augment/skills/` | `AGENTS.md` | No | No |
-| zencoder | `.zencoder/skills/` | `AGENTS.md` | No | No |
-| junie | `.junie/skills/` | `AGENTS.md` | No | No |
-| openhands | `.openhands/skills/` | `AGENTS.md` | No | No |
-| kiro | `.kiro/skills/` | `AGENTS.md` | No | No |
+| Client | Skills | Agent File | Hooks | Commands | MCP |
+|--------|--------|------------|-------|----------|-----|
+| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` | `.mcp.json` · `claude mcp` CLI |
+| cursor | `.cursor/skills/` | `AGENTS.md` | No | No | No |
+| factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No | No |
+| openclaw | `skills/` | `AGENTS.md` | No | No | No |
+| windsurf | `.windsurf/skills/` | `AGENTS.md` | No | No | No |
+| cline | `.cline/skills/` | `AGENTS.md` | No | No | No |
+| continue | `.continue/skills/` | `AGENTS.md` | No | No | No |
+| roo | `.roo/skills/` | `AGENTS.md` | No | No | No |
+| kilo | `.kilocode/skills/` | `AGENTS.md` | No | No | No |
+| trae | `.trae/skills/` | `AGENTS.md` | No | No | No |
+| augment | `.augment/skills/` | `AGENTS.md` | No | No | No |
+| zencoder | `.zencoder/skills/` | `AGENTS.md` | No | No | No |
+| junie | `.junie/skills/` | `AGENTS.md` | No | No | No |
+| openhands | `.openhands/skills/` | `AGENTS.md` | No | No | No |
+| kiro | `.kiro/skills/` | `AGENTS.md` | No | No | No |
 
-> **Note:** Universal clients share the same `.agents/skills/` directory. See [GitHub Overrides](#github-overrides) for how Copilot and VSCode handle `.github/` content.
+> **Note:** Universal clients share the same `.agents/skills/` directory. See [GitHub Overrides](#github-overrides) for how Copilot and VSCode handle `.github/` content. MCP servers from plugins are synced to each client's native config format — unsupported clients show a warning during sync.
 
 ## Marketplace Structure
 
@@ -396,6 +396,7 @@ my-plugin/
 │       └── review.md
 ├── hooks/              # Hook files (Claude/Factory only)
 │   └── pre-commit.md
+├── .mcp.json           # MCP server configs (Claude, Codex, VSCode)
 └── AGENTS.md           # Agent configuration (optional)
 ```
 
