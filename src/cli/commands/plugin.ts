@@ -114,6 +114,20 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
       }
     }
 
+    // Print MCP server sync results
+    if (result.mcpResults) {
+      for (const [scope, mcpResult] of Object.entries(result.mcpResults)) {
+        if (!mcpResult) continue;
+        const mcpLines = formatMcpResult(mcpResult, scope);
+        if (mcpLines.length > 0) {
+          console.log('');
+          for (const line of mcpLines) {
+            console.log(line);
+          }
+        }
+      }
+    }
+
     // Print native plugin sync results
     if (result.nativeResult) {
       const nativeLines = formatNativeResult(result.nativeResult);

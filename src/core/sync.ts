@@ -1896,6 +1896,23 @@ export async function syncWorkspace(
     }
   }
 
+  // Step 5e: Sync MCP server configs to project-scoped .vscode/mcp.json
+  const mcpResults: Record<string, McpMergeResult> = {};
+  if (syncClients.includes('vscode')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'vscode');
+    const projectMcpPath = join(workspacePath, '.vscode', 'mcp.json');
+    const vscodeMcp = syncVscodeMcpConfig(validPlugins, {
+      dryRun,
+      force: false,
+      configPath: projectMcpPath,
+      trackedServers: trackedMcpServers,
+    });
+    if (vscodeMcp.warnings.length > 0) {
+      warnings.push(...vscodeMcp.warnings);
+    }
+    mcpResults.vscode = vscodeMcp;
+  }
+
   // Count results
   const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, workspaceFileResults);
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
@@ -1915,7 +1932,14 @@ export async function syncWorkspace(
     await persistSyncState(
       workspacePath, pluginResults, workspaceFileResults, syncClients,
       nativePluginsByClient, nativeResult,
-      vscodeState ? { vscodeState } : undefined,
+      {
+        ...(vscodeState && { vscodeState }),
+        ...(Object.keys(mcpResults).length > 0 && {
+          mcpTrackedServers: Object.fromEntries(
+            Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
+          ),
+        }),
+      },
     );
   }
 
@@ -1930,6 +1954,7 @@ export async function syncWorkspace(
     ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
     ...(warnings.length > 0 && { warnings }),
     ...(messages.length > 0 && { messages }),
+    ...(Object.keys(mcpResults).length > 0 && { mcpResults }),
     ...(nativeResult && { nativeResult }),
   };
 }
