@@ -146,9 +146,11 @@ Shared formatting lives in `src/cli/format-sync.ts`. When adding new sync output
 
 ### VSCode / Copilot Display Alias
 
-`vscode` is a display alias for `copilot`. In CLI output, artifacts for the `vscode` client are always shown as `copilot` and their counts are merged. This is because VS Code's AI features are delivered through GitHub Copilot — they are the same client from the user's perspective.
+`vscode` is a display alias for `copilot` **for artifact counts only** (skills, commands, agents, hooks). Since VS Code and Copilot share skill paths, their counts are merged under the `copilot` label.
 
-Internally, `vscode` and `copilot` remain distinct client types with separate path mappings (see `resolveClientMappings()` in `client-mapping.ts`). The aliasing is purely in the display layer (`format-sync.ts`).
+**MCP output uses the raw client name** — no aliasing. This is because vscode and copilot have independent MCP support (copilot doesn't support MCP yet).
+
+Internally, `vscode` and `copilot` remain distinct client types with separate path mappings (see `resolveClientMappings()` in `client-mapping.ts`).
 
 ## Troubleshooting
 
