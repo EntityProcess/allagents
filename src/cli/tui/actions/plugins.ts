@@ -651,14 +651,14 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
       for (const plugin of result.plugins) {
         const skillNames = await discoverSkillNames(plugin.path);
         const desc = plugin.description ? ` - ${plugin.description}` : '';
-        const hint = skillNames.length > 0
-          ? `${skillNames.length} skills: ${truncateList(skillNames)}`
-          : undefined;
-        allPlugins.push({
+        const entry: { label: string; value: string; hint?: string } = {
           label: `${plugin.name}${desc} (${marketplace.name})`,
           value: `${plugin.name}@${marketplace.name}`,
-          hint,
-        });
+        };
+        if (skillNames.length > 0) {
+          entry.hint = `${skillNames.length} skills: ${truncateList(skillNames)}`;
+        }
+        allPlugins.push(entry);
       }
     }
 
