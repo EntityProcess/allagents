@@ -121,12 +121,9 @@ export async function installSelectedPlugin(
       p.note(result.error ?? 'Unknown error', 'Error');
       return false;
     }
-    s.stop('Plugin added');
-
-    const syncS = p.spinner();
-    syncS.start('Syncing...');
+    s.message('Syncing...');
     await syncWorkspace(workspacePath);
-    syncS.stop('Sync complete');
+    s.stop('Installed and synced');
   } else {
     const result = await addUserPlugin(pluginRef);
     if (!result.success) {
@@ -134,12 +131,9 @@ export async function installSelectedPlugin(
       p.note(result.error ?? 'Unknown error', 'Error');
       return false;
     }
-    s.stop('Plugin added');
-
-    const syncS = p.spinner();
-    syncS.start('Syncing...');
+    s.message('Syncing...');
     await syncUserWorkspace();
-    syncS.stop('Sync complete');
+    s.stop('Installed and synced');
   }
 
   cache?.invalidate();
@@ -167,23 +161,23 @@ async function runUpdatePlugin(
     return;
   }
 
-  s.stop(result.action === 'updated' ? 'Plugin updated' : 'Already up to date');
-
-  // Sync after update
-  if (result.action === 'updated') {
-    const syncS = p.spinner();
-    syncS.start('Syncing...');
-    if (scope === 'project' && context.workspacePath) {
-      await syncWorkspace(context.workspacePath);
-    } else {
-      await syncUserWorkspace();
-    }
-    syncS.stop('Sync complete');
-    cache?.invalidate();
+  if (result.action !== 'updated') {
+    s.stop('Already up to date');
+    p.note(`- ${pluginSource} (${result.action})`, 'Update');
+    return;
   }
 
-  const icon = result.action === 'updated' ? '\u2713' : '-';
-  p.note(`${icon} ${pluginSource} (${result.action})`, 'Update');
+  // Sync after update
+  s.message('Syncing...');
+  if (scope === 'project' && context.workspacePath) {
+    await syncWorkspace(context.workspacePath);
+  } else {
+    await syncUserWorkspace();
+  }
+  s.stop('Updated and synced');
+  cache?.invalidate();
+
+  p.note(`\u2713 ${pluginSource} (${result.action})`, 'Update');
 }
 
 /**
@@ -219,12 +213,9 @@ export async function runUpdateAllPlugins(
     return;
   }
 
-  s.stop(`Found ${pluginsToUpdate.length} plugin(s)`);
+  s.message(`Updating ${pluginsToUpdate.length} plugin(s)...`);
 
   const deps = createUpdateDeps();
-
-  const updateS = p.spinner();
-  updateS.start('Updating plugins...');
 
   const results: Array<{ plugin: string; action: string; error?: string }> = [];
   let needsProjectSync = false;
@@ -246,26 +237,19 @@ export async function runUpdateAllPlugins(
     }
   }
 
-  updateS.stop('Update complete');
-
   // Sync if any plugins were updated
-  if (needsProjectSync && context.workspacePath) {
-    const syncS = p.spinner();
-    syncS.start('Syncing project...');
-    await syncWorkspace(context.workspacePath);
-    syncS.stop('Project sync complete');
-  }
-
-  if (needsUserSync) {
-    const syncS = p.spinner();
-    syncS.start('Syncing user...');
-    await syncUserWorkspace();
-    syncS.stop('User sync complete');
-  }
-
   if (needsProjectSync || needsUserSync) {
+    s.message('Syncing...');
+    if (needsProjectSync && context.workspacePath) {
+      await syncWorkspace(context.workspacePath);
+    }
+    if (needsUserSync) {
+      await syncUserWorkspace();
+    }
     cache?.invalidate();
   }
+
+  s.stop('Update complete');
 
   // Show results
   const updated = results.filter((r) => r.action === 'updated').length;
@@ -456,17 +440,14 @@ async function runPluginDetail(
         }
       }
 
-      s.stop('Mode updated');
-
       // Sync
-      const syncS = p.spinner();
-      syncS.start('Syncing...');
+      s.message('Syncing...');
       if (scope === 'project' && context.workspacePath) {
         await syncWorkspace(context.workspacePath);
       } else {
         await syncUserWorkspace();
       }
-      syncS.stop('Sync complete');
+      s.stop('Mode updated and synced');
       cache?.invalidate();
 
       const newMode = currentMode === 'allowlist' ? 'ON' : 'OFF';
@@ -498,12 +479,9 @@ async function runPluginDetail(
           p.note(result.error ?? 'Unknown error', 'Error');
           continue;
         }
-        s.stop('Plugin removed');
-
-        const syncS = p.spinner();
-        syncS.start('Syncing...');
+        s.message('Syncing...');
         await syncWorkspace(context.workspacePath);
-        syncS.stop('Sync complete');
+        s.stop('Removed and synced');
       } else {
         const result = await removeUserPlugin(pluginSource);
         if (!result.success) {
@@ -511,12 +489,9 @@ async function runPluginDetail(
           p.note(result.error ?? 'Unknown error', 'Error');
           continue;
         }
-        s.stop('Plugin removed');
-
-        const syncS = p.spinner();
-        syncS.start('Syncing...');
+        s.message('Syncing...');
         await syncUserWorkspace();
-        syncS.stop('Sync complete');
+        s.stop('Removed and synced');
       }
 
       cache?.invalidate();
@@ -618,17 +593,14 @@ export async function runBrowsePluginSkills(
       }
     }
 
-    s.stop('Skills updated');
-
     // Auto-sync
-    const syncS = p.spinner();
-    syncS.start('Syncing...');
+    s.message('Syncing...');
     if (scope === 'project' && context.workspacePath) {
       await syncWorkspace(context.workspacePath);
     } else if (scope === 'user') {
       await syncUserWorkspace();
     }
-    syncS.stop('Sync complete');
+    s.stop('Skills updated and synced');
     cache?.invalidate();
 
     const changes: string[] = [];
@@ -643,6 +615,16 @@ export async function runBrowsePluginSkills(
     const message = error instanceof Error ? error.message : String(error);
     p.note(message, 'Error');
   }
+}
+
+/**
+ * Truncate a list to maxVisible items, appending "+N more" if needed.
+ */
+function truncateList(items: string[], maxVisible = 3): string {
+  if (items.length <= maxVisible) {
+    return items.join(', ');
+  }
+  return `${items.slice(0, maxVisible).join(', ')} +${items.length - maxVisible} more`;
 }
 
 /**
@@ -662,20 +644,21 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
       return;
     }
 
-    // Collect plugins from all marketplaces with skill preview
-    const allPlugins: Array<{ label: string; value: string }> = [];
+    // Collect plugins from all marketplaces with compact skill preview
+    const allPlugins: Array<{ label: string; value: string; hint?: string }> = [];
     for (const marketplace of marketplaces) {
       const result = await getCachedMarketplacePlugins(marketplace.name, cache);
       for (const plugin of result.plugins) {
         const skillNames = await discoverSkillNames(plugin.path);
         const desc = plugin.description ? ` - ${plugin.description}` : '';
-        const skillInfo = skillNames.length > 0
-          ? `\n    Skills: ${skillNames.join(', ')}`
-          : '';
-        allPlugins.push({
-          label: `${plugin.name}${desc} (${marketplace.name})${skillInfo}`,
+        const entry: { label: string; value: string; hint?: string } = {
+          label: `${plugin.name}${desc} (${marketplace.name})`,
           value: `${plugin.name}@${marketplace.name}`,
-        });
+        };
+        if (skillNames.length > 0) {
+          entry.hint = `${skillNames.length} skills: ${truncateList(skillNames)}`;
+        }
+        allPlugins.push(entry);
       }
     }
 

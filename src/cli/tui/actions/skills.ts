@@ -251,18 +251,15 @@ async function runToggleSkills(
     else changedProject = true;
   }
 
-  s.stop('Skills updated');
-
   // Auto-sync affected scopes
-  const syncS = p.spinner();
-  syncS.start('Syncing...');
+  s.message('Syncing...');
   if (changedProject && context.workspacePath) {
     await syncWorkspace(context.workspacePath);
   }
   if (changedUser) {
     await syncUserWorkspace();
   }
-  syncS.stop('Sync complete');
+  s.stop('Skills updated and synced');
   cache?.invalidate();
 
   const changes: string[] = [];
@@ -273,6 +270,16 @@ async function runToggleSkills(
     changes.push(`✗ Disabled: ${skill.name} (${skill.pluginName}) [${skill.scope}]`);
   }
   p.note(changes.join('\n'), 'Updated');
+}
+
+/**
+ * Truncate a list to maxVisible items, appending "+N more" if needed.
+ */
+function truncateList(items: string[], maxVisible = 3): string {
+  if (items.length <= maxVisible) {
+    return items.join(', ');
+  }
+  return `${items.slice(0, maxVisible).join(', ')} +${items.length - maxVisible} more`;
 }
 
 /**
@@ -312,14 +319,14 @@ async function runBrowseMarketplaceSkills(
     }
   }
 
-  // Build select options — one per plugin, showing its skills
-  const options: Array<{ label: string; value: string }> = [];
+  // Build select options — one per plugin, with compact skill preview in hint
+  const options: Array<{ label: string; value: string; hint?: string }> = [];
   for (const [pluginRef, data] of byPlugin) {
-    const skillList = data.skills.join(', ');
     const desc = data.description ? ` - ${data.description}` : '';
     options.push({
-      label: `${pluginRef}${desc}\n    Skills: ${skillList}`,
+      label: `${pluginRef}${desc}`,
       value: pluginRef,
+      hint: `${data.skills.length} skills: ${truncateList(data.skills)}`,
     });
   }
   options.push({ label: 'Back', value: '__back__' });
