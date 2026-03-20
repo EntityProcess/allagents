@@ -176,10 +176,11 @@ async function runToggleSkills(
   context: TuiContext,
   cache?: TuiCache,
 ): Promise<void> {
-  // Build multiselect options grouped by plugin
+  // Build multiselect options with metadata in hint
   const options = skills.map((s) => ({
-    label: `${s.name} (${s.pluginName}) [${s.scope}]`,
+    label: s.name,
     value: s.key,
+    hint: `${s.pluginName} · ${s.scope}`,
   }));
 
   // Pre-select enabled skills (not disabled)

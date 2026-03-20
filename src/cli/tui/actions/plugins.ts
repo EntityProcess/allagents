@@ -275,7 +275,7 @@ export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise
   try {
     while (true) {
       // Build options: + Add plugin, Update all, then list installed plugins
-      const options: Array<{ label: string; value: string }> = [
+      const options: Array<{ label: string; value: string; hint?: string }> = [
         { label: '+ Add plugin', value: '__add__' },
       ];
 
@@ -298,15 +298,17 @@ export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise
         for (const plugin of status.plugins) {
           const key = `project:${plugin.source}`;
           options.push({
-            label: `${plugin.source} (${plugin.type}) [project]`,
+            label: plugin.source,
             value: key,
+            hint: `${plugin.type} · project`,
           });
         }
         for (const plugin of status.userPlugins ?? []) {
           const key = `user:${plugin.source}`;
           options.push({
-            label: `${plugin.source} (${plugin.type}) [user]`,
+            label: plugin.source,
             value: key,
+            hint: `${plugin.type} · user`,
           });
         }
       }
