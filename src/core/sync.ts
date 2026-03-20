@@ -69,7 +69,7 @@ import { updateRepositories, migrateWorkspaceSkillsV1toV2 } from './workspace-mo
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import { syncCodexMcpServers } from './codex-mcp.js';
-import { syncClaudeMcpConfig } from './claude-mcp.js';
+import { syncClaudeMcpConfig, syncClaudeMcpServersViaCli } from './claude-mcp.js';
 import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
 
 /**
@@ -2082,6 +2082,16 @@ export async function syncUserWorkspace(
       warnings.push(...codexMcp.warnings);
     }
     mcpResults.codex = codexMcp;
+  }
+
+  // Sync MCP servers to Claude Code via CLI if claude client is configured
+  if (syncClients.includes('claude')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'claude');
+    const claudeMcp = await syncClaudeMcpServersViaCli(validPlugins, { dryRun, trackedServers: trackedMcpServers });
+    if (claudeMcp.warnings.length > 0) {
+      warnings.push(...claudeMcp.warnings);
+    }
+    mcpResults.claude = claudeMcp;
   }
 
   // Run native CLI installations for user scope

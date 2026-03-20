@@ -1,8 +1,15 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import JSON5 from 'json5';
+import { executeCommand } from './native/types.js';
+import type { NativeCommandResult } from './native/types.js';
 import { collectMcpServers } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import type { ValidatedPlugin } from './sync.js';
+
+type ExecuteFn = (
+  binary: string,
+  args: string[],
+) => NativeCommandResult | Promise<NativeCommandResult>;
 
 /**
  * Deep equality check for MCP server configs.
@@ -28,7 +35,47 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Sync MCP server configs from plugins into a project-root .mcp.json file.
+ * Build CLI args for `claude mcp add <name>` from a .mcp.json server config.
+ * Returns null if the config format is unsupported.
+ */
+export function buildClaudeMcpAddArgs(
+  name: string,
+  config: Record<string, unknown>,
+  scope: 'user' | 'project' = 'user',
+): string[] | null {
+  // HTTP-based
+  if (typeof config.url === 'string') {
+    return ['mcp', 'add', '--transport', 'http', '--scope', scope, name, config.url];
+  }
+
+  // stdio-based (command + args)
+  if (typeof config.command === 'string') {
+    const args: string[] = ['mcp', 'add', '--scope', scope];
+
+    // Add --env flags if present
+    if (config.env && typeof config.env === 'object') {
+      for (const [key, value] of Object.entries(
+        config.env as Record<string, string>,
+      )) {
+        args.push('-e', `${key}=${value}`);
+      }
+    }
+
+    args.push(name, '--', config.command);
+
+    // Add command args if present
+    if (Array.isArray(config.args)) {
+      args.push(...(config.args as string[]));
+    }
+
+    return args;
+  }
+
+  return null;
+}
+
+/**
+ * Sync MCP server configs from plugins into project-scoped .mcp.json.
  *
  * Claude Code reads .mcp.json at the project root for project-scoped MCP servers.
  * This is the same file that `claude mcp add --scope project` writes to.
@@ -148,6 +195,131 @@ export function syncClaudeMcpConfig(
       existingConfig.mcpServers = existingServers;
       writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
       result.configPath = configPath;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Sync MCP servers from plugins into Claude Code via `claude mcp add/remove --scope user`.
+ *
+ * Uses the same ownership model as codex-mcp:
+ * - Only tracked servers are updated/removed
+ * - Pre-existing user-managed servers are skipped
+ * - Uses `claude mcp get <name>` (exit code) to detect existing servers
+ */
+export async function syncClaudeMcpServersViaCli(
+  validatedPlugins: ValidatedPlugin[],
+  options?: {
+    dryRun?: boolean;
+    trackedServers?: string[];
+    _mockExecute?: ExecuteFn;
+  },
+): Promise<McpMergeResult> {
+  const dryRun = options?.dryRun ?? false;
+  const previouslyTracked = new Set(options?.trackedServers ?? []);
+  const hasTracking = options?.trackedServers !== undefined;
+  const exec: ExecuteFn =
+    options?._mockExecute ?? ((binary, args) => executeCommand(binary, args));
+
+  const { servers: pluginServers, warnings } = collectMcpServers(validatedPlugins);
+
+  const result: McpMergeResult = {
+    added: 0,
+    skipped: 0,
+    overwritten: 0,
+    removed: 0,
+    warnings: [...warnings],
+    addedServers: [],
+    skippedServers: [],
+    overwrittenServers: [],
+    removedServers: [],
+    trackedServers: [],
+  };
+
+  // Skip entirely when there are no MCP servers to sync and nothing to remove
+  if (pluginServers.size === 0 && previouslyTracked.size === 0) {
+    return result;
+  }
+
+  // Check if claude CLI is available
+  const versionResult = await exec('claude', ['--version']);
+  if (!versionResult.success) {
+    result.warnings.push(
+      `Claude CLI not available: ${versionResult.error ?? 'unknown error'}`,
+    );
+    return result;
+  }
+
+  // Process plugin servers: add new, skip existing user-managed
+  for (const [name, config] of pluginServers) {
+    // Check if server already exists via `claude mcp get <name>`
+    const getResult = await exec('claude', ['mcp', 'get', name]);
+    const exists = getResult.success;
+
+    if (exists) {
+      if (hasTracking && previouslyTracked.has(name)) {
+        // We own this server - keep tracking
+        result.trackedServers.push(name);
+      } else {
+        // User-managed server - skip (do not track)
+        result.skipped++;
+        result.skippedServers.push(name);
+      }
+    } else {
+      // New server - add it
+      const addArgs = buildClaudeMcpAddArgs(
+        name,
+        config as Record<string, unknown>,
+        'user',
+      );
+      if (!addArgs) {
+        result.warnings.push(
+          `Unsupported MCP server config for '${name}', skipping`,
+        );
+        continue;
+      }
+
+      if (!dryRun) {
+        const addResult = await exec('claude', addArgs);
+        if (!addResult.success) {
+          result.warnings.push(
+            `Failed to add MCP server '${name}': ${addResult.error ?? 'unknown error'}`,
+          );
+          continue;
+        }
+      }
+
+      result.added++;
+      result.addedServers.push(name);
+      result.trackedServers.push(name);
+    }
+  }
+
+  // Remove orphaned tracked servers
+  if (hasTracking) {
+    const currentServerNames = new Set(pluginServers.keys());
+    for (const trackedName of previouslyTracked) {
+      if (!currentServerNames.has(trackedName)) {
+        // Check if it still exists before trying to remove
+        const getResult = await exec('claude', ['mcp', 'get', trackedName]);
+        if (getResult.success) {
+          if (!dryRun) {
+            const removeResult = await exec('claude', [
+              'mcp', 'remove', trackedName, '--scope', 'user',
+            ]);
+            if (!removeResult.success) {
+              result.warnings.push(
+                `Failed to remove MCP server '${trackedName}': ${removeResult.error ?? 'unknown error'}`,
+              );
+              continue;
+            }
+          }
+          result.removed++;
+          result.removedServers.push(trackedName);
+        }
+      }
     }
   }
 
