@@ -80,10 +80,11 @@ function classifyDestination(dest: string): { client: string; artifactType: Arti
 export function classifyCopyResults(copyResults: CopyResult[]): Map<string, ArtifactCounts> {
   const clientCounts = new Map<string, ArtifactCounts>();
   const seenDestinations = new Set<string>();
-  // Dedup by (displayClient, artifactType, source) to prevent double-counting
-  // when aliased clients (e.g. vscode→copilot) write the same source file to
-  // different destination directories. Using source (not filename) ensures two
-  // different plugins with identically-named skills are each counted correctly.
+  // Dedup by (displayClient, artifactType, artifact-name) to prevent double-counting
+  // when aliased clients (e.g. vscode→copilot) or symlink targets (universal→copilot)
+  // write the same artifact to different destination directories. Two plugins that share
+  // a skill name write to the same canonical path, so seenDestinations already deduplicates
+  // them — meaning this check is safe to key on just the artifact's folder/file name.
   const seenClientArtifacts = new Set<string>();
 
   for (const result of copyResults) {
@@ -96,7 +97,8 @@ export function classifyCopyResults(copyResults: CopyResult[]): Map<string, Arti
     const { artifactType } = classification;
     const client = getDisplayName(classification.client);
 
-    const clientArtifactKey = `${client}|${artifactType}|${result.source}`;
+    const artifactName = result.destination.replace(/\\/g, '/').split('/').pop() ?? result.destination;
+    const clientArtifactKey = `${client}|${artifactType}|${artifactName}`;
     if (seenClientArtifacts.has(clientArtifactKey)) continue;
     seenClientArtifacts.add(clientArtifactKey);
     let counts = clientCounts.get(client);
