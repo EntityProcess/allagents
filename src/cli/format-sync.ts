@@ -80,6 +80,11 @@ function classifyDestination(dest: string): { client: string; artifactType: Arti
 export function classifyCopyResults(copyResults: CopyResult[]): Map<string, ArtifactCounts> {
   const clientCounts = new Map<string, ArtifactCounts>();
   const seenDestinations = new Set<string>();
+  // Dedup by (displayClient, artifactType, source) to prevent double-counting
+  // when aliased clients (e.g. vscode→copilot) write the same source file to
+  // different destination directories. Using source (not filename) ensures two
+  // different plugins with identically-named skills are each counted correctly.
+  const seenClientArtifacts = new Set<string>();
 
   for (const result of copyResults) {
     if (result.action !== 'copied') continue;
@@ -90,6 +95,10 @@ export function classifyCopyResults(copyResults: CopyResult[]): Map<string, Arti
 
     const { artifactType } = classification;
     const client = getDisplayName(classification.client);
+
+    const clientArtifactKey = `${client}|${artifactType}|${result.source}`;
+    if (seenClientArtifacts.has(clientArtifactKey)) continue;
+    seenClientArtifacts.add(clientArtifactKey);
     let counts = clientCounts.get(client);
     if (!counts) {
       counts = { skills: 0, commands: 0, agents: 0, hooks: 0 };
@@ -157,7 +166,8 @@ export function formatSyncHeader(result: SyncResult): string[] {
   const successCount = result.pluginResults.filter((p) => p.success).length;
   return [
     `Updating ${pluginCount} plugin(s)...`,
-    `\u2713 Successfully updated ${successCount} marketplace(s)`,
+    '',
+    `\u2713 Successfully updated ${successCount} plugin(s)`,
   ];
 }
 
@@ -166,14 +176,12 @@ export function formatSyncHeader(result: SyncResult): string[] {
  */
 export function formatSyncSummary(
   result: SyncResult,
-  { dryRun = false, label = 'Sync' }: { dryRun?: boolean; label?: string } = {},
+  { dryRun = false }: { dryRun?: boolean } = {},
 ): string[] {
   const lines: string[] = [];
   const allCopied = result.pluginResults.flatMap((pr) =>
     pr.copyResults.filter((r) => r.action === 'copied'),
   );
-
-  lines.push(`${label} complete${dryRun ? ' (dry run)' : ''}:`);
 
   const classified = classifyCopyResults(allCopied);
   if (classified.size > 0) {
