@@ -68,7 +68,7 @@ import {
 import { updateRepositories, migrateWorkspaceSkillsV1toV2 } from './workspace-modify.js';
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
-import { syncCodexMcpServers } from './codex-mcp.js';
+import { syncCodexMcpServers, syncCodexProjectMcpConfig } from './codex-mcp.js';
 import { syncClaudeMcpConfig, syncClaudeMcpServersViaCli } from './claude-mcp.js';
 import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
 
@@ -1931,6 +1931,22 @@ export async function syncWorkspace(
       warnings.push(...claudeMcp.warnings);
     }
     mcpResults.claude = claudeMcp;
+  }
+
+  // Step 5g: Sync MCP server configs to project-scoped .codex/config.toml
+  if (syncClients.includes('codex')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'codex');
+    const projectCodexConfigPath = join(workspacePath, '.codex', 'config.toml');
+    const codexMcp = syncCodexProjectMcpConfig(validPlugins, {
+      dryRun,
+      force: false,
+      configPath: projectCodexConfigPath,
+      trackedServers: trackedMcpServers,
+    });
+    if (codexMcp.warnings.length > 0) {
+      warnings.push(...codexMcp.warnings);
+    }
+    mcpResults.codex = codexMcp;
   }
 
   // Count results
