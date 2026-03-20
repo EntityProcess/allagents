@@ -1,18 +1,16 @@
 {
   "name": "allagents",
+  "version": "1.0.0",
+  "description": "Skills, agents, and plugins for AI coding agents",
   "owner": {
     "name": "AllAgents",
     "url": "https://allagents.dev"
-  },
-  "metadata": {
-    "description": "Skills, agents, and plugins for AI coding agents",
-    "pluginRoot": "./plugins"
   },
   "plugins": [
     {
       "name": "deepwiki",
       "description": "AI-generated documentation for GitHub repositories",
-      "source": "./deepwiki"
+      "source": "./plugins/deepwiki"
     }
   ]
 }
