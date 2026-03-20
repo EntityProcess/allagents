@@ -13,7 +13,7 @@ import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
 import { ClientTypeSchema, InstallModeSchema, type ClientEntry, type ClientType, type InstallMode } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
-import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary } from '../format-sync.js';
+import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary, formatSyncHeader } from '../format-sync.js';
 
 
 // =============================================================================
@@ -170,18 +170,12 @@ const syncCmd = command({
 
       // Sync user workspace if config exists
       if (userConfigExists) {
-        if (!isJsonMode()) {
-          console.log('Syncing user workspace...\n');
-        }
         const userResult = await syncUserWorkspace({ offline, dryRun, force });
         combined = userResult;
       }
 
       // Sync project workspace if config exists
       if (projectConfigExists) {
-        if (!isJsonMode()) {
-          console.log('Syncing project workspace...\n');
-        }
         const projectResult = await syncWorkspace(process.cwd(), {
           offline,
           dryRun,
@@ -218,6 +212,12 @@ const syncCmd = command({
         }
         console.log('');
       }
+
+      // Print sync header
+      for (const line of formatSyncHeader(result)) {
+        console.log(line);
+      }
+      console.log('');
 
       // Print plugin results
       for (const pluginResult of result.pluginResults) {
