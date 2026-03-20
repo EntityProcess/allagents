@@ -6,9 +6,9 @@ import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
-import { buildClientGroups } from '../prompt-clients.js';
+import { buildClientOptions } from '../prompt-clients.js';
 
-const { select } = p;
+const { select, autocompleteMultiselect } = p;
 
 /**
  * Manage clients - lets user select scope then toggle AI clients.
@@ -49,11 +49,11 @@ export async function runManageClients(context: TuiContext, cache?: TuiCache): P
     }
 
     const allClients = ClientTypeSchema.options;
-    const { groups } = buildClientGroups();
+    const options = buildClientOptions();
 
-    const selectedClients = await p.groupMultiselect({
+    const selectedClients = await autocompleteMultiselect({
       message: `Select AI clients [${scope}]`,
-      options: groups,
+      options,
       initialValues: currentClients.filter((c): c is ClientType => (allClients as readonly string[]).includes(c)),
       required: false,
     });

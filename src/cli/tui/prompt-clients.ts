@@ -2,36 +2,18 @@ import * as p from '@clack/prompts';
 import { ClientTypeSchema, type ClientEntry, type ClientType } from '../../models/workspace-config.js';
 import { CLIENT_MAPPINGS } from '../../models/client-mapping.js';
 
-const { groupMultiselect } = p;
-
-interface ClientGroupsResult {
-  groups: Record<string, { value: ClientType; label: string; hint?: string }[]>;
-  initialValues: ClientType[];
-}
+const { autocompleteMultiselect } = p;
 
 /**
- * Build the two-group options structure for client selection.
- * Group 1: "Universal (.agents/skills)" — pre-selected.
- * Group 2: "Client-specific" — all other clients, unselected.
+ * Build a flat options list for searchable client selection.
+ * Each option includes the skills path as a hint.
  */
-export function buildClientGroups(): ClientGroupsResult {
-  const allClients = ClientTypeSchema.options;
-
-  const universalGroup = allClients
-    .filter((c) => c === 'universal')
-    .map((c) => ({ value: c, label: c, hint: CLIENT_MAPPINGS[c].skillsPath }));
-
-  const clientSpecificGroup = allClients
-    .filter((c) => c !== 'universal')
-    .map((c) => ({ value: c, label: c, hint: CLIENT_MAPPINGS[c].skillsPath }));
-
-  return {
-    groups: {
-      'Universal (.agents/skills)': universalGroup,
-      'Client-specific': clientSpecificGroup,
-    },
-    initialValues: ['universal'],
-  };
+export function buildClientOptions(): { value: ClientType; label: string; hint?: string }[] {
+  return ClientTypeSchema.options.map((c) => ({
+    value: c,
+    label: c,
+    hint: CLIENT_MAPPINGS[c].skillsPath,
+  }));
 }
 
 /**
@@ -43,7 +25,7 @@ export function isInteractive(): boolean {
 }
 
 /**
- * Prompt the user to select AI clients using a grouped multiselect.
+ * Prompt the user to select AI clients using a searchable multiselect.
  * Returns selected clients, or null if cancelled.
  * In non-interactive mode, returns ['universal'] without prompting.
  * If user deselects everything, falls back to ['universal'].
@@ -53,12 +35,12 @@ export async function promptForClients(): Promise<ClientEntry[] | null> {
     return ['universal'];
   }
 
-  const { groups, initialValues } = buildClientGroups();
+  const options = buildClientOptions();
 
-  const selected = await groupMultiselect({
+  const selected = await autocompleteMultiselect({
     message: 'Which AI clients do you use?',
-    options: groups,
-    initialValues,
+    options,
+    initialValues: ['universal'] as ClientType[],
     required: false,
   });
 
