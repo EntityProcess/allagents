@@ -1,5 +1,5 @@
 import type { NativeSyncResult } from '../core/native/types.js';
-import type { SyncResult, DeletedArtifact } from '../core/sync.js';
+import type { SyncResult, DeletedArtifact, PluginSyncResult } from '../core/sync.js';
 import type { CopyResult } from '../core/transform.js';
 import type { McpMergeResult } from '../core/vscode-mcp.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, getDisplayName } from '../models/client-mapping.js';
@@ -174,23 +174,23 @@ export function formatSyncHeader(result: SyncResult): string[] {
 }
 
 /**
- * Format the overall sync summary with per-client artifact counts.
+ * Format the plugin header line with optional scope.
+ * Example: "✓ Plugin: deepwiki@allagents (scope: project)"
+ */
+export function formatPluginHeader(pluginResult: PluginSyncResult): string {
+  const status = pluginResult.success ? '\u2713' : '\u2717';
+  const scopeSuffix = pluginResult.scope ? ` (scope: ${pluginResult.scope})` : '';
+  return `${status} Plugin: ${pluginResult.plugin}${scopeSuffix}`;
+}
+
+/**
+ * Format the overall sync summary with totals for generated/failed/skipped/deleted.
+ * Artifact counts per client are no longer shown here — they are displayed per-plugin.
  */
 export function formatSyncSummary(
   result: SyncResult,
-  { dryRun = false }: { dryRun?: boolean } = {},
 ): string[] {
   const lines: string[] = [];
-  const allCopied = result.pluginResults.flatMap((pr) =>
-    pr.copyResults.filter((r) => r.action === 'copied'),
-  );
-
-  const classified = classifyCopyResults(allCopied);
-  if (classified.size > 0) {
-    lines.push(...formatArtifactLines(classified));
-  } else if (allCopied.length > 0) {
-    lines.push(`  Total ${dryRun ? 'would copy' : 'copied'}: ${result.totalCopied}`);
-  }
 
   if (result.totalGenerated > 0) lines.push(`  Total generated: ${result.totalGenerated}`);
   if (result.totalFailed > 0) lines.push(`  Total failed: ${result.totalFailed}`);

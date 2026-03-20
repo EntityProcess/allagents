@@ -48,7 +48,7 @@ import {
   pluginUpdateMeta,
 } from '../metadata/plugin.js';
 import { skillsCmd } from './plugin-skills.js';
-import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts } from '../format-sync.js';
+import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatPluginHeader } from '../format-sync.js';
 import {
   getPluginSource,
   getPluginClients,
@@ -83,8 +83,7 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
 
   if (!isJsonMode()) {
     for (const pluginResult of result.pluginResults) {
-      const status = pluginResult.success ? '\u2713' : '\u2717';
-      console.log(`${status} Plugin: ${pluginResult.plugin}`);
+      console.log(formatPluginHeader(pluginResult));
 
       if (pluginResult.error) {
         console.log(`  Error: ${pluginResult.error}`);
@@ -167,8 +166,7 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
 
   if (!isJsonMode()) {
     for (const pluginResult of result.pluginResults) {
-      const status = pluginResult.success ? '\u2713' : '\u2717';
-      console.log(`${status} Plugin: ${pluginResult.plugin}`);
+      console.log(formatPluginHeader(pluginResult));
 
       if (pluginResult.error) {
         console.log(`  Error: ${pluginResult.error}`);

@@ -204,6 +204,8 @@ export interface PluginSyncResult {
   success: boolean;
   copyResults: CopyResult[];
   error?: string;
+  /** Whether this plugin was synced at project or user scope */
+  scope?: 'project' | 'user';
 }
 
 /**
@@ -1793,9 +1795,9 @@ export async function syncWorkspace(
   // Use syncMode from config (defaults to 'symlink')
   const syncMode = config.syncMode ?? 'symlink';
   const pluginResults = await Promise.all(
-    validPlugins.map((validatedPlugin) => {
+    validPlugins.map(async (validatedPlugin) => {
       const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
-      return copyValidatedPlugin(
+      const result = await copyValidatedPlugin(
         validatedPlugin,
         workspacePath,
         validatedPlugin.clients,
@@ -1804,6 +1806,7 @@ export async function syncWorkspace(
         undefined, // clientMappings
         syncMode,
       );
+      return { ...result, scope: 'project' as const };
     }),
   );
 
@@ -2036,10 +2039,11 @@ export async function syncUserWorkspace(
   // Use syncMode from config (defaults to 'symlink')
   const syncMode = config.syncMode ?? 'symlink';
   const pluginResults = await Promise.all(
-    validPlugins.map((vp) => {
+    validPlugins.map(async (vp) => {
       const skillNameMap = pluginSkillMaps.get(vp.resolved);
       const resolvedUserMappings = resolveClientMappings(vp.clients, USER_CLIENT_MAPPINGS);
-      return copyValidatedPlugin(vp, homeDir, vp.clients, dryRun, skillNameMap, resolvedUserMappings, syncMode);
+      const result = await copyValidatedPlugin(vp, homeDir, vp.clients, dryRun, skillNameMap, resolvedUserMappings, syncMode);
+      return { ...result, scope: 'user' as const };
     }),
   );
 

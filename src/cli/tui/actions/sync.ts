@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
 import { syncUserWorkspace, syncWorkspace } from '../../../core/sync.js';
-import { formatMcpResult, formatNativeResult, formatSyncSummary } from '../../format-sync.js';
+import { formatMcpResult, formatNativeResult, formatSyncSummary, formatPluginHeader } from '../../format-sync.js';
 import type { TuiContext } from '../context.js';
 
 /**
@@ -21,7 +21,7 @@ export async function runSync(context: TuiContext): Promise<void> {
         p.note(result.error, 'Sync Error');
       } else {
         const lines = result.pluginResults.map(
-          (pr) => `${pr.success ? '\u2713' : '\u2717'} ${pr.plugin}`,
+          (pr) => formatPluginHeader(pr),
         );
         lines.push('');
         lines.push(...formatSyncSummary(result));
@@ -42,7 +42,7 @@ export async function runSync(context: TuiContext): Promise<void> {
         p.note(userResult.error, 'User Sync Error');
       } else {
         const lines = userResult.pluginResults.map(
-          (pr) => `${pr.success ? '\u2713' : '\u2717'} ${pr.plugin}`,
+          (pr) => formatPluginHeader(pr),
         );
         lines.push('');
         lines.push(...formatSyncSummary(userResult));
