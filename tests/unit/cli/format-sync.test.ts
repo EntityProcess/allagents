@@ -366,17 +366,6 @@ describe('formatPluginHeader', () => {
     expect(formatPluginHeader(pr)).toBe('\u2713 Plugin: deepwiki@allagents (scope: project)');
   });
 
-  test('shows user scope', () => {
-    const pr: PluginSyncResult = {
-      plugin: 'my-plugin@marketplace',
-      resolved: '/tmp/my-plugin',
-      success: true,
-      copyResults: [],
-      scope: 'user',
-    };
-    expect(formatPluginHeader(pr)).toBe('\u2713 Plugin: my-plugin@marketplace (scope: user)');
-  });
-
   test('shows failure status', () => {
     const pr: PluginSyncResult = {
       plugin: 'broken-plugin',

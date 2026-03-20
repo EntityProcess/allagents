@@ -42,7 +42,7 @@ export async function runSync(context: TuiContext): Promise<void> {
         p.note(userResult.error, 'User Sync Error');
       } else {
         const lines = userResult.pluginResults.map(
-          (pr) => `${pr.success ? '\u2713' : '\u2717'} ${pr.plugin}`,
+          (pr) => formatPluginHeader(pr),
         );
         lines.push('');
         lines.push(...formatSyncSummary(userResult));
