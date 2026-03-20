@@ -145,9 +145,6 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
  * Run user-scope sync and print results. Returns true if sync succeeded.
  */
 async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnType<typeof buildSyncData> | null }> {
-  if (!isJsonMode()) {
-    console.log('\nSyncing user workspace...\n');
-  }
   const result = await syncUserWorkspace();
 
   if (!result.success && result.error) {

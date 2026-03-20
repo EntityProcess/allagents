@@ -150,6 +150,18 @@ export function formatPluginArtifacts(copyResults: CopyResult[], indent = '  '):
 }
 
 /**
+ * Format the sync header shown before individual plugin results.
+ */
+export function formatSyncHeader(result: SyncResult): string[] {
+  const pluginCount = result.pluginResults.length;
+  const successCount = result.pluginResults.filter((p) => p.success).length;
+  return [
+    `Updating ${pluginCount} plugin(s)...`,
+    `\u2713 Successfully updated ${successCount} marketplace(s)`,
+  ];
+}
+
+/**
  * Format the overall sync summary with per-client artifact counts.
  */
 export function formatSyncSummary(
