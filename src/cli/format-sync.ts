@@ -245,7 +245,9 @@ export function formatMcpResult(
   if (overwritten > 0) parts.push(`${overwritten} updated`);
   if (removed > 0) parts.push(`${removed} removed`);
   if (skipped > 0) parts.push(`${skipped} skipped`);
-  const displayScope = scope ? getDisplayName(scope) : undefined;
+  // MCP scopes use the raw client name (no aliasing) because
+  // vscode and copilot have independent MCP support.
+  const displayScope = scope;
   const label = displayScope ? `MCP servers (${displayScope})` : 'MCP servers';
   lines.push(`${label}: ${parts.join(', ')}`);
 

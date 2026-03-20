@@ -69,6 +69,15 @@ describe('formatMcpResult', () => {
 
     expect(lines.some((l) => l.includes('File modified'))).toBe(false);
   });
+
+  test('displays vscode scope as vscode, not copilot', () => {
+    const lines = formatMcpResult(makeResult({
+      added: 1,
+      addedServers: ['deepwiki'],
+    }), 'vscode');
+
+    expect(lines[0]).toBe('MCP servers (vscode): 1 added');
+  });
 });
 
 describe('classifyCopyResults', () => {

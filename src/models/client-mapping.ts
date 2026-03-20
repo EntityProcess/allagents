@@ -287,8 +287,8 @@ export function resolveClientMappings(
 
 /**
  * Display name aliases for CLI output.
- * vscode is always displayed as copilot since VS Code's AI features
- * are delivered through GitHub Copilot.
+ * vscode is displayed as copilot for artifact counts since VS Code's AI features
+ * are delivered through GitHub Copilot and they share skill paths.
  */
 export const CLIENT_DISPLAY_ALIASES: Partial<Record<ClientType, string>> = {
   vscode: 'copilot',
