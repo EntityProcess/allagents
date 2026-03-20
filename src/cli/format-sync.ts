@@ -79,9 +79,12 @@ function classifyDestination(dest: string): { client: string; artifactType: Arti
  */
 export function classifyCopyResults(copyResults: CopyResult[]): Map<string, ArtifactCounts> {
   const clientCounts = new Map<string, ArtifactCounts>();
+  const seenDestinations = new Set<string>();
 
   for (const result of copyResults) {
     if (result.action !== 'copied') continue;
+    if (seenDestinations.has(result.destination)) continue;
+    seenDestinations.add(result.destination);
     const classification = classifyDestination(result.destination);
     if (!classification) continue;
 
