@@ -249,8 +249,8 @@ export function parseCodexConfigToml(content: string): {
         serverSections.set(currentServer, (serverSections.get(currentServer) ?? '') +
           (serverSections.has(currentServer) ? '\n' : '') + currentLines.join('\n'));
       }
-      currentServer = sectionMatch[1];
-      serverNames.add(currentServer);
+      currentServer = sectionMatch[1] ?? null;
+      if (currentServer) serverNames.add(currentServer);
       currentLines = [line];
       continue;
     }
@@ -395,7 +395,7 @@ export function syncCodexProjectMcpConfig(
     for (const toml of finalServers.values()) {
       parts.push(toml);
     }
-    const output = parts.join('\n\n') + '\n';
+    const output = `${parts.join('\n\n')}\n`;
     const dir = dirname(configPath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
