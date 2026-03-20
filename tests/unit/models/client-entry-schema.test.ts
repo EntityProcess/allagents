@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { ClientEntrySchema, WorkspaceConfigSchema, normalizeClientEntry } from '../../../src/models/workspace-config.js';
+import { ClientEntrySchema, normalizeClientEntry } from '../../../src/models/workspace-config.js';
 
 describe('ClientEntrySchema', () => {
   describe('existing behavior', () => {
