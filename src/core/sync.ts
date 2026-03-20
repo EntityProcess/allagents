@@ -66,7 +66,7 @@ import {
   reconcileVscodeWorkspaceFolders,
 } from './vscode-workspace.js';
 import { updateRepositories, migrateWorkspaceSkillsV1toV2 } from './workspace-modify.js';
-import { syncVscodeMcpConfig } from './vscode-mcp.js';
+import { syncVscodeMcpConfig, collectMcpServers } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import { syncCodexMcpServers, syncCodexProjectMcpConfig } from './codex-mcp.js';
 import { syncClaudeMcpConfig, syncClaudeMcpServersViaCli } from './claude-mcp.js';
@@ -1949,6 +1949,17 @@ export async function syncWorkspace(
     mcpResults.codex = codexMcp;
   }
 
+  // Warn about clients that don't support project-scoped MCP sync
+  const PROJECT_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'universal']);
+  const { servers: allMcpServers } = collectMcpServers(validPlugins);
+  if (allMcpServers.size > 0) {
+    for (const client of syncClients) {
+      if (!PROJECT_MCP_CLIENTS.has(client)) {
+        warnings.push(`MCP servers not synced for ${client} (not supported at project scope)`);
+      }
+    }
+  }
+
   // Count results
   const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, workspaceFileResults);
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
@@ -2112,6 +2123,17 @@ export async function syncUserWorkspace(
       warnings.push(...claudeMcp.warnings);
     }
     mcpResults.claude = claudeMcp;
+  }
+
+  // Warn about clients that don't support user-scoped MCP sync
+  const USER_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'universal']);
+  const { servers: allUserMcpServers } = collectMcpServers(validPlugins);
+  if (allUserMcpServers.size > 0) {
+    for (const client of syncClients) {
+      if (!USER_MCP_CLIENTS.has(client)) {
+        warnings.push(`MCP servers not synced for ${client} (not supported at user scope)`);
+      }
+    }
   }
 
   // Run native CLI installations for user scope

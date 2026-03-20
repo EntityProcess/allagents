@@ -245,7 +245,8 @@ export function formatMcpResult(
   if (overwritten > 0) parts.push(`${overwritten} updated`);
   if (removed > 0) parts.push(`${removed} removed`);
   if (skipped > 0) parts.push(`${skipped} skipped`);
-  const label = scope ? `MCP servers (${scope})` : 'MCP servers';
+  const displayScope = scope ? getDisplayName(scope) : undefined;
+  const label = displayScope ? `MCP servers (${displayScope})` : 'MCP servers';
   lines.push(`${label}: ${parts.join(', ')}`);
 
   for (const name of mcpResult.addedServers) {
