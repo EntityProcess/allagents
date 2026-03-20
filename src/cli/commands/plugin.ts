@@ -1043,7 +1043,7 @@ const pluginInstallCmd = command({
         if (result.autoRegistered) {
           console.log(`  Resolved marketplace: ${result.autoRegistered}`);
         }
-        console.log(`Installing plugin "${displayPlugin}"...`);
+        console.log(`Installing plugin "${displayPlugin}"...\n`);
       }
 
       // Single sync pass (enabledSkills already written if --skill was used)
@@ -1052,7 +1052,7 @@ const pluginInstallCmd = command({
         : await runSyncAndPrint();
 
       if (!isJsonMode() && syncOk) {
-        console.log(`\u2714 Successfully installed plugin: ${displayPlugin} (scope: ${isUser ? 'user' : 'project'})`);
+        console.log(`\n\u2714 Successfully installed plugin: ${displayPlugin} (scope: ${isUser ? 'user' : 'project'})`);
       }
 
       if (isJsonMode()) {
