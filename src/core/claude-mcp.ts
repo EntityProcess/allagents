@@ -1,7 +1,5 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import JSON5 from 'json5';
-import { getHomeDir } from '../constants.js';
 import { collectMcpServers } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import type { ValidatedPlugin } from './sync.js';
@@ -30,17 +28,11 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Get the path to Claude Code's user-level settings.json
- */
-export function getClaudeSettingsPath(): string {
-  return join(getHomeDir(), '.claude', 'settings.json');
-}
-
-/**
- * Sync MCP server configs from plugins into Claude Code's settings.json.
+ * Sync MCP server configs from plugins into a project-root .mcp.json file.
  *
- * Claude Code stores MCP servers under the "mcpServers" key in settings.json,
- * unlike VS Code which uses "servers" inside mcp.json.
+ * Claude Code reads .mcp.json at the project root for project-scoped MCP servers.
+ * This is the same file that `claude mcp add --scope project` writes to.
+ * The format uses "mcpServers" as the top-level key.
  *
  * With tracking enabled:
  * - Tracked servers with changed configs are updated (not skipped)
@@ -58,7 +50,10 @@ export function syncClaudeMcpConfig(
 ): McpMergeResult {
   const dryRun = options?.dryRun ?? false;
   const force = options?.force ?? false;
-  const configPath = options?.configPath ?? getClaudeSettingsPath();
+  const configPath = options?.configPath;
+  if (!configPath) {
+    throw new Error('configPath is required for syncClaudeMcpConfig');
+  }
   const previouslyTracked = new Set(options?.trackedServers ?? []);
   const hasTracking = options?.trackedServers !== undefined;
 
@@ -77,7 +72,7 @@ export function syncClaudeMcpConfig(
     trackedServers: [],
   };
 
-  // Read existing Claude settings.json (or start fresh)
+  // Read existing .mcp.json (or start fresh)
   let existingConfig: Record<string, unknown> = {};
   if (existsSync(configPath)) {
     try {
@@ -89,7 +84,6 @@ export function syncClaudeMcpConfig(
     }
   }
 
-  // Claude Code uses "mcpServers" key (not "servers" like VS Code)
   const existingServers = (existingConfig.mcpServers as Record<string, unknown>) ?? {};
 
   // Process plugin servers: add new, update tracked, skip user-managed conflicts
@@ -137,10 +131,6 @@ export function syncClaudeMcpConfig(
   const hasChanges = result.added > 0 || result.overwritten > 0 || result.removed > 0;
   if (hasChanges && !dryRun) {
     existingConfig.mcpServers = existingServers;
-    const dir = dirname(configPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
     writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
     result.configPath = configPath;
   }
@@ -156,10 +146,6 @@ export function syncClaudeMcpConfig(
     }
     if (result.removed > 0 && !dryRun) {
       existingConfig.mcpServers = existingServers;
-      const dir = dirname(configPath);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-      }
       writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
       result.configPath = configPath;
     }

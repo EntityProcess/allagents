@@ -1914,14 +1914,14 @@ export async function syncWorkspace(
     mcpResults.vscode = vscodeMcp;
   }
 
-  // Step 5f: Sync MCP server configs to project-scoped .claude/settings.json
+  // Step 5f: Sync MCP server configs to project-scoped .mcp.json (read by Claude Code)
   if (syncClients.includes('claude')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'claude');
-    const projectClaudeSettingsPath = join(workspacePath, '.claude', 'settings.json');
+    const projectMcpJsonPath = join(workspacePath, '.mcp.json');
     const claudeMcp = syncClaudeMcpConfig(validPlugins, {
       dryRun,
       force: false,
-      configPath: projectClaudeSettingsPath,
+      configPath: projectMcpJsonPath,
       trackedServers: trackedMcpServers,
     });
     if (claudeMcp.warnings.length > 0) {
@@ -2082,16 +2082,6 @@ export async function syncUserWorkspace(
       warnings.push(...codexMcp.warnings);
     }
     mcpResults.codex = codexMcp;
-  }
-
-  // Sync MCP servers to Claude Code settings if claude client is configured
-  if (syncClients.includes('claude')) {
-    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'claude');
-    const claudeMcp = syncClaudeMcpConfig(validPlugins, { dryRun, force, trackedServers: trackedMcpServers });
-    if (claudeMcp.warnings.length > 0) {
-      warnings.push(...claudeMcp.warnings);
-    }
-    mcpResults.claude = claudeMcp;
   }
 
   // Run native CLI installations for user scope

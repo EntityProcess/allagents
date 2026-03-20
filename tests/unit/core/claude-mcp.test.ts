@@ -29,13 +29,13 @@ describe('syncClaudeMcpConfig', () => {
     rmSync(pluginDir, { recursive: true, force: true });
   });
 
-  test('creates settings.json with mcpServers when none exists', () => {
+  test('creates .mcp.json with mcpServers when none exists', () => {
     writeFileSync(
       join(pluginDir, '.mcp.json'),
       JSON.stringify({ mcpServers: { deepwiki: { type: 'http', url: 'https://mcp.deepwiki.com/mcp' } } }),
     );
 
-    const configPath = join(tempDir, '.claude', 'settings.json');
+    const configPath = join(tempDir, '.mcp.json');
     const result = syncClaudeMcpConfig([makePlugin(pluginDir)], { configPath });
 
     expect(result.added).toBe(1);
@@ -47,9 +47,11 @@ describe('syncClaudeMcpConfig', () => {
     expect(written.mcpServers.deepwiki).toEqual({ type: 'http', url: 'https://mcp.deepwiki.com/mcp' });
   });
 
-  test('preserves existing settings when adding mcpServers', () => {
-    const configPath = join(tempDir, 'settings.json');
-    writeFileSync(configPath, JSON.stringify({ allowedTools: ['Read', 'Write'] }));
+  test('preserves existing mcpServers entries when adding new ones', () => {
+    const configPath = join(tempDir, '.mcp.json');
+    writeFileSync(configPath, JSON.stringify({
+      mcpServers: { existing: { type: 'http', url: 'https://existing.com' } },
+    }));
 
     writeFileSync(
       join(pluginDir, '.mcp.json'),
@@ -59,12 +61,12 @@ describe('syncClaudeMcpConfig', () => {
     syncClaudeMcpConfig([makePlugin(pluginDir)], { configPath });
 
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.allowedTools).toEqual(['Read', 'Write']);
+    expect(written.mcpServers.existing).toEqual({ type: 'http', url: 'https://existing.com' });
     expect(written.mcpServers.deepwiki).toEqual({ type: 'http', url: 'https://mcp.deepwiki.com/mcp' });
   });
 
   test('skips user-managed servers with conflicting names', () => {
-    const configPath = join(tempDir, 'settings.json');
+    const configPath = join(tempDir, '.mcp.json');
     writeFileSync(configPath, JSON.stringify({
       mcpServers: { deepwiki: { type: 'http', url: 'https://my-custom-deepwiki.com' } },
     }));
@@ -78,13 +80,12 @@ describe('syncClaudeMcpConfig', () => {
 
     expect(result.skipped).toBe(1);
     expect(result.added).toBe(0);
-    // User's config should be preserved
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(written.mcpServers.deepwiki.url).toBe('https://my-custom-deepwiki.com');
   });
 
   test('updates tracked servers when config changes', () => {
-    const configPath = join(tempDir, 'settings.json');
+    const configPath = join(tempDir, '.mcp.json');
     writeFileSync(configPath, JSON.stringify({
       mcpServers: { deepwiki: { type: 'http', url: 'https://old.deepwiki.com' } },
     }));
@@ -105,12 +106,11 @@ describe('syncClaudeMcpConfig', () => {
   });
 
   test('removes orphaned tracked servers', () => {
-    const configPath = join(tempDir, 'settings.json');
+    const configPath = join(tempDir, '.mcp.json');
     writeFileSync(configPath, JSON.stringify({
       mcpServers: { old_server: { type: 'http', url: 'https://old.com' } },
     }));
 
-    // No plugins have MCP servers
     const result = syncClaudeMcpConfig([], {
       configPath,
       trackedServers: ['old_server'],
@@ -128,7 +128,7 @@ describe('syncClaudeMcpConfig', () => {
       JSON.stringify({ mcpServers: { deepwiki: { type: 'http', url: 'https://mcp.deepwiki.com/mcp' } } }),
     );
 
-    const configPath = join(tempDir, 'settings.json');
+    const configPath = join(tempDir, '.mcp.json');
     const result = syncClaudeMcpConfig([makePlugin(pluginDir)], { configPath, dryRun: true });
 
     expect(result.added).toBe(1);
