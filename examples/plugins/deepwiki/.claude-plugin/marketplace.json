@@ -1,0 +1,17 @@
+{
+  "name": "deepwiki-plugins",
+  "owner": {
+    "name": "DeepWiki"
+  },
+  "metadata": {
+    "description": "Skills, agents, and plugins for AI coding agents",
+    "pluginRoot": "."
+  },
+  "plugins": [
+    {
+      "name": "deepwiki",
+      "description": "AI-generated documentation for GitHub repositories",
+      "source": "."
+    }
+  ]
+}
