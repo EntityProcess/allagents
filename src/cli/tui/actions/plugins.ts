@@ -796,9 +796,10 @@ async function runMarketplaceDetail(
           });
         pluginOptions.push({ label: 'Back', value: '__back__' });
 
-        const selectedPlugin = await select({
+        const selectedPlugin = await autocomplete({
           message: 'Select a plugin to install',
           options: pluginOptions,
+          placeholder: 'Type to search...',
         });
 
         if (p.isCancel(selectedPlugin) || selectedPlugin === '__back__') {
