@@ -48,7 +48,7 @@ import {
   pluginUpdateMeta,
 } from '../metadata/plugin.js';
 import { skillsCmd } from './plugin-skills.js';
-import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary } from '../format-sync.js';
+import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts } from '../format-sync.js';
 import {
   getPluginSource,
   getPluginClients,
@@ -68,7 +68,7 @@ import { load } from 'js-yaml';
  */
 async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<{ ok: boolean; syncData: ReturnType<typeof buildSyncData> | null }> {
   if (!isJsonMode()) {
-    console.log('\nSyncing workspace...\n');
+    console.log('\nUpdating workspace...\n');
   }
   const result = await syncWorkspace(process.cwd(), options);
 
@@ -144,11 +144,6 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
       for (const warning of result.warnings) {
         console.log(`  \u26A0 ${warning}`);
       }
-    }
-
-    console.log('');
-    for (const line of formatSyncSummary(result)) {
-      console.log(line);
     }
   }
 
@@ -228,10 +223,6 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
       }
     }
 
-    console.log('');
-    for (const line of formatSyncSummary(result)) {
-      console.log(line);
-    }
   }
 
   return { ok: result.success && result.totalFailed === 0, syncData };
@@ -1069,13 +1060,17 @@ const pluginInstallCmd = command({
         if (result.autoRegistered) {
           console.log(`  Resolved marketplace: ${result.autoRegistered}`);
         }
-        console.log(`\u2713 Installed plugin (${isUser ? 'user' : 'project'} scope): ${displayPlugin}`);
+        console.log(`Installing plugin "${displayPlugin}"...`);
       }
 
       // Single sync pass (enabledSkills already written if --skill was used)
       const { ok: syncOk, syncData } = isUser
         ? await runUserSyncAndPrint()
         : await runSyncAndPrint();
+
+      if (!isJsonMode() && syncOk) {
+        console.log(`\u2714 Successfully installed plugin: ${displayPlugin} (scope: ${isUser ? 'user' : 'project'})`);
+      }
 
       if (isJsonMode()) {
         jsonOutput({
