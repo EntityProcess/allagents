@@ -215,7 +215,6 @@ describe('formatSyncSummary', () => {
 
     const lines = formatSyncSummary(result);
     expect(lines).toEqual([
-      'Sync complete:',
       '  claude: 1 skill, 1 agent',
     ]);
   });
@@ -240,28 +239,13 @@ describe('formatSyncSummary', () => {
 
     const lines = formatSyncSummary(result);
     expect(lines).toEqual([
-      'Sync complete:',
       '  claude: 1 skill',
       '  Total generated: 1',
       '  Total failed: 1',
     ]);
   });
 
-  test('shows dry-run label', () => {
-    const result: SyncResult = {
-      success: true,
-      pluginResults: [],
-      totalCopied: 0,
-      totalFailed: 0,
-      totalSkipped: 0,
-      totalGenerated: 0,
-    };
-
-    const lines = formatSyncSummary(result, { dryRun: true });
-    expect(lines[0]).toBe('Sync complete (dry run):');
-  });
-
-  test('uses custom label', () => {
+  test('dry-run shows would-copy fallback for unclassified files', () => {
     const result: SyncResult = {
       success: true,
       pluginResults: [{
@@ -269,7 +253,7 @@ describe('formatSyncSummary', () => {
         resolved: '/tmp/test',
         success: true,
         copyResults: [
-          { source: '/plugin/skills/a', destination: '/home/user/.codex/skills/a', action: 'copied' },
+          { source: '/plugin/something.txt', destination: '/workspace/something.txt', action: 'copied' },
         ],
       }],
       totalCopied: 1,
@@ -278,8 +262,8 @@ describe('formatSyncSummary', () => {
       totalGenerated: 0,
     };
 
-    const lines = formatSyncSummary(result, { label: 'User sync' });
-    expect(lines[0]).toBe('User sync complete:');
+    const lines = formatSyncSummary(result, { dryRun: true });
+    expect(lines).toEqual(['  Total would copy: 1']);
   });
 });
 
