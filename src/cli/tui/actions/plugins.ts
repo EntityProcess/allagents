@@ -32,7 +32,7 @@ import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 
-const { select, text, confirm, multiselect } = p;
+const { select, text, confirm, multiselect, autocomplete } = p;
 
 /**
  * Create dependencies for updatePlugin.
@@ -671,9 +671,10 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
 
     allPlugins.push({ label: 'Back', value: '__back__' });
 
-    const selected = await select({
+    const selected = await autocomplete({
       message: 'Select a plugin to install',
       options: allPlugins,
+      placeholder: 'Type to search...',
     });
 
     if (p.isCancel(selected) || selected === '__back__') {

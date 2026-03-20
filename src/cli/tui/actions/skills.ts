@@ -25,7 +25,7 @@ import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 import { installSelectedPlugin, runBrowsePluginSkills } from './plugins.js';
 
-const { multiselect, select } = p;
+const { multiselect, select, autocomplete } = p;
 
 interface ScopedSkill extends SkillInfo {
   scope: 'user' | 'project';
@@ -332,9 +332,10 @@ async function runBrowseMarketplaceSkills(
   }
   options.push({ label: 'Back', value: '__back__' });
 
-  const selected = await select({
+  const selected = await autocomplete({
     message: 'Select a plugin',
     options,
+    placeholder: 'Type to search...',
   });
 
   if (p.isCancel(selected) || selected === '__back__') {
