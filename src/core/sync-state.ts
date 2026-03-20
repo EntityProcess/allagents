@@ -6,7 +6,7 @@ import { SyncStateSchema, type SyncState } from '../models/sync-state.js';
 import type { ClientType } from '../models/workspace-config.js';
 
 /** MCP scope identifier (e.g., "vscode" for user-level mcp.json) */
-export type McpScope = 'vscode' | 'codex' | 'claude';
+export type McpScope = 'vscode' | 'codex' | 'claude' | 'copilot';
 
 /**
  * Data structure for saving sync state with optional MCP servers
