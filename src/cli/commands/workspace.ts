@@ -13,7 +13,7 @@ import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
 import { ClientTypeSchema, InstallModeSchema, type ClientEntry, type ClientType, type InstallMode } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
-import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary, formatSyncHeader } from '../format-sync.js';
+import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary, formatSyncHeader, formatPluginHeader } from '../format-sync.js';
 
 
 // =============================================================================
@@ -105,8 +105,7 @@ const initCmd = command({
         if (syncResult.pluginResults.length > 0) {
           console.log('\nPlugin sync results:');
           for (const pluginResult of syncResult.pluginResults) {
-            const status = pluginResult.success ? '\u2713' : '\u2717';
-            console.log(`  ${status} ${pluginResult.plugin}`);
+            console.log(`  ${formatPluginHeader(pluginResult)}`);
             if (pluginResult.error) {
               console.log(`    Error: ${pluginResult.error}`);
             }
@@ -221,8 +220,7 @@ const syncCmd = command({
 
       // Print plugin results
       for (const pluginResult of result.pluginResults) {
-        const status = pluginResult.success ? '\u2713' : '\u2717';
-        console.log(`${status} Plugin: ${pluginResult.plugin}`);
+        console.log(formatPluginHeader(pluginResult));
 
         if (pluginResult.error) {
           console.log(`  Error: ${pluginResult.error}`);
@@ -285,10 +283,13 @@ const syncCmd = command({
         }
       }
 
-      // Print summary
-      console.log('');
-      for (const line of formatSyncSummary(result, { dryRun })) {
-        console.log(line);
+      // Print summary (only generated/failed/skipped/deleted totals)
+      const summaryLines = formatSyncSummary(result, { dryRun });
+      if (summaryLines.length > 0) {
+        console.log('');
+        for (const line of summaryLines) {
+          console.log(line);
+        }
       }
 
       if (!result.success || result.totalFailed > 0) {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { formatMcpResult, formatNativeResult, classifyCopyResults, formatArtifactLines, formatPluginArtifacts, formatSyncSummary, formatDeletedArtifacts } from '../../../src/cli/format-sync.js';
+import { formatMcpResult, formatNativeResult, classifyCopyResults, formatArtifactLines, formatPluginArtifacts, formatSyncSummary, formatDeletedArtifacts, formatPluginHeader } from '../../../src/cli/format-sync.js';
 import type { CopyResult } from '../../../src/core/transform.js';
-import type { SyncResult, DeletedArtifact } from '../../../src/core/sync.js';
+import type { SyncResult, DeletedArtifact, PluginSyncResult } from '../../../src/core/sync.js';
 import type { McpMergeResult } from '../../../src/core/vscode-mcp.js';
 import type { NativeSyncResult } from '../../../src/core/native/types.js';
 
@@ -195,7 +195,7 @@ describe('formatPluginArtifacts', () => {
 });
 
 describe('formatSyncSummary', () => {
-  test('shows per-client artifact summary', () => {
+  test('returns empty when no failures/generated/skipped', () => {
     const result: SyncResult = {
       success: true,
       pluginResults: [{
@@ -204,19 +204,16 @@ describe('formatSyncSummary', () => {
         success: true,
         copyResults: [
           { source: '/plugin/skills/a', destination: '/workspace/.claude/skills/a', action: 'copied' },
-          { source: '/plugin/agents/b.md', destination: '/workspace/.claude/agents/b.md', action: 'copied' },
         ],
       }],
-      totalCopied: 2,
+      totalCopied: 1,
       totalFailed: 0,
       totalSkipped: 0,
       totalGenerated: 0,
     };
 
     const lines = formatSyncSummary(result);
-    expect(lines).toEqual([
-      '  claude: 1 skill, 1 agent',
-    ]);
+    expect(lines).toEqual([]);
   });
 
   test('includes failed and generated counts', () => {
@@ -239,31 +236,9 @@ describe('formatSyncSummary', () => {
 
     const lines = formatSyncSummary(result);
     expect(lines).toEqual([
-      '  claude: 1 skill',
       '  Total generated: 1',
       '  Total failed: 1',
     ]);
-  });
-
-  test('dry-run shows would-copy fallback for unclassified files', () => {
-    const result: SyncResult = {
-      success: true,
-      pluginResults: [{
-        plugin: 'test',
-        resolved: '/tmp/test',
-        success: true,
-        copyResults: [
-          { source: '/plugin/something.txt', destination: '/workspace/something.txt', action: 'copied' },
-        ],
-      }],
-      totalCopied: 1,
-      totalFailed: 0,
-      totalSkipped: 0,
-      totalGenerated: 0,
-    };
-
-    const lines = formatSyncSummary(result, { dryRun: true });
-    expect(lines).toEqual(['  Total would copy: 1']);
   });
 });
 
@@ -376,5 +351,50 @@ describe('formatSyncSummary with deletedArtifacts', () => {
 
     const lines = formatSyncSummary(result);
     expect(lines.some((l) => l.includes('Deleted'))).toBe(false);
+  });
+});
+
+describe('formatPluginHeader', () => {
+  test('shows scope when present', () => {
+    const pr: PluginSyncResult = {
+      plugin: 'deepwiki@allagents',
+      resolved: '/tmp/deepwiki',
+      success: true,
+      copyResults: [],
+      scope: 'project',
+    };
+    expect(formatPluginHeader(pr)).toBe('\u2713 Plugin: deepwiki@allagents (scope: project)');
+  });
+
+  test('shows user scope', () => {
+    const pr: PluginSyncResult = {
+      plugin: 'my-plugin@marketplace',
+      resolved: '/tmp/my-plugin',
+      success: true,
+      copyResults: [],
+      scope: 'user',
+    };
+    expect(formatPluginHeader(pr)).toBe('\u2713 Plugin: my-plugin@marketplace (scope: user)');
+  });
+
+  test('shows failure status', () => {
+    const pr: PluginSyncResult = {
+      plugin: 'broken-plugin',
+      resolved: '/tmp/broken',
+      success: false,
+      copyResults: [],
+      scope: 'project',
+    };
+    expect(formatPluginHeader(pr)).toBe('\u2717 Plugin: broken-plugin (scope: project)');
+  });
+
+  test('omits scope when not set', () => {
+    const pr: PluginSyncResult = {
+      plugin: 'test-plugin',
+      resolved: '/tmp/test',
+      success: true,
+      copyResults: [],
+    };
+    expect(formatPluginHeader(pr)).toBe('\u2713 Plugin: test-plugin');
   });
 });
