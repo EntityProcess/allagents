@@ -618,6 +618,16 @@ export async function runBrowsePluginSkills(
 }
 
 /**
+ * Truncate a list to maxVisible items, appending "+N more" if needed.
+ */
+function truncateList(items: string[], maxVisible = 3): string {
+  if (items.length <= maxVisible) {
+    return items.join(', ');
+  }
+  return `${items.slice(0, maxVisible).join(', ')} +${items.length - maxVisible} more`;
+}
+
+/**
  * Plugin installation flow.
  * Lists marketplace plugins, lets user pick one, installs it, and auto-syncs.
  */
@@ -634,19 +644,20 @@ export async function runInstallPlugin(context: TuiContext, cache?: TuiCache): P
       return;
     }
 
-    // Collect plugins from all marketplaces with skill preview
-    const allPlugins: Array<{ label: string; value: string }> = [];
+    // Collect plugins from all marketplaces with compact skill preview
+    const allPlugins: Array<{ label: string; value: string; hint?: string }> = [];
     for (const marketplace of marketplaces) {
       const result = await getCachedMarketplacePlugins(marketplace.name, cache);
       for (const plugin of result.plugins) {
         const skillNames = await discoverSkillNames(plugin.path);
         const desc = plugin.description ? ` - ${plugin.description}` : '';
-        const skillInfo = skillNames.length > 0
-          ? `\n    Skills: ${skillNames.join(', ')}`
-          : '';
+        const hint = skillNames.length > 0
+          ? `${skillNames.length} skills: ${truncateList(skillNames)}`
+          : undefined;
         allPlugins.push({
-          label: `${plugin.name}${desc} (${marketplace.name})${skillInfo}`,
+          label: `${plugin.name}${desc} (${marketplace.name})`,
           value: `${plugin.name}@${marketplace.name}`,
+          hint,
         });
       }
     }

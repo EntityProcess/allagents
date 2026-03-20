@@ -273,6 +273,16 @@ async function runToggleSkills(
 }
 
 /**
+ * Truncate a list to maxVisible items, appending "+N more" if needed.
+ */
+function truncateList(items: string[], maxVisible = 3): string {
+  if (items.length <= maxVisible) {
+    return items.join(', ');
+  }
+  return `${items.slice(0, maxVisible).join(', ')} +${items.length - maxVisible} more`;
+}
+
+/**
  * Browse skills available from configured marketplaces.
  * Shows a skill-centric view grouped by plugin. Selecting a skill installs its plugin.
  */
@@ -309,14 +319,14 @@ async function runBrowseMarketplaceSkills(
     }
   }
 
-  // Build select options — one per plugin, showing its skills
-  const options: Array<{ label: string; value: string }> = [];
+  // Build select options — one per plugin, with compact skill preview in hint
+  const options: Array<{ label: string; value: string; hint?: string }> = [];
   for (const [pluginRef, data] of byPlugin) {
-    const skillList = data.skills.join(', ');
     const desc = data.description ? ` - ${data.description}` : '';
     options.push({
-      label: `${pluginRef}${desc}\n    Skills: ${skillList}`,
+      label: `${pluginRef}${desc}`,
       value: pluginRef,
+      hint: `${data.skills.length} skills: ${truncateList(data.skills)}`,
     });
   }
   options.push({ label: 'Back', value: '__back__' });
