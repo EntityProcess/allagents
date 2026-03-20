@@ -39,7 +39,7 @@ export function parseClientEntries(input: string): ClientEntry[] {
       }
       const name = part.slice(0, colonIdx);
       const mode = part.slice(colonIdx + 1);
-      if (!ClientTypeSchema.options.includes(name as any)) {
+      if (!(ClientTypeSchema.options as readonly string[]).includes(name)) {
         throw new Error(
           `Invalid client(s): ${name}\n  Valid clients: ${ClientTypeSchema.options.join(', ')}`,
         );

@@ -116,7 +116,7 @@ export const ClientEntrySchema = z.union([
         // Bare string — validate as client type
         const result = ClientTypeSchema.safeParse(s);
         if (!result.success) {
-          result.error.issues.forEach((issue) => ctx.addIssue(issue));
+          for (const issue of result.error.issues) ctx.addIssue(issue);
           return z.NEVER;
         }
         return result.data;
