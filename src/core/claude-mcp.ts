@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import JSON5 from 'json5';
 import { executeCommand } from './native/types.js';
 import type { NativeCommandResult } from './native/types.js';
@@ -178,6 +179,10 @@ export function syncClaudeMcpConfig(
   const hasChanges = result.added > 0 || result.overwritten > 0 || result.removed > 0;
   if (hasChanges && !dryRun) {
     existingConfig.mcpServers = existingServers;
+    const dir = dirname(configPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
     writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
     result.configPath = configPath;
   }
@@ -193,6 +198,10 @@ export function syncClaudeMcpConfig(
     }
     if (result.removed > 0 && !dryRun) {
       existingConfig.mcpServers = existingServers;
+      const dir = dirname(configPath);
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
       writeFileSync(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf-8');
       result.configPath = configPath;
     }

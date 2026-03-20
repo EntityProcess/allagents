@@ -78,6 +78,15 @@ describe('formatMcpResult', () => {
 
     expect(lines[0]).toBe('MCP servers (vscode): 1 added');
   });
+
+  test('displays copilot scope as copilot', () => {
+    const lines = formatMcpResult(makeResult({
+      added: 1,
+      addedServers: ['deepwiki'],
+    }), 'copilot');
+
+    expect(lines[0]).toBe('MCP servers (copilot): 1 added');
+  });
 });
 
 describe('classifyCopyResults', () => {
