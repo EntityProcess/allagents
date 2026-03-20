@@ -69,6 +69,7 @@ import { updateRepositories, migrateWorkspaceSkillsV1toV2 } from './workspace-mo
 import { syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import { syncCodexMcpServers } from './codex-mcp.js';
+import { syncClaudeMcpConfig } from './claude-mcp.js';
 import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
 
 /**
@@ -1913,6 +1914,22 @@ export async function syncWorkspace(
     mcpResults.vscode = vscodeMcp;
   }
 
+  // Step 5f: Sync MCP server configs to project-scoped .claude/settings.json
+  if (syncClients.includes('claude')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'claude');
+    const projectClaudeSettingsPath = join(workspacePath, '.claude', 'settings.json');
+    const claudeMcp = syncClaudeMcpConfig(validPlugins, {
+      dryRun,
+      force: false,
+      configPath: projectClaudeSettingsPath,
+      trackedServers: trackedMcpServers,
+    });
+    if (claudeMcp.warnings.length > 0) {
+      warnings.push(...claudeMcp.warnings);
+    }
+    mcpResults.claude = claudeMcp;
+  }
+
   // Count results
   const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, workspaceFileResults);
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
@@ -2065,6 +2082,16 @@ export async function syncUserWorkspace(
       warnings.push(...codexMcp.warnings);
     }
     mcpResults.codex = codexMcp;
+  }
+
+  // Sync MCP servers to Claude Code settings if claude client is configured
+  if (syncClients.includes('claude')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'claude');
+    const claudeMcp = syncClaudeMcpConfig(validPlugins, { dryRun, force, trackedServers: trackedMcpServers });
+    if (claudeMcp.warnings.length > 0) {
+      warnings.push(...claudeMcp.warnings);
+    }
+    mcpResults.claude = claudeMcp;
   }
 
   // Run native CLI installations for user scope

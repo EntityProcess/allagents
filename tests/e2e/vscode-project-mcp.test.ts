@@ -85,7 +85,10 @@ clients:
 
     const mcpConfigPath = join(testDir, '.vscode', 'mcp.json');
     expect(existsSync(mcpConfigPath)).toBe(false);
-    expect(result.mcpResults).toBeUndefined();
+    // No vscode MCP results, but claude MCP results are expected
+    expect(result.mcpResults?.vscode).toBeUndefined();
+    expect(result.mcpResults?.claude).toBeDefined();
+    expect(result.mcpResults!.claude!.added).toBe(1);
   });
 
   test('sync tracks MCP servers in project sync state', async () => {
