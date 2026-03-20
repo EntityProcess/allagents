@@ -284,7 +284,7 @@ const syncCmd = command({
       }
 
       // Print summary (only generated/failed/skipped/deleted totals)
-      const summaryLines = formatSyncSummary(result, { dryRun });
+      const summaryLines = formatSyncSummary(result);
       if (summaryLines.length > 0) {
         console.log('');
         for (const line of summaryLines) {

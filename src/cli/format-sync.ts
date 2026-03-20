@@ -189,7 +189,6 @@ export function formatPluginHeader(pluginResult: PluginSyncResult): string {
  */
 export function formatSyncSummary(
   result: SyncResult,
-  { dryRun = false }: { dryRun?: boolean } = {},
 ): string[] {
   const lines: string[] = [];
 
