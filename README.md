@@ -334,12 +334,12 @@ AllAgents supports 23 AI coding assistants:
 
 | Client | Skills | Agent File | Hooks | Commands | MCP |
 |--------|--------|------------|-------|----------|-----|
-| copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No | `.vscode/mcp.json` |
-| codex | `.agents/skills/` | `AGENTS.md` | No | No | `.codex/config.toml` |
+| copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No | `.vscode/mcp.json` · `~/.config/Code/User/mcp.json` |
+| codex | `.agents/skills/` | `AGENTS.md` | No | No | `.codex/config.toml` · `codex mcp` CLI |
 | opencode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
 | gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
 | ampcode | `.agents/skills/` | `AGENTS.md` | No | No | No |
-| vscode | `.agents/skills/` | `AGENTS.md` | No | No | `.vscode/mcp.json` |
+| vscode | `.agents/skills/` | `AGENTS.md` | No | No | `.vscode/mcp.json` · `~/.config/Code/User/mcp.json` |
 | replit | `.agents/skills/` | `AGENTS.md` | No | No | No |
 | kimi | `.agents/skills/` | `AGENTS.md` | No | No | No |
 
@@ -347,7 +347,7 @@ AllAgents supports 23 AI coding assistants:
 
 | Client | Skills | Agent File | Hooks | Commands | MCP |
 |--------|--------|------------|-------|----------|-----|
-| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` | `.mcp.json` |
+| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` | `.mcp.json` · `claude mcp` CLI |
 | cursor | `.cursor/skills/` | `AGENTS.md` | No | No | No |
 | factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No | No |
 | openclaw | `skills/` | `AGENTS.md` | No | No | No |
