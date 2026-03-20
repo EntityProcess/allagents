@@ -924,9 +924,8 @@ const pluginInstallCmd = command({
       long: 'skill',
       description: 'Only enable specific skills (can be repeated)',
     }),
-    force: flag({ long: 'force', short: 'f', description: 'Replace plugin if it already exists' }),
   },
-  handler: async ({ plugin, scope, skills, force }) => {
+  handler: async ({ plugin, scope, skills }) => {
     try {
       // Treat as user scope if explicitly requested or if cwd resolves to user config
       const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
@@ -958,23 +957,12 @@ const pluginInstallCmd = command({
         }
       }
 
+      // Always force-reinstall if the plugin already exists (no error, just overwrite)
       const result = isUser
-        ? await addUserPlugin(plugin, force)
-        : await addPlugin(plugin, process.cwd(), force);
+        ? await addUserPlugin(plugin, true)
+        : await addPlugin(plugin, process.cwd(), true);
 
-      const pluginAlreadyExists =
-        !result.success && !!result.error?.includes('Plugin already exists');
-
-      if (!result.success && !pluginAlreadyExists) {
-        if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin install', error: result.error ?? 'Unknown error' });
-          process.exit(1);
-        }
-        console.error(`Error: ${result.error}`);
-        process.exit(1);
-      }
-
-      if (pluginAlreadyExists && skills.length === 0) {
+      if (!result.success) {
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'plugin install', error: result.error ?? 'Unknown error' });
           process.exit(1);
@@ -989,9 +977,7 @@ const pluginInstallCmd = command({
       if (skills.length > 0) {
         const workspacePath = isUser ? getHomeDir() : process.cwd();
 
-        // If plugin was just installed, do an initial sync to fetch the plugin so we can discover its skills.
-        // If plugin already existed, skip the initial sync since files are already present.
-        if (!pluginAlreadyExists) {
+        // Do an initial sync to fetch the plugin so we can discover its skills.
         const initialSync = isUser
           ? await syncUserWorkspace()
           : await syncWorkspace(workspacePath);
@@ -1005,7 +991,6 @@ const pluginInstallCmd = command({
           console.error(`Error: ${error}`);
           process.exit(1);
         }
-        } // end if (!pluginAlreadyExists)
 
         const allSkills = await getAllSkillsFromPlugins(workspacePath);
         const displayNames = extractPluginNames(displayPlugin);
