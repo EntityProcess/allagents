@@ -137,6 +137,7 @@ const initCmd = command({
 
 const syncCmd = command({
   name: 'sync',
+  aliases: ['update'],
   description: buildDescription(syncMeta),
   args: {
     offline: flag({ long: 'offline', description: 'Use cached plugins without fetching latest from remote' }),
