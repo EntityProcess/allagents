@@ -49,6 +49,22 @@ export function buildMenuOptions(context: TuiContext) {
 }
 
 /**
+ * Build a compact one-line workspace summary for subsequent menu loops.
+ */
+function buildCompactSummary(context: TuiContext): string {
+  const parts: string[] = [];
+  if (context.hasWorkspace) {
+    parts.push(`${context.projectPluginCount} project`);
+  }
+  parts.push(`${context.userPluginCount} user`);
+  parts.push(`${context.marketplaceCount} marketplaces`);
+  if (context.needsSync) {
+    parts.push(chalk.yellow('sync needed'));
+  }
+  return parts.join(', ');
+}
+
+/**
  * Build a workspace summary for display in a note.
  */
 function buildSummary(context: TuiContext): string {
@@ -89,9 +105,15 @@ export async function runWizard(): Promise<void> {
 
   const cache = new TuiCache();
   let context = await getTuiContext(process.cwd(), cache);
+  let isFirstLoop = true;
 
   while (true) {
-    p.note(buildSummary(context), 'Workspace');
+    if (isFirstLoop) {
+      p.note(buildSummary(context), 'Workspace');
+      isFirstLoop = false;
+    } else {
+      p.log.info(chalk.dim(`Workspace: ${buildCompactSummary(context)}`));
+    }
 
     const action = await select<MenuAction>({
       message: 'What would you like to do?',
