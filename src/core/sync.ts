@@ -70,6 +70,7 @@ import { syncVscodeMcpConfig, collectMcpServers } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import { syncCodexMcpServers, syncCodexProjectMcpConfig } from './codex-mcp.js';
 import { syncClaudeMcpConfig, syncClaudeMcpServersViaCli } from './claude-mcp.js';
+import { getCopilotMcpConfigPath } from './copilot-mcp.js';
 import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
 
 /**
@@ -1949,8 +1950,24 @@ export async function syncWorkspace(
     mcpResults.codex = codexMcp;
   }
 
+  // Step 5h: Sync MCP server configs to project-scoped .copilot/mcp-config.json
+  if (syncClients.includes('copilot')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'copilot');
+    const projectCopilotMcpPath = join(workspacePath, '.copilot', 'mcp-config.json');
+    const copilotMcp = syncClaudeMcpConfig(validPlugins, {
+      dryRun,
+      force: false,
+      configPath: projectCopilotMcpPath,
+      trackedServers: trackedMcpServers,
+    });
+    if (copilotMcp.warnings.length > 0) {
+      warnings.push(...copilotMcp.warnings);
+    }
+    mcpResults.copilot = copilotMcp;
+  }
+
   // Warn about clients that don't support project-scoped MCP sync
-  const PROJECT_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'universal']);
+  const PROJECT_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'copilot', 'universal']);
   const { servers: allMcpServers } = collectMcpServers(validPlugins);
   if (allMcpServers.size > 0) {
     for (const client of syncClients) {
@@ -2125,8 +2142,24 @@ export async function syncUserWorkspace(
     mcpResults.claude = claudeMcp;
   }
 
+  // Sync MCP servers to Copilot CLI config if copilot client is configured
+  if (syncClients.includes('copilot')) {
+    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'copilot');
+    const copilotMcpPath = getCopilotMcpConfigPath();
+    const copilotMcp = syncClaudeMcpConfig(validPlugins, {
+      dryRun,
+      force,
+      configPath: copilotMcpPath,
+      trackedServers: trackedMcpServers,
+    });
+    if (copilotMcp.warnings.length > 0) {
+      warnings.push(...copilotMcp.warnings);
+    }
+    mcpResults.copilot = copilotMcp;
+  }
+
   // Warn about clients that don't support user-scoped MCP sync
-  const USER_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'universal']);
+  const USER_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'copilot', 'universal']);
   const { servers: allUserMcpServers } = collectMcpServers(validPlugins);
   if (allUserMcpServers.size > 0) {
     for (const client of syncClients) {
