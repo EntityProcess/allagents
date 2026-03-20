@@ -101,11 +101,47 @@ export const InstallModeSchema = z.enum(['file', 'native']);
 export type InstallMode = z.infer<typeof InstallModeSchema>;
 
 /**
- * Client entry — string shorthand or object with install mode.
- * String "claude" is equivalent to { name: "claude", install: "file" }.
+ * Client entry — string shorthand, colon shorthand, or object with install mode.
+ *
+ * "claude"        → bare client, install defaults to "file"
+ * "claude:native" → colon shorthand, parsed to { name: "claude", install: "native" }
+ * { name, install } → explicit object form
  */
 export const ClientEntrySchema = z.union([
-  ClientTypeSchema,
+  z
+    .string()
+    .transform((s, ctx) => {
+      const colonIdx = s.indexOf(':');
+      if (colonIdx === -1) {
+        // Bare string — validate as client type
+        const result = ClientTypeSchema.safeParse(s);
+        if (!result.success) {
+          for (const issue of result.error.issues) ctx.addIssue(issue);
+          return z.NEVER;
+        }
+        return result.data;
+      }
+      // Colon shorthand — split on first colon
+      const name = s.slice(0, colonIdx);
+      const mode = s.slice(colonIdx + 1);
+      const nameResult = ClientTypeSchema.safeParse(name);
+      if (!nameResult.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Invalid client type: '${name}'`,
+        });
+        return z.NEVER;
+      }
+      const modeResult = InstallModeSchema.safeParse(mode);
+      if (!modeResult.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Invalid install mode: '${mode}'. Valid modes: ${InstallModeSchema.options.join(', ')}`,
+        });
+        return z.NEVER;
+      }
+      return { name: nameResult.data, install: modeResult.data };
+    }),
   z.object({
     name: ClientTypeSchema,
     install: InstallModeSchema.default('file'),

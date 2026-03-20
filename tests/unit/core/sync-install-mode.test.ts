@@ -92,4 +92,18 @@ describe('syncWorkspace — install mode', () => {
     // Copilot native with local plugin can't install natively -> falls back to file
     expect(existsSync(join(testDir, '.github', 'skills', 'test-skill'))).toBe(true);
   });
+
+  it('colon shorthand claude:native skips file copy for marketplace plugin', async () => {
+    await createPlugin(testDir, 'test-plugin', 'test-skill');
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      'repositories: []\nplugins:\n  - ./test-plugin\nclients:\n  - copilot\n  - claude:native\n',
+    );
+
+    const result = await syncWorkspace(testDir);
+    expect(result.success).toBe(true);
+    // Local plugin falls back to file copy even for native clients
+    expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill'))).toBe(true);
+    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill'))).toBe(true);
+  });
 });

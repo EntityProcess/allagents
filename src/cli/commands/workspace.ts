@@ -11,7 +11,7 @@ import { addRepository, removeRepository, listRepositories, detectRemote, update
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
-import { ClientTypeSchema, InstallModeSchema, type ClientEntry, type ClientType, type InstallMode } from '../../models/workspace-config.js';
+import { ClientTypeSchema, InstallModeSchema, ClientEntrySchema, type ClientEntry } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
 import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary, formatSyncHeader, formatPluginHeader } from '../format-sync.js';
 
@@ -25,30 +25,30 @@ import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifac
  * "claude:native,copilot,vscode" → [{ name: 'claude', install: 'native' }, 'copilot', 'vscode']
  */
 export function parseClientEntries(input: string): ClientEntry[] {
-  const validClients: readonly string[] = ClientTypeSchema.options;
-  const validModes: readonly string[] = InstallModeSchema.options;
   const entries: ClientEntry[] = [];
 
   for (const part of input.split(',').map((s) => s.trim()).filter(Boolean)) {
-    const colonIdx = part.indexOf(':');
-    if (colonIdx === -1) {
-      if (!validClients.includes(part)) {
-        throw new Error(`Invalid client(s): ${part}\n  Valid clients: ${validClients.join(', ')}`);
-      }
-      entries.push(part as ClientEntry);
-    } else {
-      const name = part.slice(0, colonIdx);
-      const mode = part.slice(colonIdx + 1);
-      if (!validClients.includes(name)) {
-        throw new Error(`Invalid client(s): ${name}\n  Valid clients: ${validClients.join(', ')}`);
-      }
-      if (!validModes.includes(mode)) {
+    const result = ClientEntrySchema.safeParse(part);
+    if (!result.success) {
+      // Provide user-friendly error messages
+      const colonIdx = part.indexOf(':');
+      if (colonIdx === -1) {
         throw new Error(
-          `Invalid install mode '${mode}' for client '${name}'. Valid modes: ${validModes.join(', ')}`,
+          `Invalid client(s): ${part}\n  Valid clients: ${ClientTypeSchema.options.join(', ')}`,
         );
       }
-      entries.push({ name: name as ClientType, install: mode as InstallMode });
+      const name = part.slice(0, colonIdx);
+      const mode = part.slice(colonIdx + 1);
+      if (!(ClientTypeSchema.options as readonly string[]).includes(name)) {
+        throw new Error(
+          `Invalid client(s): ${name}\n  Valid clients: ${ClientTypeSchema.options.join(', ')}`,
+        );
+      }
+      throw new Error(
+        `Invalid install mode '${mode}' for client '${name}'. Valid modes: ${InstallModeSchema.options.join(', ')}`,
+      );
     }
+    entries.push(result.data);
   }
 
   return entries;
