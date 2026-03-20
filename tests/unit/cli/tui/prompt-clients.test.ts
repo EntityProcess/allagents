@@ -1,21 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import { buildClientGroups } from '../../../../src/cli/tui/prompt-clients.js';
+import { buildClientOptions } from '../../../../src/cli/tui/prompt-clients.js';
 
-describe('buildClientGroups', () => {
-  test('returns universal group with universal pre-selected and client-specific group with all others', () => {
-    const { groups, initialValues } = buildClientGroups();
+describe('buildClientOptions', () => {
+  test('returns flat options list with all clients including universal', () => {
+    const options = buildClientOptions();
 
-    // Universal group has exactly one option
-    expect(groups['Universal (.agents/skills)']).toHaveLength(1);
-    expect(groups['Universal (.agents/skills)']![0]!.value).toBe('universal');
+    // Should have all clients
+    expect(options.length).toBeGreaterThan(10);
 
-    // Client-specific group has all other clients
-    const clientSpecific = groups['Client-specific'];
-    expect(clientSpecific!.length).toBeGreaterThan(10);
-    expect(clientSpecific!.find((o) => o.value === 'universal')).toBeUndefined();
-    expect(clientSpecific!.find((o) => o.value === 'claude')).toBeDefined();
+    // Universal should be present
+    expect(options.find((o) => o.value === 'universal')).toBeDefined();
 
-    // Only universal is pre-selected
-    expect(initialValues).toEqual(['universal']);
+    // Claude should be present
+    expect(options.find((o) => o.value === 'claude')).toBeDefined();
+
+    // Each option should have a hint (skills path)
+    for (const option of options) {
+      expect(option.hint).toBeDefined();
+    }
   });
 });
