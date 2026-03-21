@@ -27,7 +27,8 @@
     "prepare": "bun run build && (test -d .git && bunx prek install -t pre-push || true)",
     "release": "bun run scripts/release.ts",
     "release:next": "bun run scripts/release.ts next",
-    "publish:next": "bun run build && bun publish --tag next",
+    "prepublishOnly": "test \"$ALLOW_PUBLISH\" = '1' || (echo 'ERROR: Use bun run publish:next, then bun run promote:latest' && exit 1)",
+    "publish:next": "bun run build && ALLOW_PUBLISH=1 npm publish --tag next",
     "promote:latest": "bun scripts/tag-channel.ts latest"
   },
   "keywords": [

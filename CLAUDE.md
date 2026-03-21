@@ -152,6 +152,15 @@ Shared formatting lives in `src/cli/format-sync.ts`. When adding new sync output
 
 Internally, `vscode` and `copilot` remain distinct client types with separate path mappings (see `resolveClientMappings()` in `client-mapping.ts`).
 
+## Publishing
+
+**Never run `npm publish` directly.** Always use the two-step workflow:
+
+1. `bun run publish:next` — publishes to the `next` tag
+2. `bun run promote:latest` — promotes `next` to `latest` after testing
+
+A `prepublishOnly` guard in `package.json` blocks direct `npm publish`. This prevents untested releases from going to `latest`.
+
 ## Troubleshooting
 
 ### agent-browser
