@@ -33,9 +33,9 @@ import {
 
 /**
  * Default clients for user-scope installations.
- * Note: 'claude' is excluded because user-scope plugins should not modify
- * project-level Claude config. Claude is only included for project-scoped
- * (.allagents) installations.
+ * Note: 'claude' is excluded to avoid conflicting with Claude's native
+ * plugin system. Claude is only included for project-scoped (.allagents)
+ * installations.
  */
 const DEFAULT_USER_CLIENTS: ClientEntry[] = [
   'copilot',
@@ -43,8 +43,6 @@ const DEFAULT_USER_CLIENTS: ClientEntry[] = [
   'cursor',
   'opencode',
   'gemini',
-  'factory',
-  'ampcode',
   'vscode',
 ];
 

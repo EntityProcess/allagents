@@ -69,8 +69,8 @@ describe('user-workspace', () => {
       expect(config!.clients).toContain('cursor');
       expect(config!.clients).toContain('opencode');
       expect(config!.clients).toContain('gemini');
-      expect(config!.clients).toContain('factory');
-      expect(config!.clients).toContain('ampcode');
+      expect(config!.clients).not.toContain('factory');
+      expect(config!.clients).not.toContain('ampcode');
       expect(config!.clients).toContain('vscode');
     });
   });
