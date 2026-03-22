@@ -27,6 +27,8 @@ import {
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
   getUserWorkspaceConfig,
+  getUserWorkspaceConfigPath,
+  ensureUserWorkspace,
   addUserEnabledSkill,
   type InstalledPluginInfo,
 } from '../../core/user-workspace.js';
@@ -930,8 +932,21 @@ const pluginInstallCmd = command({
       // Treat as user scope if explicitly requested or if cwd resolves to user config
       const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
 
-      // If no workspace.yaml exists for project scope, prompt for clients first
-      if (!isUser) {
+      // If no workspace.yaml exists, prompt for clients first
+      if (isUser) {
+        const userConfigPath = getUserWorkspaceConfigPath();
+        if (!existsSync(userConfigPath)) {
+          const { promptForClients } = await import('../tui/prompt-clients.js');
+          const clients = await promptForClients();
+          if (clients === null) {
+            if (isJsonMode()) {
+              jsonOutput({ success: false, command: 'plugin install', error: 'Cancelled' });
+            }
+            return;
+          }
+          await ensureUserWorkspace(clients);
+        }
+      } else {
         const configPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
         if (!existsSync(configPath)) {
           const { promptForClients } = await import('../tui/prompt-clients.js');

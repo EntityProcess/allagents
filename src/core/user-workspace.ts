@@ -73,14 +73,14 @@ export function isUserConfigPath(workspacePath: string): boolean {
  * Ensure user-level workspace.yaml exists with default config.
  * Creates it if missing, does not overwrite existing.
  */
-export async function ensureUserWorkspace(): Promise<void> {
+export async function ensureUserWorkspace(clients?: ClientEntry[]): Promise<void> {
   const configPath = getUserWorkspaceConfigPath();
   if (existsSync(configPath)) return;
 
   const defaultConfig: WorkspaceConfig = {
     repositories: [],
     plugins: [],
-    clients: [...DEFAULT_USER_CLIENTS],
+    clients: clients ? [...clients] : [...DEFAULT_USER_CLIENTS],
   };
 
   await mkdir(getAllagentsDir(), { recursive: true });
