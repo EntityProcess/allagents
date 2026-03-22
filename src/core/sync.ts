@@ -1730,17 +1730,20 @@ export async function syncWorkspace(
   // Use workspaceSourceBase if provided (during init with --from) to resolve
   // relative paths correctly relative to the source directory
   let validatedWorkspaceSource: ValidatedPlugin | null = null;
+  const workspaceSourceWarnings: string[] = [];
   if (config.workspace?.source) {
     const sourceBasePath = workspaceSourceBase ?? workspacePath;
-    validatedWorkspaceSource = await validatePlugin(
+    const wsSourceResult = await validatePlugin(
       config.workspace.source,
       sourceBasePath,
       offline,
     );
-    if (!validatedWorkspaceSource.success) {
-      return failedSyncResult(
-        `Workspace source validation failed: ${validatedWorkspaceSource.error}`,
-        { totalFailed: 1 },
+    if (wsSourceResult.success) {
+      validatedWorkspaceSource = wsSourceResult;
+    } else {
+      // Non-blocking: warn but continue syncing plugins
+      workspaceSourceWarnings.push(
+        `Workspace source: ${wsSourceResult.error}`,
       );
     }
   }
@@ -1750,6 +1753,7 @@ export async function syncWorkspace(
   const validPlugins = validatedPlugins.filter((v) => v.success);
   const warnings = [
     ...planWarnings,
+    ...workspaceSourceWarnings,
     ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
   ];
   const messages: string[] = [];
@@ -1819,8 +1823,10 @@ export async function syncWorkspace(
 
   // Step 5: Copy workspace files if configured
   // Supports both workspace.source (default base) and file-level sources
+  // Skip when workspace.source was configured but validation failed (plugins still synced above)
   let workspaceFileResults: CopyResult[] = [];
-  if (config.workspace) {
+  const skipWorkspaceFiles = !!config.workspace?.source && !validatedWorkspaceSource;
+  if (config.workspace && !skipWorkspaceFiles) {
     const sourcePath = validatedWorkspaceSource?.resolved;
     const filesToCopy = [...config.workspace.files];
 
