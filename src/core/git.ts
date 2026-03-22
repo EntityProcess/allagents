@@ -2,27 +2,11 @@ import simpleGit from 'simple-git';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, normalize, resolve, sep } from 'node:path';
+import { GitCloneError, classifyError } from './git-errors.js';
+
+export { GitCloneError, classifyError };
 
 const CLONE_TIMEOUT_MS = 60_000; // 60 seconds
-
-export class GitCloneError extends Error {
-  readonly url: string;
-  readonly isTimeout: boolean;
-  readonly isAuthError: boolean;
-
-  constructor(
-    message: string,
-    url: string,
-    isTimeout = false,
-    isAuthError = false,
-  ) {
-    super(message);
-    this.name = 'GitCloneError';
-    this.url = url;
-    this.isTimeout = isTimeout;
-    this.isAuthError = isAuthError;
-  }
-}
 
 /**
  * Build an HTTPS GitHub URL from owner/repo.
@@ -138,42 +122,3 @@ export async function cleanupTempDir(dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }
 
-function classifyError(error: unknown, url: string): GitCloneError {
-  const errorMessage =
-    error instanceof Error ? error.message : String(error);
-
-  const isTimeout =
-    errorMessage.includes('block timeout') ||
-    errorMessage.includes('timed out');
-
-  const isAuthError =
-    errorMessage.includes('Authentication failed') ||
-    errorMessage.includes('could not read Username') ||
-    errorMessage.includes('Permission denied') ||
-    errorMessage.includes('Repository not found');
-
-  if (isTimeout) {
-    return new GitCloneError(
-      `Clone timed out after 60s for ${url}.\n  Check your network connection and repository access.\n  For SSH: ssh-add -l (to check loaded keys)\n  For HTTPS: Check your git credentials`,
-      url,
-      true,
-      false,
-    );
-  }
-
-  if (isAuthError) {
-    return new GitCloneError(
-      `Authentication failed for ${url}.\n  For private repos, ensure you have access.\n  For SSH: Check your keys with 'ssh -T git@github.com'\n  For HTTPS: Configure git credentials or run 'gh auth setup-git'`,
-      url,
-      false,
-      true,
-    );
-  }
-
-  return new GitCloneError(
-    `Failed to clone ${url}: ${errorMessage}`,
-    url,
-    false,
-    false,
-  );
-}
