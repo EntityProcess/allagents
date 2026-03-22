@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, copyFile, unlink } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile, copyFile, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,9 +7,10 @@ import { syncWorkspace, type SyncResult } from './sync.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, type WorkspaceRepository } from '../constants.js';
 import { getClientTypes, type ClientEntry } from '../models/workspace-config.js';
-import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
+import { isGitHubUrl, parseGitHubUrl, getPluginCachePath } from '../utils/plugin-path.js';
 import { fetchWorkspaceFromGitHub, readFileFromClone } from './github-fetch.js';
 import { cleanupTempDir } from './git.js';
+import { getMarketplacesDir } from './marketplace.js';
 
 /**
  * Options for workspace initialization
@@ -299,6 +300,18 @@ export async function initWorkspace(
       }
     }
 
+    // Seed plugin/marketplace cache from the GitHub temp clone before cleanup.
+    // This avoids re-cloning the same private repo during sync (which can fail
+    // due to credential manager issues, rate limits, or transient errors).
+    if (githubTempDir && parsedFromUrl) {
+      await seedCacheFromClone(
+        githubTempDir,
+        parsedFromUrl.owner,
+        parsedFromUrl.repo,
+        githubBranch,
+      );
+    }
+
     // Clean up GitHub temp clone now that we've read all needed files
     if (githubTempDir) {
       await cleanupTempDir(githubTempDir);
@@ -342,5 +355,43 @@ export async function initWorkspace(
       throw new Error(`Failed to initialize workspace: ${error.message}`);
     }
     throw error;
+  }
+}
+
+/**
+ * Seed the plugin and marketplace caches from an already-cloned GitHub repo.
+ *
+ * During `workspace init --from`, the repo is cloned once to read workspace.yaml.
+ * Sync then tries to clone the same repo again for workspace.source validation
+ * and marketplace registration. For private repos this second clone can fail.
+ *
+ * By copying the temp clone to the permanent cache paths before cleanup, sync
+ * finds cached repos and avoids redundant network requests.
+ */
+async function seedCacheFromClone(
+  tempDir: string,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<void> {
+  const cachePaths = [
+    // fetchPlugin cache (used for workspace.source and direct GitHub URL plugins)
+    getPluginCachePath(owner, repo, branch),
+    // addMarketplace cache (used for plugin@owner/repo marketplace registration)
+    join(getMarketplacesDir(), repo),
+  ];
+
+  for (const cachePath of cachePaths) {
+    if (existsSync(cachePath)) continue;
+
+    try {
+      const parentDir = dirname(cachePath);
+      if (!existsSync(parentDir)) {
+        await mkdir(parentDir, { recursive: true });
+      }
+      await cp(tempDir, cachePath, { recursive: true });
+    } catch {
+      // Non-fatal: sync will attempt its own clone as fallback
+    }
   }
 }
