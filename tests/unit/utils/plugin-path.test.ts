@@ -161,6 +161,18 @@ describe('parseGitHubUrl', () => {
     });
   });
 
+  it('should parse URLs with /blob/ the same as /tree/', () => {
+    const result = parseGitHubUrl(
+      'https://github.com/WiseTechGlobal/WTG.AI.Prompts/blob/main/scripts/allagents-setup/cargowise'
+    );
+    expect(result).toEqual({
+      owner: 'WiseTechGlobal',
+      repo: 'WTG.AI.Prompts',
+      branch: 'main',
+      subpath: 'scripts/allagents-setup/cargowise',
+    });
+  });
+
   it('should return null for invalid URLs', () => {
     expect(parseGitHubUrl('https://gitlab.com/owner/repo')).toBeNull();
     expect(parseGitHubUrl('not-a-url')).toBeNull();
