@@ -158,5 +158,6 @@ describe('syncCodexProjectMcpConfig', () => {
 });
 
 function dirname(p: string) {
-  return p.substring(0, p.lastIndexOf('/'));
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return i === -1 ? '.' : p.substring(0, i);
 }

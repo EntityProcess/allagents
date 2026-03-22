@@ -126,9 +126,11 @@ export function parseGitHubUrl(
     return null;
   }
 
-  // Try to extract with /tree/: https://github.com/owner/repo/tree/branch/path or /tree/branch
+  // Try to extract with /tree/ or /blob/: https://github.com/owner/repo/tree/branch/path
+  // Both /tree/ and /blob/ encode the same owner/repo/branch/path structure.
+  // Users often copy /blob/ URLs from GitHub's file browser.
   const treeMatch = normalized.match(
-    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/tree\/(.+)$/,
+    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/(?:tree|blob)\/(.+)$/,
   );
   if (treeMatch) {
     const owner = treeMatch[1];
