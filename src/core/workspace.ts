@@ -368,7 +368,7 @@ export async function initWorkspace(
  * By copying the temp clone to the permanent cache paths before cleanup, sync
  * finds cached repos and avoids redundant network requests.
  */
-async function seedCacheFromClone(
+export async function seedCacheFromClone(
   tempDir: string,
   owner: string,
   repo: string,
