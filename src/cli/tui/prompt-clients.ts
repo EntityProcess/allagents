@@ -40,7 +40,7 @@ export async function promptForClients(): Promise<ClientEntry[] | null> {
   const selected = await autocompleteMultiselect({
     message: 'Which AI clients do you use?',
     options,
-    initialValues: ['universal'] as ClientType[],
+    initialValues: ['universal', 'copilot', 'vscode'] as ClientType[],
     required: false,
   });
 
