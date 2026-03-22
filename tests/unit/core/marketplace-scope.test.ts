@@ -196,27 +196,6 @@ describe('scope-aware registry loading and saving', () => {
       expect(result.overrides).toEqual([]);
     });
 
-    it('returns user entries with no overrides when both paths are the same file', async () => {
-      const sharedPath = join(tmpDir, 'same-registry.json');
-
-      const registry: MarketplaceRegistry = {
-        version: 1,
-        marketplaces: {
-          'my-mp': {
-            name: 'my-mp',
-            source: { type: 'github', location: 'org/repo' },
-            path: '/some/path',
-          },
-        },
-      };
-      writeFileSync(sharedPath, JSON.stringify(registry));
-
-      const result = await loadMergedRegistries(sharedPath, sharedPath);
-
-      expect(result.registry.marketplaces['my-mp']).toBeDefined();
-      expect(result.overrides).toEqual([]);
-    });
-
     it('works when user registry does not exist', async () => {
       const userPath = join(tmpDir, 'nonexistent.json');
       const projectPath = join(tmpDir, 'project-marketplaces.json');
@@ -277,29 +256,6 @@ describe('scope-aware registry loading and saving', () => {
       expect(result.entries[0].scope).toBe('user');
       expect(result.entries[1].name).toBe('beta');
       expect(result.entries[1].scope).toBe('project');
-      expect(result.overrides).toEqual([]);
-    });
-
-    it('treats all entries as user scope when both paths resolve to the same file', async () => {
-      const sharedPath = join(tmpDir, 'same-registry.json');
-
-      const registry: MarketplaceRegistry = {
-        version: 1,
-        marketplaces: {
-          'my-mp': {
-            name: 'my-mp',
-            source: { type: 'github', location: 'org/repo' },
-            path: '/some/path',
-          },
-        },
-      };
-      writeFileSync(sharedPath, JSON.stringify(registry));
-
-      const result = await listMarketplacesWithScope(sharedPath, sharedPath);
-
-      expect(result.entries).toHaveLength(1);
-      expect(result.entries[0].name).toBe('my-mp');
-      expect(result.entries[0].scope).toBe('user');
       expect(result.overrides).toEqual([]);
     });
 

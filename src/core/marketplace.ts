@@ -1336,13 +1336,6 @@ export async function loadMergedRegistries(
   userRegistryPath: string,
   projectRegistryPath: string,
 ): Promise<MergedRegistriesResult> {
-  // When both paths resolve to the same file (e.g. cwd is the home directory),
-  // there is no separate project registry — return user entries with no overrides.
-  if (resolve(userRegistryPath) === resolve(projectRegistryPath)) {
-    const registry = await loadRegistryFromPath(userRegistryPath);
-    return { registry, overrides: [] };
-  }
-
   const [userRegistry, projectRegistry] = await Promise.all([
     loadRegistryFromPath(userRegistryPath),
     loadRegistryFromPath(projectRegistryPath),
@@ -1405,18 +1398,6 @@ export async function listMarketplacesWithScope(
   userRegistryPath: string,
   projectRegistryPath: string,
 ): Promise<ScopedMarketplaceListResult> {
-  // When both paths resolve to the same file (e.g. cwd is the home directory),
-  // treat all entries as user scope — there is no separate project registry.
-  if (resolve(userRegistryPath) === resolve(projectRegistryPath)) {
-    const registry = await loadRegistryFromPath(userRegistryPath);
-    return {
-      entries: Object.values(registry.marketplaces)
-        .map((entry) => ({ ...entry, scope: 'user' as const }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-      overrides: [],
-    };
-  }
-
   const [userRegistry, projectRegistry] = await Promise.all([
     loadRegistryFromPath(userRegistryPath),
     loadRegistryFromPath(projectRegistryPath),
