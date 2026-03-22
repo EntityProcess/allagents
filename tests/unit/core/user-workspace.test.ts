@@ -326,5 +326,25 @@ describe('user-workspace', () => {
       expect(plugins[2].name).toBe('local-plugin');
       expect(plugins[2].marketplace).toBe('');
     });
+
+    test('returns empty when workspace path is home directory', async () => {
+      // Write a config directly to ~/.allagents/workspace.yaml (the user config)
+      const configDir = join(tempHome, '.allagents');
+      await mkdir(configDir, { recursive: true });
+      const { dump: yamlDump } = await import('js-yaml');
+      await writeFile(
+        join(configDir, 'workspace.yaml'),
+        yamlDump({
+          plugins: ['code-review@my-marketplace'],
+          clients: ['claude'],
+        }, { lineWidth: -1 }),
+        'utf-8',
+      );
+
+      // When workspace path is the home directory, project config resolves to
+      // the same file as user config — should return empty to avoid duplicates
+      const plugins = await getInstalledProjectPlugins(tempHome);
+      expect(plugins).toHaveLength(0);
+    });
   });
 });

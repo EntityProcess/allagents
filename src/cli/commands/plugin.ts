@@ -761,8 +761,11 @@ const pluginListCmd = command({
 
       const userConfigPath = join(getAllagentsDir(), WORKSPACE_CONFIG_FILE);
       const projectConfigPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+      const cwdIsHome = isUserConfigPath(process.cwd());
       await loadConfigClients(userConfigPath, 'user');
-      await loadConfigClients(projectConfigPath, 'project');
+      if (!cwdIsHome) {
+        await loadConfigClients(projectConfigPath, 'project');
+      }
 
       // Get installed marketplace plugins
       const userPlugins = await getInstalledUserPlugins();
@@ -771,7 +774,7 @@ const pluginListCmd = command({
 
       // Load native plugins from sync state
       const userSyncState = await loadSyncState(getAllagentsDir());
-      const projectSyncState = await loadSyncState(process.cwd());
+      const projectSyncState = cwdIsHome ? null : await loadSyncState(process.cwd());
 
       // Build merged map: key = "name:marketplace:scope" for format-independent dedup
       interface MergedPlugin {
