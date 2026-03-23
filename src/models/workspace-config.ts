@@ -5,6 +5,7 @@ import { z } from 'zod';
  */
 export const RepositorySchema = z.object({
   path: z.string(),
+  name: z.string().optional(),
   source: z.string().optional(),
   repo: z.string().optional(),
   description: z.string().optional(),
