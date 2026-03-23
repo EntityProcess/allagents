@@ -836,6 +836,10 @@ export async function getInstalledUserPlugins(): Promise<
 export async function getInstalledProjectPlugins(
   workspacePath: string,
 ): Promise<InstalledPluginInfo[]> {
+  // When cwd is the user's home directory, the project config resolves to the
+  // same file as the user config — skip to avoid listing plugins twice.
+  if (isUserConfigPath(workspacePath)) return [];
+
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
   if (!existsSync(configPath)) return [];
 
