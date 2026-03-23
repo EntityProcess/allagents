@@ -1,5 +1,6 @@
 import * as p from '@clack/prompts';
 import { initWorkspace } from '../../../core/workspace.js';
+import { formatVerboseSyncLines } from '../../format-sync.js';
 import type { ClientEntry } from '../../../models/workspace-config.js';
 import { promptForClients } from '../prompt-clients.js';
 
@@ -64,9 +65,8 @@ export async function runInit(): Promise<void> {
       lines.push(`Clients: ${selectedClients.join(', ')}`);
     }
     if (result.syncResult) {
-      lines.push(
-        `Plugins synced: ${result.syncResult.totalCopied} copied, ${result.syncResult.totalFailed} failed`,
-      );
+      lines.push('');
+      lines.push(...formatVerboseSyncLines(result.syncResult));
     }
     p.note(lines.join('\n'), 'Workspace Created');
   } catch (error) {

@@ -12,7 +12,7 @@ import {
   getInstalledProjectPlugins,
   getUserPluginsForMarketplace,
 } from '../../../core/user-workspace.js';
-import { syncWorkspace, syncUserWorkspace } from '../../../core/sync.js';
+import { syncWorkspace, syncUserWorkspace, type SyncResult } from '../../../core/sync.js';
 import {
   listMarketplaces,
   listMarketplacePlugins,
@@ -25,6 +25,7 @@ import {
   type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
 import { updatePlugin } from '../../../core/plugin.js';
+import { formatVerboseSyncLines } from '../../format-sync.js';
 import { parseMarketplaceManifest } from '../../../utils/marketplace-manifest-parser.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
 import { getAllSkillsFromPlugins, discoverSkillNames } from '../../../core/skills.js';
@@ -113,6 +114,8 @@ export async function installSelectedPlugin(
   const s = p.spinner();
   s.start('Installing plugin...');
 
+  let syncResult: SyncResult;
+
   if (scope === 'project') {
     const workspacePath = context.workspacePath ?? process.cwd();
     const result = await addPlugin(pluginRef, workspacePath);
@@ -122,7 +125,7 @@ export async function installSelectedPlugin(
       return false;
     }
     s.message('Syncing...');
-    await syncWorkspace(workspacePath);
+    syncResult = await syncWorkspace(workspacePath);
     s.stop('Installed and synced');
   } else {
     const result = await addUserPlugin(pluginRef);
@@ -132,12 +135,13 @@ export async function installSelectedPlugin(
       return false;
     }
     s.message('Syncing...');
-    await syncUserWorkspace();
+    syncResult = await syncUserWorkspace();
     s.stop('Installed and synced');
   }
 
   cache?.invalidate();
-  p.note(`Installed: ${pluginRef}`, 'Success');
+  const lines = formatVerboseSyncLines(syncResult);
+  p.note(lines.join('\n'), `Installed: ${pluginRef}`);
   return true;
 }
 

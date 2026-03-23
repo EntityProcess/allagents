@@ -296,6 +296,70 @@ export function formatNativeResult(nativeResult: NativeSyncResult): string[] {
 }
 
 /**
+ * Format verbose sync result lines suitable for display in both headless and TUI modes.
+ * Includes per-plugin headers, per-client artifact counts, generated/failed breakdowns,
+ * MCP server changes, native plugin results, warnings, and summary totals.
+ */
+export function formatVerboseSyncLines(result: SyncResult): string[] {
+  const lines: string[] = [];
+
+  for (const pluginResult of result.pluginResults) {
+    lines.push(formatPluginHeader(pluginResult));
+
+    if (pluginResult.error) {
+      lines.push(`  Error: ${pluginResult.error}`);
+    }
+
+    lines.push(...formatPluginArtifacts(pluginResult.copyResults));
+
+    const generated = pluginResult.copyResults.filter((r) => r.action === 'generated').length;
+    const failed = pluginResult.copyResults.filter((r) => r.action === 'failed').length;
+
+    if (generated > 0) lines.push(`  Generated: ${generated} files`);
+    if (failed > 0) {
+      lines.push(`  Failed: ${failed} files`);
+      for (const failedResult of pluginResult.copyResults.filter((r) => r.action === 'failed')) {
+        lines.push(`    - ${failedResult.destination}: ${failedResult.error}`);
+      }
+    }
+  }
+
+  if (result.warnings && result.warnings.length > 0) {
+    lines.push('');
+    for (const warning of result.warnings) {
+      lines.push(`  \u26A0 ${warning}`);
+    }
+  }
+
+  if (result.mcpResults) {
+    for (const [scope, mcpResult] of Object.entries(result.mcpResults)) {
+      if (!mcpResult) continue;
+      const mcpLines = formatMcpResult(mcpResult, scope);
+      if (mcpLines.length > 0) {
+        lines.push('');
+        lines.push(...mcpLines);
+      }
+    }
+  }
+
+  if (result.nativeResult) {
+    const nativeLines = formatNativeResult(result.nativeResult);
+    if (nativeLines.length > 0) {
+      lines.push('');
+      lines.push(...nativeLines);
+    }
+  }
+
+  const summaryLines = formatSyncSummary(result);
+  if (summaryLines.length > 0) {
+    lines.push('');
+    lines.push(...summaryLines);
+  }
+
+  return lines;
+}
+
+/**
  * Build a JSON-friendly sync data object from a sync result.
  */
 export function buildSyncData(result: SyncResult) {
