@@ -44,6 +44,11 @@
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EntityProcess/allagents.git"
+  },
+  "homepage": "https://allagents.dev",
   "dependencies": {
     "@clack/prompts": "^1.0.0",
     "chalk": "^5.6.2",
