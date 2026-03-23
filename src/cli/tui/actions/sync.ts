@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
 import { syncUserWorkspace, syncWorkspace } from '../../../core/sync.js';
-import { formatMcpResult, formatNativeResult, formatSyncSummary, formatPluginHeader } from '../../format-sync.js';
+import { formatVerboseSyncLines } from '../../format-sync.js';
 import type { TuiContext } from '../context.js';
 
 /**
@@ -26,14 +26,7 @@ export async function runSync(context: TuiContext): Promise<void> {
         }
         p.note(result.error, 'Sync Error');
       } else {
-        projectLines = result.pluginResults.map(
-          (pr) => formatPluginHeader(pr),
-        );
-        projectLines.push('');
-        projectLines.push(...formatSyncSummary(result));
-        if (result.nativeResult) {
-          projectLines.push(...formatNativeResult(result.nativeResult));
-        }
+        projectLines = formatVerboseSyncLines(result);
         if (context.userPluginCount > 0) {
           s.message('Syncing user plugins...');
         } else {
@@ -60,22 +53,7 @@ export async function runSync(context: TuiContext): Promise<void> {
       if (userResult.error) {
         p.note(userResult.error, 'User Sync Error');
       } else {
-        const lines = userResult.pluginResults.map(
-          (pr) => formatPluginHeader(pr),
-        );
-        lines.push('');
-        lines.push(...formatSyncSummary(userResult));
-        if (userResult.mcpResults) {
-          for (const [scope, mcpResult] of Object.entries(
-            userResult.mcpResults,
-          )) {
-            if (!mcpResult) continue;
-            lines.push(...formatMcpResult(mcpResult, scope));
-          }
-        }
-        if (userResult.nativeResult) {
-          lines.push(...formatNativeResult(userResult.nativeResult));
-        }
+        const lines = formatVerboseSyncLines(userResult);
         p.note(lines.join('\n'), 'User Sync');
       }
     }
