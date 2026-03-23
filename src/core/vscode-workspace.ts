@@ -128,7 +128,9 @@ export function generateVscodeWorkspace(
   // 1. Repository folders (from workspace.yaml)
   for (const repo of repositories) {
     const absolutePath = resolve(workspacePath, repo.path).replace(/\\/g, '/');
-    folders.push({ path: absolutePath });
+    const entry: WorkspaceFolder = { path: absolutePath };
+    if (repo.name) entry.name = repo.name;
+    folders.push(entry);
     seenPaths.add(absolutePath);
   }
 
@@ -233,8 +235,9 @@ export function reconcileVscodeWorkspaceFolders(
 ): ReconcileResult {
   const normalizedWorkspacePath = resolve(workspacePath).replace(/\\/g, '/');
 
-  // Build set of absolute paths from .code-workspace folders (exclude '.')
+  // Build map of absolute paths → names from .code-workspace folders (exclude '.')
   const codeWorkspaceAbsPaths = new Set<string>();
+  const codeWorkspaceNames = new Map<string, string>();
   for (const folder of codeWorkspaceFolders) {
     if (folder.path === '.') continue;
     const absPath = (isAbsolute(folder.path)
@@ -242,6 +245,7 @@ export function reconcileVscodeWorkspaceFolders(
       : resolve(workspacePath, folder.path)
     ).replace(/\\/g, '/');
     codeWorkspaceAbsPaths.add(absPath);
+    if (folder.name) codeWorkspaceNames.set(absPath, folder.name);
   }
 
   // Build set of last-synced absolute paths (common ancestor)
@@ -281,7 +285,10 @@ export function reconcileVscodeWorkspaceFolders(
       // New in .code-workspace, not in workspace.yaml → add
       const relPath = relative(normalizedWorkspacePath, absPath).replace(/\\/g, '/');
       added.push(relPath);
-      updatedRepos.push({ path: relPath });
+      const newRepo: Repository = { path: relPath };
+      const folderName = codeWorkspaceNames.get(absPath);
+      if (folderName) newRepo.name = folderName;
+      updatedRepos.push(newRepo);
     }
   }
 
