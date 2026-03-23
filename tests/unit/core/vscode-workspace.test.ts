@@ -32,6 +32,24 @@ describe('generateVscodeWorkspace', () => {
     ]);
   });
 
+  test('includes name in folder entry when repository has name', () => {
+    const workspacePath = join(testBase, 'myapp');
+    const result = generateVscodeWorkspace({
+      workspacePath,
+      repositories: [
+        { path: '../backend', name: 'API Server' },
+        { path: '../frontend' },
+      ],
+      template: undefined,
+    });
+
+    expect(result.folders).toEqual([
+      { path: '.' },
+      { path: resolve(workspacePath, '../backend').replace(/\\/g, '/'), name: 'API Server' },
+      { path: resolve(workspacePath, '../frontend').replace(/\\/g, '/') },
+    ]);
+  });
+
   test('applies default settings when no template', () => {
     const result = generateVscodeWorkspace({
       workspacePath: join(testBase, 'myapp'),
@@ -351,6 +369,25 @@ describe('reconcileVscodeWorkspaceFolders', () => {
 
     expect(result.added).toEqual([]);
     expect(result.removed).toEqual([]);
+  });
+
+  test('preserves name from .code-workspace folder when adding new repo', () => {
+    const lastSyncedRepos = [absPath('../backend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+      { path: absPath('../designs/GLOW'), name: 'ModernPlatform.Designs.GLOW' },
+    ];
+    const currentRepos = [{ path: '../backend' }];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.added.length).toBe(1);
+    const addedRepo = result.updatedRepos.find(r => r.path.includes('GLOW'));
+    expect(addedRepo).toBeDefined();
+    expect(addedRepo!.name).toBe('ModernPlatform.Designs.GLOW');
   });
 
   test('preserves existing repo properties (description, source) on unchanged repos', () => {
