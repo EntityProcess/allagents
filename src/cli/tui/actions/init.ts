@@ -45,11 +45,17 @@ export async function runInit(): Promise<void> {
     const s = p.spinner();
     s.start('Initializing workspace...');
 
-    const options: Parameters<typeof initWorkspace>[1] = {
-      ...(fromSource ? { from: fromSource } : {}),
-      ...(selectedClients && selectedClients.length > 0 ? { clients: selectedClients } : {}),
-    };
-    const result = await initWorkspace(targetPath, options);
+    let result: Awaited<ReturnType<typeof initWorkspace>>;
+    try {
+      const options: Parameters<typeof initWorkspace>[1] = {
+        ...(fromSource ? { from: fromSource } : {}),
+        ...(selectedClients && selectedClients.length > 0 ? { clients: selectedClients } : {}),
+      };
+      result = await initWorkspace(targetPath, options);
+    } catch (error) {
+      s.stop('Failed');
+      throw error;
+    }
 
     s.stop('Workspace initialized');
 
