@@ -26,6 +26,8 @@ export interface FetchResult {
   action: 'fetched' | 'updated' | 'skipped';
   cachePath: string;
   error?: string;
+  /** Duration of the git operation in milliseconds */
+  durationMs?: number;
 }
 
 /**
@@ -48,17 +50,26 @@ export interface FetchDeps {
   pull?: typeof pull;
 }
 
-// Coalesces concurrent fetches targeting the same cache directory.
-// When multiple callers request the same repo concurrently (e.g. a direct
-// GitHub URL and a marketplace spec both resolving to the same repo), only
-// the first caller performs the git operation; others await its result.
-const inflight = new Map<string, Promise<FetchResult>>();
+// Deduplicates git operations for the same cache directory within a sync session.
+// Both concurrent and sequential callers targeting the same repo reuse the
+// result of the first git operation. Call `resetFetchCache()` between sync
+// sessions to allow fresh fetches.
+const fetchCache = new Map<string, Promise<FetchResult>>();
+
+/**
+ * Reset the fetch cache between sync sessions.
+ * Call this at the start of a sync to ensure fresh fetches.
+ */
+export function resetFetchCache(): void {
+  fetchCache.clear();
+}
 
 /**
  * Fetch a plugin from GitHub to local cache.
  *
- * Concurrent calls for the same cache path are coalesced into a single git
- * operation to avoid racing pulls/clones on the same directory.
+ * Deduplicates git operations: the first caller for a given cache path
+ * performs the git pull/clone; all subsequent callers (concurrent or
+ * sequential) reuse the same result within the current sync session.
  *
  * @param url - GitHub URL of the plugin
  * @param options - Fetch options (force update)
@@ -98,10 +109,10 @@ export async function fetchPlugin(
   const { owner, repo } = parsed;
   const cachePath = getPluginCachePath(owner, repo, branch);
 
-  // Coalesce concurrent fetches for the same cache path
-  const existing = inflight.get(cachePath);
-  if (existing) {
-    return existing;
+  // Return cached result if this repo was already fetched this session
+  const cached = fetchCache.get(cachePath);
+  if (cached) {
+    return cached;
   }
 
   const promise = doFetchPlugin(
@@ -112,12 +123,8 @@ export async function fetchPlugin(
     branch,
     deps,
   );
-  inflight.set(cachePath, promise);
-  try {
-    return await promise;
-  } finally {
-    inflight.delete(cachePath);
-  }
+  fetchCache.set(cachePath, promise);
+  return promise;
 }
 
 /**
@@ -157,8 +164,10 @@ async function doFetchPlugin(
     // cached version is still usable (e.g. concurrent pulls on the same
     // shallow clone can fail with "not something we can merge").
     try {
+      const pullStart = performance.now();
       await pullFn(cachePath);
-      return { success: true, action: 'updated', cachePath };
+      const pullMs = Math.round(performance.now() - pullStart);
+      return { success: true, action: 'updated', cachePath, durationMs: pullMs };
     } catch {
       return { success: true, action: 'skipped', cachePath };
     }
@@ -170,12 +179,15 @@ async function doFetchPlugin(
     const parentDir = dirname(cachePath);
     await mkdirFn(parentDir, { recursive: true });
 
+    const cloneStart = performance.now();
     await cloneToFn(repoUrl, cachePath, branch);
+    const cloneMs = Math.round(performance.now() - cloneStart);
 
     return {
       success: true,
       action: 'fetched',
       cachePath,
+      durationMs: cloneMs,
     };
   } catch (error) {
     if (error instanceof GitCloneError) {

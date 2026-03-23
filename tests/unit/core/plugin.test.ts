@@ -1,5 +1,5 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { fetchPlugin, updatePlugin, type FetchDeps, type UpdatePluginDeps } from '../../../src/core/plugin.js';
+import { fetchPlugin, resetFetchCache, updatePlugin, type FetchDeps, type UpdatePluginDeps } from '../../../src/core/plugin.js';
 import { GitCloneError } from '../../../src/core/git.js';
 
 // Create mock functions for dependency injection
@@ -17,10 +17,11 @@ const deps: FetchDeps = {
 };
 
 beforeEach(() => {
-  existsSyncMock.mockClear();
-  mkdirMock.mockClear();
-  cloneToMock.mockClear();
-  pullMock.mockClear();
+  existsSyncMock.mockReset();
+  mkdirMock.mockReset();
+  cloneToMock.mockReset();
+  pullMock.mockReset();
+  resetFetchCache();
 });
 
 describe('fetchPlugin', () => {
