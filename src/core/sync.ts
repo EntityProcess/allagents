@@ -72,6 +72,7 @@ import { syncCodexMcpServers, syncCodexProjectMcpConfig } from './codex-mcp.js';
 import { syncClaudeMcpConfig, syncClaudeMcpServersViaCli } from './claude-mcp.js';
 import { getCopilotMcpConfigPath } from './copilot-mcp.js';
 import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
+import { Stopwatch } from '../utils/stopwatch.js';
 
 /**
  * Result of deduplicating clients by skillsPath
@@ -159,6 +160,8 @@ export interface SyncResult {
   mcpResults?: Record<string, McpMergeResult>;
   /** Result of native CLI plugin installations */
   nativeResult?: NativeSyncResult;
+  /** Timing data for sync steps (when available) */
+  timing?: { totalMs: number; steps: Array<{ label: string; durationMs: number; detail?: string }> };
 }
 
 /**
@@ -194,6 +197,22 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
     ...(mcpResults && { mcpResults }),
     ...(nativeResult && { nativeResult }),
+    ...(mergeTiming(a.timing, b.timing)),
+  };
+}
+
+function mergeTiming(
+  a?: SyncResult['timing'],
+  b?: SyncResult['timing'],
+): { timing: NonNullable<SyncResult['timing']> } | Record<string, never> {
+  if (!a && !b) return {};
+  const aSteps = (a?.steps ?? []).map((s) => ({ ...s, label: `user:${s.label}` }));
+  const bSteps = (b?.steps ?? []).map((s) => ({ ...s, label: `project:${s.label}` }));
+  return {
+    timing: {
+      totalMs: (a?.totalMs ?? 0) + (b?.totalMs ?? 0),
+      steps: [...aSteps, ...bSteps],
+    },
   };
 }
 
@@ -1657,6 +1676,7 @@ export async function syncWorkspace(
   await migrateWorkspaceSkillsV1toV2(workspacePath);
 
   const { offline = false, dryRun = false, workspaceSourceBase, skipAgentFiles = false } = options;
+  const sw = new Stopwatch();
   const configDir = join(workspacePath, CONFIG_DIR);
   const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
 
@@ -1717,13 +1737,14 @@ export async function syncWorkspace(
   }
 
   // Step 0: Pre-register unique marketplaces to avoid race conditions during parallel validation
-  await ensureMarketplacesRegistered(filteredPlans.map((plan) => plan.source));
+  await sw.measure('marketplace-registration', () =>
+    ensureMarketplacesRegistered(filteredPlans.map((plan) => plan.source)),
+  );
 
   // Step 1: Validate all plugins before any destructive action
-  const validatedPlugins = await validateAllPlugins(
-    filteredPlans,
-    workspacePath,
-    offline,
+  const validatedPlugins = await sw.measure('plugin-validation', () =>
+    validateAllPlugins(filteredPlans, workspacePath, offline),
+    `${filteredPlans.length} plugin(s)`,
   );
 
   // Step 1b: Validate workspace.source if defined
@@ -1732,6 +1753,7 @@ export async function syncWorkspace(
   let validatedWorkspaceSource: ValidatedPlugin | null = null;
   const workspaceSourceWarnings: string[] = [];
   if (config.workspace?.source) {
+    sw.start('workspace-source-validation');
     const sourceBasePath = workspaceSourceBase ?? workspacePath;
     const wsSourceResult = await validatePlugin(
       config.workspace.source,
@@ -1746,6 +1768,7 @@ export async function syncWorkspace(
         `Workspace source: ${wsSourceResult.error}`,
       );
     }
+    sw.stop('workspace-source-validation');
   }
 
   // Separate valid and failed plugins
@@ -1782,7 +1805,9 @@ export async function syncWorkspace(
 
   // Step 3: Selective purge - only remove files we previously synced (skip in dry-run mode)
   if (!dryRun) {
-    await selectivePurgeWorkspace(workspacePath, previousState, syncClients);
+    await sw.measure('selective-purge', () =>
+      selectivePurgeWorkspace(workspacePath, previousState, syncClients),
+    );
   }
 
   // Step 3b: Two-pass skill name resolution
@@ -1791,7 +1816,9 @@ export async function syncWorkspace(
   const isV1Fallback = config.version === undefined || config.version < 2;
   const disabledSkillsSet = isV1Fallback ? new Set(config.disabledSkills ?? []) : undefined;
   const enabledSkillsSet = isV1Fallback && config.enabledSkills ? new Set(config.enabledSkills) : undefined;
-  const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet);
+  const allSkills = await sw.measure('skill-collection', () =>
+    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet),
+  );
 
   // Build per-plugin skill name maps (handles conflicts automatically)
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
@@ -1800,25 +1827,28 @@ export async function syncWorkspace(
   // Pass 2: Copy skills using resolved names
   // Use syncMode from config (defaults to 'symlink')
   const syncMode = config.syncMode ?? 'symlink';
-  const pluginResults = await Promise.all(
-    validPlugins.map(async (validatedPlugin) => {
-      const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
-      const result = await copyValidatedPlugin(
-        validatedPlugin,
-        workspacePath,
-        validatedPlugin.clients,
-        dryRun,
-        skillNameMap,
-        undefined, // clientMappings
-        syncMode,
-      );
-      return { ...result, scope: 'project' as const };
-    }),
+  const pluginResults = await sw.measure('plugin-copy', () =>
+    Promise.all(
+      validPlugins.map(async (validatedPlugin) => {
+        const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
+        const result = await copyValidatedPlugin(
+          validatedPlugin,
+          workspacePath,
+          validatedPlugin.clients,
+          dryRun,
+          skillNameMap,
+          undefined, // clientMappings
+          syncMode,
+        );
+        return { ...result, scope: 'project' as const };
+      }),
+    ),
+    `${validPlugins.length} plugin(s)`,
   );
 
   // Step 4b: Native CLI installations
-  const nativeResult = await syncNativePlugins(
-    validPlugins, previousState, 'project', workspacePath, dryRun, warnings, messages,
+  const nativeResult = await sw.measure('native-plugin-sync', () =>
+    syncNativePlugins(validPlugins, previousState, 'project', workspacePath, dryRun, warnings, messages),
   );
 
   // Step 5: Copy workspace files if configured
@@ -1827,6 +1857,7 @@ export async function syncWorkspace(
   let workspaceFileResults: CopyResult[] = [];
   const skipWorkspaceFiles = !!config.workspace?.source && !validatedWorkspaceSource;
   if (config.workspace && !skipWorkspaceFiles) {
+    sw.start('workspace-files');
     const sourcePath = validatedWorkspaceSource?.resolved;
     const filesToCopy = [...config.workspace.files];
 
@@ -1887,6 +1918,7 @@ export async function syncWorkspace(
         await copyFile(agentsPath, claudePath);
       }
     }
+    sw.stop('workspace-files');
   }
 
   // When repositories are configured but no workspace.source is set,
@@ -1900,7 +1932,9 @@ export async function syncWorkspace(
   // Step 5d: Reconcile and generate VSCode .code-workspace file
   let vscodeState: { hash: string; repos: string[] } | undefined;
   if (syncClients.includes('vscode') && !dryRun) {
-    const result = await syncVscodeWorkspaceFile(workspacePath, config, configPath, previousState, messages);
+    const result = await sw.measure('vscode-workspace-file', () =>
+      syncVscodeWorkspaceFile(workspacePath, config, configPath, previousState, messages),
+    );
     config = result.config;
     if (result.hash && result.repos) {
       vscodeState = { hash: result.hash, repos: result.repos };
@@ -1908,6 +1942,7 @@ export async function syncWorkspace(
   }
 
   // Step 5e: Sync MCP server configs to project-scoped .vscode/mcp.json
+  sw.start('mcp-sync');
   const mcpResults: Record<string, McpMergeResult> = {};
   if (syncClients.includes('vscode')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'vscode');
@@ -1972,6 +2007,8 @@ export async function syncWorkspace(
     mcpResults.copilot = copilotMcp;
   }
 
+  sw.stop('mcp-sync');
+
   // Warn about clients that don't support project-scoped MCP sync
   const PROJECT_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'copilot', 'universal']);
   const { servers: allMcpServers } = collectMcpServers(validPlugins);
@@ -1999,17 +2036,19 @@ export async function syncWorkspace(
   // Persist sync state (skip in dry-run mode)
   const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
   if (!dryRun) {
-    await persistSyncState(
-      workspacePath, pluginResults, workspaceFileResults, syncClients,
-      nativePluginsByClient, nativeResult,
-      {
-        ...(vscodeState && { vscodeState }),
-        ...(Object.keys(mcpResults).length > 0 && {
-          mcpTrackedServers: Object.fromEntries(
-            Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
-          ),
-        }),
-      },
+    await sw.measure('persist-state', () =>
+      persistSyncState(
+        workspacePath, pluginResults, workspaceFileResults, syncClients,
+        nativePluginsByClient, nativeResult,
+        {
+          ...(vscodeState && { vscodeState }),
+          ...(Object.keys(mcpResults).length > 0 && {
+            mcpTrackedServers: Object.fromEntries(
+              Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
+            ),
+          }),
+        },
+      ),
     );
   }
 
@@ -2026,6 +2065,7 @@ export async function syncWorkspace(
     ...(messages.length > 0 && { messages }),
     ...(Object.keys(mcpResults).length > 0 && { mcpResults }),
     ...(nativeResult && { nativeResult }),
+    timing: sw.toJSON(),
   };
 }
 
@@ -2042,6 +2082,7 @@ export async function syncUserWorkspace(
   // MIGRATION: v1→v2 - remove after v3 release
   await migrateUserWorkspaceSkillsV1toV2();
 
+  const sw = new Stopwatch();
   const homeDir = resolve(getHomeDir());
   const config = await getUserWorkspaceConfig();
 
@@ -2066,10 +2107,15 @@ export async function syncUserWorkspace(
   const syncClients = collectSyncClients(workspaceClients, pluginPlans);
 
   // Pre-register unique marketplaces to avoid race conditions during parallel validation
-  await ensureMarketplacesRegistered(pluginPlans.map((plan) => plan.source));
+  await sw.measure('marketplace-registration', () =>
+    ensureMarketplacesRegistered(pluginPlans.map((plan) => plan.source)),
+  );
 
   // Validate all plugins
-  const validatedPlugins = await validateAllPlugins(pluginPlans, homeDir, offline);
+  const validatedPlugins = await sw.measure('plugin-validation', () =>
+    validateAllPlugins(pluginPlans, homeDir, offline),
+    `${pluginPlans.length} plugin(s)`,
+  );
   const failedValidations = validatedPlugins.filter((v) => !v.success);
   const validPlugins = validatedPlugins.filter((v) => v.success);
   const warnings = [
@@ -2091,7 +2137,9 @@ export async function syncUserWorkspace(
 
   // Selective purge
   if (!dryRun) {
-    await selectivePurgeWorkspace(homeDir, previousState, syncClients);
+    await sw.measure('selective-purge', () =>
+      selectivePurgeWorkspace(homeDir, previousState, syncClients),
+    );
   }
 
   // Two-pass skill name resolution (excluding disabled/non-enabled skills)
@@ -2099,25 +2147,31 @@ export async function syncUserWorkspace(
   const isV1FallbackUser = config.version === undefined || config.version < 2;
   const disabledSkillsSet = isV1FallbackUser ? new Set(config.disabledSkills ?? []) : undefined;
   const enabledSkillsSet = isV1FallbackUser && config.enabledSkills ? new Set(config.enabledSkills) : undefined;
-  const allSkills = await collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet);
+  const allSkills = await sw.measure('skill-collection', () =>
+    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet),
+  );
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
 
   // Copy plugins using USER_CLIENT_MAPPINGS
   // Use syncMode from config (defaults to 'symlink')
   const syncMode = config.syncMode ?? 'symlink';
-  const pluginResults = await Promise.all(
-    validPlugins.map(async (vp) => {
-      const skillNameMap = pluginSkillMaps.get(vp.resolved);
-      const resolvedUserMappings = resolveClientMappings(vp.clients, USER_CLIENT_MAPPINGS);
-      const result = await copyValidatedPlugin(vp, homeDir, vp.clients, dryRun, skillNameMap, resolvedUserMappings, syncMode);
-      return { ...result, scope: 'user' as const };
-    }),
+  const pluginResults = await sw.measure('plugin-copy', () =>
+    Promise.all(
+      validPlugins.map(async (vp) => {
+        const skillNameMap = pluginSkillMaps.get(vp.resolved);
+        const resolvedUserMappings = resolveClientMappings(vp.clients, USER_CLIENT_MAPPINGS);
+        const result = await copyValidatedPlugin(vp, homeDir, vp.clients, dryRun, skillNameMap, resolvedUserMappings, syncMode);
+        return { ...result, scope: 'user' as const };
+      }),
+    ),
+    `${validPlugins.length} plugin(s)`,
   );
 
   // Count results
   const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, []);
 
   // Sync MCP server configs to VS Code if vscode client is configured
+  sw.start('mcp-sync');
   const mcpResults: Record<string, McpMergeResult> = {};
   if (syncClients.includes('vscode')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'vscode');
@@ -2164,6 +2218,8 @@ export async function syncUserWorkspace(
     mcpResults.copilot = copilotMcp;
   }
 
+  sw.stop('mcp-sync');
+
   // Warn about clients that don't support user-scoped MCP sync
   const USER_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'copilot', 'universal']);
   const { servers: allUserMcpServers } = collectMcpServers(validPlugins);
@@ -2176,8 +2232,8 @@ export async function syncUserWorkspace(
   }
 
   // Run native CLI installations for user scope
-  const nativeResult = await syncNativePlugins(
-    validPlugins, previousState, 'user', homeDir, dryRun, warnings, messages,
+  const nativeResult = await sw.measure('native-plugin-sync', () =>
+    syncNativePlugins(validPlugins, previousState, 'user', homeDir, dryRun, warnings, messages),
   );
 
   // Compute deleted artifacts: compare previous state vs what was just synced
@@ -2190,17 +2246,19 @@ export async function syncUserWorkspace(
   // Save sync state (including MCP servers and native plugins)
   if (!dryRun) {
     const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
-    await persistSyncState(
-      homeDir, pluginResults, [], syncClients,
-      nativePluginsByClient, nativeResult,
-      {
-        clientMappings: USER_CLIENT_MAPPINGS,
-        ...(Object.keys(mcpResults).length > 0 && {
-          mcpTrackedServers: Object.fromEntries(
-            Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
-          ),
-        }),
-      },
+    await sw.measure('persist-state', () =>
+      persistSyncState(
+        homeDir, pluginResults, [], syncClients,
+        nativePluginsByClient, nativeResult,
+        {
+          clientMappings: USER_CLIENT_MAPPINGS,
+          ...(Object.keys(mcpResults).length > 0 && {
+            mcpTrackedServers: Object.fromEntries(
+              Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
+            ),
+          }),
+        },
+      ),
     );
   }
 
@@ -2216,5 +2274,6 @@ export async function syncUserWorkspace(
     ...(messages.length > 0 && { messages }),
     ...(Object.keys(mcpResults).length > 0 && { mcpResults }),
     ...(nativeResult && { nativeResult }),
+    timing: sw.toJSON(),
   };
 }

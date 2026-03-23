@@ -121,4 +121,3 @@ export async function cleanupTempDir(dir: string): Promise<void> {
 
   await rm(dir, { recursive: true, force: true });
 }
-

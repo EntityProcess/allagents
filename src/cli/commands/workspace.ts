@@ -168,6 +168,10 @@ const syncCmd = command({
 
       let combined: SyncResult | null = null;
 
+      // Reset fetch cache so both user and project scopes share fetched repos
+      const { resetFetchCache } = await import('../../core/plugin.js');
+      resetFetchCache();
+
       // Sync user workspace if config exists
       if (userConfigExists) {
         const userResult = await syncUserWorkspace({ offline, dryRun, force });
@@ -293,6 +297,22 @@ const syncCmd = command({
         }
       }
 
+      // Print timing breakdown (debug only: ALLAGENTS_DEBUG=timing)
+      if (process.env.ALLAGENTS_DEBUG?.includes('timing') && result.timing) {
+        console.error('');
+        const totalMs = result.timing.totalMs;
+        console.error(`[debug] Sync timing (total: ${formatTimingMs(totalMs)})`);
+        console.error(`[debug] ${'─'.repeat(56)}`);
+        for (const step of result.timing.steps) {
+          const pct = totalMs > 0 ? ((step.durationMs / totalMs) * 100).toFixed(1) : '0.0';
+          const detail = step.detail ? ` [${step.detail}]` : '';
+          const label = step.label.padEnd(40);
+          const duration = formatTimingMs(step.durationMs).padStart(8);
+          console.error(`[debug]   ${label} ${duration}  ${pct.padStart(5)}%${detail}`);
+        }
+        console.error(`[debug] ${'─'.repeat(56)}`);
+      }
+
       if (!result.success || result.totalFailed > 0) {
         process.exit(1);
       }
@@ -309,6 +329,11 @@ const syncCmd = command({
     }
   },
 });
+
+function formatTimingMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
 
 // =============================================================================
 // workspace status
