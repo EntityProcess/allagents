@@ -2092,9 +2092,11 @@ async function seedFetchCacheFromMarketplaces(
 
     // Also seed the branch-qualified key so that callers using an explicit
     // branch (e.g. workspace.source URLs with /tree/main/) get a cache hit.
+    // The marketplace repo content will be pulled fresh during validateAllPlugins
+    // before any caller reads from this path.
     const branch = readGitBranch(entry.path);
     if (branch) {
-      seedFetchCache(`https://github.com/${entry.source.location}/tree/${branch}`, entry.path);
+      seedFetchCache(entry.source.location, entry.path, branch);
     }
   }
 }

@@ -72,13 +72,14 @@ export function resetFetchCache(): void {
  *
  * @param url - GitHub URL or owner/repo shorthand
  * @param path - Local path where the repo already exists
+ * @param branch - Optional branch override (seeds branch-qualified cache key)
  */
-export function seedFetchCache(url: string, path: string): void {
+export function seedFetchCache(url: string, path: string, branch?: string): void {
   const parsed = parseGitHubUrl(url);
   if (!parsed) return;
 
   const { owner, repo } = parsed;
-  const cachePath = getPluginCachePath(owner, repo, parsed.branch);
+  const cachePath = getPluginCachePath(owner, repo, branch ?? parsed.branch);
 
   // Don't overwrite if already populated (e.g. by a prior fetchPlugin call)
   if (fetchCache.has(cachePath)) return;

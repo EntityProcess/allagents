@@ -63,11 +63,11 @@ describe('seedFetchCache', () => {
     expect(result.cachePath).toBe(firstPath);
   });
 
-  it('seeds branch-qualified key via full GitHub URL with /tree/branch', async () => {
+  it('seeds branch-qualified key via explicit branch parameter', async () => {
     const marketplacePath = '/home/user/.allagents/plugins/marketplaces/WTG.AI.Prompts';
 
-    // Seed with a URL containing /tree/main (as workspace source URLs do)
-    seedFetchCache('https://github.com/WiseTechGlobal/WTG.AI.Prompts/tree/main', marketplacePath);
+    // Seed with explicit branch (as seedFetchCacheFromMarketplaces does after reading .git/HEAD)
+    seedFetchCache('WiseTechGlobal/WTG.AI.Prompts', marketplacePath, 'main');
 
     // fetchPlugin with explicit branch should hit the seeded cache
     const result = await fetchPlugin('WiseTechGlobal/WTG.AI.Prompts', { branch: 'main' }, {
