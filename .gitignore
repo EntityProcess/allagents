@@ -39,6 +39,7 @@ temp/
 
 # Git worktrees
 .worktrees/
+allagents.worktrees/
 
 # Ralph runtime files (not config)
 .ralph/.call_count

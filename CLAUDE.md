@@ -33,9 +33,9 @@ When working on a GitHub issue, **ALWAYS** follow this workflow:
 
 1. **Create a worktree with a feature branch** from `main`:
    ```bash
-   git worktree add .worktrees/<type>-<short-description> -b <type>/<issue-number>-<short-description>
-   # Example: git worktree add .worktrees/feat-add-new-embedder -b feat/42-add-new-embedder
-   cd .worktrees/<type>-<short-description>
+   git worktree add ../allagents.worktrees/<type>-<short-description> -b <type>/<issue-number>-<short-description>
+   # Example: git worktree add ../allagents.worktrees/feat-add-new-embedder -b feat/42-add-new-embedder
+   cd ../allagents.worktrees/<type>-<short-description>
    ```
 
 2. **Implement the changes** and commit following the commit convention
@@ -118,11 +118,11 @@ If a mock doesn't match the real interface (e.g., missing a `name` field the rea
 
 ### Git Worktrees
 
-**ALWAYS use git worktrees for feature development.** Worktrees live in `.worktrees/` (already in `.gitignore`).
+Use the default `allagents.worktrees/` directory (sibling to the repo, already in `.gitignore`). After creating a worktree, run `bun install` since worktrees do not share `node_modules`.
 
 When done:
 ```bash
-git worktree remove .worktrees/<name>
+git worktree remove ../allagents.worktrees/<name>
 ```
 
 ## Architecture Notes
