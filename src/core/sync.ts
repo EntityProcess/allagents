@@ -26,7 +26,7 @@ import {
   parseGitHubUrl,
   parseFileSource,
 } from '../utils/plugin-path.js';
-import { fetchPlugin, getPluginName } from './plugin.js';
+import { fetchPlugin, getPluginName, seedFetchCache } from './plugin.js';
 import {
   copyPluginToWorkspace,
   copyWorkspaceFiles,
@@ -49,6 +49,7 @@ import {
   getMarketplaceOverrides,
   getRegistryPath,
   getProjectRegistryPath,
+  getMarketplace,
 } from './marketplace.js';
 import {
   loadSyncState,
@@ -1737,9 +1738,12 @@ export async function syncWorkspace(
   }
 
   // Step 0: Pre-register unique marketplaces to avoid race conditions during parallel validation
-  await sw.measure('marketplace-registration', () =>
+  const marketplaceResults = await sw.measure('marketplace-registration', () =>
     ensureMarketplacesRegistered(filteredPlans.map((plan) => plan.source)),
   );
+
+  // Seed fetchCache with marketplace paths so fetchPlugin skips redundant git pulls
+  await seedFetchCacheFromMarketplaces(marketplaceResults);
 
   // Step 1: Validate all plugins before any destructive action
   const validatedPlugins = await sw.measure('plugin-validation', () =>
@@ -2070,6 +2074,48 @@ export async function syncWorkspace(
 }
 
 /**
+ * Seed the fetchPlugin cache with paths from successfully registered marketplaces.
+ * This prevents fetchPlugin from performing a redundant git pull for repos
+ * that the marketplace has already cloned/pulled.
+ */
+async function seedFetchCacheFromMarketplaces(
+  results: Array<{ source: string; success: boolean; name?: string }>,
+): Promise<void> {
+  for (const result of results) {
+    if (!result.success || !result.name) continue;
+
+    const entry = await getMarketplace(result.name);
+    if (!entry || entry.source.type !== 'github') continue;
+
+    // Seed the bare key (owner/repo without branch)
+    seedFetchCache(entry.source.location, entry.path);
+
+    // Also seed the branch-qualified key so that callers using an explicit
+    // branch (e.g. workspace.source URLs with /tree/main/) get a cache hit.
+    // The marketplace repo content will be pulled fresh during validateAllPlugins
+    // before any caller reads from this path.
+    const branch = readGitBranch(entry.path);
+    if (branch) {
+      seedFetchCache(entry.source.location, entry.path, branch);
+    }
+  }
+}
+
+/**
+ * Read the current branch from a git repo's HEAD file without spawning a process.
+ * Returns null if the branch cannot be determined (detached HEAD, missing file, etc.).
+ */
+function readGitBranch(repoPath: string): string | null {
+  try {
+    const head = readFileSync(join(repoPath, '.git', 'HEAD'), 'utf-8').trim();
+    const prefix = 'ref: refs/heads/';
+    return head.startsWith(prefix) ? head.slice(prefix.length) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Sync user-scoped plugins to user home directories using USER_CLIENT_MAPPINGS.
  * Reads config from ~/.allagents/workspace.yaml and syncs to paths relative to $HOME.
  *
@@ -2107,9 +2153,12 @@ export async function syncUserWorkspace(
   const syncClients = collectSyncClients(workspaceClients, pluginPlans);
 
   // Pre-register unique marketplaces to avoid race conditions during parallel validation
-  await sw.measure('marketplace-registration', () =>
+  const marketplaceResults = await sw.measure('marketplace-registration', () =>
     ensureMarketplacesRegistered(pluginPlans.map((plan) => plan.source)),
   );
+
+  // Seed fetchCache with marketplace paths so fetchPlugin skips redundant git pulls
+  await seedFetchCacheFromMarketplaces(marketplaceResults);
 
   // Validate all plugins
   const validatedPlugins = await sw.measure('plugin-validation', () =>
