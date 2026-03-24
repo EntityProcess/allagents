@@ -212,6 +212,8 @@ export interface ReconcileResult {
   added: string[];
   /** Relative paths of repositories removed (were in .code-workspace before, now gone) */
   removed: string[];
+  /** Relative paths of repositories whose display name changed in .code-workspace */
+  renamed: string[];
 }
 
 /**
@@ -261,6 +263,7 @@ export function reconcileVscodeWorkspaceFolders(
 
   const added: string[] = [];
   const removed: string[] = [];
+  const renamed: string[] = [];
   const updatedRepos: Repository[] = [];
 
   // Keep repos still in .code-workspace or newly added to workspace.yaml
@@ -272,7 +275,13 @@ export function reconcileVscodeWorkspaceFolders(
       // Was in last sync, removed from .code-workspace → remove
       removed.push(repo.path);
     } else {
-      updatedRepos.push(repo);
+      const folderName = codeWorkspaceNames.get(absPath);
+      if (folderName !== undefined && folderName !== repo.name) {
+        updatedRepos.push({ ...repo, name: folderName });
+        renamed.push(repo.path);
+      } else {
+        updatedRepos.push(repo);
+      }
     }
   }
 
@@ -292,5 +301,5 @@ export function reconcileVscodeWorkspaceFolders(
     }
   }
 
-  return { updatedRepos, added, removed };
+  return { updatedRepos, added, removed, renamed };
 }

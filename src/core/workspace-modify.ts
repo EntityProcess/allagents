@@ -1061,3 +1061,27 @@ export async function updateRepositories(
     };
   }
 }
+
+/**
+ * Replace the repositories list in workspace.yaml.
+ * Used when .code-workspace reconciliation updates metadata on existing entries.
+ */
+export async function setRepositories(
+  repositories: Repository[],
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    config.repositories = repositories;
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
