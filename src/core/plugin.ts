@@ -65,6 +65,35 @@ export function resetFetchCache(): void {
 }
 
 /**
+ * Seed the fetch cache with a pre-resolved path for a GitHub URL.
+ *
+ * Call this after marketplace registration/update so that subsequent
+ * `fetchPlugin` calls for the same repo skip the redundant git pull.
+ *
+ * @param url - GitHub URL or owner/repo shorthand
+ * @param path - Local path where the repo already exists
+ */
+export function seedFetchCache(url: string, path: string): void {
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) return;
+
+  const { owner, repo } = parsed;
+  const cachePath = getPluginCachePath(owner, repo, parsed.branch);
+
+  // Don't overwrite if already populated (e.g. by a prior fetchPlugin call)
+  if (fetchCache.has(cachePath)) return;
+
+  fetchCache.set(
+    cachePath,
+    Promise.resolve({
+      success: true,
+      action: 'skipped' as const,
+      cachePath: path,
+    }),
+  );
+}
+
+/**
  * Fetch a plugin from GitHub to local cache.
  *
  * Deduplicates git operations: the first caller for a given cache path
