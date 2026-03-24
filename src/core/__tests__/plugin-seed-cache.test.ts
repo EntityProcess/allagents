@@ -63,6 +63,25 @@ describe('seedFetchCache', () => {
     expect(result.cachePath).toBe(firstPath);
   });
 
+  it('seeds branch-qualified key via full GitHub URL with /tree/branch', async () => {
+    const marketplacePath = '/home/user/.allagents/plugins/marketplaces/WTG.AI.Prompts';
+
+    // Seed with a URL containing /tree/main (as workspace source URLs do)
+    seedFetchCache('https://github.com/WiseTechGlobal/WTG.AI.Prompts/tree/main', marketplacePath);
+
+    // fetchPlugin with explicit branch should hit the seeded cache
+    const result = await fetchPlugin('WiseTechGlobal/WTG.AI.Prompts', { branch: 'main' }, {
+      existsSync: () => { throw new Error('should not be called'); },
+      mkdir: () => { throw new Error('should not be called'); },
+      cloneTo: () => { throw new Error('should not be called'); },
+      pull: () => { throw new Error('should not be called'); },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.action).toBe('skipped');
+    expect(result.cachePath).toBe(marketplacePath);
+  });
+
   it('ignores invalid URLs', () => {
     // Should not throw, just silently skip
     seedFetchCache('not-a-valid-url', '/some/path');

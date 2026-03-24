@@ -2087,7 +2087,29 @@ async function seedFetchCacheFromMarketplaces(
     const entry = await getMarketplace(result.name);
     if (!entry || entry.source.type !== 'github') continue;
 
+    // Seed the bare key (owner/repo without branch)
     seedFetchCache(entry.source.location, entry.path);
+
+    // Also seed the branch-qualified key so that callers using an explicit
+    // branch (e.g. workspace.source URLs with /tree/main/) get a cache hit.
+    const branch = readGitBranch(entry.path);
+    if (branch) {
+      seedFetchCache(`https://github.com/${entry.source.location}/tree/${branch}`, entry.path);
+    }
+  }
+}
+
+/**
+ * Read the current branch from a git repo's HEAD file without spawning a process.
+ * Returns null if the branch cannot be determined (detached HEAD, missing file, etc.).
+ */
+function readGitBranch(repoPath: string): string | null {
+  try {
+    const head = readFileSync(join(repoPath, '.git', 'HEAD'), 'utf-8').trim();
+    const prefix = 'ref: refs/heads/';
+    return head.startsWith(prefix) ? head.slice(prefix.length) : null;
+  } catch {
+    return null;
   }
 }
 
