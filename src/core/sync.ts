@@ -66,7 +66,7 @@ import {
   computeWorkspaceHash,
   reconcileVscodeWorkspaceFolders,
 } from './vscode-workspace.js';
-import { updateRepositories, migrateWorkspaceSkillsV1toV2 } from './workspace-modify.js';
+import { setRepositories, updateRepositories, migrateWorkspaceSkillsV1toV2 } from './workspace-modify.js';
 import { syncVscodeMcpConfig, collectMcpServers } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import { syncCodexMcpServers, syncCodexProjectMcpConfig } from './codex-mcp.js';
@@ -1580,11 +1580,20 @@ async function syncVscodeWorkspaceFile(
             config.repositories,
           );
 
-          if (reconciled.added.length > 0 || reconciled.removed.length > 0) {
-            await updateRepositories(
-              { remove: reconciled.removed, add: reconciled.added.map(p => ({ path: p })) },
-              workspacePath,
-            );
+          if (
+            reconciled.added.length > 0 ||
+            reconciled.removed.length > 0 ||
+            reconciled.renamed.length > 0
+          ) {
+            const updateResult = reconciled.renamed.length > 0
+              ? await setRepositories(reconciled.updatedRepos, workspacePath)
+              : await updateRepositories(
+                  { remove: reconciled.removed, add: reconciled.added.map(p => ({ path: p })) },
+                  workspacePath,
+                );
+            if (!updateResult.success) {
+              throw new Error(updateResult.error ?? 'Failed to update repositories');
+            }
             updatedConfig = await parseWorkspaceConfig(configPath);
 
             if (reconciled.removed.length > 0) {
@@ -1592,6 +1601,9 @@ async function syncVscodeWorkspaceFile(
             }
             if (reconciled.added.length > 0) {
               messages.push(`Repositories added (from .code-workspace): ${reconciled.added.join(', ')}`);
+            }
+            if (reconciled.renamed.length > 0) {
+              messages.push(`Repository names updated (from .code-workspace): ${reconciled.renamed.join(', ')}`);
             }
           }
         } catch {

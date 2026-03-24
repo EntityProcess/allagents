@@ -390,6 +390,42 @@ describe('reconcileVscodeWorkspaceFolders', () => {
     expect(addedRepo!.name).toBe('ModernPlatform.Designs.GLOW');
   });
 
+  test('preserves name edits from .code-workspace for an existing repo', () => {
+    const lastSyncedRepos = [absPath('../backend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend'), name: 'API Server' },
+    ];
+    const currentRepos = [{ path: '../backend' }];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.renamed).toEqual(['../backend']);
+    expect(result.updatedRepos).toEqual([{ path: '../backend', name: 'API Server' }]);
+  });
+
+  test('removes repo name when folder name is removed from .code-workspace', () => {
+    const lastSyncedRepos = [absPath('../backend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+    ];
+    const currentRepos = [{ path: '../backend', name: 'API Server' }];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.renamed).toEqual(['../backend']);
+    expect(result.updatedRepos).toEqual([{ path: '../backend' }]);
+  });
+
   test('preserves existing repo properties (description, source) on unchanged repos', () => {
     const lastSyncedRepos = [absPath('../backend'), absPath('../frontend')];
     const codeWorkspaceFolders = [
@@ -409,5 +445,6 @@ describe('reconcileVscodeWorkspaceFolders', () => {
     expect(result.updatedRepos).toEqual([
       { path: '../backend', description: 'API server', repo: 'org/backend' },
     ]);
+    expect(result.renamed).toEqual([]);
   });
 });
