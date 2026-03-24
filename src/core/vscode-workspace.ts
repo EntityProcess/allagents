@@ -276,8 +276,14 @@ export function reconcileVscodeWorkspaceFolders(
       removed.push(repo.path);
     } else {
       const folderName = codeWorkspaceNames.get(absPath);
-      if (folderName !== undefined && folderName !== repo.name) {
-        updatedRepos.push({ ...repo, name: folderName });
+      if (folderName !== repo.name) {
+        const updatedRepo: Repository = { ...repo };
+        if (folderName === undefined) {
+          delete updatedRepo.name;
+        } else {
+          updatedRepo.name = folderName;
+        }
+        updatedRepos.push(updatedRepo);
         renamed.push(repo.path);
       } else {
         updatedRepos.push(repo);

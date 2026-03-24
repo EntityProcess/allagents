@@ -408,6 +408,24 @@ describe('reconcileVscodeWorkspaceFolders', () => {
     expect(result.updatedRepos).toEqual([{ path: '../backend', name: 'API Server' }]);
   });
 
+  test('removes repo name when folder name is removed from .code-workspace', () => {
+    const lastSyncedRepos = [absPath('../backend')];
+    const codeWorkspaceFolders = [
+      { path: '.' },
+      { path: absPath('../backend') },
+    ];
+    const currentRepos = [{ path: '../backend', name: 'API Server' }];
+
+    const result = reconcileVscodeWorkspaceFolders(
+      workspacePath, codeWorkspaceFolders, lastSyncedRepos, currentRepos,
+    );
+
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.renamed).toEqual(['../backend']);
+    expect(result.updatedRepos).toEqual([{ path: '../backend' }]);
+  });
+
   test('preserves existing repo properties (description, source) on unchanged repos', () => {
     const lastSyncedRepos = [absPath('../backend'), absPath('../frontend')];
     const codeWorkspaceFolders = [
