@@ -18,7 +18,7 @@ const app = conciseSubcommands({
     'For AI agents: use --agent-help for machine-readable help, or --json for structured output',
   version: packageJson.version,
   cmds: {
-    sync: syncCmd,
+    update: syncCmd,
     workspace: workspaceCmd,
     plugin: pluginCmd,
     self: selfCmd,
