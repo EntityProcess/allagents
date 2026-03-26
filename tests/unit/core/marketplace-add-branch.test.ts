@@ -27,6 +27,15 @@ mock.module('../../../src/core/git.js', () => ({
     }
   },
   pull: mock(() => Promise.resolve()),
+  repoExists: mock(() => Promise.resolve(true)),
+  refExists: mock(() => Promise.resolve(true)),
+  cloneToTemp: mock((url: string) => {
+    const dest = join(tmpdir(), `mock-clone-${Date.now()}`);
+    mkdirSync(dest, { recursive: true });
+    return Promise.resolve(dest);
+  }),
+  classifyError: (err: Error) => err,
+  cleanupTempDir: mock(() => Promise.resolve()),
 }));
 
 // Mock simple-git for updateMarketplace (it uses simpleGit directly)
