@@ -32,14 +32,14 @@ export const initMeta: AgentCommandMeta = {
 };
 
 export const syncMeta: AgentCommandMeta = {
-  command: 'workspace sync',
+  command: 'sync',
   description: 'Sync plugins to workspace',
   whenToUse: 'After modifying workspace.yaml or pulling shared config changes',
   examples: [
-    'allagents workspace sync',
-    'allagents workspace sync --dry-run',
-    'allagents workspace sync --offline',
-    'allagents workspace sync --verbose',
+    'allagents sync',
+    'allagents sync --dry-run',
+    'allagents sync --offline',
+    'allagents sync --verbose',
   ],
   expectedOutput:
     'Lists synced files with status per plugin. Exit 0 on success, exit 1 if any files failed.',

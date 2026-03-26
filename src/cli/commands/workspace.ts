@@ -665,6 +665,8 @@ const repoCmd = conciseSubcommands({
 // workspace subcommands group
 // =============================================================================
 
+export { syncCmd };
+
 export const workspaceCmd = conciseSubcommands({
   name: 'workspace',
   description: 'Manage AI agent workspaces - initialize, sync, and configure plugins',

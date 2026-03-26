@@ -75,9 +75,9 @@ describe('agent command metadata', () => {
       'plugin uninstall',
       'plugin validate',
       'self update',
+      'sync',
       'workspace init',
       'workspace status',
-      'workspace sync',
     ]);
   });
 
@@ -91,7 +91,7 @@ describe('agent command metadata', () => {
   });
 
   test('workspace sync has expected options', () => {
-    const syncCmd = allCommands.find((c) => c.command === 'workspace sync')!;
+    const syncCmd = allCommands.find((c) => c.command === 'sync')!;
     expect(syncCmd.options).toBeInstanceOf(Array);
     expect(syncCmd.options!.length).toBe(3);
 

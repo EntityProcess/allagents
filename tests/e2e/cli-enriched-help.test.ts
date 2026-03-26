@@ -9,7 +9,7 @@ import { updateMeta } from '../../src/cli/metadata/self.js';
  */
 const allCommandMetas: { name: string; meta: CommandMeta }[] = [
   { name: 'workspace init', meta: initMeta },
-  { name: 'workspace sync', meta: syncMeta },
+  { name: 'sync', meta: syncMeta },
   { name: 'workspace status', meta: statusMeta },
   { name: 'plugin install', meta: pluginInstallMeta },
   { name: 'plugin uninstall', meta: pluginUninstallMeta },
