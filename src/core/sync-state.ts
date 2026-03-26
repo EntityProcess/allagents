@@ -4,6 +4,7 @@ import { join, dirname } from 'node:path';
 import { CONFIG_DIR, SYNC_STATE_FILE } from '../constants.js';
 import { SyncStateSchema, type SyncState } from '../models/sync-state.js';
 import type { ClientType } from '../models/workspace-config.js';
+import { ensureConfigGitignore } from './config-gitignore.js';
 
 /** MCP scope identifier (e.g., "vscode" for user-level mcp.json) */
 export type McpScope = 'vscode' | 'codex' | 'claude' | 'copilot';
@@ -85,6 +86,7 @@ export async function saveSyncState(
   };
 
   await mkdir(dirname(statePath), { recursive: true });
+  await ensureConfigGitignore(workspacePath);
   await writeFile(statePath, JSON.stringify(state, null, 2), 'utf-8');
 }
 
