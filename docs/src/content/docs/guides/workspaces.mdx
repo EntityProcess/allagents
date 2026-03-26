@@ -125,11 +125,11 @@ workspace:
 - **Deleted files restored**: If you delete AGENTS.md locally, sync restores it
 - **WORKSPACE-RULES injection**: AGENTS.md and CLAUDE.md automatically get workspace discovery rules
 
-When using `--from` during init, relative paths are automatically converted to absolute paths so that `workspace sync` can pull updates from the original source.
+When using `--from` during init, relative paths are automatically converted to absolute paths so that `allagents update` can pull updates from the original source.
 
 ## VSCode Workspace Generation
 
-When `vscode` is included in the `clients` list, `workspace sync` automatically generates a `.code-workspace` file. Repository paths are resolved to absolute paths.
+When `vscode` is included in the `clients` list, `allagents update` automatically generates a `.code-workspace` file. Repository paths are resolved to absolute paths.
 
 ```yaml
 # workspace.yaml
@@ -186,13 +186,13 @@ The generated workspace includes:
 ## Syncing Plugins
 
 ```bash
-allagents workspace sync
+allagents update
 ```
 
 By default, sync pulls the latest version of remote plugins from GitHub. Use `--offline` to skip fetching and use cached versions:
 
 ```bash
-allagents workspace sync --offline
+allagents update --offline
 ```
 
 ### Non-Destructive Sync
@@ -211,7 +211,7 @@ AllAgents tracks synced files in `.allagents/sync-state.json`. This file is auto
 To sync only a specific client instead of all configured clients:
 
 ```bash
-allagents workspace sync --client opencode
+allagents update --client opencode
 ```
 
 This is useful when you want to update files for one client without touching others. Files and sync state for non-targeted clients are preserved.
@@ -221,7 +221,7 @@ This is useful when you want to update files for one client without touching oth
 Preview what would happen without making changes:
 
 ```bash
-allagents workspace sync --dry-run
+allagents update --dry-run
 ```
 
 ### User Scope
@@ -233,7 +233,7 @@ By default, plugins are installed to the current project. Use `--scope user` to 
 allagents workspace plugin install superpowers@obra/superpowers --scope user
 
 # Sync user-scoped plugins
-allagents workspace sync --scope user
+allagents update --scope user
 
 # Remove a user-scoped plugin
 allagents workspace plugin remove superpowers@obra/superpowers --scope user

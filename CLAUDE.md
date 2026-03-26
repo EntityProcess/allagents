@@ -95,7 +95,7 @@ Tests use `bun:test`. Run with `bun test` or target a specific file with `bun te
 bun run build
 
 # Test the specific behavior your change affects
-./dist/index.js workspace sync
+./dist/index.js update
 ./dist/index.js plugin update
 ```
 
@@ -138,7 +138,7 @@ MCP servers from plugins are synced to VS Code's `mcp.json`. Key ownership rule:
 ### CLI Output Paths
 
 User-facing output for sync results is displayed from multiple entry points:
-- `workspace sync` command (`src/cli/commands/workspace.ts`)
+- `update` command (`src/cli/commands/workspace.ts`) — also available as `workspace sync`
 - `plugin install/uninstall/update` commands (`src/cli/commands/plugin.ts`)
 - TUI interactive sync (`src/cli/tui/actions/sync.ts`)
 

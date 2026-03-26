@@ -136,8 +136,8 @@ const initCmd = command({
 // =============================================================================
 
 const syncCmd = command({
-  name: 'sync',
-  aliases: ['update'],
+  name: 'update',
+  aliases: ['sync'],
   description: buildDescription(syncMeta),
   args: {
     offline: flag({ long: 'offline', description: 'Use cached plugins without fetching latest from remote' }),
@@ -664,6 +664,8 @@ const repoCmd = conciseSubcommands({
 // =============================================================================
 // workspace subcommands group
 // =============================================================================
+
+export { syncCmd };
 
 export const workspaceCmd = conciseSubcommands({
   name: 'workspace',
