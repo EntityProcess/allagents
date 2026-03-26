@@ -128,7 +128,7 @@ describe('branch separation — each branch is a separate marketplace', () => {
     expect(found).toBeNull();
   });
 
-  it('should be idempotent for the same branch', async () => {
+  it('should replace existing entry for the same branch', async () => {
     // Register feature branch
     const result1 = await addMarketplace(
       'https://github.com/owner/repo/tree/feat/v2',
@@ -136,10 +136,10 @@ describe('branch separation — each branch is a separate marketplace', () => {
     );
     expect(result1.success).toBe(true);
 
-    // Try registering the same branch again with a different name
-    // Should find existing by source location and return it
+    // Re-registering the same branch with a different name replaces the entry
     const result2 = await addMarketplace('owner/repo', 'repo-v2-copy', 'feat/v2');
     expect(result2.success).toBe(true);
-    expect(result2.marketplace?.name).toBe('repo-v2'); // returns existing
+    expect(result2.replaced).toBe(true);
+    expect(result2.marketplace?.name).toBe('repo-v2-copy');
   });
 });

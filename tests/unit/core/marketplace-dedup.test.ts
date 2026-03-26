@@ -119,8 +119,8 @@ describe('marketplace deduplication', () => {
       expect(results).toHaveLength(2);
       expect(results.every((r) => r.success)).toBe(true);
 
-      // Only the first marketplace is truly new — the second finds
-      // the existing entry via manifest name, so no log is emitted.
+      // The first marketplace is new (logged), the second replaces it
+      // (not logged since replaced=true suppresses the log).
       const autoRegLogs = logMessages.filter((m) =>
         m.includes('Auto-registered'),
       );

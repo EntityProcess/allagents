@@ -66,9 +66,9 @@ export interface MarketplaceResult {
   success: boolean;
   marketplace?: MarketplaceEntry;
   error?: string;
-  /** True when addMarketplace returned an already-registered entry (idempotent) */
+  /** @deprecated No longer returned — add always replaces existing entries */
   alreadyRegistered?: boolean;
-  /** True when addMarketplace replaced an existing marketplace with force=true */
+  /** True when addMarketplace replaced an existing marketplace entry */
   replaced?: boolean;
   /** User-level plugins that were removed during marketplace removal cascade */
   removedUserPlugins?: string[];
@@ -266,14 +266,14 @@ export interface MarketplaceScopeOptions {
  * @param source - Marketplace source (URL, path, or name)
  * @param customName - Optional custom name for the marketplace
  * @param branch - Optional branch for GitHub marketplaces
- * @param force - If true, replace existing marketplace with same name instead of erroring
+ * @param _force - Deprecated, marketplace add now always replaces existing entries
  * @param scopeOptions - Optional scope options (user or project)
  */
 export async function addMarketplace(
   source: string,
   customName?: string,
   branch?: string,
-  force?: boolean,
+  _force?: boolean,
   scopeOptions?: MarketplaceScopeOptions,
 ): Promise<MarketplaceResult> {
   const parsed = parseMarketplaceSource(source);
@@ -323,10 +323,7 @@ export async function addMarketplace(
     return parsed.location;
   })();
   const existingBySource = findBySourceLocation(registry, sourceLocation);
-  // Skip idempotency check when force=true to allow overwriting by name
-  if (existingBySource && !force) {
-    return { success: true, marketplace: existingBySource, alreadyRegistered: true };
-  }
+  let alreadyRegistered = !!existingBySource;
 
   let marketplacePath: string;
 
@@ -395,14 +392,9 @@ export async function addMarketplace(
     if (manifestResult.success && manifestResult.data.name) {
       const manifestName = manifestResult.data.name;
       if (manifestName !== name) {
-        // If the manifest name is already registered, return idempotent response (unless forcing)
-        const existing = registry.marketplaces[manifestName];
-        if (existing && !force) {
-          return {
-            success: true,
-            marketplace: existing,
-            alreadyRegistered: true,
-          };
+        // Track if the manifest name is already registered
+        if (registry.marketplaces[manifestName]) {
+          alreadyRegistered = true;
         }
         name = manifestName;
       }
@@ -410,12 +402,8 @@ export async function addMarketplace(
   }
 
   // Check if already registered by name (after manifest parsing to use final name)
-  const wasAlreadyRegistered = !!registry.marketplaces[name];
-  if (wasAlreadyRegistered && !force) {
-    return {
-      success: false,
-      error: `Marketplace '${name}' already exists. Use 'update' to refresh it.`,
-    };
+  if (registry.marketplaces[name]) {
+    alreadyRegistered = true;
   }
 
   // Build location: for GitHub, use owner/repo for default branch, owner/repo/branch for non-default
@@ -447,7 +435,7 @@ export async function addMarketplace(
   return {
     success: true,
     marketplace: entry,
-    ...(wasAlreadyRegistered && force && { replaced: true }),
+    ...(alreadyRegistered && { replaced: true }),
   };
 }
 
@@ -1238,7 +1226,7 @@ async function autoRegisterMarketplace(
         return { success: false, error: result.error || 'Unknown error' };
       }
       const name = result.marketplace?.name ?? parts[1];
-      if (!result.alreadyRegistered) {
+      if (!result.replaced) {
         console.log(`Auto-registered GitHub marketplace: ${source}`);
       }
       registeredSourceCache.set(source, name);

@@ -454,22 +454,21 @@ describe('addMarketplace with force parameter', () => {
     expect(result.replaced).toBeUndefined();
   });
 
-  it('should be idempotent when adding same source twice without force', async () => {
+  it('should replace existing marketplace when adding same source twice', async () => {
     const marketplacePath = join(testDir, 'local-marketplace');
 
     // First add should succeed
     const result1 = await addMarketplace(marketplacePath);
     expect(result1.success).toBe(true);
-    expect(result1.alreadyRegistered).toBeUndefined();
+    expect(result1.replaced).toBeUndefined();
 
-    // Second add with same source should return alreadyRegistered=true (idempotent)
+    // Second add with same source should replace and return replaced=true
     const result2 = await addMarketplace(marketplacePath);
     expect(result2.success).toBe(true);
-    expect(result2.alreadyRegistered).toBe(true);
-    expect(result2.replaced).toBeUndefined();
+    expect(result2.replaced).toBe(true);
   });
 
-  it('should replace existing marketplace by name when adding different source with force=true', async () => {
+  it('should replace existing marketplace by name when adding different source', async () => {
     const marketplacePath1 = join(testDir, 'local-marketplace');
     const marketplacePath2 = join(testDir, 'local-marketplace-2');
 
@@ -488,29 +487,23 @@ describe('addMarketplace with force parameter', () => {
     const result1 = await addMarketplace(marketplacePath1);
     expect(result1.success).toBe(true);
 
-    // Second add with different source but same manifest name, without force should be idempotent
+    // Second add with different source but same manifest name replaces by default
     const result2 = await addMarketplace(marketplacePath2);
     expect(result2.success).toBe(true);
-    expect(result2.alreadyRegistered).toBe(true);
-    expect(result2.replaced).toBeUndefined();
-
-    // Third add with force should succeed and return replaced=true
-    const result3 = await addMarketplace(marketplacePath2, undefined, undefined, true);
-    expect(result3.success).toBe(true);
-    expect(result3.replaced).toBe(true);
-    expect(result3.marketplace).not.toBeNull();
+    expect(result2.replaced).toBe(true);
+    expect(result2.marketplace).not.toBeNull();
   });
 
-  it('should keep replaced=undefined when adding new marketplace with force=true', async () => {
+  it('should keep replaced=undefined when adding new marketplace', async () => {
     const marketplacePath = join(testDir, 'local-marketplace');
 
-    // First add with force=true should not have replaced flag
-    const result = await addMarketplace(marketplacePath, undefined, undefined, true);
+    // First add should not have replaced flag
+    const result = await addMarketplace(marketplacePath);
     expect(result.success).toBe(true);
     expect(result.replaced).toBeUndefined();
   });
 
-  it('addMarketplace with force replaces existing marketplace by different source', async () => {
+  it('addMarketplace replaces existing marketplace by different source', async () => {
     const marketplacePath1 = join(testDir, 'local-marketplace');
     const marketplacePath2 = join(testDir, 'local-marketplace-alt');
 
@@ -529,8 +522,8 @@ describe('addMarketplace with force parameter', () => {
     const result1 = await addMarketplace(marketplacePath1);
     expect(result1.success).toBe(true);
 
-    // Action: add same name with different source and force=true
-    const result2 = await addMarketplace(marketplacePath2, undefined, undefined, true);
+    // Action: add same name with different source — replaces by default
+    const result2 = await addMarketplace(marketplacePath2);
 
     // Assert: second add succeeds with replaced=true
     expect(result2.success).toBe(true);
@@ -544,7 +537,7 @@ describe('addMarketplace with force parameter', () => {
     expect(registry.marketplaces['test-marketplace'].path).toBe(marketplacePath2);
   });
 
-  it('addMarketplace is idempotent for same manifest name from different sources', async () => {
+  it('addMarketplace replaces when adding same manifest name from different sources', async () => {
     const marketplacePath1 = join(testDir, 'local-marketplace');
     const marketplacePath2 = join(testDir, 'local-marketplace-diff');
 
@@ -562,34 +555,11 @@ describe('addMarketplace with force parameter', () => {
     // Setup: add initial marketplace
     await addMarketplace(marketplacePath1);
 
-    // Action: try to add different source with same name, without force
-    const result = await addMarketplace(marketplacePath2, undefined, undefined, false);
+    // Action: add different source with same name — replaces by default
+    const result = await addMarketplace(marketplacePath2);
 
-    // Assert: returns idempotent success (same manifest name already registered)
+    // Assert: replaces the existing entry
     expect(result.success).toBe(true);
-    expect(result.alreadyRegistered).toBe(true);
-    expect(result.replaced).toBeUndefined();
-  });
-
-  it('addMarketplace with force on first add returns replaced=undefined', async () => {
-    const marketplacePath = join(testDir, 'local-marketplace');
-    const result = await addMarketplace(marketplacePath, undefined, undefined, true);
-
-    expect(result.success).toBe(true);
-    expect(result.replaced).toBeUndefined();
-  });
-
-  it('addMarketplace is idempotent when adding same source twice without force', async () => {
-    const marketplacePath = join(testDir, 'local-marketplace');
-
-    // First add
-    const result1 = await addMarketplace(marketplacePath);
-    expect(result1.success).toBe(true);
-
-    // Second add with same source
-    const result2 = await addMarketplace(marketplacePath);
-    expect(result2.success).toBe(true);
-    expect(result2.alreadyRegistered).toBe(true);
-    expect(result2.replaced).toBeUndefined();
+    expect(result.replaced).toBe(true);
   });
 });
