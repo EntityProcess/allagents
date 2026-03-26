@@ -11,6 +11,7 @@ import { isGitHubUrl, parseGitHubUrl, getPluginCachePath } from '../utils/plugin
 import { fetchWorkspaceFromGitHub, readFileFromClone } from './github-fetch.js';
 import { cleanupTempDir } from './git.js';
 import { getMarketplacesDir } from './marketplace.js';
+import { ensureConfigGitignore } from './config-gitignore.js';
 
 /**
  * Options for workspace initialization
@@ -80,6 +81,7 @@ export async function initWorkspace(
 
     // Create .allagents directory
     await mkdir(configDir, { recursive: true });
+    await ensureConfigGitignore(absoluteTarget);
 
     // Determine workspace.yaml source and track source directory for relative path resolution
     let workspaceYamlContent: string;
