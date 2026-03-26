@@ -33,7 +33,7 @@ CLI tool for managing multi-repo AI agent workspaces with plugin synchronization
          ▼
 ┌─────────────────┐
 │    AllAgents    │  (sync & transform)
-│  workspace sync │
+│      sync       │
 └────────┬────────┘
          │
     ┌────┴────┬────────┬─────────┐
@@ -69,7 +69,7 @@ allagents plugin install code-review@claude-plugins-official
 allagents plugin install my-plugin@someuser/their-repo
 
 # Sync plugins to workspace
-allagents workspace sync
+allagents sync
 ```
 
 ### Initialize from Remote Template
@@ -99,7 +99,7 @@ allagents workspace init <path>
 allagents workspace init <path> --from <source>  # From local path or GitHub URL
 
 # Sync all plugins to workspace (non-destructive)
-allagents workspace sync [options]
+allagents sync [options]
   --force    Force re-fetch of remote plugins even if cached
   --dry-run  Preview changes without applying
 
@@ -124,7 +124,7 @@ allagents workspace repo list
 
 ### VSCode Workspace Generation
 
-When `vscode` is included in the `clients` list, `workspace sync` automatically generates a `.code-workspace` file. Repository paths are resolved to absolute paths. Plugin folders are included with prompt/instruction file location settings for Copilot.
+When `vscode` is included in the `clients` list, `allagents sync` automatically generates a `.code-workspace` file. Repository paths are resolved to absolute paths. Plugin folders are included with prompt/instruction file location settings for Copilot.
 
 ```yaml
 # workspace.yaml
