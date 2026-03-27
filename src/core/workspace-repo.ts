@@ -1,13 +1,13 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { load, dump } from 'js-yaml';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, type WorkspaceSkillEntry } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { ensureWorkspace, type ModifyResult } from './workspace-modify.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { WorkspaceConfig, Repository, ClientType } from '../models/workspace-config.js';
-import { discoverRepoSkills } from './repo-skills.js';
+import { discoverWorkspaceSkills } from './repo-skills.js';
 
 /**
  * Detect source platform and owner/repo from a git remote at the given path.
@@ -188,25 +188,7 @@ export async function updateAgentFiles(
   const clientNames = resolveClientNames(config.clients);
 
   // Discover skills from all repositories
-  const allSkills: WorkspaceSkillEntry[] = [];
-  for (const repo of config.repositories) {
-    if (repo.skills === false) continue;
-
-    const repoAbsPath = resolve(workspacePath, repo.path);
-    const discoverOpts = Array.isArray(repo.skills)
-      ? { skillPaths: repo.skills }
-      : { clients: clientNames };
-
-    const repoSkills = await discoverRepoSkills(repoAbsPath, discoverOpts);
-    for (const skill of repoSkills) {
-      allSkills.push({
-        repoPath: repo.path,
-        name: skill.name,
-        description: skill.description,
-        location: `${repo.path}/${skill.relativePath}`,
-      });
-    }
-  }
+  const allSkills = await discoverWorkspaceSkills(workspacePath, config.repositories, clientNames);
 
   // Collect unique agent files from configured clients
   const agentFiles = new Set<string>();

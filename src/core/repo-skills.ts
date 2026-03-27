@@ -1,9 +1,10 @@
 import { existsSync, lstatSync, type Dirent } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { parseSkillMetadata } from '../validators/skill.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
-import type { ClientType } from '../models/workspace-config.js';
+import type { ClientType, Repository } from '../models/workspace-config.js';
+import type { WorkspaceSkillEntry } from '../constants.js';
 
 export interface RepoSkillEntry {
   /** Skill name from frontmatter */
@@ -99,4 +100,40 @@ export async function discoverRepoSkills(
   }
 
   return results;
+}
+
+/**
+ * Discover skills from all workspace repositories and return entries
+ * suitable for embedding in WORKSPACE-RULES.
+ * Shared by both updateAgentFiles() and the full sync pipeline.
+ */
+export async function discoverWorkspaceSkills(
+  workspacePath: string,
+  repositories: Repository[],
+  clientNames: string[],
+): Promise<WorkspaceSkillEntry[]> {
+  const allSkills: WorkspaceSkillEntry[] = [];
+
+  for (const repo of repositories) {
+    if (repo.skills === false) continue;
+
+    const repoAbsPath = resolve(workspacePath, repo.path);
+    const discoverOpts = Array.isArray(repo.skills)
+      ? { skillPaths: repo.skills }
+      : { clients: clientNames };
+
+    const repoSkills = await discoverRepoSkills(repoAbsPath, discoverOpts);
+    for (const skill of repoSkills) {
+      // Use forward slashes for consistent cross-platform paths
+      const location = `${repo.path}/${skill.relativePath}`.replace(/\\/g, '/');
+      allSkills.push({
+        repoPath: repo.path,
+        name: skill.name,
+        description: skill.description,
+        location,
+      });
+    }
+  }
+
+  return allSkills;
 }
