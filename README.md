@@ -46,9 +46,9 @@ npx allagents update
 
 ## Why AllAgents?
 
-Tools like `npx skills add` and `npx plugins add` install skills to one project for one or two clients. AllAgents manages your entire AI tooling stack — skills, agents, hooks, commands, and MCP servers — across multiple repos and all your clients, from a single declarative config.
+Tools like `npx skills` and `npx plugins` install skills to one project for one or two clients. AllAgents manages your entire AI tooling stack — skills, agents, hooks, commands, and MCP servers — across multiple repos and all your clients, from a single declarative config.
 
-| | `npx skills add` | `npx plugins add` | `allagents` |
+| | `npx skills` | `npx plugins` | `npx allagents` |
 |---|---|---|---|
 | **Config** | Imperative | Imperative | Declarative (`workspace.yaml`) |
 | **Scope** | Single project | Single project | Multi-repo workspace |
