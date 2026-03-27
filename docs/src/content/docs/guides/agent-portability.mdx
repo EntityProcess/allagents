@@ -29,19 +29,28 @@ These frontmatter fields are understood by both Claude Code and GitHub Copilot:
 | `name` | Agent identifier |
 | `description` | What the agent does and when to use it |
 
+### Shared Fields (Different Syntax)
+
+These fields exist in both clients but use client-specific values:
+
+| Field | Claude Code | Copilot |
+|-------|-------------|---------|
+| `tools` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | `read`, `edit`, `search/codebase`, `web/fetch` |
+| `model` | `sonnet`, `opus`, `haiku`, `inherit` | `Claude Opus 4.5`, `GPT-5 (copilot)` |
+| MCP servers | `mcpServers` (camelCase) | `mcp-servers` (kebab-case) |
+| `disable-model-invocation` | Supported | Supported |
+| `user-invocable` | Supported | Supported |
+| `hooks` | Supported | Supported |
+
 ### Client-Specific Fields
 
 These fields are valid in their respective clients but ignored by others:
 
 **Claude Code only:**
-- `tools` — Claude tool names (`Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`)
-- `model` — Claude model aliases (`sonnet`, `opus`, `haiku`, `inherit`)
-- `disallowedTools`, `permissionMode`, `maxTurns`, `skills`, `mcpServers`, `hooks`, `memory`, `background`, `effort`, `isolation`, `initialPrompt`
+- `disallowedTools`, `permissionMode`, `maxTurns`, `skills`, `memory`, `background`, `effort`, `isolation`, `initialPrompt`
 
 **GitHub Copilot only:**
-- `tools` — Copilot tool names (`read`, `edit`, `search/codebase`, `web/fetch`)
-- `model` — Copilot model names (`Claude Opus 4.5`, `GPT-5 (copilot)`)
-- `target`, `disable-model-invocation`, `user-invocable`, `mcp-servers`, `metadata`, `agents`, `argument-hint`, `handoffs`
+- `target`, `metadata`, `agents`, `argument-hint`, `handoffs`
 
 ### Best Practices
 
