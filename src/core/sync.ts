@@ -2065,7 +2065,7 @@ export async function syncWorkspace(
 
   // Warn about clients that don't support project-scoped MCP sync
   const PROJECT_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'copilot', 'universal']);
-  const { servers: allMcpServers } = collectMcpServers(validPlugins);
+  const allMcpServers = proxyBaseServers ?? collectMcpServers(validPlugins).servers;
   if (allMcpServers.size > 0) {
     for (const client of syncClients) {
       if (!PROJECT_MCP_CLIENTS.has(client)) {
@@ -2362,7 +2362,7 @@ export async function syncUserWorkspace(
 
   // Warn about clients that don't support user-scoped MCP sync
   const USER_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'copilot', 'universal']);
-  const { servers: allUserMcpServers } = collectMcpServers(validPlugins);
+  const allUserMcpServers = userProxyBaseServers ?? collectMcpServers(validPlugins).servers;
   if (allUserMcpServers.size > 0) {
     for (const client of syncClients) {
       if (!USER_MCP_CLIENTS.has(client)) {
