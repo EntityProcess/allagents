@@ -1,4 +1,4 @@
-import { existsSync, lstatSync } from 'node:fs';
+import { existsSync, lstatSync, type Dirent } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { parseSkillMetadata } from '../validators/skill.js';
@@ -56,7 +56,7 @@ export async function discoverRepoSkills(
     const absDir = join(repoPath, skillDir);
     if (!existsSync(absDir)) continue;
 
-    let entries;
+    let entries: Dirent[];
     try {
       entries = await readdir(absDir, { withFileTypes: true });
     } catch {
@@ -93,7 +93,7 @@ export async function discoverRepoSkills(
           relativePath: relPath,
         });
       } catch {
-        continue;
+        // skip unreadable skill files
       }
     }
   }
