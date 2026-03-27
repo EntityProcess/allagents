@@ -52,6 +52,10 @@ After sync:
 └── testing/                     # unchanged (unique)
 ```
 
+:::note
+This rename-based deduplication applies to **plugin skills** (copied to `.claude/skills/`). **Repository skills** embedded in the WORKSPACE-RULES index use a different strategy — they pick a single winner rather than keeping all copies. See [Repository Skill Discovery](/reference/configuration/#repository-skill-discovery) for details.
+:::
+
 ## Adding Skills
 
 You can add a specific skill from a GitHub repo without installing the full plugin first:

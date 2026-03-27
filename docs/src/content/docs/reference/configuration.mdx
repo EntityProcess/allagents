@@ -137,6 +137,18 @@ repositories:
 
 Skills must have a `SKILL.md` file with YAML frontmatter containing `name` and `description` fields. The generated index uses relative paths from the workspace root so AI agents can read the full skill instructions on demand.
 
+#### Duplicate Skill Resolution
+
+When multiple repositories (or multiple client paths within the same repo) contain skills with the same `name`, AllAgents picks a single winner:
+
+| Priority | Rule |
+|----------|------|
+| 1st | Skills under `.agents/` paths take priority |
+| 2nd | The skill with the largest file size wins |
+| 3rd | First-seen skill wins (repository order in `workspace.yaml`) |
+
+This differs from [plugin skill deduplication](/guides/plugins/#duplicate-skill-handling), which keeps all copies and renames them for uniqueness. Repository skills are an index of pointers, so only the best source is kept.
+
 ## VSCode Configuration
 
 The optional `vscode` section controls `.code-workspace` file generation when `vscode` is in the `clients` list.
