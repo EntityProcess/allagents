@@ -48,18 +48,18 @@ allagents update
 
 ## Why AllAgents?
 
-Most tools install skills to one project for one client. AllAgents manages your entire AI tooling stack — skills, agents, hooks, commands, and MCP servers — across multiple repos and all your clients, from a single declarative config.
+Tools like `npx skills add` and `npx plugins add` install skills to one project for one or two clients. AllAgents manages your entire AI tooling stack — skills, agents, hooks, commands, and MCP servers — across multiple repos and all your clients, from a single declarative config.
 
-| | Skill installers | AllAgents |
-|---|---|---|
-| **Config** | Imperative (`npx add`) | Declarative (`workspace.yaml`) |
-| **Scope** | One project | Multi-repo workspace |
-| **Artifacts** | Skills only | Skills, agents, hooks, commands, MCP servers |
-| **Clients** | 1–2 clients | 23 clients simultaneously |
-| **Team sharing** | Each dev runs install | Git-versioned — clone and go |
-| **Ongoing sync** | One-shot install | `allagents update` keeps everything current |
-| **Workspace awareness** | None | WORKSPACE-RULES injected so AI knows all repos and skills |
-| **Provider resilience** | One provider goes down, you stop | Switch clients instantly — same tooling everywhere |
+| | `npx skills add` | `npx plugins add` | `allagents` |
+|---|---|---|---|
+| **Config** | Imperative | Imperative | Declarative (`workspace.yaml`) |
+| **Scope** | Single project | Single project | Multi-repo workspace |
+| **Artifacts** | Skills | Skills, agents, hooks, commands, MCP | Skills, agents, hooks, commands, MCP |
+| **Clients** | 43 agents | 2 (Claude, Cursor) | 23 clients simultaneously |
+| **Team sharing** | Each dev runs install | Each dev runs install | Git-versioned — clone and go |
+| **Ongoing sync** | One-shot install | One-shot install | `allagents update` keeps everything current |
+| **Workspace awareness** | None | None | WORKSPACE-RULES injected so AI knows all repos and skills |
+| **Provider resilience** | Per-client | Per-client | Switch clients instantly — same tooling everywhere |
 
 ## workspace.yaml
 
