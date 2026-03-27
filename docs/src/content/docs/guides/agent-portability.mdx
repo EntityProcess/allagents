@@ -38,8 +38,6 @@ These fields exist in both clients but use client-specific values:
 | `tools` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | `read`, `edit`, `search/codebase`, `web/fetch` |
 | `model` | `sonnet`, `opus`, `haiku`, `inherit` | `Claude Opus 4.5`, `GPT-5 (copilot)` |
 | MCP servers | `mcpServers` (camelCase) | `mcp-servers` (kebab-case) |
-| `disable-model-invocation` | Supported | Supported |
-| `user-invocable` | Supported | Supported |
 | `hooks` | Supported | Supported |
 
 ### Client-Specific Fields
@@ -50,7 +48,7 @@ These fields are valid in their respective clients but ignored by others:
 - `disallowedTools`, `permissionMode`, `maxTurns`, `skills`, `memory`, `background`, `effort`, `isolation`, `initialPrompt`
 
 **GitHub Copilot only:**
-- `target`, `metadata`, `agents`, `argument-hint`, `handoffs`
+- `disable-model-invocation`, `user-invocable`, `target`, `metadata`, `agents`, `argument-hint`, `handoffs`
 
 ### Best Practices
 
