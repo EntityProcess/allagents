@@ -25,7 +25,7 @@ AllAgents automatically copies `AGENTS.md` and `CLAUDE.md` from your template so
 - **AGENTS.md** - Universal agent instructions (works with multiple clients)
 - **CLAUDE.md** - Claude-specific instructions
 
-Both files receive `WORKSPACE-RULES` injection, which tells AI agents to read `workspace.yaml` for repository paths.
+Both files receive `WORKSPACE-RULES` injection, which embeds repository paths and a skills index directly in the file so AI agents know which repos are available and what skills they contain.
 
 If your template only has `AGENTS.md` and `claude` is in your clients list, AllAgents automatically copies `AGENTS.md` to `CLAUDE.md` so Claude has its instruction file.
 
@@ -68,6 +68,9 @@ repositories:
     source: github
     repo: myorg/my-project
     description: My main project
+  - path: ../shared-lib
+    skills:                     # Custom skill paths (overrides auto-discovery)
+      - plugins/my-plugin/skills
 
 plugins:
   - code-review@claude-plugins-official
@@ -123,7 +126,7 @@ workspace:
 
 - **Source is truth**: Local copies are overwritten on every sync
 - **Deleted files restored**: If you delete AGENTS.md locally, sync restores it
-- **WORKSPACE-RULES injection**: AGENTS.md and CLAUDE.md automatically get workspace discovery rules
+- **WORKSPACE-RULES injection**: AGENTS.md and CLAUDE.md automatically get workspace discovery rules, including a skills index if any repositories contain skills
 
 When using `--from` during init, relative paths are automatically converted to absolute paths so that `allagents update` can pull updates from the original source.
 

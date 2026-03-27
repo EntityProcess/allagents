@@ -25,6 +25,12 @@ repositories:
     source: github
     repo: myorg/my-project
     description: Main project repository
+  - path: ../other-project               # Auto-discovers skills from client paths
+  - path: ../framework
+    skills:                               # Custom skill paths (relative to repo root)
+      - plugins/my-plugin/skills
+  - path: ../legacy-repo
+    skills: false                         # Disable skill discovery for this repo
 
 plugins:
   - code-review@claude-plugins-official
@@ -103,6 +109,33 @@ The `workspace` section enables syncing files from external sources to your work
 - Source is the single source of truth; local copies are overwritten
 - Deleted local files are restored on next sync
 - AGENTS.md and CLAUDE.md automatically receive WORKSPACE-RULES injection
+
+### Repository Skill Discovery
+
+During sync, AllAgents scans workspace repositories for skills and embeds an index in the WORKSPACE-RULES section of AGENTS.md. AI agents use this index to find and load skills from repos they're working in.
+
+By default, skill discovery scans each repository's client skill directories (e.g., `.claude/skills/`, `.agents/skills/`, `.codex/skills/`) based on which clients are configured. Symlinks and junctions are skipped.
+
+The `skills` field on each repository controls discovery:
+
+| Value | Behavior |
+|-------|----------|
+| omitted or `true` | Auto-discover from client skill paths |
+| `string[]` | Scan only these custom paths (relative to repo root) |
+| `false` | Disable skill discovery for this repo |
+
+```yaml
+repositories:
+  - path: ../my-project                  # Auto-discovers from .claude/skills/, .agents/skills/, etc.
+  - path: ../framework
+    skills:
+      - plugins/agentv-dev/skills        # Only scan these paths
+      - plugins/agentic-engineering/skills
+  - path: ../legacy-repo
+    skills: false                        # No skill discovery
+```
+
+Skills must have a `SKILL.md` file with YAML frontmatter containing `name` and `description` fields. The generated index uses relative paths from the workspace root so AI agents can read the full skill instructions on demand.
 
 ## VSCode Configuration
 
