@@ -129,7 +129,23 @@ Running `allagents update` syncs agents, skills, hooks, and MCP servers to both 
 
 ### Skills Are the Strongest Interop Point
 
-Skills (reusable prompt files in `skills/` directories) are read natively by both Claude Code and Copilot. They use the same format and the same frontmatter (`name`, `description`). When writing shared plugins, prefer skills over client-specific commands or hooks.
+Skills (reusable prompt files in `skills/` directories) are read natively by both Claude Code and Copilot. They use the same format and the same frontmatter. When writing shared plugins, prefer skills over client-specific commands or hooks.
+
+#### Skill Frontmatter Portability
+
+Unlike agents, skills have strong frontmatter alignment across clients:
+
+| Field | Claude Code | Copilot | Portable |
+|-------|-------------|---------|----------|
+| `name` | Required | Required | Yes |
+| `description` | Required | Required | Yes |
+| `disable-model-invocation` | Supported | Supported | Yes |
+| `user-invocable` | Supported | Supported | Yes |
+| `argument-hint` | Not supported | Supported | No (Copilot only) |
+| `allowed-tools` | Supported | Not supported | No (Claude only) |
+| `model` | Supported | Not supported | No (Claude only) |
+
+For portable skills, use `name`, `description`, `disable-model-invocation`, and `user-invocable`. Avoid `allowed-tools` and `model` — these are Claude-specific and ignored by Copilot.
 
 ### Resilience Without AllAgents
 
