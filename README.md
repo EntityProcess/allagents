@@ -11,17 +11,15 @@ AllAgents keeps your AI tooling (skills, agents, hooks, MCP servers) in one work
 ## Quick Start
 
 ```bash
-npm install -g allagents
-
 # Create a workspace
-allagents workspace init my-workspace
+npx allagents workspace init my-workspace
 cd my-workspace
 
 # Install plugins
-allagents plugin install code-review@claude-plugins-official
+npx allagents plugin install code-review@claude-plugins-official
 
 # Sync to all configured clients
-allagents update
+npx allagents update
 ```
 
 ## How It Works
