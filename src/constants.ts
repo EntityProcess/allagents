@@ -69,7 +69,7 @@ export function generateWorkspaceRules(
       .join('\n');
 
     skillsBlock = `
-## Workspace Skills
+## Repository Skills
 When a task matches a skill description, fetch the full instructions from its location.
 
 <available_skills>

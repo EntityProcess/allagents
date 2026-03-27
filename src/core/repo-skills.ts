@@ -13,6 +13,8 @@ export interface RepoSkillEntry {
   description: string;
   /** Path to SKILL.md relative to the repo root */
   relativePath: string;
+  /** File size of SKILL.md in bytes */
+  fileSize: number;
 }
 
 interface DiscoverOptions {
@@ -92,6 +94,7 @@ export async function discoverRepoSkills(
           name: metadata.name,
           description: metadata.description,
           relativePath: relPath,
+          fileSize: content.length,
         });
       } catch {
         // skip unreadable skill files
@@ -106,13 +109,17 @@ export async function discoverRepoSkills(
  * Discover skills from all workspace repositories and return entries
  * suitable for embedding in WORKSPACE-RULES.
  * Shared by both updateAgentFiles() and the full sync pipeline.
+ *
+ * Deduplicates by skill name:
+ * - Skills under .agents/ take priority
+ * - Otherwise the skill with the largest file size wins
  */
 export async function discoverWorkspaceSkills(
   workspacePath: string,
   repositories: Repository[],
   clientNames: string[],
 ): Promise<WorkspaceSkillEntry[]> {
-  const allSkills: WorkspaceSkillEntry[] = [];
+  const skillsByName = new Map<string, WorkspaceSkillEntry & { fileSize: number }>();
 
   for (const repo of repositories) {
     if (repo.skills === false) continue;
@@ -126,14 +133,34 @@ export async function discoverWorkspaceSkills(
     for (const skill of repoSkills) {
       // Use forward slashes for consistent cross-platform paths
       const location = `${repo.path}/${skill.relativePath}`.replace(/\\/g, '/');
-      allSkills.push({
+      const candidate = {
         repoPath: repo.path,
         name: skill.name,
         description: skill.description,
         location,
-      });
+        fileSize: skill.fileSize,
+      };
+
+      const existing = skillsByName.get(skill.name);
+      if (!existing) {
+        skillsByName.set(skill.name, candidate);
+        continue;
+      }
+
+      // .agents skills take priority
+      const existingIsAgents = existing.location.includes('.agents/');
+      const candidateIsAgents = candidate.location.includes('.agents/');
+      if (candidateIsAgents && !existingIsAgents) {
+        skillsByName.set(skill.name, candidate);
+      } else if (!candidateIsAgents && existingIsAgents) {
+        // keep existing
+      } else if (candidate.fileSize > existing.fileSize) {
+        // same priority tier — larger file wins; equal size keeps first-seen (repo order)
+        skillsByName.set(skill.name, candidate);
+      }
     }
   }
 
-  return allSkills;
+  // Strip fileSize from output entries
+  return [...skillsByName.values()].map(({ fileSize: _, ...entry }) => entry);
 }
