@@ -11,8 +11,8 @@ AllAgents keeps your AI tooling (skills, agents, hooks, MCP servers) in one work
 ## Quick Start
 
 ```bash
-# Create a workspace
-npx allagents workspace init my-workspace
+# Create a workspace from a shared template
+npx allagents workspace init my-workspace --from myorg/templates/nodejs
 cd my-workspace
 
 # Install plugins
@@ -21,6 +21,8 @@ npx allagents plugin install code-review@claude-plugins-official
 # Sync to all configured clients
 npx allagents update
 ```
+
+No cloning required — AllAgents fetches the `workspace.yaml` directly from GitHub and sets up everything.
 
 ## How It Works
 
