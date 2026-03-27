@@ -132,6 +132,8 @@ export function syncVscodeMcpConfig(
     force?: boolean;
     /** Previously tracked server names (enables update/remove behavior) */
     trackedServers?: string[];
+    /** Pre-computed servers (e.g. after proxy transform) — bypasses collectMcpServers */
+    serverOverrides?: Map<string, unknown>;
   },
 ): McpMergeResult {
   const dryRun = options?.dryRun ?? false;
@@ -141,7 +143,9 @@ export function syncVscodeMcpConfig(
   const hasTracking = options?.trackedServers !== undefined;
 
   // Collect servers from all plugins
-  const { servers: pluginServers, warnings } = collectMcpServers(validatedPlugins);
+  const { servers: pluginServers, warnings } = options?.serverOverrides
+    ? { servers: options.serverOverrides, warnings: [] as string[] }
+    : collectMcpServers(validatedPlugins);
 
   const result: McpMergeResult = {
     added: 0,
