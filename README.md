@@ -48,12 +48,18 @@ allagents update
 
 ## Why AllAgents?
 
-| | Single-client tools | AllAgents |
+Most tools install skills to one project for one client. AllAgents manages your entire AI tooling stack — skills, agents, hooks, commands, and MCP servers — across multiple repos and all your clients, from a single declarative config.
+
+| | Skill installers | AllAgents |
 |---|---|---|
-| **Scope** | One project, one client | Multi-repo workspace, 23 clients |
-| **Distribution** | Runtime cache or manual copy | Git-versioned, synced on `allagents update` |
-| **Separation** | AI config mixed with code | Workspace repo stays separate from project repos |
-| **Provider resilience** | One provider goes down, you stop | Switch clients instantly — same skills everywhere |
+| **Config** | Imperative (`npx add`) | Declarative (`workspace.yaml`) |
+| **Scope** | One project | Multi-repo workspace |
+| **Artifacts** | Skills only | Skills, agents, hooks, commands, MCP servers |
+| **Clients** | 1–2 clients | 23 clients simultaneously |
+| **Team sharing** | Each dev runs install | Git-versioned — clone and go |
+| **Ongoing sync** | One-shot install | `allagents update` keeps everything current |
+| **Workspace awareness** | None | WORKSPACE-RULES injected so AI knows all repos and skills |
+| **Provider resilience** | One provider goes down, you stop | Switch clients instantly — same tooling everywhere |
 
 ## workspace.yaml
 
