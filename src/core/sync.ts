@@ -34,6 +34,7 @@ import {
   type CopyResult,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
+import { discoverWorkspaceSkills } from './repo-skills.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient, resolveClientMappings } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import {
@@ -1913,13 +1914,18 @@ export async function syncWorkspace(
       );
     }
 
-    // Step 5c: Copy workspace files with GitHub cache
-    // Pass repositories so paths are embedded directly in WORKSPACE-RULES
+    // Step 5c: Discover skills from workspace repositories
+    const repoSkills = hasRepositories && !dryRun
+      ? await discoverWorkspaceSkills(workspacePath, config.repositories, syncClients as string[])
+      : [];
+
+    // Step 5d: Copy workspace files with GitHub cache
+    // Pass repositories and skills so paths are embedded directly in WORKSPACE-RULES
     workspaceFileResults = await copyWorkspaceFiles(
       sourcePath,
       workspacePath,
       filesToCopy,
-      { dryRun, githubCache, repositories: config.repositories },
+      { dryRun, githubCache, repositories: config.repositories, skills: repoSkills },
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md

@@ -9,6 +9,7 @@ export const RepositorySchema = z.object({
   source: z.string().optional(),
   repo: z.string().optional(),
   description: z.string().optional(),
+  skills: z.union([z.boolean(), z.array(z.string())]).optional(),
 });
 
 export type Repository = z.infer<typeof RepositorySchema>;
