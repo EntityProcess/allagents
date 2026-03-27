@@ -136,6 +136,7 @@ Full documentation at [allagents.dev](https://allagents.dev):
 
 ## Related Projects
 
+- [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) — Universal skills for AI coding assistants
 - [skillpm](https://github.com/sbroenne/skillpm) — npm-native package manager for Agent Skills
 - [skills-npm](https://github.com/antfu/skills-npm) — Discover agent skills shipped in npm packages
 - [dotagents](https://github.com/iannuttall/dotagents) — Unified AI agent configuration management
