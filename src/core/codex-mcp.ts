@@ -63,6 +63,7 @@ export async function syncCodexMcpServers(
   options?: {
     dryRun?: boolean;
     trackedServers?: string[];
+    serverOverrides?: Map<string, unknown>;
     _mockExecute?: ExecuteFn;
   },
 ): Promise<McpMergeResult> {
@@ -73,8 +74,9 @@ export async function syncCodexMcpServers(
     options?._mockExecute ?? ((binary, args) => executeCommand(binary, args));
 
   // Collect servers from all plugins
-  const { servers: pluginServers, warnings } =
-    collectMcpServers(validatedPlugins);
+  const { servers: pluginServers, warnings } = options?.serverOverrides
+    ? { servers: options.serverOverrides, warnings: [] as string[] }
+    : collectMcpServers(validatedPlugins);
 
   const result: McpMergeResult = {
     added: 0,

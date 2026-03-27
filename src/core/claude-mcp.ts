@@ -227,6 +227,7 @@ export async function syncClaudeMcpServersViaCli(
   options?: {
     dryRun?: boolean;
     trackedServers?: string[];
+    serverOverrides?: Map<string, unknown>;
     _mockExecute?: ExecuteFn;
   },
 ): Promise<McpMergeResult> {
@@ -236,7 +237,9 @@ export async function syncClaudeMcpServersViaCli(
   const exec: ExecuteFn =
     options?._mockExecute ?? ((binary, args) => executeCommand(binary, args));
 
-  const { servers: pluginServers, warnings } = collectMcpServers(validatedPlugins);
+  const { servers: pluginServers, warnings } = options?.serverOverrides
+    ? { servers: options.serverOverrides, warnings: [] as string[] }
+    : collectMcpServers(validatedPlugins);
 
   const result: McpMergeResult = {
     added: 0,
