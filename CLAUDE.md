@@ -88,7 +88,17 @@ Tests use `bun:test`. Run with `bun test` or target a specific file with `bun te
 
 ### Manual E2E Testing
 
-**ALWAYS run manual E2E tests before marking a PR ready for review.** Build the CLI and test the actual user-facing behavior end-to-end. Draft PRs can be created early and committed to frequently, but E2E validation must happen before requesting review.
+Manual E2E testing is required at **two points** in the development workflow:
+
+#### 1. Red E2E (before implementation)
+
+**ALWAYS run a red E2E test first** to understand the current behavior before writing any code. Build the CLI from the current branch, set up a temp workspace that exercises the feature/fix you're about to implement, and document what happens today. This establishes the baseline and confirms you understand the problem.
+
+#### 2. Green E2E (after implementation, before finalization)
+
+**ALWAYS run a green E2E test after implementation** to verify the change works end-to-end. Use the same temp workspace from the red test and confirm the behavior now matches expectations.
+
+#### How to E2E test
 
 ```bash
 # Build the CLI in your worktree
@@ -99,13 +109,27 @@ bun run build
 ./dist/index.js plugin update
 ```
 
-**How to E2E test:** Create a temporary workspace in `/tmp/`, configure it with a `workspace.yaml` that exercises your change, run the built CLI against it, and verify the filesystem result matches expectations. Clean up after.
+Create a temporary workspace in `/tmp/`, configure it with a `workspace.yaml` that exercises your change, run the built CLI against it, and verify the filesystem result matches expectations. Clean up after.
 
 **IMPORTANT: Never run `git config` in the repo directory.** If tests need git user config (e.g., for commits in a temp repo), always scope it to the temp directory: `git config --local user.name "Test"` inside the temp dir. Running `git config user.name` or `git config user.email` in the project root will silently override the user's identity for all future commits.
 
 **Include E2E steps in the PR description** so human reviewers can reproduce the test. Document the exact commands you ran and what you verified.
 
 Unit tests with mocks verify internal logic but miss integration bugs. Mocks that don't match real interfaces create false confidence.
+
+### Code Review
+
+**ALWAYS run a code review after implementation is complete and before final E2E.** Use the `superpowers:code-reviewer` agent to review changed files against the plan and CLAUDE.md coding standards. Fix all important issues before proceeding to the green E2E test.
+
+### Development Workflow Summary
+
+The full workflow for any feature or fix is:
+
+1. **Red E2E** — build CLI, test current behavior, confirm the problem
+2. **Implement** — write code and unit/integration tests
+3. **Code review** — review implementation for correctness, DRY, test coverage
+4. **Green E2E** — build CLI, test new behavior, confirm the fix
+5. **Push** — commit and push, verify CI passes
 
 ### Unit Test Anti-patterns
 
