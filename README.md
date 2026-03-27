@@ -1,280 +1,83 @@
 # AllAgents
 
-CLI tool for managing multi-repo AI agent workspaces with plugin synchronization across multiple AI clients.
+[![npm](https://img.shields.io/npm/v/allagents)](https://www.npmjs.com/package/allagents)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-allagents.dev-blue)](https://allagents.dev)
 
-## Why AllAgents?
+Write AI agent skills once. Sync to 23 clients. Manage across multiple repos.
 
-**The Problem:** AI coding assistants (Claude, Copilot, Cursor, Codex, etc.) each have their own configuration formats and directory structures. If you want to share skills across multiple projects or use multiple AI clients, you need to manually copy and transform files.
+AllAgents keeps your AI tooling (skills, agents, hooks, MCP servers) in one workspace and syncs it to every client your team uses — Claude, Copilot, Cursor, Codex, Gemini, and 18 more.
 
-**AllAgents solves this by:**
+## Quick Start
 
-| Feature | Claude Code Plugins | AllAgents |
-|---------|--------------------|-----------|
-| Scope | Single project | Multi-repo workspace |
-| Client support | Claude only | 23 AI clients |
-| File location | Runtime lookup from cache | Copied to workspace (git-versioned) |
-| Project structure | AI config mixed with code | Separate workspace repo |
+```bash
+# Create a workspace from a shared template
+npx allagents workspace init my-workspace --from myorg/templates/nodejs
+cd my-workspace
 
-### Key Differentiators
+# Install plugins
+npx allagents plugin install code-review@claude-plugins-official
 
-1. **Multi-repo workspaces** - One workspace references multiple project repositories. Your AI tooling lives separately from your application code.
+# Sync to all configured clients
+npx allagents update
+```
 
-2. **Multi-client distribution** - Write plugins once, sync to all clients. AllAgents transforms and copies files to each client's expected paths.
+No cloning required — AllAgents fetches the `workspace.yaml` directly from GitHub and sets up everything.
 
-3. **Workspace is a git repo** - Unlike Claude's runtime plugin system, AllAgents copies files into your workspace. Team members get the same AI tooling via git.
+## How It Works
 
-4. **Clean separation** - Project repos stay clean. AI configuration lives in the workspace.
+1. **Configure** your workspace with repos, plugins, and target clients in `workspace.yaml`
+2. **Sync** — AllAgents copies skills, agents, hooks, and MCP servers to each client's expected paths
+3. **Work** — every team member gets identical AI tooling via git, across any client they choose
 
 ```
 ┌─────────────────┐
-│   Marketplace   │  (plugin source - GitHub repos)
+│   Marketplace   │  GitHub repos containing plugins
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│    AllAgents    │  (sync & transform)
+│    AllAgents     │  sync & transform
 │      sync       │
 └────────┬────────┘
          │
     ┌────┴────┬────────┬─────────┐
     ▼         ▼        ▼         ▼
-.claude/  .agents/  .cursor/  .factory/   (client paths)
+.claude/  .github/  .cursor/  .agents/   client paths
 ```
 
-## Installation
+## Why AllAgents?
 
-```bash
-# Using npm
-npm install -g allagents
+Tools like `npx skills` and `npx plugins` install skills to one project for one or two clients. AllAgents manages your entire AI tooling stack — skills, agents, hooks, commands, and MCP servers — across multiple repos and all your clients, from a single declarative config.
 
-# Or run directly without installing
-npx allagents
-```
+| | `npx skills` | `npx plugins` | `npx allagents` |
+|---|---|---|---|
+| **Config** | Imperative | Imperative | Declarative (`workspace.yaml`) |
+| **Scope** | Single project | Single project | Multi-repo workspace |
+| **Artifacts** | Skills | Skills, agents, hooks, commands, MCP | Skills, agents, hooks, commands, MCP |
+| **Clients** | 43 agents | 2 (Claude, Cursor) | 23 clients simultaneously |
+| **Team sharing** | Each dev runs install | Each dev runs install | Git-versioned — clone and go |
+| **Ongoing sync** | One-shot install | One-shot install | `allagents update` keeps everything current |
+| **Workspace awareness** | None | None | WORKSPACE-RULES injected so AI knows all repos and skills |
+| **Provider resilience** | Per-client | Per-client | Switch clients instantly — same tooling everywhere |
 
-## Quick Start
-
-```bash
-# Create a new workspace
-allagents workspace init my-workspace
-cd my-workspace
-
-# Or initialize from a remote GitHub template
-allagents workspace init my-workspace --from owner/repo/path/to/template
-
-# Add a marketplace (or let auto-registration handle it)
-allagents plugin marketplace add anthropics/claude-plugins-official
-
-# Install plugins to workspace
-allagents plugin install code-review@claude-plugins-official
-allagents plugin install my-plugin@someuser/their-repo
-
-# Sync plugins to workspace
-allagents update
-```
-
-### Initialize from Remote Template
-
-Start a new workspace instantly from any GitHub repository containing a `workspace.yaml`:
-
-```bash
-# From GitHub URL
-allagents workspace init ~/my-project --from https://github.com/myorg/templates/tree/main/nodejs
-
-# From shorthand
-allagents workspace init ~/my-project --from myorg/templates/nodejs
-
-# From repo root (looks for .allagents/workspace.yaml or workspace.yaml)
-allagents workspace init ~/my-project --from myorg/templates
-```
-
-This fetches the workspace configuration directly from GitHub - no cloning required.
-
-## Commands
-
-### Workspace Commands
-
-```bash
-# Initialize a new workspace from template
-allagents workspace init <path>
-allagents workspace init <path> --from <source>  # From local path or GitHub URL
-
-# Sync all plugins to workspace (non-destructive)
-allagents update [options]
-  --force    Force re-fetch of remote plugins even if cached
-  --dry-run  Preview changes without applying
-
-# Non-destructive sync: your files are safe
-# - First sync overlays without deleting existing files
-# - Subsequent syncs only remove files AllAgents previously synced
-# - Tracked in .allagents/sync-state.json
-
-# Show status of workspace and plugins
-allagents workspace status
-
-# Add a repository to the workspace (auto-detects git remote source)
-allagents workspace repo add <path>
-allagents workspace repo add <path> --description "My project"
-
-# Remove a repository from the workspace
-allagents workspace repo remove <path>
-
-# List all repositories in the workspace
-allagents workspace repo list
-```
-
-### VSCode Workspace Generation
-
-When `vscode` is included in the `clients` list, `allagents update` automatically generates a `.code-workspace` file. Repository paths are resolved to absolute paths. Plugin folders are included with prompt/instruction file location settings for Copilot.
+## workspace.yaml
 
 ```yaml
-# workspace.yaml
-clients:
-  - vscode
-  - claude
-```
-
-#### Output filename
-
-The output filename defaults to `<dirname>.code-workspace`. Override with `vscode.output`:
-
-```yaml
-# workspace.yaml
-vscode:
-  output: my-project
-```
-
-#### Template file
-
-Create `.allagents/template.code-workspace` for VSCode-specific settings, launch configurations, extensions, and extra folders. The template supports `{path:../...}` placeholders that resolve to absolute paths using repository paths from workspace.yaml.
-
-```json
-{
-  "folders": [
-    { "path": "{path:../Shared}", "name": "SharedLib" }
-  ],
-  "settings": {
-    "cSpell.words": ["myterm"],
-    "chat.agent.maxRequests": 999,
-    "chat.useAgentSkills": true
-  },
-  "launch": {
-    "configurations": [
-      {
-        "type": "node",
-        "name": "dev",
-        "cwd": "{path:../myapp}/src",
-        "runtimeExecutable": "npm",
-        "runtimeArgs": ["run", "dev"]
-      }
-    ]
-  },
-  "extensions": {
-    "recommendations": ["dbaeumer.vscode-eslint"]
-  }
-}
-```
-
-The generated workspace includes:
-- Repository folders from workspace.yaml (resolved to absolute paths, listed first)
-- Template folders (deduplicated against repository folders)
-- All other template content (settings, launch, extensions) with `{repo:..}` placeholders resolved
-
-### Plugin Marketplace Commands
-
-```bash
-# List registered marketplaces
-allagents plugin marketplace list
-
-# Add a marketplace from GitHub or local path
-allagents plugin marketplace add <source>
-  # Examples:
-  #   allagents plugin marketplace add anthropics/claude-plugins-official
-  #   allagents plugin marketplace add /path/to/local/marketplace
-
-# Remove a marketplace
-allagents plugin marketplace remove <name>
-
-# Update marketplace(s) from remote
-allagents plugin marketplace update [name]
-```
-
-### Plugin Commands
-
-```bash
-# Install a plugin to .allagents/workspace.yaml (auto-registers marketplace if needed)
-allagents plugin install <plugin@marketplace>
-
-# Remove a plugin from .allagents/workspace.yaml
-allagents plugin uninstall <plugin>
-
-# List available plugins from marketplaces
-allagents plugin list [marketplace]
-
-# Validate a plugin or marketplace structure
-allagents plugin validate <path>
-```
-
-### Skills Commands
-
-```bash
-# Add a specific skill from a GitHub repo
-allagents skills add reddit --from ReScienceLab/opc-skills
-
-# Add a skill via GitHub URL (skill name extracted from path)
-allagents skills add https://github.com/owner/repo/tree/main/skills/my-skill
-
-# List all skills and their enabled/disabled status
-allagents skills list
-
-# Disable a skill without uninstalling its plugin
-allagents skills remove brainstorming
-
-# Re-enable a previously disabled skill
-allagents skills add brainstorming
-```
-
-### GitHub Overrides
-
-For **Copilot** and **VSCode**, AllAgents copies GitHub-specific files from a plugin's `.github/` folder into the workspace's `.github/` directory:
-
-- `.github/prompts/` — prompt files
-- `.github/agents/` — agent overrides
-- `.github/hooks/` — hook overrides
-- `copilot-instructions.md` — root Copilot instructions
-
-Root `agents/` and `hooks/` directories in a plugin also map to `.github/agents/` and `.github/hooks/` for Copilot/VSCode.
-
-## .allagents/workspace.yaml
-
-The workspace configuration file lives in `.allagents/workspace.yaml` and defines repositories, plugins, workspace files, and target clients:
-
-```yaml
-# Workspace file sync (optional) - copy files from a shared source
 workspace:
-  source: ../shared-config              # Default base for relative paths
+  source: ../shared-config
   files:
-    - AGENTS.md                         # String shorthand: same source and dest
-    - source: docs/guide.md             # Object form: explicit source
-      dest: GUIDE.md                    # Optional dest (defaults to basename)
-    - dest: CUSTOM.md                   # File-level source override
-      source: ../other-config/CUSTOM.md
-    - dest: AGENTS.md                   # GitHub source
-      source: owner/repo/path/AGENTS.md
+    - AGENTS.md
 
 repositories:
   - path: ../my-project
-    source: github
-    repo: myorg/my-project
-    description: Main project repository
+    description: Main project
   - path: ../my-api
-    source: github
-    repo: myorg/my-api
     description: API service
 
 plugins:
-  - code-review@claude-plugins-official     # plugin@marketplace format
-  - context7@claude-plugins-official
-  - my-plugin@someuser/their-repo           # fully qualified for custom marketplaces
+  - code-review@claude-plugins-official
+  - my-plugin@someuser/their-repo
 
 clients:
   - claude
@@ -282,190 +85,63 @@ clients:
   - cursor
 ```
 
-### Workspace File Sync
+## Commands
 
-The `workspace:` section enables syncing files from external sources to your workspace root. This is useful for sharing agent configurations (AGENTS.md, CLAUDE.md) across multiple projects.
+| Command | Description |
+|---|---|
+| `allagents workspace init <path>` | Create a workspace (optionally `--from owner/repo`) |
+| `allagents update` | Sync all plugins to workspace |
+| `allagents plugin install <spec>` | Install a plugin |
+| `allagents plugin uninstall <spec>` | Remove a plugin |
+| `allagents plugin list` | List available plugins |
+| `allagents skills add <name>` | Add a skill from a repo |
+| `allagents skills list` | List skills and status |
+| `allagents workspace status` | Show workspace state |
+| `allagents self update` | Update AllAgents CLI |
 
-**Key behaviors:**
-- **Source of truth is remote** - Local copies are overwritten on every sync
-- **Deleted files are restored** - If you delete AGENTS.md locally, sync restores it
-- **WORKSPACE-RULES injection** - AGENTS.md and CLAUDE.md automatically get workspace discovery rules injected
+See the [full CLI reference](https://allagents.dev/reference/cli/) for all options.
 
-**Source resolution:**
-| Format | Example | Resolves to |
-|--------|---------|-------------|
-| String shorthand | `AGENTS.md` | `{workspace.source}/AGENTS.md` |
-| Relative source | `source: docs/guide.md` | `{workspace.source}/docs/guide.md` |
-| File-level override | `source: ../other/file.md` | `../other/file.md` (relative to workspace) |
-| GitHub source | `source: owner/repo/path/file.md` | Fetched from GitHub cache |
+## Supported Clients
 
-**GitHub sources** are fetched fresh on every sync (always pulls latest).
+**23 AI coding assistants** across two tiers:
 
-### Plugin Spec Format
+**Universal** (share `.agents/skills/`): Copilot, Codex, OpenCode, Gemini, Amp Code, VSCode, Replit, Kimi
 
-Plugins use the `plugin@marketplace` format:
+**Provider-specific**: Claude, Cursor, Factory, OpenClaw, Windsurf, Cline, Continue, Roo, Kilo, Trae, Augment, Zencoder, Junie, OpenHands, Kiro
 
-| Format | Example | Description |
-|--------|---------|-------------|
-| Well-known | `code-review@claude-plugins-official` | Uses known marketplace mapping |
-| owner/repo | `my-plugin@owner/repo` | Auto-registers GitHub repo, looks in `plugins/` |
-| owner/repo/subpath | `my-plugin@owner/repo/extensions` | Looks in custom subdirectory |
-
-The subpath format is useful when plugins aren't in the standard `plugins/` directory:
-
-```yaml
-plugins:
-  - feature-dev@anthropics/claude-plugins-official/plugins  # explicit plugins/ dir
-  - my-addon@someuser/repo/addons                           # custom addons/ dir
-  - tool@org/monorepo/packages/tools                        # nested path
-```
-
-### Well-Known Marketplaces
-
-These marketplace names auto-resolve to their GitHub repos:
-
-- `claude-plugins-official` → `anthropics/claude-plugins-official`
-
-### Supported Clients
-
-AllAgents supports 23 AI coding assistants:
-
-#### Universal Clients (share `.agents/skills/`)
-
-| Client | Skills | Agent File | Hooks | Commands | MCP |
-|--------|--------|------------|-------|----------|-----|
-| copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No | `.vscode/mcp.json` · `~/.config/Code/User/mcp.json` |
-| codex | `.agents/skills/` | `AGENTS.md` | No | No | `.codex/config.toml` · `codex mcp` CLI |
-| opencode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
-| gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
-| ampcode | `.agents/skills/` | `AGENTS.md` | No | No | No |
-| vscode | `.agents/skills/` | `AGENTS.md` | No | No | `.vscode/mcp.json` · `~/.config/Code/User/mcp.json` |
-| replit | `.agents/skills/` | `AGENTS.md` | No | No | No |
-| kimi | `.agents/skills/` | `AGENTS.md` | No | No | No |
-
-#### Provider-Specific Clients
-
-| Client | Skills | Agent File | Hooks | Commands | MCP |
-|--------|--------|------------|-------|----------|-----|
-| claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` | `.mcp.json` · `claude mcp` CLI |
-| cursor | `.cursor/skills/` | `AGENTS.md` | No | No | No |
-| factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No | No |
-| openclaw | `skills/` | `AGENTS.md` | No | No | No |
-| windsurf | `.windsurf/skills/` | `AGENTS.md` | No | No | No |
-| cline | `.cline/skills/` | `AGENTS.md` | No | No | No |
-| continue | `.continue/skills/` | `AGENTS.md` | No | No | No |
-| roo | `.roo/skills/` | `AGENTS.md` | No | No | No |
-| kilo | `.kilocode/skills/` | `AGENTS.md` | No | No | No |
-| trae | `.trae/skills/` | `AGENTS.md` | No | No | No |
-| augment | `.augment/skills/` | `AGENTS.md` | No | No | No |
-| zencoder | `.zencoder/skills/` | `AGENTS.md` | No | No | No |
-| junie | `.junie/skills/` | `AGENTS.md` | No | No | No |
-| openhands | `.openhands/skills/` | `AGENTS.md` | No | No | No |
-| kiro | `.kiro/skills/` | `AGENTS.md` | No | No | No |
-
-> **Note:** Universal clients share the same `.agents/skills/` directory. See [GitHub Overrides](#github-overrides) for how Copilot and VSCode handle `.github/` content. MCP servers from plugins are synced to each client's native config format — unsupported clients show a warning during sync.
-
-## Marketplace Structure
-
-Marketplaces contain multiple plugins:
-
-```
-my-marketplace/
-├── plugins/
-│   ├── code-review/
-│   │   └── skills/
-│   └── debugging/
-│       └── skills/
-└── README.md
-```
+See the [client support matrix](https://allagents.dev/reference/clients/) for paths, hooks, commands, and MCP support per client.
 
 ## Plugin Structure
 
-Each plugin follows this structure:
-
 ```
 my-plugin/
-├── skills/             # Skill directories with SKILL.md (all clients)
+├── skills/          # Reusable prompts (all clients)
 │   └── debugging/
 │       └── SKILL.md
-├── commands/           # Command files (.md) - Claude, OpenCode
-│   ├── build.md
-│   └── deploy.md
-├── .github/            # GitHub overrides (Copilot, VSCode)
-│   └── prompts/
-│       └── review.md
-├── hooks/              # Hook files (Claude/Factory only)
-│   └── pre-commit.md
-├── .mcp.json           # MCP server configs (Claude, Codex, VSCode)
-└── AGENTS.md           # Agent configuration (optional)
+├── agents/          # Agent definitions
+├── commands/        # Slash commands (Claude, OpenCode)
+├── hooks/           # Lifecycle hooks (Claude, Factory, Copilot)
+├── .github/         # Copilot/VSCode overrides
+└── .mcp.json        # MCP server configs
 ```
 
-### Skill Validation
+## Documentation
 
-Skills must have a valid `SKILL.md` file with YAML frontmatter:
+Full documentation at [allagents.dev](https://allagents.dev):
 
-```yaml
----
-name: my-skill          # Required: lowercase, alphanumeric + hyphens, max 64 chars
-description: Description of the skill  # Required
-allowed-tools:          # Optional
-  - Read
-  - Write
-model: claude-3-opus    # Optional
----
-
-# Skill Content
-
-Skill instructions go here...
-```
-
-### Self Commands
-
-```bash
-# Update to latest version (auto-detects package manager)
-allagents self update
-
-# Force a specific package manager
-allagents self update --npm
-allagents self update --bun
-```
-
-When using the interactive TUI, AllAgents automatically checks for newer versions in the background and shows a notice on startup when an update is available.
-
-## Storage Locations
-
-```
-~/.allagents/
-├── marketplaces.json              # Registry of marketplaces
-├── version-check.json             # Cached update check (auto-managed)
-└── marketplaces/                  # Cloned marketplace repos
-    ├── claude-plugins-official/
-    └── someuser-their-repo/
-```
-
-## Development
-
-```bash
-# Install dependencies
-bun install
-
-# Run in development
-bun run dev workspace init test-ws
-
-# Run tests
-bun run test
-
-# Type check
-bun run typecheck
-
-# Build
-bun run build
-```
+- [Getting Started](https://allagents.dev/getting-started/introduction/)
+- [Workspaces Guide](https://allagents.dev/guides/workspaces/)
+- [Plugins Guide](https://allagents.dev/guides/plugins/)
+- [Agent Portability](https://allagents.dev/guides/agent-portability/)
+- [Client Support Matrix](https://allagents.dev/reference/clients/)
+- [Configuration Reference](https://allagents.dev/reference/configuration/)
 
 ## Related Projects
 
-- [dotagents](https://github.com/iannuttall/dotagents) - Unified AI agent configuration management
-- [vercel-labs/skills](https://github.com/vercel-labs/skills) - Universal skills for AI coding assistants
+- [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) — Universal skills for AI coding assistants
+- [skillpm](https://github.com/sbroenne/skillpm) — npm-native package manager for Agent Skills
+- [skills-npm](https://github.com/antfu/skills-npm) — Discover agent skills shipped in npm packages
+- [dotagents](https://github.com/iannuttall/dotagents) — Unified AI agent configuration management
 
 ## License
 

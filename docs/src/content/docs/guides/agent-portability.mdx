@@ -1,0 +1,154 @@
+---
+title: Agent Portability
+description: Writing portable agent definitions that work across Claude Code, GitHub Copilot, and other AI clients.
+---
+
+AllAgents syncs agent files (`.claude/agents/` to `.github/agents/`, etc.) verbatim — no transformation is needed. Clients ignore frontmatter fields they don't recognize, so the same file works everywhere.
+
+However, some frontmatter fields are client-specific and won't be interpreted by other clients. This guide covers how to write agents that work well across all clients.
+
+## How Agent Sync Works
+
+When a plugin contains an `agents/` directory, AllAgents copies those files to each client's agent path:
+
+| Client | Agent Path |
+|--------|-----------|
+| Claude | `.claude/agents/` |
+| Copilot | `.github/agents/` |
+
+The files are copied (or symlinked) verbatim. No frontmatter transformation occurs because clients safely ignore fields they don't understand.
+
+## Writing Portable Agents
+
+### Universal Fields
+
+These frontmatter fields are understood by both Claude Code and GitHub Copilot:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Agent identifier |
+| `description` | What the agent does and when to use it |
+
+### Shared Fields (Different Syntax)
+
+These fields exist in both clients but use client-specific values:
+
+| Field | Claude Code | Copilot |
+|-------|-------------|---------|
+| `tools` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | `read`, `edit`, `search/codebase`, `web/fetch` |
+| `model` | `sonnet`, `opus`, `haiku`, `inherit` | `Claude Opus 4.5`, `GPT-5 (copilot)` |
+| MCP servers | `mcpServers` (camelCase) | `mcp-servers` (kebab-case) |
+| `hooks` | Supported | Supported |
+
+### Client-Specific Fields
+
+These fields are valid in their respective clients but ignored by others:
+
+**Claude Code only:**
+- `disallowedTools`, `permissionMode`, `maxTurns`, `skills`, `memory`, `background`, `effort`, `isolation`, `initialPrompt`
+
+**GitHub Copilot only:**
+- `disable-model-invocation`, `user-invocable`, `target`, `metadata`, `agents`, `argument-hint`, `handoffs`
+
+### Best Practices
+
+For maximum portability:
+
+1. **Keep `name` and `description`** — these are universal
+2. **Omit `tools`** — each client will use its full default toolset, which is usually what you want
+3. **Omit `model`** — each client will use its default model
+4. **Put behavior in the markdown body** — the system prompt (everything after the frontmatter) is the strongest interop point; all clients read it identically
+
+```markdown
+---
+name: code-reviewer
+description: Reviews code for quality, security, and best practices. Use proactively after code changes.
+---
+
+You are a senior code reviewer. When invoked:
+
+1. Check recent changes with git diff
+2. Review modified files for quality, security, and maintainability
+3. Provide feedback organized by priority (critical, warnings, suggestions)
+```
+
+This agent works identically in Claude Code and Copilot — both understand the name and description, and both follow the system prompt instructions using whatever tools they have available.
+
+### When Client-Specific Fields Are Fine
+
+If you only target one client, use any fields you need. Claude-specific fields like `tools: Read, Grep, Glob` or `model: haiku` are harmless in Copilot — they're simply ignored. The agent still works; it just uses Copilot's defaults instead.
+
+```markdown
+---
+name: safe-researcher
+description: Read-only research agent for codebase exploration
+tools: Read, Grep, Glob, Bash
+model: haiku
+---
+
+You are a research agent. Explore the codebase and report findings.
+Do not modify any files.
+```
+
+In Claude Code, this agent is restricted to read-only tools and uses Haiku. In Copilot, the `tools` and `model` fields are ignored, so the agent has full tool access and uses Copilot's default model. The system prompt instruction "Do not modify any files" still guides behavior in both.
+
+## Multi-Provider Resilience
+
+Running multiple AI coding tools in parallel provides resilience against model provider outages. If one provider goes down, your team can switch to another tool that's already configured with the same agents, skills, and project context.
+
+AllAgents makes this seamless by syncing your configuration across all clients simultaneously.
+
+### Setting Up Dual-Provider Workspaces
+
+Configure your workspace with multiple clients:
+
+```yaml
+# .allagents/workspace.yaml
+plugins:
+  - code-review@my-org/ai-plugins
+  - my-org/shared-agents
+
+clients:
+  - claude
+  - copilot
+```
+
+Running `allagents update` syncs agents, skills, hooks, and MCP servers to both clients. Your team can use either tool interchangeably.
+
+### What Gets Synced
+
+| Artifact | Claude | Copilot |
+|----------|--------|---------|
+| Skills | `.claude/skills/` | `.github/skills/` |
+| Agents | `.claude/agents/` | `.github/agents/` |
+| Hooks | `.claude/hooks/` | `.github/hooks/` |
+| Commands / Prompts | `.claude/commands/` | `.github/prompts/` |
+| Agent file | `CLAUDE.md` | `AGENTS.md` |
+| MCP servers | `.claude/mcp.json` | `.copilot/mcp-config.json` |
+| WORKSPACE-RULES | Injected in `CLAUDE.md` | Injected in `AGENTS.md` |
+
+### Skills Are the Strongest Interop Point
+
+Skills (reusable prompt files in `skills/` directories) are read natively by both Claude Code and Copilot. They use the same format and the same frontmatter. When writing shared plugins, prefer skills over client-specific commands or hooks.
+
+#### Skill Frontmatter Portability
+
+Unlike agents, skills have strong frontmatter alignment across clients:
+
+| Field | Claude Code | Copilot | Portable |
+|-------|-------------|---------|----------|
+| `name` | Required | Required | Yes |
+| `description` | Required | Required | Yes |
+| `disable-model-invocation` | Supported | Supported | Yes |
+| `user-invocable` | Supported | Supported | Yes |
+| `argument-hint` | Not supported | Supported | No (Copilot only) |
+| `allowed-tools` | Supported | Not supported | No (Claude only) |
+| `model` | Supported | Not supported | No (Claude only) |
+
+For portable skills, use `name`, `description`, `disable-model-invocation`, and `user-invocable`. Avoid `allowed-tools` and `model` — these are Claude-specific and ignored by Copilot.
+
+### Resilience Without AllAgents
+
+Without AllAgents, teams maintain separate configurations for each tool — duplicate `AGENTS.md` and `CLAUDE.md` files, manual `sync-agents.sh` scripts, and per-tool MCP registration. This duplication is error-prone and drifts over time.
+
+AllAgents eliminates this by treating your `workspace.yaml` as the single source of truth and syncing to all clients on every `allagents update`.
