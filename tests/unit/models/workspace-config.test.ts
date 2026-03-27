@@ -146,4 +146,36 @@ describe('RepositorySchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('accepts skills: true', () => {
+    const result = RepositorySchema.safeParse({ path: '../repo', skills: true });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.skills).toBe(true);
+  });
+
+  it('accepts skills: false', () => {
+    const result = RepositorySchema.safeParse({ path: '../repo', skills: false });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.skills).toBe(false);
+  });
+
+  it('accepts skills as array of custom paths', () => {
+    const result = RepositorySchema.safeParse({
+      path: '../repo',
+      skills: ['plugins/agentv-dev/skills', 'plugins/agentic-engineering/skills'],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.skills).toEqual([
+        'plugins/agentv-dev/skills',
+        'plugins/agentic-engineering/skills',
+      ]);
+    }
+  });
+
+  it('accepts omitted skills field', () => {
+    const result = RepositorySchema.safeParse({ path: '../repo' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.skills).toBeUndefined();
+  });
 });

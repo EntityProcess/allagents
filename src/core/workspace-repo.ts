@@ -1,12 +1,13 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { load, dump } from 'js-yaml';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, type WorkspaceSkillEntry } from '../constants.js';
 import { ensureWorkspace, type ModifyResult } from './workspace-modify.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { WorkspaceConfig, Repository, ClientType } from '../models/workspace-config.js';
+import { discoverRepoSkills } from './repo-skills.js';
 
 /**
  * Detect source platform and owner/repo from a git remote at the given path.
@@ -161,9 +162,17 @@ export async function listRepositories(
 }
 
 /**
+ * Resolve client names from the config's clients array (handles string and object forms).
+ */
+function resolveClientNames(clients: WorkspaceConfig['clients']): string[] {
+  return (clients ?? []).map((c) => (typeof c === 'string' ? c : (c as { name: string }).name));
+}
+
+/**
  * Ensure WORKSPACE-RULES are injected into agent files for all configured clients.
  * Lightweight alternative to full syncWorkspace() — only touches agent files.
  * Repository paths are embedded directly in the rules.
+ * Discovers skills from workspace repositories and includes them in the rules.
  */
 export async function updateAgentFiles(
   workspacePath: string = process.cwd(),
@@ -176,17 +185,41 @@ export async function updateAgentFiles(
 
   if (config.repositories.length === 0) return;
 
+  const clientNames = resolveClientNames(config.clients);
+
+  // Discover skills from all repositories
+  const allSkills: WorkspaceSkillEntry[] = [];
+  for (const repo of config.repositories) {
+    if (repo.skills === false) continue;
+
+    const repoAbsPath = resolve(workspacePath, repo.path);
+    const discoverOpts = Array.isArray(repo.skills)
+      ? { skillPaths: repo.skills }
+      : { clients: clientNames };
+
+    const repoSkills = await discoverRepoSkills(repoAbsPath, discoverOpts);
+    for (const skill of repoSkills) {
+      allSkills.push({
+        repoPath: repo.path,
+        name: skill.name,
+        description: skill.description,
+        location: `${repo.path}/${skill.relativePath}`,
+      });
+    }
+  }
+
   // Collect unique agent files from configured clients
   const agentFiles = new Set<string>();
   for (const client of config.clients ?? []) {
-    const mapping = CLIENT_MAPPINGS[client as ClientType];
+    const clientName = typeof client === 'string' ? client : (client as { name: string }).name;
+    const mapping = CLIENT_MAPPINGS[clientName as ClientType];
     if (mapping?.agentFile) agentFiles.add(mapping.agentFile);
   }
   // Always include AGENTS.md as it's the universal fallback
   agentFiles.add('AGENTS.md');
 
-  // Pass repositories directly so paths are embedded in the rules
+  // Pass repositories and skills so they are embedded in the rules
   for (const agentFile of agentFiles) {
-    await ensureWorkspaceRules(join(workspacePath, agentFile), config.repositories);
+    await ensureWorkspaceRules(join(workspacePath, agentFile), config.repositories, allSkills);
   }
 }

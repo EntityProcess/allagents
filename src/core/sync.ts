@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, lstatSync } from 'node:fs';
 import { rm, unlink, rmdir, copyFile } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
 import JSON5 from 'json5';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, getHomeDir } from '../constants.js';
+import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, getHomeDir, type WorkspaceSkillEntry } from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import type {
   WorkspaceConfig,
@@ -34,6 +34,7 @@ import {
   type CopyResult,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
+import { discoverRepoSkills } from './repo-skills.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient, resolveClientMappings } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import {
@@ -1913,13 +1914,35 @@ export async function syncWorkspace(
       );
     }
 
-    // Step 5c: Copy workspace files with GitHub cache
-    // Pass repositories so paths are embedded directly in WORKSPACE-RULES
+    // Step 5c: Discover skills from workspace repositories
+    const repoSkills: WorkspaceSkillEntry[] = [];
+    if (hasRepositories && !dryRun) {
+      const clientNames = syncClients as string[];
+      for (const repo of config.repositories) {
+        if (repo.skills === false) continue;
+        const repoAbsPath = resolve(workspacePath, repo.path);
+        const discoverOpts = Array.isArray(repo.skills)
+          ? { skillPaths: repo.skills }
+          : { clients: clientNames };
+        const skills = await discoverRepoSkills(repoAbsPath, discoverOpts);
+        for (const skill of skills) {
+          repoSkills.push({
+            repoPath: repo.path,
+            name: skill.name,
+            description: skill.description,
+            location: `${repo.path}/${skill.relativePath}`,
+          });
+        }
+      }
+    }
+
+    // Step 5d: Copy workspace files with GitHub cache
+    // Pass repositories and skills so paths are embedded directly in WORKSPACE-RULES
     workspaceFileResults = await copyWorkspaceFiles(
       sourcePath,
       workspacePath,
       filesToCopy,
-      { dryRun, githubCache, repositories: config.repositories },
+      { dryRun, githubCache, repositories: config.repositories, skills: repoSkills },
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md

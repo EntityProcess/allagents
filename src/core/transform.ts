@@ -6,7 +6,7 @@ import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
 import { CLIENT_MAPPINGS, isUniversalClient } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import type { ClientType, WorkspaceFile, SyncMode, PluginSkillsConfig } from '../models/workspace-config.js';
-import { generateWorkspaceRules, type WorkspaceRepository } from '../constants.js';
+import { generateWorkspaceRules, type WorkspaceRepository, type WorkspaceSkillEntry } from '../constants.js';
 import { parseFileSource } from '../utils/plugin-path.js';
 import { createSymlink } from '../utils/symlink.js';
 import { adjustLinksInContent } from '../utils/link-adjuster.js';
@@ -25,8 +25,12 @@ const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'] as const;
  * @param filePath - Path to the agent file (CLAUDE.md or AGENTS.md)
  * @param repositories - Array of repositories to include in the rules (paths embedded directly)
  */
-export async function ensureWorkspaceRules(filePath: string, repositories: WorkspaceRepository[]): Promise<void> {
-  const rulesContent = generateWorkspaceRules(repositories);
+export async function ensureWorkspaceRules(
+  filePath: string,
+  repositories: WorkspaceRepository[],
+  skills: WorkspaceSkillEntry[] = [],
+): Promise<void> {
+  const rulesContent = generateWorkspaceRules(repositories, skills);
   const startMarker = '<!-- WORKSPACE-RULES:START -->';
   const endMarker = '<!-- WORKSPACE-RULES:END -->';
 
@@ -153,6 +157,11 @@ export interface WorkspaceCopyOptions extends CopyOptions {
    * When empty/absent, WORKSPACE-RULES injection is skipped.
    */
   repositories?: WorkspaceRepository[];
+  /**
+   * Discovered skills from workspace repositories.
+   * Embedded in WORKSPACE-RULES as an available_skills index.
+   */
+  skills?: WorkspaceSkillEntry[];
 }
 
 /**
@@ -904,7 +913,7 @@ export async function copyWorkspaceFiles(
   files: WorkspaceFile[],
   options: WorkspaceCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false, githubCache, repositories = [] } = options;
+  const { dryRun = false, githubCache, repositories = [], skills = [] } = options;
   const results: CopyResult[] = [];
 
   // Separate string patterns from object entries
@@ -1091,7 +1100,7 @@ export async function copyWorkspaceFiles(
     for (const agentFile of copiedAgentFiles) {
       const targetPath = join(workspacePath, agentFile);
       try {
-        await ensureWorkspaceRules(targetPath, repositories);
+        await ensureWorkspaceRules(targetPath, repositories, skills);
       } catch (error) {
         results.push({
           source: 'WORKSPACE-RULES',

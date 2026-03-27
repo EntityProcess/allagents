@@ -38,15 +38,45 @@ export const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'] as const;
 export type { Repository as WorkspaceRepository } from './models/workspace-config.js';
 import type { Repository } from './models/workspace-config.js';
 
+export interface WorkspaceSkillEntry {
+  repoPath: string;
+  name: string;
+  description: string;
+  location: string;
+}
+
 /**
- * Generate WORKSPACE-RULES content with embedded repository paths
+ * Generate WORKSPACE-RULES content with embedded repository paths and optional skills index
  * This eliminates the indirection of requiring agents to read workspace.yaml
  * @param repositories - List of repositories with paths and optional descriptions
+ * @param skills - Discovered skills from workspace repositories
  */
-export function generateWorkspaceRules(repositories: Repository[]): string {
+export function generateWorkspaceRules(
+  repositories: Repository[],
+  skills: WorkspaceSkillEntry[] = [],
+): string {
   const repoList = repositories
     .map((r) => `- ${r.path}${r.description ? ` - ${r.description}` : ''}`)
     .join('\n');
+
+  let skillsBlock = '';
+  if (skills.length > 0) {
+    const skillEntries = skills
+      .map(
+        (s) =>
+          `<skill>\n<name>${s.name}</name>\n<description>${s.description}</description>\n<location>${s.location}</location>\n</skill>`,
+      )
+      .join('\n');
+
+    skillsBlock = `
+## Workspace Skills
+When a task matches a skill description, fetch the full instructions from its location.
+
+<available_skills>
+${skillEntries}
+</available_skills>
+`;
+  }
 
   return `
 <!-- WORKSPACE-RULES:START -->
@@ -57,7 +87,7 @@ ${repoList}
 ## Rule: Use Repository Paths
 TRIGGER: File operations (read, search, modify)
 ACTION: Use the repository paths listed above, not assumptions
-<!-- WORKSPACE-RULES:END -->
+${skillsBlock}<!-- WORKSPACE-RULES:END -->
 `;
 }
 
