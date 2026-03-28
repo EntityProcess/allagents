@@ -1636,6 +1636,7 @@ async function persistSyncState(
     vscodeState?: { hash: string; repos: string[] };
     mcpTrackedServers?: Partial<Record<string, string[]>>;
     clientMappings?: Record<ClientType, ClientMapping>;
+    skillsIndex?: string[];
   },
 ): Promise<void> {
   const allCopyResults: CopyResult[] = [
@@ -1667,6 +1668,7 @@ async function persistSyncState(
     ...(extra?.vscodeState?.hash && { vscodeWorkspaceHash: extra.vscodeState.hash }),
     ...(extra?.vscodeState?.repos && { vscodeWorkspaceRepos: extra.vscodeState.repos }),
     ...(extra?.mcpTrackedServers && { mcpServers: extra.mcpTrackedServers }),
+    ...(extra?.skillsIndex && extra.skillsIndex.length > 0 && { skillsIndex: extra.skillsIndex }),
   });
 }
 
@@ -1873,6 +1875,7 @@ export async function syncWorkspace(
   // Supports both workspace.source (default base) and file-level sources
   // Skip when workspace.source was configured but validation failed (plugins still synced above)
   let workspaceFileResults: CopyResult[] = [];
+  let writtenSkillsIndexFiles: string[] = [];
   const skipWorkspaceFiles = !!config.workspace?.source && !validatedWorkspaceSource;
   if (config.workspace && !skipWorkspaceFiles) {
     sw.start('workspace-files');
@@ -1924,9 +1927,9 @@ export async function syncWorkspace(
     let skillsIndexRefs: { repoName: string; indexPath: string }[] = [];
     if (repoSkills.length > 0 && !dryRun) {
       const grouped = groupSkillsByRepo(repoSkills, config.repositories);
-      const writtenFiles = writeSkillsIndex(workspacePath, grouped);
-      cleanupSkillsIndex(workspacePath, writtenFiles);
-      skillsIndexRefs = writtenFiles.map((f) => {
+      writtenSkillsIndexFiles = writeSkillsIndex(workspacePath, grouped);
+      cleanupSkillsIndex(workspacePath, writtenSkillsIndexFiles);
+      skillsIndexRefs = writtenSkillsIndexFiles.map((f) => {
         const repoName = f.replace('skills-index/', '').replace('.md', '');
         return { repoName, indexPath: `.allagents/${f}` };
       });
@@ -2113,6 +2116,7 @@ export async function syncWorkspace(
               Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
             ),
           }),
+          ...(writtenSkillsIndexFiles.length > 0 && { skillsIndex: writtenSkillsIndexFiles }),
         },
       ),
     );
