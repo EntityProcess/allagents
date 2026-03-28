@@ -34,7 +34,7 @@ import {
   type CopyResult,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
-import { discoverWorkspaceSkills } from './repo-skills.js';
+import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from './repo-skills.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient, resolveClientMappings } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import {
@@ -1920,13 +1920,25 @@ export async function syncWorkspace(
       ? await discoverWorkspaceSkills(workspacePath, config.repositories, syncClients as string[])
       : [];
 
+    // Step 5c.1: Write skills-index files and clean up stale ones
+    let skillsIndexRefs: { repoName: string; indexPath: string }[] = [];
+    if (repoSkills.length > 0 && !dryRun) {
+      const grouped = groupSkillsByRepo(repoSkills, config.repositories);
+      const writtenFiles = writeSkillsIndex(workspacePath, grouped);
+      cleanupSkillsIndex(workspacePath, writtenFiles);
+      skillsIndexRefs = writtenFiles.map((f) => {
+        const repoName = f.replace('skills-index/', '').replace('.md', '');
+        return { repoName, indexPath: `.allagents/${f}` };
+      });
+    }
+
     // Step 5d: Copy workspace files with GitHub cache
-    // Pass repositories and skills so paths are embedded directly in WORKSPACE-RULES
+    // Pass repositories and skillsIndexRefs so conditional links are embedded in WORKSPACE-RULES
     workspaceFileResults = await copyWorkspaceFiles(
       sourcePath,
       workspacePath,
       filesToCopy,
-      { dryRun, githubCache, repositories: config.repositories, skillsIndexRefs: [] },
+      { dryRun, githubCache, repositories: config.repositories, skillsIndexRefs },
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
