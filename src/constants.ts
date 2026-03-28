@@ -38,43 +38,35 @@ export const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'] as const;
 export type { Repository as WorkspaceRepository } from './models/workspace-config.js';
 import type { Repository } from './models/workspace-config.js';
 
-export interface WorkspaceSkillEntry {
-  repoPath: string;
-  name: string;
-  description: string;
-  location: string;
+export interface SkillsIndexRef {
+  repoName: string;
+  indexPath: string;
 }
 
 /**
- * Generate WORKSPACE-RULES content with embedded repository paths and optional skills index
+ * Generate WORKSPACE-RULES content with embedded repository paths and optional skills-index links
  * This eliminates the indirection of requiring agents to read workspace.yaml
  * @param repositories - List of repositories with paths and optional descriptions
- * @param skills - Discovered skills from workspace repositories
+ * @param skillsIndexRefs - References to per-repo skills-index files
  */
 export function generateWorkspaceRules(
   repositories: Repository[],
-  skills: WorkspaceSkillEntry[] = [],
+  skillsIndexRefs: SkillsIndexRef[] = [],
 ): string {
   const repoList = repositories
     .map((r) => `- ${r.path}${r.description ? ` - ${r.description}` : ''}`)
     .join('\n');
 
   let skillsBlock = '';
-  if (skills.length > 0) {
-    const skillEntries = skills
-      .map(
-        (s) =>
-          `<skill>\n<name>${s.name}</name>\n<description>${s.description}</description>\n<location>${s.location}</location>\n</skill>`,
-      )
+  if (skillsIndexRefs.length > 0) {
+    const refLines = skillsIndexRefs
+      .map((r) => `- ${r.repoName}: ${r.indexPath}`)
       .join('\n');
 
     skillsBlock = `
 ## Repository Skills
-When a task matches a skill description, fetch the full instructions from its location.
-
-<available_skills>
-${skillEntries}
-</available_skills>
+If the skills from the following repositories are not already available in your context, read the corresponding index file:
+${refLines}
 `;
   }
 

@@ -4,7 +4,12 @@ import { basename, join, relative, resolve } from 'node:path';
 import { parseSkillMetadata } from '../validators/skill.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { ClientType, Repository } from '../models/workspace-config.js';
-import type { WorkspaceSkillEntry } from '../constants.js';
+export interface WorkspaceSkillEntry {
+  repoPath: string;
+  name: string;
+  description: string;
+  location: string;
+}
 
 export interface RepoSkillEntry {
   /** Skill name from frontmatter */

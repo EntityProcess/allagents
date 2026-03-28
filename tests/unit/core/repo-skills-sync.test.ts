@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { updateAgentFiles } from '../../../src/core/workspace-repo.js';
 import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from '../../../src/core/repo-skills.js';
-import type { WorkspaceSkillEntry } from '../../../src/constants.js';
+import { generateWorkspaceRules } from '../../../src/constants.js';
+import type { WorkspaceSkillEntry } from '../../../src/core/repo-skills.js';
 
 function makeSkill(dir: string, name: string, description: string) {
   const skillDir = join(dir, name);
@@ -30,7 +31,7 @@ describe('updateAgentFiles with skills', () => {
     rmSync(workspaceDir, { recursive: true, force: true });
   });
 
-  it('embeds discovered skills in AGENTS.md', async () => {
+  it('writes skills-index file and links from AGENTS.md', async () => {
     makeSkill(join(repoDir, '.claude', 'skills'), 'test-skill', 'A test skill');
 
     writeFileSync(
@@ -40,10 +41,16 @@ describe('updateAgentFiles with skills', () => {
 
     await updateAgentFiles(workspaceDir);
 
+    // Skills-index file should exist
+    const indexContent = readFileSync(join(workspaceDir, '.allagents', 'skills-index', 'my-repo.md'), 'utf-8');
+    expect(indexContent).toContain('<available_skills>');
+    expect(indexContent).toContain('<name>test-skill</name>');
+
+    // AGENTS.md should have conditional link, not inline skills
     const agentsContent = readFileSync(join(workspaceDir, 'AGENTS.md'), 'utf-8');
-    expect(agentsContent).toContain('<available_skills>');
-    expect(agentsContent).toContain('<name>test-skill</name>');
-    expect(agentsContent).toContain('./my-repo/.claude/skills/test-skill/SKILL.md');
+    expect(agentsContent).toContain('## Repository Skills');
+    expect(agentsContent).toContain('.allagents/skills-index/my-repo.md');
+    expect(agentsContent).not.toContain('<available_skills>');
   });
 
   it('uses custom skill paths from workspace.yaml', async () => {
@@ -56,9 +63,9 @@ describe('updateAgentFiles with skills', () => {
 
     await updateAgentFiles(workspaceDir);
 
-    const agentsContent = readFileSync(join(workspaceDir, 'AGENTS.md'), 'utf-8');
-    expect(agentsContent).toContain('<name>custom</name>');
-    expect(agentsContent).toContain('./my-repo/plugins/my-plugin/skills/custom/SKILL.md');
+    const indexContent = readFileSync(join(workspaceDir, '.allagents', 'skills-index', 'my-repo.md'), 'utf-8');
+    expect(indexContent).toContain('<name>custom</name>');
+    expect(indexContent).toContain('./my-repo/plugins/my-plugin/skills/custom/SKILL.md');
   });
 
   it('skips repos with skills: false', async () => {
@@ -72,7 +79,8 @@ describe('updateAgentFiles with skills', () => {
     await updateAgentFiles(workspaceDir);
 
     const agentsContent = readFileSync(join(workspaceDir, 'AGENTS.md'), 'utf-8');
-    expect(agentsContent).not.toContain('<available_skills>');
+    expect(agentsContent).not.toContain('## Repository Skills');
+    expect(existsSync(join(workspaceDir, '.allagents', 'skills-index'))).toBe(false);
   });
 
   it('omits skills block when repos have no skills', async () => {
@@ -84,7 +92,7 @@ describe('updateAgentFiles with skills', () => {
     await updateAgentFiles(workspaceDir);
 
     const agentsContent = readFileSync(join(workspaceDir, 'AGENTS.md'), 'utf-8');
-    expect(agentsContent).not.toContain('<available_skills>');
+    expect(agentsContent).not.toContain('## Repository Skills');
   });
 
   it('includes skills from multiple repos', async () => {
@@ -101,11 +109,15 @@ describe('updateAgentFiles with skills', () => {
 
     await updateAgentFiles(workspaceDir);
 
+    // Both index files should exist
+    expect(existsSync(join(workspaceDir, '.allagents', 'skills-index', 'my-repo.md'))).toBe(true);
+    expect(existsSync(join(workspaceDir, '.allagents', 'skills-index', 'repo2.md'))).toBe(true);
+
+    // AGENTS.md should link to both
     const agentsContent = readFileSync(join(workspaceDir, 'AGENTS.md'), 'utf-8');
-    expect(agentsContent).toContain('<name>skill-a</name>');
-    expect(agentsContent).toContain('<name>skill-b</name>');
-    expect(agentsContent).toContain('./my-repo/.claude/skills/skill-a/SKILL.md');
-    expect(agentsContent).toContain('./repo2/.claude/skills/skill-b/SKILL.md');
+    expect(agentsContent).toContain('.allagents/skills-index/my-repo.md');
+    expect(agentsContent).toContain('.allagents/skills-index/repo2.md');
+    expect(agentsContent).not.toContain('<available_skills>');
   });
 
   it('renders section heading as Repository Skills', async () => {
@@ -302,5 +314,27 @@ describe('groupSkillsByRepo', () => {
   it('returns empty map when skills array is empty', () => {
     const grouped = groupSkillsByRepo([], []);
     expect(grouped.size).toBe(0);
+  });
+});
+
+describe('generateWorkspaceRules with skills-index links', () => {
+  it('emits conditional links instead of inline skills', () => {
+    const skillsIndexRefs = [
+      { repoName: 'my-repo', indexPath: '.allagents/skills-index/my-repo.md' },
+    ];
+    const result = generateWorkspaceRules(
+      [{ path: './my-repo' }],
+      skillsIndexRefs,
+    );
+
+    expect(result).toContain('## Repository Skills');
+    expect(result).toContain('my-repo');
+    expect(result).toContain('.allagents/skills-index/my-repo.md');
+    expect(result).not.toContain('<available_skills>');
+  });
+
+  it('omits skills section when no index refs', () => {
+    const result = generateWorkspaceRules([{ path: './my-repo' }], []);
+    expect(result).not.toContain('## Repository Skills');
   });
 });

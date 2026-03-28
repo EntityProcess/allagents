@@ -1926,7 +1926,7 @@ export async function syncWorkspace(
       sourcePath,
       workspacePath,
       filesToCopy,
-      { dryRun, githubCache, repositories: config.repositories, skills: repoSkills },
+      { dryRun, githubCache, repositories: config.repositories, skillsIndexRefs: [] },
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
