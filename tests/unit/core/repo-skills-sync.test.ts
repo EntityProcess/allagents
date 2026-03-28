@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { updateAgentFiles } from '../../../src/core/workspace-repo.js';
-import { discoverWorkspaceSkills } from '../../../src/core/repo-skills.js';
+import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from '../../../src/core/repo-skills.js';
+import type { WorkspaceSkillEntry } from '../../../src/constants.js';
 
 function makeSkill(dir: string, name: string, description: string) {
   const skillDir = join(dir, name);
@@ -194,5 +195,112 @@ describe('discoverWorkspaceSkills deduplication', () => {
     expect(results).toHaveLength(2);
     const names = results.map((r) => r.name).sort();
     expect(names).toEqual(['skill-a', 'skill-b']);
+  });
+});
+
+describe('writeSkillsIndex', () => {
+  let workspaceDir: string;
+
+  beforeEach(() => {
+    workspaceDir = mkdtempSync(join(tmpdir(), 'skills-index-test-'));
+    mkdirSync(join(workspaceDir, '.allagents'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(workspaceDir, { recursive: true, force: true });
+  });
+
+  it('writes per-repo skills index files', () => {
+    const skillsByRepo = new Map<string, { repoName: string; skills: WorkspaceSkillEntry[] }>();
+    skillsByRepo.set('./my-repo', {
+      repoName: 'my-repo',
+      skills: [
+        { repoPath: './my-repo', name: 'test-skill', description: 'A test skill', location: './my-repo/.claude/skills/test-skill/SKILL.md' },
+      ],
+    });
+
+    const written = writeSkillsIndex(workspaceDir, skillsByRepo);
+
+    expect(written).toEqual(['skills-index/my-repo.md']);
+    const content = readFileSync(join(workspaceDir, '.allagents', 'skills-index', 'my-repo.md'), 'utf-8');
+    expect(content).toContain('<available_skills>');
+    expect(content).toContain('<name>test-skill</name>');
+    expect(content).toContain('./my-repo/.claude/skills/test-skill/SKILL.md');
+  });
+
+  it('returns empty array when no skills', () => {
+    const written = writeSkillsIndex(workspaceDir, new Map());
+    expect(written).toEqual([]);
+  });
+});
+
+describe('cleanupSkillsIndex', () => {
+  let workspaceDir: string;
+
+  beforeEach(() => {
+    workspaceDir = mkdtempSync(join(tmpdir(), 'skills-cleanup-test-'));
+    mkdirSync(join(workspaceDir, '.allagents', 'skills-index'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(workspaceDir, { recursive: true, force: true });
+  });
+
+  it('removes stale index files not in current set', () => {
+    writeFileSync(join(workspaceDir, '.allagents', 'skills-index', 'old-repo.md'), 'stale');
+    writeFileSync(join(workspaceDir, '.allagents', 'skills-index', 'current-repo.md'), 'fresh');
+
+    cleanupSkillsIndex(workspaceDir, ['skills-index/current-repo.md']);
+
+    expect(existsSync(join(workspaceDir, '.allagents', 'skills-index', 'old-repo.md'))).toBe(false);
+    expect(existsSync(join(workspaceDir, '.allagents', 'skills-index', 'current-repo.md'))).toBe(true);
+  });
+
+  it('removes skills-index directory when empty', () => {
+    writeFileSync(join(workspaceDir, '.allagents', 'skills-index', 'old.md'), 'stale');
+
+    cleanupSkillsIndex(workspaceDir, []);
+
+    expect(existsSync(join(workspaceDir, '.allagents', 'skills-index'))).toBe(false);
+  });
+});
+
+describe('groupSkillsByRepo', () => {
+  it('groups skills by repo path using repository name', () => {
+    const skills: WorkspaceSkillEntry[] = [
+      { repoPath: './repo-a', name: 'skill-1', description: 'First', location: './repo-a/.claude/skills/skill-1/SKILL.md' },
+      { repoPath: './repo-a', name: 'skill-2', description: 'Second', location: './repo-a/.claude/skills/skill-2/SKILL.md' },
+      { repoPath: './repo-b', name: 'skill-3', description: 'Third', location: './repo-b/.claude/skills/skill-3/SKILL.md' },
+    ];
+
+    const repositories = [
+      { path: './repo-a', name: 'my-frontend' },
+      { path: './repo-b', name: 'my-backend' },
+    ];
+
+    const grouped = groupSkillsByRepo(skills, repositories);
+
+    expect(grouped.size).toBe(2);
+    expect(grouped.get('./repo-a')?.repoName).toBe('my-frontend');
+    expect(grouped.get('./repo-a')?.skills).toHaveLength(2);
+    expect(grouped.get('./repo-b')?.repoName).toBe('my-backend');
+    expect(grouped.get('./repo-b')?.skills).toHaveLength(1);
+  });
+
+  it('falls back to basename when repository has no name', () => {
+    const skills: WorkspaceSkillEntry[] = [
+      { repoPath: './some/deep/repo-path', name: 'skill-1', description: 'First', location: './some/deep/repo-path/.claude/skills/skill-1/SKILL.md' },
+    ];
+
+    const repositories = [{ path: './some/deep/repo-path' }];
+
+    const grouped = groupSkillsByRepo(skills, repositories);
+
+    expect(grouped.get('./some/deep/repo-path')?.repoName).toBe('repo-path');
+  });
+
+  it('returns empty map when skills array is empty', () => {
+    const grouped = groupSkillsByRepo([], []);
+    expect(grouped.size).toBe(0);
   });
 });
