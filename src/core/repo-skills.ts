@@ -175,20 +175,28 @@ export interface RepoSkillGroup {
   skills: WorkspaceSkillEntry[];
 }
 
+export interface SkillsIndexResult {
+  /** Relative paths from .allagents/ (for cleanup and state tracking) */
+  writtenFiles: string[];
+  /** Refs for embedding in WORKSPACE-RULES */
+  refs: { repoName: string; indexPath: string }[];
+}
+
 /**
  * Writes per-repo skills index files to `.allagents/skills-index/<repo-name>.md`.
- * Returns list of relative paths (from `.allagents/`) of written files.
+ * Returns written file paths and WORKSPACE-RULES refs.
  */
 export function writeSkillsIndex(
   workspacePath: string,
   skillsByRepo: Map<string, RepoSkillGroup>,
-): string[] {
-  if (skillsByRepo.size === 0) return [];
+): SkillsIndexResult {
+  if (skillsByRepo.size === 0) return { writtenFiles: [], refs: [] };
 
   const indexDir = join(workspacePath, '.allagents', 'skills-index');
   mkdirSync(indexDir, { recursive: true });
 
-  const written: string[] = [];
+  const writtenFiles: string[] = [];
+  const refs: { repoName: string; indexPath: string }[] = [];
 
   for (const [, { repoName, skills }] of skillsByRepo) {
     const skillEntries = skills
@@ -200,12 +208,13 @@ export function writeSkillsIndex(
 
     const content = `# Skills: ${repoName}\n\n<available_skills>\n${skillEntries}\n</available_skills>\n`;
 
-    const fileName = `${repoName}.md`;
-    writeFileSync(join(indexDir, fileName), content, 'utf-8');
-    written.push(`skills-index/${fileName}`);
+    const filePath = `skills-index/${repoName}.md`;
+    writeFileSync(join(indexDir, `${repoName}.md`), content, 'utf-8');
+    writtenFiles.push(filePath);
+    refs.push({ repoName, indexPath: `.allagents/${filePath}` });
   }
 
-  return written;
+  return { writtenFiles, refs };
 }
 
 /**
@@ -272,15 +281,3 @@ export function groupSkillsByRepo(
   return grouped;
 }
 
-/**
- * Convert written skills-index file paths to SkillsIndexRef entries
- * for embedding in WORKSPACE-RULES.
- */
-export function toSkillsIndexRefs(
-  writtenFiles: string[],
-): { repoName: string; indexPath: string }[] {
-  return writtenFiles.map((f) => {
-    const repoName = f.replace('skills-index/', '').replace('.md', '');
-    return { repoName, indexPath: `.allagents/${f}` };
-  });
-}

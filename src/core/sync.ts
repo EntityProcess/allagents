@@ -34,7 +34,7 @@ import {
   type CopyResult,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
-import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo, toSkillsIndexRefs } from './repo-skills.js';
+import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from './repo-skills.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient, resolveClientMappings } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import {
@@ -1928,8 +1928,9 @@ export async function syncWorkspace(
     if (!dryRun) {
       if (repoSkills.length > 0) {
         const grouped = groupSkillsByRepo(repoSkills, config.repositories);
-        writtenSkillsIndexFiles = writeSkillsIndex(workspacePath, grouped);
-        skillsIndexRefs = toSkillsIndexRefs(writtenSkillsIndexFiles);
+        const result = writeSkillsIndex(workspacePath, grouped);
+        writtenSkillsIndexFiles = result.writtenFiles;
+        skillsIndexRefs = result.refs;
       }
       // Always clean up stale index files (handles case where all skills were removed)
       cleanupSkillsIndex(workspacePath, writtenSkillsIndexFiles);

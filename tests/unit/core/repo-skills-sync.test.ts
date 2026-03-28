@@ -231,18 +231,19 @@ describe('writeSkillsIndex', () => {
       ],
     });
 
-    const written = writeSkillsIndex(workspaceDir, skillsByRepo);
+    const result = writeSkillsIndex(workspaceDir, skillsByRepo);
 
-    expect(written).toEqual(['skills-index/my-repo.md']);
+    expect(result.writtenFiles).toEqual(['skills-index/my-repo.md']);
+    expect(result.refs).toEqual([{ repoName: 'my-repo', indexPath: '.allagents/skills-index/my-repo.md' }]);
     const content = readFileSync(join(workspaceDir, '.allagents', 'skills-index', 'my-repo.md'), 'utf-8');
     expect(content).toContain('<available_skills>');
     expect(content).toContain('<name>test-skill</name>');
     expect(content).toContain('./my-repo/.claude/skills/test-skill/SKILL.md');
   });
 
-  it('returns empty array when no skills', () => {
-    const written = writeSkillsIndex(workspaceDir, new Map());
-    expect(written).toEqual([]);
+  it('returns empty result when no skills', () => {
+    const result = writeSkillsIndex(workspaceDir, new Map());
+    expect(result).toEqual({ writtenFiles: [], refs: [] });
   });
 });
 
