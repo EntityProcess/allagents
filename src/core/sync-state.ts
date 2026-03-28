@@ -18,6 +18,7 @@ export interface SyncStateData {
   nativePlugins?: Partial<Record<ClientType, string[]>>;
   vscodeWorkspaceHash?: string;
   vscodeWorkspaceRepos?: string[];
+  skillsIndex?: string[];
 }
 
 /**
@@ -83,6 +84,7 @@ export async function saveSyncState(
     ...(normalizedData.nativePlugins && { nativePlugins: normalizedData.nativePlugins }),
     ...(normalizedData.vscodeWorkspaceHash && { vscodeWorkspaceHash: normalizedData.vscodeWorkspaceHash }),
     ...(normalizedData.vscodeWorkspaceRepos && { vscodeWorkspaceRepos: normalizedData.vscodeWorkspaceRepos }),
+    ...(normalizedData.skillsIndex && normalizedData.skillsIndex.length > 0 && { skillsIndex: normalizedData.skillsIndex }),
   };
 
   await mkdir(dirname(statePath), { recursive: true });

@@ -7,7 +7,7 @@ import { ensureWorkspace, type ModifyResult } from './workspace-modify.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { WorkspaceConfig, Repository, ClientType } from '../models/workspace-config.js';
-import { discoverWorkspaceSkills } from './repo-skills.js';
+import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from './repo-skills.js';
 
 /**
  * Detect source platform and owner/repo from a git remote at the given path.
@@ -190,6 +190,11 @@ export async function updateAgentFiles(
   // Discover skills from all repositories
   const allSkills = await discoverWorkspaceSkills(workspacePath, config.repositories, clientNames);
 
+  // Write per-repo skills-index files
+  const grouped = groupSkillsByRepo(allSkills, config.repositories);
+  const { writtenFiles, refs: skillsIndexRefs } = writeSkillsIndex(workspacePath, grouped);
+  cleanupSkillsIndex(workspacePath, writtenFiles);
+
   // Collect unique agent files from configured clients
   const agentFiles = new Set<string>();
   for (const client of config.clients ?? []) {
@@ -200,8 +205,7 @@ export async function updateAgentFiles(
   // Always include AGENTS.md as it's the universal fallback
   agentFiles.add('AGENTS.md');
 
-  // Pass repositories and skills so they are embedded in the rules
   for (const agentFile of agentFiles) {
-    await ensureWorkspaceRules(join(workspacePath, agentFile), config.repositories, allSkills);
+    await ensureWorkspaceRules(join(workspacePath, agentFile), config.repositories, skillsIndexRefs);
   }
 }

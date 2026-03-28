@@ -1,10 +1,15 @@
-import { existsSync, lstatSync, type Dirent } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, rmSync, writeFileSync, type Dirent } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { join, relative, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import { parseSkillMetadata } from '../validators/skill.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { ClientType, Repository } from '../models/workspace-config.js';
-import type { WorkspaceSkillEntry } from '../constants.js';
+export interface WorkspaceSkillEntry {
+  repoPath: string;
+  name: string;
+  description: string;
+  location: string;
+}
 
 export interface RepoSkillEntry {
   /** Skill name from frontmatter */
@@ -122,7 +127,7 @@ export async function discoverWorkspaceSkills(
   const skillsByName = new Map<string, WorkspaceSkillEntry & { fileSize: number }>();
 
   for (const repo of repositories) {
-    if (repo.skills === false) continue;
+    if (repo.skills === false || repo.skills === undefined) continue;
 
     const repoAbsPath = resolve(workspacePath, repo.path);
     const discoverOpts = Array.isArray(repo.skills)
@@ -164,3 +169,115 @@ export async function discoverWorkspaceSkills(
   // Strip fileSize from output entries
   return [...skillsByName.values()].map(({ fileSize: _, ...entry }) => entry);
 }
+
+export interface RepoSkillGroup {
+  repoName: string;
+  skills: WorkspaceSkillEntry[];
+}
+
+export interface SkillsIndexResult {
+  /** Relative paths from .allagents/ (for cleanup and state tracking) */
+  writtenFiles: string[];
+  /** Refs for embedding in WORKSPACE-RULES */
+  refs: { repoName: string; indexPath: string }[];
+}
+
+/**
+ * Writes per-repo skills index files to `.allagents/skills-index/<repo-name>.md`.
+ * Returns written file paths and WORKSPACE-RULES refs.
+ */
+export function writeSkillsIndex(
+  workspacePath: string,
+  skillsByRepo: Map<string, RepoSkillGroup>,
+): SkillsIndexResult {
+  if (skillsByRepo.size === 0) return { writtenFiles: [], refs: [] };
+
+  const indexDir = join(workspacePath, '.allagents', 'skills-index');
+  mkdirSync(indexDir, { recursive: true });
+
+  const writtenFiles: string[] = [];
+  const refs: { repoName: string; indexPath: string }[] = [];
+
+  for (const [, { repoName, skills }] of skillsByRepo) {
+    const skillEntries = skills
+      .map(
+        (s) =>
+          `<skill>\n<name>${s.name}</name>\n<description>${s.description}</description>\n<location>${s.location}</location>\n</skill>`,
+      )
+      .join('\n');
+
+    const content = `# Skills: ${repoName}\n\n<available_skills>\n${skillEntries}\n</available_skills>\n`;
+
+    const filePath = `skills-index/${repoName}.md`;
+    writeFileSync(join(indexDir, `${repoName}.md`), content, 'utf-8');
+    writtenFiles.push(filePath);
+    refs.push({ repoName, indexPath: `.allagents/${filePath}` });
+  }
+
+  return { writtenFiles, refs };
+}
+
+/**
+ * Removes skills-index files not in the current set.
+ * Removes the `skills-index/` directory if it becomes empty.
+ */
+export function cleanupSkillsIndex(
+  workspacePath: string,
+  currentFiles: string[],
+): void {
+  const indexDir = join(workspacePath, '.allagents', 'skills-index');
+  if (!existsSync(indexDir)) return;
+
+  const currentSet = new Set(currentFiles.map((f) => f.replace('skills-index/', '')));
+
+  let entries: string[];
+  try {
+    entries = readdirSync(indexDir);
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!currentSet.has(entry)) {
+      rmSync(join(indexDir, entry), { force: true });
+    }
+  }
+
+  // Remove directory if empty
+  try {
+    const remaining = readdirSync(indexDir);
+    if (remaining.length === 0) {
+      rmSync(indexDir, { recursive: true, force: true });
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Groups WorkspaceSkillEntry[] by repo path, deriving repo name from
+ * `repository.name` or path basename.
+ */
+export function groupSkillsByRepo(
+  skills: WorkspaceSkillEntry[],
+  repositories: Repository[],
+): Map<string, RepoSkillGroup> {
+  const repoNameMap = new Map<string, string>();
+  for (const repo of repositories) {
+    repoNameMap.set(repo.path, repo.name ?? basename(repo.path));
+  }
+
+  const grouped = new Map<string, RepoSkillGroup>();
+  for (const skill of skills) {
+    const repoName = repoNameMap.get(skill.repoPath) ?? basename(skill.repoPath);
+    const existing = grouped.get(skill.repoPath);
+    if (existing) {
+      existing.skills.push(skill);
+    } else {
+      grouped.set(skill.repoPath, { repoName, skills: [skill] });
+    }
+  }
+
+  return grouped;
+}
+

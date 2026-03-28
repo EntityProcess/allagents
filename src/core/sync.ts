@@ -34,7 +34,7 @@ import {
   type CopyResult,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
-import { discoverWorkspaceSkills } from './repo-skills.js';
+import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from './repo-skills.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient, resolveClientMappings } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import {
@@ -1636,6 +1636,7 @@ async function persistSyncState(
     vscodeState?: { hash: string; repos: string[] };
     mcpTrackedServers?: Partial<Record<string, string[]>>;
     clientMappings?: Record<ClientType, ClientMapping>;
+    skillsIndex?: string[];
   },
 ): Promise<void> {
   const allCopyResults: CopyResult[] = [
@@ -1667,6 +1668,7 @@ async function persistSyncState(
     ...(extra?.vscodeState?.hash && { vscodeWorkspaceHash: extra.vscodeState.hash }),
     ...(extra?.vscodeState?.repos && { vscodeWorkspaceRepos: extra.vscodeState.repos }),
     ...(extra?.mcpTrackedServers && { mcpServers: extra.mcpTrackedServers }),
+    ...(extra?.skillsIndex && extra.skillsIndex.length > 0 && { skillsIndex: extra.skillsIndex }),
   });
 }
 
@@ -1873,6 +1875,7 @@ export async function syncWorkspace(
   // Supports both workspace.source (default base) and file-level sources
   // Skip when workspace.source was configured but validation failed (plugins still synced above)
   let workspaceFileResults: CopyResult[] = [];
+  let writtenSkillsIndexFiles: string[] = [];
   const skipWorkspaceFiles = !!config.workspace?.source && !validatedWorkspaceSource;
   if (config.workspace && !skipWorkspaceFiles) {
     sw.start('workspace-files');
@@ -1920,13 +1923,26 @@ export async function syncWorkspace(
       ? await discoverWorkspaceSkills(workspacePath, config.repositories, syncClients as string[])
       : [];
 
+    // Step 5c.1: Write skills-index files and clean up stale ones
+    let skillsIndexRefs: { repoName: string; indexPath: string }[] = [];
+    if (!dryRun) {
+      if (repoSkills.length > 0) {
+        const grouped = groupSkillsByRepo(repoSkills, config.repositories);
+        const result = writeSkillsIndex(workspacePath, grouped);
+        writtenSkillsIndexFiles = result.writtenFiles;
+        skillsIndexRefs = result.refs;
+      }
+      // Always clean up stale index files (handles case where all skills were removed)
+      cleanupSkillsIndex(workspacePath, writtenSkillsIndexFiles);
+    }
+
     // Step 5d: Copy workspace files with GitHub cache
-    // Pass repositories and skills so paths are embedded directly in WORKSPACE-RULES
+    // Pass repositories and skillsIndexRefs so conditional links are embedded in WORKSPACE-RULES
     workspaceFileResults = await copyWorkspaceFiles(
       sourcePath,
       workspacePath,
       filesToCopy,
-      { dryRun, githubCache, repositories: config.repositories, skills: repoSkills },
+      { dryRun, githubCache, repositories: config.repositories, skillsIndexRefs },
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
@@ -2101,6 +2117,7 @@ export async function syncWorkspace(
               Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
             ),
           }),
+          ...(writtenSkillsIndexFiles.length > 0 && { skillsIndex: writtenSkillsIndexFiles }),
         },
       ),
     );
