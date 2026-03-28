@@ -94,6 +94,8 @@ export function syncClaudeMcpConfig(
     configPath?: string;
     force?: boolean;
     trackedServers?: string[];
+    /** Pre-computed servers (e.g. after proxy transform) — bypasses collectMcpServers */
+    serverOverrides?: Map<string, unknown>;
   },
 ): McpMergeResult {
   const dryRun = options?.dryRun ?? false;
@@ -105,7 +107,9 @@ export function syncClaudeMcpConfig(
   const previouslyTracked = new Set(options?.trackedServers ?? []);
   const hasTracking = options?.trackedServers !== undefined;
 
-  const { servers: pluginServers, warnings } = collectMcpServers(validatedPlugins);
+  const { servers: pluginServers, warnings } = options?.serverOverrides
+    ? { servers: options.serverOverrides, warnings: [] as string[] }
+    : collectMcpServers(validatedPlugins);
 
   const result: McpMergeResult = {
     added: 0,
@@ -223,6 +227,7 @@ export async function syncClaudeMcpServersViaCli(
   options?: {
     dryRun?: boolean;
     trackedServers?: string[];
+    serverOverrides?: Map<string, unknown>;
     _mockExecute?: ExecuteFn;
   },
 ): Promise<McpMergeResult> {
@@ -232,7 +237,9 @@ export async function syncClaudeMcpServersViaCli(
   const exec: ExecuteFn =
     options?._mockExecute ?? ((binary, args) => executeCommand(binary, args));
 
-  const { servers: pluginServers, warnings } = collectMcpServers(validatedPlugins);
+  const { servers: pluginServers, warnings } = options?.serverOverrides
+    ? { servers: options.serverOverrides, warnings: [] as string[] }
+    : collectMcpServers(validatedPlugins);
 
   const result: McpMergeResult = {
     added: 0,

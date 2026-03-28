@@ -270,6 +270,23 @@ export const SyncModeSchema = z.enum(['symlink', 'copy']);
 export type SyncMode = z.infer<typeof SyncModeSchema>;
 
 /**
+ * Per-server MCP proxy override
+ */
+export const McpProxyServerSchema = z.object({
+  proxy: z.array(z.string()),
+});
+
+/**
+ * MCP proxy configuration — rewrites HTTP MCP servers to stdio via mcp-remote
+ */
+export const McpProxyConfigSchema = z.object({
+  clients: z.array(z.string()),
+  servers: z.record(McpProxyServerSchema).optional(),
+});
+
+export type McpProxyConfig = z.infer<typeof McpProxyConfigSchema>;
+
+/**
  * Complete workspace configuration (workspace.yaml)
  */
 export const WorkspaceConfigSchema = z.object({
@@ -280,6 +297,7 @@ export const WorkspaceConfigSchema = z.object({
   clients: z.array(ClientEntrySchema),
   vscode: VscodeConfigSchema.optional(),
   syncMode: SyncModeSchema.optional(),
+  mcpProxy: McpProxyConfigSchema.optional(),
   /** @deprecated Use inline skills field on plugin entry instead. Will be removed in v3. */
   disabledSkills: z.array(z.string()).optional(),
   /** @deprecated Use inline skills field on plugin entry instead. Will be removed in v3. */

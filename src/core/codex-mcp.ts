@@ -63,6 +63,7 @@ export async function syncCodexMcpServers(
   options?: {
     dryRun?: boolean;
     trackedServers?: string[];
+    serverOverrides?: Map<string, unknown>;
     _mockExecute?: ExecuteFn;
   },
 ): Promise<McpMergeResult> {
@@ -73,8 +74,9 @@ export async function syncCodexMcpServers(
     options?._mockExecute ?? ((binary, args) => executeCommand(binary, args));
 
   // Collect servers from all plugins
-  const { servers: pluginServers, warnings } =
-    collectMcpServers(validatedPlugins);
+  const { servers: pluginServers, warnings } = options?.serverOverrides
+    ? { servers: options.serverOverrides, warnings: [] as string[] }
+    : collectMcpServers(validatedPlugins);
 
   const result: McpMergeResult = {
     added: 0,
@@ -304,6 +306,8 @@ export function syncCodexProjectMcpConfig(
     configPath?: string;
     force?: boolean;
     trackedServers?: string[];
+    /** Pre-computed servers (e.g. after proxy transform) — bypasses collectMcpServers */
+    serverOverrides?: Map<string, unknown>;
   },
 ): McpMergeResult {
   const dryRun = options?.dryRun ?? false;
@@ -315,7 +319,9 @@ export function syncCodexProjectMcpConfig(
   const previouslyTracked = new Set(options?.trackedServers ?? []);
   const hasTracking = options?.trackedServers !== undefined;
 
-  const { servers: pluginServers, warnings } = collectMcpServers(validatedPlugins);
+  const { servers: pluginServers, warnings } = options?.serverOverrides
+    ? { servers: options.serverOverrides, warnings: [] as string[] }
+    : collectMcpServers(validatedPlugins);
 
   const result: McpMergeResult = {
     added: 0,

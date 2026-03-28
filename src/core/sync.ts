@@ -69,6 +69,7 @@ import {
 } from './vscode-workspace.js';
 import { setRepositories, updateRepositories, migrateWorkspaceSkillsV1toV2 } from './workspace-modify.js';
 import { syncVscodeMcpConfig, collectMcpServers } from './vscode-mcp.js';
+import { applyMcpProxy, ensureProxyMetadata, getProxyMetadataPath } from './mcp-proxy.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import { syncCodexMcpServers, syncCodexProjectMcpConfig } from './codex-mcp.js';
 import { syncClaudeMcpConfig, syncClaudeMcpServersViaCli } from './claude-mcp.js';
@@ -1963,17 +1964,42 @@ export async function syncWorkspace(
     }
   }
 
+  // MCP Proxy: prepare transform if configured
+  const mcpProxyConfig = config.mcpProxy;
+  let proxyMetadataPath: string | undefined;
+  let proxyBaseServers: Map<string, unknown> | undefined;
+  if (mcpProxyConfig) {
+    if (!dryRun) {
+      ensureProxyMetadata();
+    }
+    proxyMetadataPath = getProxyMetadataPath();
+    const { servers, warnings: proxyWarnings } = collectMcpServers(validPlugins);
+    if (proxyWarnings.length > 0) {
+      warnings.push(...proxyWarnings);
+    }
+    if (servers.size > 0) {
+      proxyBaseServers = servers;
+    }
+  }
+
+  function getServersForClient(client: string): Map<string, unknown> | undefined {
+    if (!mcpProxyConfig || !proxyMetadataPath || !proxyBaseServers) return undefined;
+    return applyMcpProxy(proxyBaseServers, client, mcpProxyConfig, proxyMetadataPath);
+  }
+
   // Step 5e: Sync MCP server configs to project-scoped .vscode/mcp.json
   sw.start('mcp-sync');
   const mcpResults: Record<string, McpMergeResult> = {};
   if (syncClients.includes('vscode')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'vscode');
     const projectMcpPath = join(workspacePath, '.vscode', 'mcp.json');
+    const vscodeMcpOverrides = getServersForClient('vscode');
     const vscodeMcp = syncVscodeMcpConfig(validPlugins, {
       dryRun,
       force: false,
       configPath: projectMcpPath,
       trackedServers: trackedMcpServers,
+      ...(vscodeMcpOverrides && { serverOverrides: vscodeMcpOverrides }),
     });
     if (vscodeMcp.warnings.length > 0) {
       warnings.push(...vscodeMcp.warnings);
@@ -1985,11 +2011,13 @@ export async function syncWorkspace(
   if (syncClients.includes('claude')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'claude');
     const projectMcpJsonPath = join(workspacePath, '.mcp.json');
+    const claudeMcpOverrides = getServersForClient('claude');
     const claudeMcp = syncClaudeMcpConfig(validPlugins, {
       dryRun,
       force: false,
       configPath: projectMcpJsonPath,
       trackedServers: trackedMcpServers,
+      ...(claudeMcpOverrides && { serverOverrides: claudeMcpOverrides }),
     });
     if (claudeMcp.warnings.length > 0) {
       warnings.push(...claudeMcp.warnings);
@@ -2001,11 +2029,13 @@ export async function syncWorkspace(
   if (syncClients.includes('codex')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'codex');
     const projectCodexConfigPath = join(workspacePath, '.codex', 'config.toml');
+    const codexMcpOverrides = getServersForClient('codex');
     const codexMcp = syncCodexProjectMcpConfig(validPlugins, {
       dryRun,
       force: false,
       configPath: projectCodexConfigPath,
       trackedServers: trackedMcpServers,
+      ...(codexMcpOverrides && { serverOverrides: codexMcpOverrides }),
     });
     if (codexMcp.warnings.length > 0) {
       warnings.push(...codexMcp.warnings);
@@ -2017,11 +2047,13 @@ export async function syncWorkspace(
   if (syncClients.includes('copilot')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'copilot');
     const projectCopilotMcpPath = join(workspacePath, '.copilot', 'mcp-config.json');
+    const copilotMcpOverrides = getServersForClient('copilot');
     const copilotMcp = syncClaudeMcpConfig(validPlugins, {
       dryRun,
       force: false,
       configPath: projectCopilotMcpPath,
       trackedServers: trackedMcpServers,
+      ...(copilotMcpOverrides && { serverOverrides: copilotMcpOverrides }),
     });
     if (copilotMcp.warnings.length > 0) {
       warnings.push(...copilotMcp.warnings);
@@ -2033,7 +2065,7 @@ export async function syncWorkspace(
 
   // Warn about clients that don't support project-scoped MCP sync
   const PROJECT_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'copilot', 'universal']);
-  const { servers: allMcpServers } = collectMcpServers(validPlugins);
+  const allMcpServers = proxyBaseServers ?? collectMcpServers(validPlugins).servers;
   if (allMcpServers.size > 0) {
     for (const client of syncClients) {
       if (!PROJECT_MCP_CLIENTS.has(client)) {
@@ -2237,12 +2269,41 @@ export async function syncUserWorkspace(
   // Count results
   const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, []);
 
+  // MCP Proxy: prepare transform if configured (user-scoped)
+  const userMcpProxyConfig = config.mcpProxy;
+  let userProxyMetadataPath: string | undefined;
+  let userProxyBaseServers: Map<string, unknown> | undefined;
+  if (userMcpProxyConfig) {
+    if (!dryRun) {
+      ensureProxyMetadata();
+    }
+    userProxyMetadataPath = getProxyMetadataPath();
+    const { servers, warnings: proxyWarnings } = collectMcpServers(validPlugins);
+    if (proxyWarnings.length > 0) {
+      warnings.push(...proxyWarnings);
+    }
+    if (servers.size > 0) {
+      userProxyBaseServers = servers;
+    }
+  }
+
+  function getUserServersForClient(client: string): Map<string, unknown> | undefined {
+    if (!userMcpProxyConfig || !userProxyMetadataPath || !userProxyBaseServers) return undefined;
+    return applyMcpProxy(userProxyBaseServers, client, userMcpProxyConfig, userProxyMetadataPath);
+  }
+
   // Sync MCP server configs to VS Code if vscode client is configured
   sw.start('mcp-sync');
   const mcpResults: Record<string, McpMergeResult> = {};
   if (syncClients.includes('vscode')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'vscode');
-    const vscodeMcp = syncVscodeMcpConfig(validPlugins, { dryRun, force, trackedServers: trackedMcpServers });
+    const vscodeMcpOverrides = getUserServersForClient('vscode');
+    const vscodeMcp = syncVscodeMcpConfig(validPlugins, {
+      dryRun,
+      force,
+      trackedServers: trackedMcpServers,
+      ...(vscodeMcpOverrides && { serverOverrides: vscodeMcpOverrides }),
+    });
     if (vscodeMcp.warnings.length > 0) {
       warnings.push(...vscodeMcp.warnings);
     }
@@ -2252,7 +2313,12 @@ export async function syncUserWorkspace(
   // Sync MCP servers to Codex CLI if codex client is configured
   if (syncClients.includes('codex')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'codex');
-    const codexMcp = await syncCodexMcpServers(validPlugins, { dryRun, trackedServers: trackedMcpServers });
+    const codexMcpOverrides = getUserServersForClient('codex');
+    const codexMcp = await syncCodexMcpServers(validPlugins, {
+      dryRun,
+      trackedServers: trackedMcpServers,
+      ...(codexMcpOverrides && { serverOverrides: codexMcpOverrides }),
+    });
     if (codexMcp.warnings.length > 0) {
       warnings.push(...codexMcp.warnings);
     }
@@ -2262,7 +2328,12 @@ export async function syncUserWorkspace(
   // Sync MCP servers to Claude Code via CLI if claude client is configured
   if (syncClients.includes('claude')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'claude');
-    const claudeMcp = await syncClaudeMcpServersViaCli(validPlugins, { dryRun, trackedServers: trackedMcpServers });
+    const claudeMcpOverrides = getUserServersForClient('claude');
+    const claudeMcp = await syncClaudeMcpServersViaCli(validPlugins, {
+      dryRun,
+      trackedServers: trackedMcpServers,
+      ...(claudeMcpOverrides && { serverOverrides: claudeMcpOverrides }),
+    });
     if (claudeMcp.warnings.length > 0) {
       warnings.push(...claudeMcp.warnings);
     }
@@ -2273,11 +2344,13 @@ export async function syncUserWorkspace(
   if (syncClients.includes('copilot')) {
     const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'copilot');
     const copilotMcpPath = getCopilotMcpConfigPath();
+    const copilotMcpOverrides = getUserServersForClient('copilot');
     const copilotMcp = syncClaudeMcpConfig(validPlugins, {
       dryRun,
       force,
       configPath: copilotMcpPath,
       trackedServers: trackedMcpServers,
+      ...(copilotMcpOverrides && { serverOverrides: copilotMcpOverrides }),
     });
     if (copilotMcp.warnings.length > 0) {
       warnings.push(...copilotMcp.warnings);
@@ -2289,7 +2362,7 @@ export async function syncUserWorkspace(
 
   // Warn about clients that don't support user-scoped MCP sync
   const USER_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'copilot', 'universal']);
-  const { servers: allUserMcpServers } = collectMcpServers(validPlugins);
+  const allUserMcpServers = userProxyBaseServers ?? collectMcpServers(validPlugins).servers;
   if (allUserMcpServers.size > 0) {
     for (const client of syncClients) {
       if (!USER_MCP_CLIENTS.has(client)) {
