@@ -7,7 +7,7 @@ import { ensureWorkspace, type ModifyResult } from './workspace-modify.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { WorkspaceConfig, Repository, ClientType } from '../models/workspace-config.js';
-import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from './repo-skills.js';
+import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo, toSkillsIndexRefs } from './repo-skills.js';
 
 /**
  * Detect source platform and owner/repo from a git remote at the given path.
@@ -196,10 +196,7 @@ export async function updateAgentFiles(
   cleanupSkillsIndex(workspacePath, writtenFiles);
 
   // Build refs for WORKSPACE-RULES conditional links
-  const skillsIndexRefs = writtenFiles.map((f) => {
-    const repoName = f.replace('skills-index/', '').replace('.md', '');
-    return { repoName, indexPath: `.allagents/${f}` };
-  });
+  const skillsIndexRefs = toSkillsIndexRefs(writtenFiles);
 
   // Collect unique agent files from configured clients
   const agentFiles = new Set<string>();

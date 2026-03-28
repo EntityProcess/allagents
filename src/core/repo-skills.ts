@@ -271,3 +271,16 @@ export function groupSkillsByRepo(
 
   return grouped;
 }
+
+/**
+ * Convert written skills-index file paths to SkillsIndexRef entries
+ * for embedding in WORKSPACE-RULES.
+ */
+export function toSkillsIndexRefs(
+  writtenFiles: string[],
+): { repoName: string; indexPath: string }[] {
+  return writtenFiles.map((f) => {
+    const repoName = f.replace('skills-index/', '').replace('.md', '');
+    return { repoName, indexPath: `.allagents/${f}` };
+  });
+}

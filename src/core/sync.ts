@@ -34,7 +34,7 @@ import {
   type CopyResult,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
-import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from './repo-skills.js';
+import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo, toSkillsIndexRefs } from './repo-skills.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient, resolveClientMappings } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import {
@@ -1925,14 +1925,14 @@ export async function syncWorkspace(
 
     // Step 5c.1: Write skills-index files and clean up stale ones
     let skillsIndexRefs: { repoName: string; indexPath: string }[] = [];
-    if (repoSkills.length > 0 && !dryRun) {
-      const grouped = groupSkillsByRepo(repoSkills, config.repositories);
-      writtenSkillsIndexFiles = writeSkillsIndex(workspacePath, grouped);
+    if (!dryRun) {
+      if (repoSkills.length > 0) {
+        const grouped = groupSkillsByRepo(repoSkills, config.repositories);
+        writtenSkillsIndexFiles = writeSkillsIndex(workspacePath, grouped);
+        skillsIndexRefs = toSkillsIndexRefs(writtenSkillsIndexFiles);
+      }
+      // Always clean up stale index files (handles case where all skills were removed)
       cleanupSkillsIndex(workspacePath, writtenSkillsIndexFiles);
-      skillsIndexRefs = writtenSkillsIndexFiles.map((f) => {
-        const repoName = f.replace('skills-index/', '').replace('.md', '');
-        return { repoName, indexPath: `.allagents/${f}` };
-      });
     }
 
     // Step 5d: Copy workspace files with GitHub cache
