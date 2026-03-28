@@ -122,7 +122,7 @@ export async function discoverWorkspaceSkills(
   const skillsByName = new Map<string, WorkspaceSkillEntry & { fileSize: number }>();
 
   for (const repo of repositories) {
-    if (repo.skills === false) continue;
+    if (repo.skills === false || repo.skills === undefined) continue;
 
     const repoAbsPath = resolve(workspacePath, repo.path);
     const discoverOpts = Array.isArray(repo.skills)

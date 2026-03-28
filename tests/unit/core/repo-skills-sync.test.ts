@@ -34,7 +34,7 @@ describe('updateAgentFiles with skills', () => {
 
     writeFileSync(
       join(workspaceDir, '.allagents', 'workspace.yaml'),
-      'repositories:\n  - path: ./my-repo\nplugins: []\nclients:\n  - claude\n',
+      'repositories:\n  - path: ./my-repo\n    skills: true\nplugins: []\nclients:\n  - claude\n',
     );
 
     await updateAgentFiles(workspaceDir);
@@ -95,7 +95,7 @@ describe('updateAgentFiles with skills', () => {
 
     writeFileSync(
       join(workspaceDir, '.allagents', 'workspace.yaml'),
-      'repositories:\n  - path: ./my-repo\n  - path: ./repo2\nplugins: []\nclients:\n  - claude\n',
+      'repositories:\n  - path: ./my-repo\n    skills: true\n  - path: ./repo2\n    skills: true\nplugins: []\nclients:\n  - claude\n',
     );
 
     await updateAgentFiles(workspaceDir);
@@ -112,7 +112,7 @@ describe('updateAgentFiles with skills', () => {
 
     writeFileSync(
       join(workspaceDir, '.allagents', 'workspace.yaml'),
-      'repositories:\n  - path: ./my-repo\nplugins: []\nclients:\n  - claude\n',
+      'repositories:\n  - path: ./my-repo\n    skills: true\nplugins: []\nclients:\n  - claude\n',
     );
 
     await updateAgentFiles(workspaceDir);
@@ -145,7 +145,7 @@ describe('discoverWorkspaceSkills deduplication', () => {
 
     const results = await discoverWorkspaceSkills(
       workspaceDir,
-      [{ path: './repo1' }, { path: './repo2' }],
+      [{ path: './repo1', skills: true }, { path: './repo2', skills: true }],
       ['claude', 'universal'],
     );
 
@@ -169,7 +169,7 @@ describe('discoverWorkspaceSkills deduplication', () => {
 
     const results = await discoverWorkspaceSkills(
       workspaceDir,
-      [{ path: './repo1' }, { path: './repo2' }],
+      [{ path: './repo1', skills: true }, { path: './repo2', skills: true }],
       ['claude'],
     );
 
@@ -187,7 +187,7 @@ describe('discoverWorkspaceSkills deduplication', () => {
 
     const results = await discoverWorkspaceSkills(
       workspaceDir,
-      [{ path: './repo1' }, { path: './repo2' }],
+      [{ path: './repo1', skills: true }, { path: './repo2', skills: true }],
       ['claude'],
     );
 

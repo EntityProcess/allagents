@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { discoverRepoSkills } from '../../../src/core/repo-skills.js';
+import { discoverRepoSkills, discoverWorkspaceSkills } from '../../../src/core/repo-skills.js';
 
 function makeSkill(dir: string, name: string, description: string) {
   const skillDir = join(dir, name);
@@ -119,5 +119,44 @@ describe('discoverRepoSkills', () => {
     });
 
     expect(results).toEqual([]);
+  });
+});
+
+describe('discoverWorkspaceSkills opt-in', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'skills-optin-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('skips repos where skills is undefined (opt-in)', async () => {
+    const repoDir = join(tmpDir, 'my-repo');
+    makeSkill(join(repoDir, '.claude', 'skills'), 'some-skill', 'A skill');
+
+    const results = await discoverWorkspaceSkills(
+      tmpDir,
+      [{ path: './my-repo' }],
+      ['claude'],
+    );
+
+    expect(results).toEqual([]);
+  });
+
+  it('discovers skills when skills: true', async () => {
+    const repoDir = join(tmpDir, 'my-repo');
+    makeSkill(join(repoDir, '.claude', 'skills'), 'some-skill', 'A skill');
+
+    const results = await discoverWorkspaceSkills(
+      tmpDir,
+      [{ path: './my-repo', skills: true }],
+      ['claude'],
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('some-skill');
   });
 });
