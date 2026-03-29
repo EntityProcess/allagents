@@ -12,6 +12,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'AllAgents',
+      disable404Route: true,
       description: 'CLI tool for managing AI coding assistant plugins across multiple clients.',
       favicon: '/favicon.svg',
       customCss: ['./src/styles/custom.css'],
