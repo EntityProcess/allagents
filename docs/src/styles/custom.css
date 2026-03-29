@@ -39,15 +39,3 @@ starlight-theme-select {
 .expressive-code {
   margin: 1.5rem 0;
 }
-
-html:has(.lander) .sidebar {
-  display: none;
-}
-
-html:has(.lander) main {
-  margin-inline-start: 0;
-}
-
-html:has(.lander) .content-panel {
-  max-width: none;
-}
