@@ -15,24 +15,21 @@ export default defineConfig({
       description: 'CLI tool for managing AI coding assistant plugins across multiple clients.',
       favicon: '/favicon.svg',
       customCss: ['./src/styles/custom.css'],
-      components: {
-        Hero: './src/components/Hero.astro',
-      },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/EntityProcess/allagents' },
       ],
       sidebar: [
         {
           label: 'Getting Started',
-          autogenerate: { directory: 'getting-started' },
+          autogenerate: { directory: 'docs/getting-started' },
         },
         {
           label: 'Guides',
-          autogenerate: { directory: 'guides' },
+          autogenerate: { directory: 'docs/guides' },
         },
         {
           label: 'Reference',
-          autogenerate: { directory: 'reference' },
+          autogenerate: { directory: 'docs/reference' },
         },
       ],
     }),

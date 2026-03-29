@@ -53,7 +53,7 @@ After sync:
 ```
 
 :::note
-This rename-based deduplication applies to **plugin skills** (copied to `.claude/skills/`). **Repository skills** embedded in the WORKSPACE-RULES index use a different strategy — they pick a single winner rather than keeping all copies. See [Repository Skill Discovery](/reference/configuration/#repository-skill-discovery) for details.
+This rename-based deduplication applies to **plugin skills** (copied to `.claude/skills/`). **Repository skills** embedded in the WORKSPACE-RULES index use a different strategy — they pick a single winner rather than keeping all copies. See [Repository Skill Discovery](/docs/reference/configuration/#repository-skill-discovery) for details.
 :::
 
 ## Adding Skills
@@ -68,7 +68,7 @@ allagents skills add reddit --from ReScienceLab/opc-skills
 allagents skills add https://github.com/owner/repo/tree/main/skills/my-skill
 ```
 
-This installs the plugin and enables only the specified skill. See the [CLI reference](/reference/cli/#plugin-skills-add) for all source formats.
+This installs the plugin and enables only the specified skill. See the [CLI reference](/docs/reference/cli/#plugin-skills-add) for all source formats.
 
 ## Disabling Individual Skills
 

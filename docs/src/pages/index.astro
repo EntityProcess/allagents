@@ -1,0 +1,21 @@
+---
+import Lander from '../components/Lander.astro';
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AllAgents - All your AI assistants. One plugin system.</title>
+    <meta name="description" content="Write plugins once, sync to Claude Code, GitHub Copilot, Cursor, and more. Manage multi-repo workspaces with declarative configuration." />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html { background: #0f1117; }
+      body { min-height: 100vh; font-family: system-ui, -apple-system, sans-serif; --sl-font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace; }
+    </style>
+  </head>
+  <body>
+    <Lander />
+  </body>
+</html>
