@@ -159,4 +159,18 @@ describe('discoverWorkspaceSkills opt-in', () => {
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe('some-skill');
   });
+
+  it('does not produce double slashes when repo path has trailing slash', async () => {
+    const repoDir = join(tmpDir, 'my-repo');
+    makeSkill(join(repoDir, '.claude', 'skills'), 'some-skill', 'A skill');
+
+    const results = await discoverWorkspaceSkills(
+      tmpDir,
+      [{ path: './my-repo/', skills: true }],
+      ['claude'],
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0].location).not.toContain('//');
+  });
 });

@@ -137,7 +137,8 @@ export async function discoverWorkspaceSkills(
     const repoSkills = await discoverRepoSkills(repoAbsPath, discoverOpts);
     for (const skill of repoSkills) {
       // Use forward slashes for consistent cross-platform paths
-      const location = `${repo.path}/${skill.relativePath}`.replace(/\\/g, '/');
+      const base = repo.path.replace(/[/\\]+$/, '');
+      const location = `${base}/${skill.relativePath}`.replace(/\\/g, '/');
       const candidate = {
         repoPath: repo.path,
         name: skill.name,
