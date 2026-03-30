@@ -1,0 +1,115 @@
+---
+title: MCP Proxy
+description: Transparently proxy HTTP MCP servers through mcp-remote for clients that need stdio transport.
+---
+
+Some MCP servers use HTTP transport with OAuth authentication, but not every AI client supports HTTP natively. The MCP proxy feature rewrites HTTP server configs to use [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) as a local stdio bridge, so all clients connect through an already-authenticated proxy.
+
+## Why Use MCP Proxy
+
+- **OAuth handled once** — `mcp-remote` manages OAuth flows and caches tokens in `~/.mcp-auth/`
+- **Stdio everywhere** — clients that only support stdio can connect to HTTP servers
+- **Transparent** — configure which clients need proxying and AllAgents rewrites configs automatically during sync
+
+## Configuration
+
+Add an `mcpProxy` section to your `workspace.yaml`:
+
+```yaml
+mcpProxy:
+  clients:
+    - claude
+    - copilot
+  servers:
+    my-internal-api:
+      proxy:
+        - codex
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `clients` | Yes | Default list of clients where all HTTP servers are proxied |
+| `servers` | No | Per-server overrides |
+| `servers.<name>.proxy` | Yes (if server entry exists) | Additional clients to proxy this specific server for |
+
+### How It Works
+
+1. During `allagents update`, AllAgents collects MCP servers from installed plugins
+2. For each server + client pair, it checks if proxying is needed:
+   - Is the client listed in `mcpProxy.clients`?
+   - Is there a per-server override in `mcpProxy.servers.<name>.proxy` that includes this client?
+3. If yes **and** the server uses HTTP transport (has a `url` field), the config is rewritten to use `mcp-remote` via stdio
+4. Stdio servers are never transformed — they pass through unchanged
+
+### Transform Example
+
+A plugin provides an HTTP MCP server:
+
+```json
+{
+  "knowledge-base": {
+    "url": "https://knowledge.mcp.example.com"
+  }
+}
+```
+
+With `mcpProxy.clients: [claude]`, the synced config for Claude becomes:
+
+```json
+{
+  "knowledge-base": {
+    "command": "npx",
+    "args": [
+      "mcp-remote",
+      "https://knowledge.mcp.example.com",
+      "--http",
+      "--static-oauth-client-metadata",
+      "@~/.allagents/mcp-remote/mcp-metadata-settings.json"
+    ]
+  }
+}
+```
+
+Other clients not listed in `mcpProxy.clients` receive the original HTTP config unchanged.
+
+## Per-Server Overrides
+
+The `servers` map lets you proxy specific servers for additional clients beyond the default list:
+
+```yaml
+mcpProxy:
+  clients:
+    - claude
+  servers:
+    my-internal-api:
+      proxy:
+        - codex
+        - copilot
+```
+
+In this example:
+- **All HTTP servers** are proxied for `claude` (from the default `clients` list)
+- **Only `my-internal-api`** is additionally proxied for `codex` and `copilot`
+
+Per-server `proxy` lists are additive — they extend the default `clients`, not replace them.
+
+## Metadata File
+
+AllAgents automatically creates a metadata file at `~/.allagents/mcp-remote/mcp-metadata-settings.json` on first sync. This file is passed to `mcp-remote` via the `--static-oauth-client-metadata` flag and contains:
+
+```json
+{
+  "client_uri": "http://localhost"
+}
+```
+
+The file is created once and never overwritten, so you can customize it if needed.
+
+## Scope
+
+MCP proxy works with both project-scoped and user-scoped syncs:
+
+- **Project scope** — rewrites servers in project-level MCP config files (`.mcp.json`, `.vscode/mcp.json`, `.copilot/mcp-config.json`)
+- **User scope** — rewrites servers synced via CLI commands (`claude mcp add`, `codex mcp add`)

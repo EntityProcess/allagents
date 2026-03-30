@@ -149,6 +149,29 @@ When multiple repositories (or multiple client paths within the same repo) conta
 
 This differs from [plugin skill deduplication](/docs/guides/plugins/#duplicate-skill-handling), which keeps all copies and renames them for uniqueness. Repository skills are an index of pointers, so only the best source is kept.
 
+## MCP Proxy
+
+The optional `mcpProxy` section rewrites HTTP MCP servers to stdio via [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) for clients that need it. See the [MCP Proxy guide](/docs/guides/mcp-proxy/) for details.
+
+```yaml
+mcpProxy:
+  clients:
+    - claude
+    - copilot
+  servers:
+    my-internal-api:
+      proxy:
+        - codex
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `clients` | Yes | Clients where all HTTP servers are proxied to stdio |
+| `servers` | No | Per-server overrides with additional client lists |
+| `servers.<name>.proxy` | Yes (per entry) | Additional clients to proxy this specific server for |
+
+Only servers with HTTP transport (`url` field) are transformed. Stdio servers pass through unchanged.
+
 ## VSCode Configuration
 
 The optional `vscode` section controls `.code-workspace` file generation when `vscode` is in the `clients` list.
