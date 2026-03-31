@@ -41,9 +41,20 @@ export function shouldPull(managed: ManagedMode | undefined): boolean {
 }
 
 /**
+ * Validate that a repo identifier looks safe (no shell/git argument injection).
+ * Allows alphanumeric, hyphens, underscores, dots, and forward slashes.
+ */
+export function isValidRepo(repo: string): boolean {
+  return /^[\w.\-/]+$/.test(repo);
+}
+
+/**
  * Build a clone URL from source platform and owner/repo.
  */
 export function buildCloneUrl(source: string, repo: string): string {
+  if (!isValidRepo(repo)) {
+    throw new Error(`Invalid repo identifier: ${repo}`);
+  }
   switch (source) {
     case 'github':
       return `https://github.com/${repo}.git`;
@@ -106,9 +117,9 @@ async function pullRepo(repoPath: string, branch?: string): Promise<string | und
 export async function processManagedRepos(
   repositories: Repository[],
   workspacePath: string,
-  options: { offline?: boolean; skipManaged?: boolean } = {},
+  options: { offline?: boolean; skipManaged?: boolean; dryRun?: boolean } = {},
 ): Promise<ManagedRepoResult[]> {
-  if (options.skipManaged || options.offline) return [];
+  if (options.skipManaged || options.offline || options.dryRun) return [];
 
   const managed = repositories.filter((r) => r.managed);
   if (managed.length === 0) return [];

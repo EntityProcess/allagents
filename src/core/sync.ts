@@ -203,6 +203,10 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
     ...(mcpResults && { mcpResults }),
     ...(nativeResult && { nativeResult }),
+    ...(() => {
+      const managedRepoResults = [...(a.managedRepoResults || []), ...(b.managedRepoResults || [])];
+      return managedRepoResults.length > 0 ? { managedRepoResults } : {};
+    })(),
     ...(mergeTiming(a.timing, b.timing)),
   };
 }
@@ -1732,7 +1736,7 @@ export async function syncWorkspace(
 
   // Step 0a: Process managed repositories (clone/pull) before anything else
   const managedRepoResults = await sw.measure('managed-repos', () =>
-    processManagedRepos(config.repositories ?? [], workspacePath, { offline, skipManaged }),
+    processManagedRepos(config.repositories ?? [], workspacePath, { offline, skipManaged, dryRun }),
   );
   const managedWarnings = managedRepoResults
     .filter((r) => r.error)
