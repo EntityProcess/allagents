@@ -409,6 +409,42 @@
       link.rel = 'stylesheet';
       link.href = '/pagefind/pagefind-ui.css';
       document.head.appendChild(link);
+      // Dark theme overrides (must be global, not Astro-scoped)
+      const darkStyles = document.createElement('style');
+      darkStyles.textContent = `
+        .aa-search-dialog-frame .pagefind-ui__search-input {
+          color: #f8fafc !important;
+          background: #1e293b !important;
+        }
+        .aa-search-dialog-frame .pagefind-ui__search-input::placeholder {
+          color: #64748b !important;
+        }
+        .aa-search-dialog-frame .pagefind-ui__search-clear {
+          color: #94a3b8 !important;
+          background: transparent !important;
+        }
+        .aa-search-dialog-frame .pagefind-ui__result-link {
+          color: #c7d2fe !important;
+        }
+        .aa-search-dialog-frame .pagefind-ui__result-excerpt {
+          color: #94a3b8 !important;
+        }
+        .aa-search-dialog-frame .pagefind-ui__result-title {
+          background: #0f172a !important;
+        }
+        .aa-search-dialog-frame .pagefind-ui__result-nested {
+          background: #0f172a !important;
+        }
+        .aa-search-dialog-frame .pagefind-ui__message {
+          color: #94a3b8 !important;
+        }
+        .aa-search-dialog-frame mark {
+          color: #f8fafc !important;
+          background-color: rgba(99, 102, 241, 0.3) !important;
+          font-weight: 600;
+        }
+      `;
+      document.head.appendChild(darkStyles);
       const script = document.createElement('script');
       script.src = '/pagefind/pagefind-ui.js';
       script.onload = () => {
@@ -624,7 +660,18 @@
     border-radius: 0.75rem;
     padding: 1.5rem;
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+
+    --pagefind-ui-scale: 0.9;
+    --pagefind-ui-primary: #e2e8f0;
+    --pagefind-ui-text: #cbd5e1;
+    --pagefind-ui-background: #1e293b;
+    --pagefind-ui-border: rgba(255, 255, 255, 0.12);
+    --pagefind-ui-tag: #334155;
+    --pagefind-ui-border-width: 1px;
+    --pagefind-ui-border-radius: 0.5rem;
+    --pagefind-ui-font: system-ui, -apple-system, sans-serif;
   }
+
 
   @media (max-width: 480px) {
     .aa-nav-search {
