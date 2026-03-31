@@ -1,6 +1,19 @@
 import { z } from 'zod';
 
 /**
+ * Managed mode for repositories:
+ * - false (default): user manages the repo, allagents does not clone or pull
+ * - 'clone': clone if path doesn't exist, never pull
+ * - true | 'sync': clone if path doesn't exist, pull latest on every sync
+ */
+export const ManagedModeSchema = z.union([
+  z.boolean(),
+  z.enum(['clone', 'sync']),
+]);
+
+export type ManagedMode = z.infer<typeof ManagedModeSchema>;
+
+/**
  * Repository definition in workspace.yaml
  */
 export const RepositorySchema = z.object({
@@ -10,6 +23,8 @@ export const RepositorySchema = z.object({
   repo: z.string().optional(),
   description: z.string().optional(),
   skills: z.union([z.boolean(), z.array(z.string())]).optional(),
+  managed: ManagedModeSchema.optional(),
+  branch: z.string().optional(),
 });
 
 export type Repository = z.infer<typeof RepositorySchema>;

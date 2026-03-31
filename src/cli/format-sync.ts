@@ -2,6 +2,7 @@ import type { NativeSyncResult } from '../core/native/types.js';
 import type { SyncResult, DeletedArtifact, PluginSyncResult } from '../core/sync.js';
 import type { CopyResult } from '../core/transform.js';
 import type { McpMergeResult } from '../core/vscode-mcp.js';
+import type { ManagedRepoResult } from '../core/managed-repos.js';
 import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, getDisplayName } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 
@@ -409,5 +410,33 @@ export function buildSyncData(result: SyncResult) {
         marketplacesAdded: result.nativeResult.marketplacesAdded,
       },
     }),
+    ...(result.managedRepoResults && result.managedRepoResults.length > 0 && {
+      managedRepos: result.managedRepoResults.map((r) => ({
+        repo: r.repo,
+        path: r.path,
+        action: r.action,
+        ...(r.error && { error: r.error }),
+      })),
+    }),
   };
+}
+
+/**
+ * Format managed repository results for display.
+ */
+export function formatManagedRepoResults(results: ManagedRepoResult[]): string[] {
+  const actionResults = results.filter((r) => r.action !== 'skipped' || r.error);
+  if (actionResults.length === 0) return [];
+
+  const lines: string[] = ['Repositories:'];
+  for (const r of actionResults) {
+    if (r.action === 'cloned') {
+      lines.push(`  \u2713 Cloned ${r.repo} \u2192 ${r.path}`);
+    } else if (r.action === 'pulled') {
+      lines.push(`  \u2713 Pulled ${r.repo}`);
+    } else if (r.error) {
+      lines.push(`  \u2717 ${r.repo}: ${r.error}`);
+    }
+  }
+  return lines;
 }
