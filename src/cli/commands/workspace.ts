@@ -13,7 +13,7 @@ import { buildDescription, conciseSubcommands } from '../help.js';
 import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
 import { ClientTypeSchema, InstallModeSchema, ClientEntrySchema, type ClientEntry } from '../../models/workspace-config.js';
 import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
-import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary, formatSyncHeader, formatPluginHeader } from '../format-sync.js';
+import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary, formatSyncHeader, formatPluginHeader, formatManagedRepoResults } from '../format-sync.js';
 
 
 // =============================================================================
@@ -144,8 +144,9 @@ const syncCmd = command({
     dryRun: flag({ long: 'dry-run', short: 'n', description: 'Simulate sync without making changes' }),
     force: flag({ long: 'force', short: 'f', description: 'Overwrite existing MCP server entries that differ from plugin config' }),
     verbose: flag({ long: 'verbose', short: 'v', description: 'Show informational sync messages' }),
+    noManaged: flag({ long: 'no-managed', description: 'Skip managed repository clone/pull operations' }),
   },
-  handler: async ({ offline, dryRun, force, verbose }) => {
+  handler: async ({ offline, dryRun, force, verbose, noManaged }) => {
     try {
       if (!isJsonMode() && dryRun) {
         console.log('Dry run mode - no changes will be made\n');
@@ -183,6 +184,7 @@ const syncCmd = command({
         const projectResult = await syncWorkspace(process.cwd(), {
           offline,
           dryRun,
+          skipManaged: noManaged,
         });
         combined = combined ? mergeSyncResults(combined, projectResult) : projectResult;
       }
@@ -213,6 +215,14 @@ const syncCmd = command({
           for (const path of purgePath.paths) {
             console.log(`    - ${path}`);
           }
+        }
+        console.log('');
+      }
+
+      // Print managed repo results
+      if (result.managedRepoResults && result.managedRepoResults.length > 0) {
+        for (const line of formatManagedRepoResults(result.managedRepoResults)) {
+          console.log(line);
         }
         console.log('');
       }

@@ -76,6 +76,7 @@ import { syncClaudeMcpConfig, syncClaudeMcpServersViaCli } from './claude-mcp.js
 import { getCopilotMcpConfigPath } from './copilot-mcp.js';
 import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
 import { Stopwatch } from '../utils/stopwatch.js';
+import { processManagedRepos } from './managed-repos.js';
 
 /**
  * Result of deduplicating clients by skillsPath
@@ -165,6 +166,8 @@ export interface SyncResult {
   nativeResult?: NativeSyncResult;
   /** Timing data for sync steps (when available) */
   timing?: { totalMs: number; steps: Array<{ label: string; durationMs: number; detail?: string }> };
+  /** Results of managed repository clone/pull operations */
+  managedRepoResults?: import('./managed-repos.js').ManagedRepoResult[];
 }
 
 /**
@@ -200,6 +203,10 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
     ...(mcpResults && { mcpResults }),
     ...(nativeResult && { nativeResult }),
+    ...(() => {
+      const managedRepoResults = [...(a.managedRepoResults || []), ...(b.managedRepoResults || [])];
+      return managedRepoResults.length > 0 ? { managedRepoResults } : {};
+    })(),
     ...(mergeTiming(a.timing, b.timing)),
   };
 }
@@ -248,6 +255,8 @@ export interface SyncOptions {
   workspaceSourceBase?: string;
   /** Skip updating AGENTS.md and other generated agent files. Use for plugin-only updates. */
   skipAgentFiles?: boolean;
+  /** Skip managed repository clone/pull operations */
+  skipManaged?: boolean;
 }
 
 /**
@@ -1692,7 +1701,7 @@ export async function syncWorkspace(
   // MIGRATION: v1→v2 - remove after v3 release
   await migrateWorkspaceSkillsV1toV2(workspacePath);
 
-  const { offline = false, dryRun = false, workspaceSourceBase, skipAgentFiles = false } = options;
+  const { offline = false, dryRun = false, workspaceSourceBase, skipAgentFiles = false, skipManaged = false } = options;
   const sw = new Stopwatch();
   const configDir = join(workspacePath, CONFIG_DIR);
   const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
@@ -1724,6 +1733,14 @@ export async function syncWorkspace(
   for (const name of overrides) {
     console.warn(`Warning: Workspace marketplace '${name}' overrides user marketplace of the same name.`);
   }
+
+  // Step 0a: Process managed repositories (clone/pull) before anything else
+  const managedRepoResults = await sw.measure('managed-repos', () =>
+    processManagedRepos(config.repositories ?? [], workspacePath, { offline, skipManaged, dryRun }),
+  );
+  const managedWarnings = managedRepoResults
+    .filter((r) => r.error)
+    .map((r) => `${r.repo}: ${r.error}`);
 
   // Check if repositories are configured — when empty/absent, skip agent file
   // creation and WORKSPACE-RULES injection (same pattern as initWorkspace)
@@ -1795,6 +1812,7 @@ export async function syncWorkspace(
   const failedValidations = validatedPlugins.filter((v) => !v.success);
   const validPlugins = validatedPlugins.filter((v) => v.success);
   const warnings = [
+    ...managedWarnings,
     ...planWarnings,
     ...workspaceSourceWarnings,
     ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
@@ -2136,6 +2154,7 @@ export async function syncWorkspace(
     ...(messages.length > 0 && { messages }),
     ...(Object.keys(mcpResults).length > 0 && { mcpResults }),
     ...(nativeResult && { nativeResult }),
+    ...(managedRepoResults.length > 0 && { managedRepoResults }),
     timing: sw.toJSON(),
   };
 }

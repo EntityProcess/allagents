@@ -1,10 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, setDefaultTimeout } from 'bun:test';
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncWorkspace, purgeWorkspace, getPurgePaths } from '../../../src/core/sync.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
+
+// syncWorkspace does real filesystem I/O across multiple temp dirs;
+// under parallel CI load (lint + typecheck + test) the default 5s can be tight.
+setDefaultTimeout(15_000);
 
 describe('sync', () => {
   let testDir: string;
