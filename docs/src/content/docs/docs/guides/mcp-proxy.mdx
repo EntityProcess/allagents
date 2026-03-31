@@ -107,9 +107,29 @@ AllAgents automatically creates a metadata file at `~/.allagents/mcp-remote/mcp-
 
 The file is created once and never overwritten, so you can customize it if needed.
 
+## Prerequisites
+
+The proxy uses `npx mcp-remote` to launch the bridge process. Because it runs through `npx`, there is nothing to install — `npx` downloads `mcp-remote` automatically on first use and caches it for subsequent runs. The only requirement is Node.js (which provides `npx`).
+
+:::note
+The first time a proxied server starts, `npx` fetches `mcp-remote` from npm, which may add a few seconds of delay. Subsequent launches use the cached package and start immediately.
+:::
+
 ## Scope
 
-MCP proxy works with both project-scoped and user-scoped syncs:
+MCP proxy works with both project-scoped and user-scoped syncs.
 
-- **Project scope** — rewrites servers in project-level MCP config files (`.mcp.json`, `.vscode/mcp.json`, `.copilot/mcp-config.json`)
-- **User scope** — rewrites servers synced via CLI commands (`claude mcp add`, `codex mcp add`)
+### Project Scope
+
+During `allagents update`, proxied servers are written to each client's project-level MCP config file:
+
+| Client | Config File |
+|--------|------------|
+| Claude | `.mcp.json` |
+| VS Code | `.vscode/mcp.json` |
+| Copilot | `.copilot/mcp-config.json` |
+| Codex | `.codex/config.toml` |
+
+### User Scope
+
+When using `--scope user`, proxied servers are synced via client CLI commands (`claude mcp add`, `codex mcp add`) to user-level config, making them available across all projects.
