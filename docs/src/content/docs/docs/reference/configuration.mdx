@@ -34,50 +34,63 @@ repositories:
 
 plugins:
   - code-review@claude-plugins-official
+  - name: superpowers@obra/superpowers
+    skills:                                # Allowlist: only sync these skills
+      - brainstorming
+      - test-driven-development
+  - name: my-plugin@my-org/my-plugin
+    skills:                                # Blocklist: sync all except these
+      exclude:
+        - verbose-logging
 
 clients:
   - claude
   - copilot
   - cursor
-
-# Disabled skills (optional)
-disabledSkills:
-  - superpowers:brainstorming
-  - my-plugin:verbose-logging
 ```
 
-### Disabled Skills
+### Plugin Skills
 
-The `disabledSkills` array lists skills that should be excluded from sync. Each entry uses the format `plugin:skill` where `plugin` is the plugin name and `skill` is the skill folder name.
+Control which skills are synced per plugin using the inline `skills` field on plugin entries:
 
 ```yaml
-disabledSkills:
-  - superpowers:brainstorming    # Disable brainstorming from superpowers plugin
-  - my-plugin:verbose-logging    # Disable verbose-logging from my-plugin
+plugins:
+  # All skills (default — no skills field needed)
+  - code-review@claude-plugins-official
+
+  # Allowlist — only sync these skills
+  - name: superpowers@obra/superpowers
+    skills:
+      - brainstorming
+      - test-driven-development
+
+  # Blocklist — sync all except these
+  - name: my-plugin@my-org/my-plugin
+    skills:
+      exclude:
+        - verbose-logging
 ```
 
-Disabled skills are managed via the CLI:
-- `allagents plugin skills remove <skill>` - Add to disabledSkills
-- `allagents plugin skills add <skill>` - Remove from disabledSkills
-- `allagents plugin skills list` - View all skills with status
+| Format | Behavior |
+|--------|----------|
+| omitted | All skills synced |
+| `string[]` (allowlist) | Only listed skills are synced |
+| `{ exclude: string[] }` (blocklist) | All skills except listed ones are synced |
 
-### Enabled Skills
+Skills are managed via the CLI:
+- `allagents plugin skills remove <skill>` — disable a skill
+- `allagents plugin skills add <skill>` — enable a skill
+- `allagents plugin skills list` — view all skills with status
 
-The `enabledSkills` array lists skills that should be included in sync (allowlist mode). When configured, **only listed skills are synced** — all others are excluded.
-
-```yaml
-enabledSkills:
-  - superpowers:brainstorming
-  - superpowers:test-driven-development
-```
-
-This is populated automatically when using `plugin install --skill`:
+Selective install also sets up the allowlist automatically:
 
 ```bash
 allagents plugin install superpowers@marketplace --skill brainstorming
 ```
 
-Use either `disabledSkills` (exclude specific skills) or `enabledSkills` (include specific skills), not both for the same plugin. If both are present, `enabledSkills` takes precedence.
+:::note
+The top-level `disabledSkills` and `enabledSkills` arrays are deprecated (v1 format). They still work as a fallback for configs that haven't migrated, but new configs should use the inline `skills` field on plugin entries instead.
+:::
 
 ### Workspace File Sync
 
@@ -148,6 +161,29 @@ When multiple repositories (or multiple client paths within the same repo) conta
 | 3rd | First-seen skill wins (repository order in `workspace.yaml`) |
 
 This differs from [plugin skill deduplication](/docs/guides/plugins/#duplicate-skill-handling), which keeps all copies and renames them for uniqueness. Repository skills are an index of pointers, so only the best source is kept.
+
+## MCP Proxy
+
+The optional `mcpProxy` section rewrites HTTP MCP servers to stdio via [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) for clients that need it. See the [MCP Proxy guide](/docs/guides/mcp-proxy/) for details.
+
+```yaml
+mcpProxy:
+  clients:
+    - claude
+    - copilot
+  servers:
+    my-internal-api:
+      proxy:
+        - codex
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `clients` | Yes | Clients where all HTTP servers are proxied to stdio |
+| `servers` | No | Per-server overrides with additional client lists |
+| `servers.<name>.proxy` | Yes (per entry) | Additional clients to proxy this specific server for |
+
+Only servers with HTTP transport (`url` field) are transformed. Stdio servers pass through unchanged.
 
 ## VSCode Configuration
 
