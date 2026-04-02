@@ -7,19 +7,22 @@ describe('native/types', () => {
     test('merges two results', () => {
       const a: NativeSyncResult = {
         marketplacesAdded: ['a/repo'],
-        pluginsInstalled: ['p1@repo'],
+        pluginsInstalled: [{ plugin: 'p1@repo', client: 'claude' }],
         pluginsFailed: [],
         skipped: [],
       };
       const b: NativeSyncResult = {
         marketplacesAdded: ['b/repo'],
-        pluginsInstalled: ['p2@repo'],
+        pluginsInstalled: [{ plugin: 'p2@repo', client: 'copilot' }],
         pluginsFailed: [{ plugin: 'p3@repo', error: 'fail' }],
         skipped: ['local-plugin'],
       };
       const merged = mergeNativeSyncResults([a, b]);
       expect(merged.marketplacesAdded).toEqual(['a/repo', 'b/repo']);
-      expect(merged.pluginsInstalled).toEqual(['p1@repo', 'p2@repo']);
+      expect(merged.pluginsInstalled).toEqual([
+        { plugin: 'p1@repo', client: 'claude' },
+        { plugin: 'p2@repo', client: 'copilot' },
+      ]);
       expect(merged.pluginsFailed).toEqual([{ plugin: 'p3@repo', error: 'fail' }]);
       expect(merged.skipped).toEqual(['local-plugin']);
     });

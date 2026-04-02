@@ -69,7 +69,7 @@ export class CopilotNativeClient implements NativeClient {
       for (const plugin of plugins) {
         const spec = this.toPluginSpec(plugin);
         if (spec) {
-          result.pluginsInstalled.push(spec);
+          result.pluginsInstalled.push({ plugin: spec });
         } else {
           result.skipped.push(plugin);
         }
@@ -98,7 +98,7 @@ export class CopilotNativeClient implements NativeClient {
       }
       const installResult = await this.installPlugin(spec, scope, options);
       if (installResult.success) {
-        result.pluginsInstalled.push(spec);
+        result.pluginsInstalled.push({ plugin: spec });
       } else {
         const rawError = installResult.error ?? 'Unknown error';
         const error = rawError.includes('Plugin path escapes marketplace directory')

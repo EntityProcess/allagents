@@ -33,7 +33,7 @@ mock.module('../../../../src/core/native/types.js', () => ({
     }
     return { success: true, output: '' };
   }),
-  mergeNativeSyncResults: (results: Array<{ marketplacesAdded: string[]; pluginsInstalled: string[]; pluginsFailed: unknown[]; skipped: string[] }>) =>
+  mergeNativeSyncResults: (results: Array<{ marketplacesAdded: string[]; pluginsInstalled: Array<{ plugin: string; client?: string }>; pluginsFailed: unknown[]; skipped: string[] }>) =>
     results.reduce(
       (acc, r) => ({
         marketplacesAdded: [...acc.marketplacesAdded, ...r.marketplacesAdded],
@@ -41,7 +41,7 @@ mock.module('../../../../src/core/native/types.js', () => ({
         pluginsFailed: [...acc.pluginsFailed, ...r.pluginsFailed],
         skipped: [...acc.skipped, ...r.skipped],
       }),
-      { marketplacesAdded: [] as string[], pluginsInstalled: [] as string[], pluginsFailed: [] as unknown[], skipped: [] as string[] },
+      { marketplacesAdded: [] as string[], pluginsInstalled: [] as Array<{ plugin: string; client?: string }>, pluginsFailed: [] as unknown[], skipped: [] as string[] },
     ),
 }));
 

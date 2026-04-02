@@ -6,6 +6,11 @@ export interface NativeCommandResult {
   error?: string;
 }
 
+export interface NativePluginInstalled {
+  plugin: string;
+  client?: string;
+}
+
 export interface NativePluginFailure {
   plugin: string;
   error: string;
@@ -14,7 +19,7 @@ export interface NativePluginFailure {
 
 export interface NativeSyncResult {
   marketplacesAdded: string[];
-  pluginsInstalled: string[];
+  pluginsInstalled: NativePluginInstalled[];
   pluginsFailed: NativePluginFailure[];
   skipped: string[];
 }
