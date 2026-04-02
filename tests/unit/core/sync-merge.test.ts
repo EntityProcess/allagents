@@ -109,7 +109,7 @@ describe('mergeSyncResults', () => {
       totalGenerated: 0,
       nativeResult: {
         marketplacesAdded: ['org/repo-a'],
-        pluginsInstalled: ['pluginA@repo-a'],
+        pluginsInstalled: [{ plugin: 'pluginA@repo-a', client: 'claude' }],
         pluginsFailed: [],
         skipped: [],
       },
@@ -123,7 +123,7 @@ describe('mergeSyncResults', () => {
       totalGenerated: 0,
       nativeResult: {
         marketplacesAdded: ['org/repo-b'],
-        pluginsInstalled: ['pluginB@repo-b'],
+        pluginsInstalled: [{ plugin: 'pluginB@repo-b', client: 'copilot' }],
         pluginsFailed: [{ plugin: 'pluginC@repo-c', error: 'not found' }],
         skipped: ['local-plugin'],
       },
@@ -131,7 +131,10 @@ describe('mergeSyncResults', () => {
     const merged = mergeSyncResults(a, b);
     expect(merged.nativeResult).toEqual({
       marketplacesAdded: ['org/repo-a', 'org/repo-b'],
-      pluginsInstalled: ['pluginA@repo-a', 'pluginB@repo-b'],
+      pluginsInstalled: [
+        { plugin: 'pluginA@repo-a', client: 'claude' },
+        { plugin: 'pluginB@repo-b', client: 'copilot' },
+      ],
       pluginsFailed: [{ plugin: 'pluginC@repo-c', error: 'not found' }],
       skipped: ['local-plugin'],
     });
@@ -147,7 +150,7 @@ describe('mergeSyncResults', () => {
       totalGenerated: 0,
       nativeResult: {
         marketplacesAdded: ['org/repo'],
-        pluginsInstalled: ['plugin@repo'],
+        pluginsInstalled: [{ plugin: 'plugin@repo', client: 'claude' }],
         pluginsFailed: [],
         skipped: [],
       },

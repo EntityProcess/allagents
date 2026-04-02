@@ -353,6 +353,7 @@ export function collectNativePluginSources(validPlugins: ValidatedPlugin[]): {
 function attachNativeClientContext(result: NativeSyncResult, clientType: ClientType): NativeSyncResult {
   return {
     ...result,
+    pluginsInstalled: result.pluginsInstalled.map((installed) => ({ ...installed, client: clientType })),
     pluginsFailed: result.pluginsFailed.map((failure) => ({ ...failure, client: clientType })),
   };
 }
@@ -1659,7 +1660,7 @@ async function persistSyncState(
 
   // Build native plugin tracking per-client
   const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
-  const installedSet = new Set(nativeResult?.pluginsInstalled ?? []);
+  const installedSet = new Set((nativeResult?.pluginsInstalled ?? []).map((p) => p.plugin));
   for (const [client, sources] of nativePluginsByClient) {
     const nativeClient = getNativeClient(client);
     if (!nativeClient) continue;

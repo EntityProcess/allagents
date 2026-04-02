@@ -64,7 +64,7 @@ export class ClaudeNativeClient implements NativeClient {
       for (const plugin of plugins) {
         const spec = this.toPluginSpec(plugin);
         if (spec) {
-          result.pluginsInstalled.push(spec);
+          result.pluginsInstalled.push({ plugin: spec });
         } else {
           result.skipped.push(plugin);
         }
@@ -93,7 +93,7 @@ export class ClaudeNativeClient implements NativeClient {
       }
       const installResult = await this.installPlugin(spec, scope, options);
       if (installResult.success) {
-        result.pluginsInstalled.push(spec);
+        result.pluginsInstalled.push({ plugin: spec });
       } else {
         result.pluginsFailed.push({
           plugin: spec,

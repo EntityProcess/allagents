@@ -275,6 +275,66 @@ describe('formatNativeResult', () => {
       '  ✗ [copilot] glow@wtg-ai-prompts: boom',
     ]);
   });
+
+  test('shows claude client name for plugins installed via claude CLI', () => {
+    const result: NativeSyncResult = {
+      marketplacesAdded: [],
+      pluginsInstalled: [
+        { plugin: 'superpowers@claude-plugins-official', client: 'claude' },
+      ],
+      pluginsFailed: [],
+      skipped: [],
+    };
+
+    expect(formatNativeResult(result)).toEqual([
+      '  + superpowers@claude-plugins-official (installed via claude CLI)',
+    ]);
+  });
+
+  test('shows copilot client name for plugins installed via copilot CLI', () => {
+    const result: NativeSyncResult = {
+      marketplacesAdded: [],
+      pluginsInstalled: [
+        { plugin: 'glow@wtg-ai-prompts', client: 'copilot' },
+      ],
+      pluginsFailed: [],
+      skipped: [],
+    };
+
+    expect(formatNativeResult(result)).toEqual([
+      '  + glow@wtg-ai-prompts (installed via copilot CLI)',
+    ]);
+  });
+
+  test('shows codex client name for plugins installed via codex CLI', () => {
+    const result: NativeSyncResult = {
+      marketplacesAdded: [],
+      pluginsInstalled: [
+        { plugin: 'my-plugin@marketplace', client: 'codex' },
+      ],
+      pluginsFailed: [],
+      skipped: [],
+    };
+
+    expect(formatNativeResult(result)).toEqual([
+      '  + my-plugin@marketplace (installed via codex CLI)',
+    ]);
+  });
+
+  test('falls back to native CLI when client is not set', () => {
+    const result: NativeSyncResult = {
+      marketplacesAdded: [],
+      pluginsInstalled: [
+        { plugin: 'plugin@repo' },
+      ],
+      pluginsFailed: [],
+      skipped: [],
+    };
+
+    expect(formatNativeResult(result)).toEqual([
+      '  + plugin@repo (installed via native CLI)',
+    ]);
+  });
 });
 
 describe('formatDeletedArtifacts', () => {

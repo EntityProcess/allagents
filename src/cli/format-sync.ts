@@ -280,8 +280,9 @@ export function formatNativeResult(nativeResult: NativeSyncResult): string[] {
     );
   }
 
-  for (const plugin of nativeResult.pluginsInstalled) {
-    lines.push(`  + ${plugin} (installed via native CLI)`);
+  for (const { plugin, client } of nativeResult.pluginsInstalled) {
+    const cliName = client ? `${client} CLI` : 'native CLI';
+    lines.push(`  + ${plugin} (installed via ${cliName})`);
   }
 
   for (const { client, plugin, error } of nativeResult.pluginsFailed) {
@@ -404,7 +405,7 @@ export function buildSyncData(result: SyncResult) {
     }),
     ...(result.nativeResult && {
       nativePlugins: {
-        installed: result.nativeResult.pluginsInstalled,
+        installed: result.nativeResult.pluginsInstalled.map((p) => p.plugin),
         failed: result.nativeResult.pluginsFailed,
         skipped: result.nativeResult.skipped,
         marketplacesAdded: result.nativeResult.marketplacesAdded,
