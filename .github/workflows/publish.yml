@@ -62,7 +62,7 @@ jobs:
           if [ "${{ steps.channel.outputs.action }}" = "publish-next" ]; then
             bun run publish:next
           else
-            bun run publish
+            bun run publish:latest
           fi
         env:
           NPM_CONFIG_PROVENANCE: true

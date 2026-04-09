@@ -29,7 +29,7 @@
     "release:next": "bun run scripts/release.ts next",
     "release:finalize": "bun run scripts/release.ts finalize",
     "prepublishOnly": "test \"$ALLOW_PUBLISH\" = '1' || (echo 'ERROR: Use bun run publish:next, then bun run promote:latest' && exit 1)",
-    "publish": "bun run build && ALLOW_PUBLISH=1 npm publish",
+    "publish:latest": "bun run build && ALLOW_PUBLISH=1 npm publish",
     "publish:next": "bun run build && ALLOW_PUBLISH=1 npm publish --tag next",
     "promote:latest": "bun scripts/tag-channel.ts latest"
   },
