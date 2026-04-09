@@ -2,20 +2,41 @@
 import { $ } from "bun";
 
 type BumpType = "patch" | "minor" | "major";
-type Channel = "stable" | "next";
+type Channel = "stable" | "next" | "finalize";
 
 const VALID_BUMP_TYPES = ["patch", "minor", "major"] as const;
 
+function parseNextPrerelease(
+  version: string,
+): { baseVersion: string; number: number } | null {
+  const match = version.match(/^(\d+\.\d+\.\d+)-next\.(\d+)$/);
+  if (!match) return null;
+  return { baseVersion: match[1], number: Number(match[2]) };
+}
+
+function finalizeVersion(currentVersion: string): string {
+  const parsed = parseNextPrerelease(currentVersion);
+  if (!parsed) {
+    console.error(
+      `Error: Version '${currentVersion}' is not a pre-release (expected X.Y.Z-next.N)`,
+    );
+    process.exit(1);
+  }
+  return parsed.baseVersion;
+}
+
 function parseArgs(): { channel: Channel; bumpType?: BumpType } {
   const args = process.argv.slice(2);
+
+  if (args[0] === "finalize") {
+    return { channel: "finalize" };
+  }
 
   if (args[0] === "next") {
     const bumpType = args[1] as BumpType | undefined;
     if (bumpType && !VALID_BUMP_TYPES.includes(bumpType)) {
       console.error(`Error: Invalid bump type '${bumpType}'`);
-      console.error(
-        "Usage: bun run release:next [patch|minor|major]",
-      );
+      console.error("Usage: bun run release:next [patch|minor|major]");
       process.exit(1);
     }
     return { channel: "next", bumpType };
@@ -28,14 +49,6 @@ function parseArgs(): { channel: Channel; bumpType?: BumpType } {
     process.exit(1);
   }
   return { channel: "stable", bumpType };
-}
-
-function parseNextPrerelease(
-  version: string,
-): { baseVersion: string; number: number } | null {
-  const match = version.match(/^(\d+\.\d+\.\d+)-next\.(\d+)$/);
-  if (!match) return null;
-  return { baseVersion: match[1], number: Number(match[2]) };
 }
 
 function bumpVersion(currentVersion: string, bumpType: BumpType): string {
@@ -106,7 +119,9 @@ async function main() {
   const newVersion =
     channel === "next"
       ? bumpNextVersion(currentVersion, bumpType)
-      : bumpVersion(currentVersion, bumpType!);
+      : channel === "finalize"
+        ? finalizeVersion(currentVersion)
+        : bumpVersion(currentVersion, bumpType!);
 
   const tagName = `v${newVersion}`;
   console.log(`Bumping version: ${currentVersion} -> ${newVersion}`);
