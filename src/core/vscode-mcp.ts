@@ -3,6 +3,8 @@ import { join, dirname } from 'node:path';
 import JSON5 from 'json5';
 import { getHomeDir } from '../constants.js';
 import type { ValidatedPlugin } from './sync.js';
+import type { ClientType } from '../models/workspace-config.js';
+import type { McpServerConfig } from '../models/workspace-config.js';
 
 /**
  * Deep equality check for MCP server configs.
@@ -88,11 +90,31 @@ export function readPluginMcpConfig(pluginPath: string): Record<string, unknown>
 }
 
 /**
- * Collect MCP servers from all validated plugins.
- * First-plugin-wins for duplicate server names.
+ * Strip allagents-only metadata fields from a workspace MCP server config
+ * before it is passed to a client sync function. Currently removes `clients`
+ * (a sync filter that should never be written into client MCP configs).
+ */
+function stripWorkspaceMcpMeta(config: McpServerConfig): Record<string, unknown> {
+  const { clients: _clients, ...rest } = config as McpServerConfig & {
+    clients?: ClientType[];
+  };
+  return rest as Record<string, unknown>;
+}
+
+/**
+ * Collect MCP servers from all validated plugins, optionally merged with
+ * workspace-level inline servers.
+ *
+ * Precedence: workspace > plugin. Name conflicts emit a warning.
+ * If a targetClient is supplied, workspace servers whose `clients` list
+ * excludes it are omitted.
+ *
+ * Plugin-level conflicts fall back to first-plugin-wins.
  */
 export function collectMcpServers(
   validatedPlugins: ValidatedPlugin[],
+  workspaceServers?: Record<string, McpServerConfig>,
+  targetClient?: ClientType,
 ): { servers: Map<string, unknown>; warnings: string[] } {
   const servers = new Map<string, unknown>();
   const warnings: string[] = [];
@@ -107,6 +129,20 @@ export function collectMcpServers(
       } else {
         servers.set(name, config);
       }
+    }
+  }
+
+  if (workspaceServers) {
+    for (const [name, config] of Object.entries(workspaceServers)) {
+      if (targetClient && config.clients && !config.clients.includes(targetClient)) {
+        continue;
+      }
+      if (servers.has(name)) {
+        warnings.push(
+          `MCP server '${name}' from workspace.yaml overrides plugin-provided server`,
+        );
+      }
+      servers.set(name, stripWorkspaceMcpMeta(config));
     }
   }
 

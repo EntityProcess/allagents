@@ -302,6 +302,39 @@ export const McpProxyConfigSchema = z.object({
 export type McpProxyConfig = z.infer<typeof McpProxyConfigSchema>;
 
 /**
+ * Workspace-level MCP server definition (top-level `mcpServers:` field in
+ * workspace.yaml). Allows declaring ad-hoc MCP servers without authoring a
+ * plugin. Supports both HTTP (url) and stdio (command) transports.
+ *
+ * Optional `clients:` filter restricts which client scopes receive the server.
+ * When absent, the server is synced to every configured client that supports
+ * project-scoped MCP (claude, codex, vscode, copilot).
+ */
+export const McpServerConfigSchema = z.union([
+  // HTTP transport
+  z
+    .object({
+      type: z.enum(['http']).optional(),
+      url: z.string(),
+      headers: z.record(z.string()).optional(),
+      clients: z.array(ClientTypeSchema).optional(),
+    })
+    .strict(),
+  // stdio transport
+  z
+    .object({
+      type: z.enum(['stdio']).optional(),
+      command: z.string(),
+      args: z.array(z.string()).optional(),
+      env: z.record(z.string()).optional(),
+      clients: z.array(ClientTypeSchema).optional(),
+    })
+    .strict(),
+]);
+
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+
+/**
  * Complete workspace configuration (workspace.yaml)
  */
 export const WorkspaceConfigSchema = z.object({
@@ -313,6 +346,12 @@ export const WorkspaceConfigSchema = z.object({
   vscode: VscodeConfigSchema.optional(),
   syncMode: SyncModeSchema.optional(),
   mcpProxy: McpProxyConfigSchema.optional(),
+  /**
+   * Inline MCP server definitions. Merged with plugin-provided .mcp.json
+   * servers during sync. Workspace-defined servers take precedence over
+   * plugin-defined servers on name conflicts.
+   */
+  mcpServers: z.record(McpServerConfigSchema).optional(),
   /** @deprecated Use inline skills field on plugin entry instead. Will be removed in v3. */
   disabledSkills: z.array(z.string()).optional(),
   /** @deprecated Use inline skills field on plugin entry instead. Will be removed in v3. */
