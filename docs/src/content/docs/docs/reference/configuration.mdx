@@ -162,6 +162,49 @@ When multiple repositories (or multiple client paths within the same repo) conta
 
 This differs from [plugin skill deduplication](/docs/guides/plugins/#duplicate-skill-handling), which keeps all copies and renames them for uniqueness. Repository skills are an index of pointers, so only the best source is kept.
 
+## MCP Servers
+
+The optional top-level `mcpServers` field defines MCP servers managed directly by the workspace. Servers defined here are synced to all configured project-scoped MCP clients (`claude`, `codex`, `vscode`, `copilot`).
+
+```yaml
+mcpServers:
+  deepwiki:
+    type: http
+    url: https://mcp.deepwiki.com/mcp
+    headers:
+      Authorization: Bearer ${DEEPWIKI_TOKEN}
+
+  gh-server:
+    type: stdio
+    command: npx
+    args:
+      - -y
+      - '@modelcontextprotocol/server-github'
+    env:
+      GH_TOKEN: ghp_xxx
+
+  # Per-server client filter — only sync to specific clients
+  claude-only:
+    type: http
+    url: https://mcp.example.com
+    clients:
+      - claude
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | No | `http` or `stdio` (inferred from presence of `url` vs `command` if omitted) |
+| `url` | http only | HTTP URL for the MCP server |
+| `headers` | No | HTTP headers map (http transport only) |
+| `command` | stdio only | Executable for the stdio command |
+| `args` | No | Command arguments array (stdio transport only) |
+| `env` | No | Environment variables map (stdio transport only) |
+| `clients` | No | Subset of project-scoped clients that should receive this server. Defaults to all configured clients. |
+
+Manage these entries declaratively in `workspace.yaml`, or via the [`allagents mcp` commands](/docs/reference/cli/#mcp-commands). Workspace-level servers override any plugin-supplied server with the same name (with a warning).
+
+Servers AllAgents adds are tracked in `.allagents/sync-state.json`; pre-existing user-managed servers in client MCP configs (`.mcp.json`, `.vscode/mcp.json`, `.copilot/mcp-config.json`, `.codex/config.toml`) are never touched.
+
 ## MCP Proxy
 
 The optional `mcpProxy` section rewrites HTTP MCP servers to stdio via [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) for clients that need it. See the [MCP Proxy guide](/docs/guides/mcp-proxy/) for details.
