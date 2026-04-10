@@ -5,6 +5,56 @@ description: Transparently proxy HTTP MCP servers through mcp-remote for clients
 
 Some MCP servers use HTTP transport with OAuth authentication, but not every AI client supports HTTP natively. The MCP proxy feature rewrites HTTP server configs to use [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) as a local stdio bridge, so all clients connect through an already-authenticated proxy.
 
+## Quick Start
+
+The fastest way to try MCP proxy is to scaffold the ready-made
+[`examples/workspaces/mcp-proxy`](https://github.com/EntityProcess/allagents/tree/main/examples/workspaces/mcp-proxy)
+workspace with `allagents workspace init --from`:
+
+```bash
+allagents workspace init ./mcp-proxy-demo \
+  --from EntityProcess/allagents/examples/workspaces/mcp-proxy
+cd ./mcp-proxy-demo
+```
+
+This creates a workspace pre-configured with the `deepwiki` plugin — a real
+public HTTP MCP server (`https://mcp.deepwiki.com/mcp`) — and an `mcpProxy`
+section that rewrites it to stdio for Codex while leaving Claude's HTTP
+config untouched:
+
+```yaml
+# .allagents/workspace.yaml
+repositories: []
+
+plugins:
+  # Real HTTP MCP server from the official AllAgents marketplace.
+  # Ships a `.mcp.json` that points at https://mcp.deepwiki.com/mcp
+  - EntityProcess/allagents/plugins/deepwiki
+
+clients:
+  - claude
+  - codex
+
+mcpProxy:
+  # Claude Code supports HTTP MCP natively, so it gets the original URL.
+  # Codex only speaks stdio, so rewrite its config to use `npx mcp-remote`.
+  clients:
+    - codex
+```
+
+`workspace init` also runs the initial sync, so you can immediately inspect
+what each client received:
+
+```bash
+cat .mcp.json            # Claude — original HTTP config
+cat .codex/config.toml   # Codex — rewritten to `npx mcp-remote` stdio
+```
+
+DeepWiki is a public, no-auth MCP server, so this example works end-to-end
+with nothing more than Node.js installed (for `npx`). Point any of your
+configured clients at the workspace and you can immediately call tools like
+`read_wiki_structure` or `ask_question` against any indexed GitHub repo.
+
 ## Why Use MCP Proxy
 
 - **OAuth handled once** — `mcp-remote` manages OAuth flows and caches tokens in `~/.mcp-auth/`

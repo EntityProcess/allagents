@@ -1,0 +1,47 @@
+# Example: MCP Proxy — bridge HTTP MCP servers to stdio via mcp-remote
+#
+# This workspace installs the `deepwiki` plugin from the official AllAgents
+# marketplace. The plugin provides a single HTTP MCP server (DeepWiki), which
+# is a public, no-auth server you can try without any setup:
+#
+#   https://mcp.deepwiki.com/mcp
+#
+# Some clients (e.g. Codex) only support stdio transport, so we use `mcpProxy`
+# to rewrite the HTTP config to use `npx mcp-remote` for those clients.
+# Clients that support HTTP natively (e.g. Claude Code) receive the original
+# HTTP config unchanged.
+#
+# Usage (scaffold a fresh copy anywhere):
+#   allagents workspace init ./mcp-proxy-demo \
+#     --from EntityProcess/allagents/examples/workspaces/mcp-proxy
+#   cd ./mcp-proxy-demo
+#
+# Or run in-place inside this repo:
+#   cd examples/workspaces/mcp-proxy
+#   allagents update
+#
+# After sync, inspect the result:
+#   cat .mcp.json                # Claude — original HTTP config
+#   cat .codex/config.toml       # Codex — rewritten to `npx mcp-remote` stdio
+#
+# Requirements:
+#   - Node.js (for `npx mcp-remote`)
+
+repositories: []
+
+plugins:
+  # Real HTTP MCP server from the official AllAgents marketplace.
+  # The deepwiki plugin ships a `.mcp.json` that declares:
+  #   { "deepwiki": { "type": "http", "url": "https://mcp.deepwiki.com/mcp" } }
+  - EntityProcess/allagents/plugins/deepwiki
+
+clients:
+  - claude
+  - codex
+
+mcpProxy:
+  # Every HTTP MCP server (currently just `deepwiki`) will be rewritten to
+  # use `npx mcp-remote` for these clients. Claude is omitted because it
+  # supports HTTP MCP natively.
+  clients:
+    - codex
