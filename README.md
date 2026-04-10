@@ -96,6 +96,8 @@ clients:
 | `allagents plugin list` | List available plugins |
 | `allagents skills add <name>` | Add a skill from a repo |
 | `allagents skills list` | List skills and status |
+| `allagents mcp add <name> <commandOrUrl>` | Add an MCP server and sync to clients |
+| `allagents mcp list` | List workspace MCP servers |
 | `allagents workspace status` | Show workspace state |
 | `allagents self update` | Update AllAgents CLI |
 

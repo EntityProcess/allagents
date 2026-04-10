@@ -4,6 +4,7 @@ import { run } from 'cmd-ts';
 import { conciseSubcommands } from './help.js';
 import { workspaceCmd, syncCmd } from './commands/workspace.js';
 import { pluginCmd } from './commands/plugin.js';
+import { mcpCmd } from './commands/mcp.js';
 import { selfCmd } from './commands/self.js';
 import { skillsCmd } from './commands/plugin-skills.js';
 import { extractJsonFlag, setJsonMode } from './json-output.js';
@@ -21,6 +22,7 @@ const app = conciseSubcommands({
     update: syncCmd,
     workspace: workspaceCmd,
     plugin: pluginCmd,
+    mcp: mcpCmd,
     self: selfCmd,
     skills: skillsCmd,
   },

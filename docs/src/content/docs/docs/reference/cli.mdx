@@ -186,3 +186,95 @@ After enabling, the skill is removed from `disabledSkills` and sync is run to re
 :::tip
 `allagents skills add` is a shorthand for `allagents plugin skills add`.
 :::
+
+## MCP Commands
+
+```bash
+allagents mcp add <name> <commandOrUrl> [options]
+allagents mcp remove <name>
+allagents mcp list
+allagents mcp get <name>
+allagents mcp update [--offline]
+```
+
+Manage MCP servers at the workspace level. Servers are persisted in a top-level `mcpServers:` field in `workspace.yaml` (parallel to `mcpProxy:`) and synced to all configured clients that support project-scoped MCP (`claude`, `codex`, `vscode`, `copilot`).
+
+### mcp add
+
+Add a new MCP server to `workspace.yaml` and immediately sync it to all configured clients.
+
+| Flag | Description |
+|------|-------------|
+| `--transport <type>` | Transport type: `http` or `stdio` (auto-detected from URL by default) |
+| `--arg <value>` | Argument for the stdio command (repeatable) |
+| `-e, --env <KEY=VALUE>` | Environment variable for stdio transport (repeatable) |
+| `--header <KEY=VALUE>` | HTTP header for http transport (repeatable) |
+| `--client <csv>` | Comma-separated list of clients that should receive this server (default: all project-scoped clients) |
+| `-f, --force` | Replace an existing server with the same name |
+
+**Transport auto-detection:** if `<commandOrUrl>` starts with `http://` or `https://`, http transport is selected; otherwise stdio is selected. Passing `--transport stdio` with a URL, or `--transport http` with a non-URL command, is rejected.
+
+```bash
+# HTTP server
+allagents mcp add deepwiki https://mcp.deepwiki.com/mcp
+
+# HTTP server with headers and client filter
+allagents mcp add internal https://mcp.internal.corp --header Authorization=Bearer-token --client claude,copilot
+
+# stdio server with args and env vars
+allagents mcp add gh-server npx --arg=-y --arg=@modelcontextprotocol/server-github -e GH_TOKEN=ghp_xxx
+
+# Replace an existing server (update workflow)
+allagents mcp add deepwiki https://new.example.com --force
+```
+
+### mcp remove
+
+Remove a server from `workspace.yaml` and unsync it from all clients. Only servers AllAgents added are removed; pre-existing user-managed servers in client MCP configs are preserved.
+
+```bash
+allagents mcp remove deepwiki
+```
+
+### mcp list
+
+List all MCP servers defined in `workspace.yaml`.
+
+```bash
+allagents mcp list
+```
+
+### mcp get
+
+Print the `workspace.yaml` definition for a specific server as YAML.
+
+```bash
+allagents mcp get deepwiki
+```
+
+Exits with status 1 if the server is not defined in `workspace.yaml`.
+
+### mcp update
+
+Re-sync MCP servers only, without touching skills, agents, hooks, or other plugin artifacts. Useful when you've edited `workspace.yaml`'s `mcpServers:` block manually and want to push the changes to clients without running a full workspace sync.
+
+| Flag | Description |
+|------|-------------|
+| `--offline` | Use cached plugins without fetching from remote marketplaces |
+
+```bash
+allagents mcp update
+allagents mcp update --offline
+```
+
+To modify a server definition, use `allagents mcp add <name> ... --force`.
+
+### Ownership model
+
+AllAgents only tracks MCP servers it added. This means:
+
+- `mcp add` marks the server as AllAgents-owned in `.allagents/sync-state.json`.
+- `mcp remove` only removes servers from client MCP configs that AllAgents originally added. User-managed servers (added manually to `.mcp.json`, `.vscode/mcp.json`, etc.) are never touched.
+- If you manually add a server to a client config first, and then run `mcp add` with the same name, the existing user-managed entry is left alone (AllAgents will skip it with a warning).
+
+See [CLAUDE.md — MCP Server Sync](https://github.com/EntityProcess/allagents/blob/main/CLAUDE.md) for the full ownership rule.
