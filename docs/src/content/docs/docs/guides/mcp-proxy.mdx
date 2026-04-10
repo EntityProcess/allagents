@@ -5,6 +5,44 @@ description: Transparently proxy HTTP MCP servers through mcp-remote for clients
 
 Some MCP servers use HTTP transport with OAuth authentication, but not every AI client supports HTTP natively. The MCP proxy feature rewrites HTTP server configs to use [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) as a local stdio bridge, so all clients connect through an already-authenticated proxy.
 
+## Quick Start
+
+Drop this `workspace.yaml` into a fresh directory (or copy the
+[`examples/workspaces/mcp-proxy`](https://github.com/EntityProcess/allagents/tree/main/examples/workspaces/mcp-proxy)
+example) and run `allagents update`:
+
+```yaml
+# .allagents/workspace.yaml
+repositories: []
+
+plugins:
+  # Real HTTP MCP server from the official AllAgents marketplace.
+  # Ships a `.mcp.json` that points at https://mcp.deepwiki.com/mcp
+  - EntityProcess/allagents/plugins/deepwiki
+
+clients:
+  - claude
+  - codex
+
+mcpProxy:
+  # Claude Code supports HTTP MCP natively, so it gets the original URL.
+  # Codex only speaks stdio, so rewrite its config to use `npx mcp-remote`.
+  clients:
+    - codex
+```
+
+Then sync and inspect what each client receives:
+
+```bash
+allagents update
+
+cat .mcp.json            # Claude — original HTTP config
+cat .codex/config.toml   # Codex — rewritten to `npx mcp-remote` stdio
+```
+
+DeepWiki is a public, no-auth MCP server, so this example works end-to-end
+with nothing more than Node.js installed (for `npx`).
+
 ## Why Use MCP Proxy
 
 - **OAuth handled once** — `mcp-remote` manages OAuth flows and caches tokens in `~/.mcp-auth/`
