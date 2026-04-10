@@ -11,7 +11,12 @@
 # Clients that support HTTP natively (e.g. Claude Code) receive the original
 # HTTP config unchanged.
 #
-# Usage:
+# Usage (scaffold a fresh copy anywhere):
+#   allagents workspace init ./mcp-proxy-demo \
+#     --from EntityProcess/allagents/examples/workspaces/mcp-proxy
+#   cd ./mcp-proxy-demo
+#
+# Or run in-place inside this repo:
 #   cd examples/workspaces/mcp-proxy
 #   allagents update
 #

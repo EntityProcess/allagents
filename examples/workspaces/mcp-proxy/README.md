@@ -17,6 +17,17 @@ only supports stdio transport.
 
 ## Running it
 
+Scaffold a fresh copy anywhere with `workspace init --from` (recommended —
+this also runs the initial sync):
+
+```bash
+allagents workspace init ./mcp-proxy-demo \
+  --from EntityProcess/allagents/examples/workspaces/mcp-proxy
+cd ./mcp-proxy-demo
+```
+
+Or, if you have this repo checked out, run it in-place:
+
 ```bash
 cd examples/workspaces/mcp-proxy
 allagents update
