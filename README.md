@@ -101,7 +101,7 @@ clients:
 | `allagents workspace status` | Show workspace state |
 | `allagents self update` | Update AllAgents CLI |
 
-See the [full CLI reference](https://allagents.dev/reference/cli/) for all options.
+See the [full CLI reference](https://allagents.dev/docs/reference/cli/) for all options.
 
 ## Supported Clients
 
@@ -111,7 +111,7 @@ See the [full CLI reference](https://allagents.dev/reference/cli/) for all optio
 
 **Provider-specific**: Claude, Cursor, Factory, OpenClaw, Windsurf, Cline, Continue, Roo, Kilo, Trae, Augment, Zencoder, Junie, OpenHands, Kiro
 
-See the [client support matrix](https://allagents.dev/reference/clients/) for paths, hooks, commands, and MCP support per client.
+See the [client support matrix](https://allagents.dev/docs/reference/clients/) for paths, hooks, commands, and MCP support per client.
 
 ## Plugin Structure
 
@@ -131,12 +131,12 @@ my-plugin/
 
 Full documentation at [allagents.dev](https://allagents.dev):
 
-- [Getting Started](https://allagents.dev/getting-started/introduction/)
-- [Workspaces Guide](https://allagents.dev/guides/workspaces/)
-- [Plugins Guide](https://allagents.dev/guides/plugins/)
-- [Agent Portability](https://allagents.dev/guides/agent-portability/)
-- [Client Support Matrix](https://allagents.dev/reference/clients/)
-- [Configuration Reference](https://allagents.dev/reference/configuration/)
+- [Getting Started](https://allagents.dev/docs/getting-started/introduction/)
+- [Workspaces Guide](https://allagents.dev/docs/guides/workspaces/)
+- [Plugins Guide](https://allagents.dev/docs/guides/plugins/)
+- [Agent Portability](https://allagents.dev/docs/guides/agent-portability/)
+- [Client Support Matrix](https://allagents.dev/docs/reference/clients/)
+- [Configuration Reference](https://allagents.dev/docs/reference/configuration/)
 
 ## Related Projects
 
