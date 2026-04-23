@@ -18,6 +18,7 @@ import {
   removeWorkspaceMcpServer,
   setWorkspaceMcpServerProxy,
 } from '../../core/mcp-servers.js';
+import { runHttpMcpStdioProxy } from '../../core/mcp-http-stdio-proxy.js';
 import { syncMcpOnly } from '../../core/mcp-sync.js';
 import {
   type ClientType,
@@ -220,7 +221,7 @@ const addArgs = {
   proxy: flag({
     long: 'proxy',
     description:
-      'Rewrite HTTP MCP server sync through mcp-remote for the targeted clients',
+      'Rewrite HTTP MCP server sync through the built-in AllAgents HTTP proxy helper for the targeted clients',
   }),
 };
 
@@ -317,6 +318,30 @@ const mcpRemoveCmd = command({
       `\u2713 Removed MCP server '${name}' from workspace.yaml`,
       { name },
     );
+  },
+});
+
+// =============================================================================
+// mcp proxy-stdio (internal)
+// =============================================================================
+
+const mcpProxyStdioCmd = command({
+  name: 'proxy-stdio',
+  description: 'Internal: expose a remote HTTP MCP server as local stdio',
+  args: {
+    serverUrl: positional({ type: string, displayName: 'serverUrl' }),
+    header: multioption({
+      type: array(string),
+      long: 'header',
+      description: 'HTTP header KEY=VALUE (repeatable)',
+    }),
+  },
+  handler: async ({ serverUrl, header }) => {
+    const headerResult = parseKeyValuePairs(header, '--header');
+    if ('error' in headerResult) {
+      exitWithError('mcp proxy-stdio', headerResult.error);
+    }
+    await runHttpMcpStdioProxy(serverUrl, headerResult.values);
   },
 });
 
@@ -469,6 +494,7 @@ export const mcpCmd = conciseSubcommands({
   description: 'Manage MCP servers for AI clients',
   cmds: {
     add: mcpAddCmd,
+    'proxy-stdio': mcpProxyStdioCmd,
     remove: mcpRemoveCmd,
     list: mcpListCmd,
     get: mcpGetCmd,

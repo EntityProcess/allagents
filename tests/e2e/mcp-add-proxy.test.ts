@@ -91,30 +91,25 @@ clients:
       },
     });
 
-    const metadataPath = join(homeDir, '.allagents', 'mcp-remote', 'mcp-metadata-settings.json');
-    expect(existsSync(metadataPath)).toBe(true);
-
     const claudeConfig = JSON.parse(readFileSync(join(workspaceDir, '.mcp.json'), 'utf-8'));
-    expect(claudeConfig.mcpServers.deepwiki.command).toBe('npx');
+    expect(claudeConfig.mcpServers.deepwiki.command).toBe('allagents');
     expect(claudeConfig.mcpServers.deepwiki.args).toEqual([
-      'mcp-remote',
+      'mcp',
+      'proxy-stdio',
       'https://mcp.deepwiki.com/mcp',
-      '--http',
-      '--static-oauth-client-metadata',
-      `@${metadataPath}`,
     ]);
 
     const codexConfig = readFileSync(join(workspaceDir, '.codex', 'config.toml'), 'utf-8');
-    expect(codexConfig).toContain('mcp-remote');
+    expect(codexConfig).toContain('proxy-stdio');
     expect(codexConfig).toContain('https://mcp.deepwiki.com/mcp');
 
     const vscodeConfig = JSON.parse(readFileSync(join(workspaceDir, '.vscode', 'mcp.json'), 'utf-8'));
-    expect(vscodeConfig.servers.deepwiki.command).toBe('npx');
-    expect(vscodeConfig.servers.deepwiki.args[0]).toBe('mcp-remote');
+    expect(vscodeConfig.servers.deepwiki.command).toBe('allagents');
+    expect(vscodeConfig.servers.deepwiki.args[0]).toBe('mcp');
 
     const copilotConfig = JSON.parse(readFileSync(join(workspaceDir, '.copilot', 'mcp-config.json'), 'utf-8'));
-    expect(copilotConfig.mcpServers.deepwiki.command).toBe('npx');
-    expect(copilotConfig.mcpServers.deepwiki.args[0]).toBe('mcp-remote');
+    expect(copilotConfig.mcpServers.deepwiki.command).toBe('allagents');
+    expect(copilotConfig.mcpServers.deepwiki.args[0]).toBe('mcp');
 
     const rerun = runCli(workspaceDir, homeDir, ['mcp', 'update']);
     expect(rerun.exitCode).toBe(0);
@@ -142,8 +137,8 @@ clients:
     const result = runCli(workspaceDir, homeDir, [
       'mcp',
       'add',
-      'wtgkb',
-      'https://knowledge.mcp.wtg.zone',
+      'secure-api',
+      'https://api.example.com/mcp',
       '--proxy',
       '--client',
       'claude,codex',
@@ -153,16 +148,16 @@ clients:
 
     const workspace = readWorkspaceConfig(workspaceDir);
     expect(workspace.mcpServers).toEqual({
-      wtgkb: {
+      'secure-api': {
         type: 'http',
-        url: 'https://knowledge.mcp.wtg.zone',
+        url: 'https://api.example.com/mcp',
         clients: ['claude', 'codex'],
       },
     });
     expect(workspace.mcpProxy).toEqual({
       clients: [],
       servers: {
-        wtgkb: {
+        'secure-api': {
           proxy: ['claude', 'codex'],
         },
       },

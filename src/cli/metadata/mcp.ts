@@ -10,10 +10,10 @@ export const mcpAddMeta: AgentCommandMeta = {
     'allagents mcp add my-server npx --arg=-y --arg=@my/mcp-server',
     'allagents mcp add gh-api npx -e GH_TOKEN=abc123 --arg=-y --arg=@modelcontextprotocol/server-github',
     'allagents mcp add deepwiki https://mcp.deepwiki.com/mcp --client claude,copilot',
-    'allagents mcp add wtgkb https://knowledge.mcp.wtg.zone --proxy',
+    'allagents mcp add secure-api https://api.example.com/mcp --proxy',
   ],
   expectedOutput:
-    'Adds the server to workspace.yaml and syncs it to all configured clients. With --proxy, HTTP servers are rewritten through the existing mcp-remote proxy path for the targeted clients. Exit 0 on success, 1 on failure.',
+    'Adds the server to workspace.yaml and syncs it to all configured clients. With --proxy, HTTP servers are rewritten through the built-in AllAgents HTTP-to-stdio proxy path for the targeted clients. Exit 0 on success, 1 on failure.',
   positionals: [
     {
       name: 'name',
@@ -63,7 +63,7 @@ export const mcpAddMeta: AgentCommandMeta = {
       flag: '--proxy',
       type: 'boolean',
       description:
-        'For HTTP servers, persist server-scoped proxy intent and sync targeted clients via mcp-remote',
+        'For HTTP servers, persist server-scoped proxy intent and sync targeted clients via the built-in AllAgents HTTP proxy helper',
     },
     {
       flag: '--force',

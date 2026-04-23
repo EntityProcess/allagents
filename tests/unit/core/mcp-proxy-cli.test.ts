@@ -9,25 +9,18 @@ import { applyMcpProxy } from '../../../src/core/mcp-proxy.js';
 import type { McpProxyConfig } from '../../../src/models/workspace-config.js';
 
 describe('CLI args with proxy transform', () => {
-  const metadataPath = '/home/user/.allagents/mcp-remote/mcp-metadata-settings.json';
-
   test('buildClaudeMcpAddArgs handles proxied HTTP config', () => {
     const servers = new Map<string, unknown>([
       ['deepwiki', { url: 'https://mcp.deepwiki.com/mcp' }],
     ]);
     const config: McpProxyConfig = { clients: ['claude'] };
-    const proxied = applyMcpProxy(servers, 'claude', config, metadataPath);
+    const proxied = applyMcpProxy(servers, 'claude', config);
     const proxiedConfig = proxied.get('deepwiki') as Record<string, unknown>;
 
     const args = buildClaudeMcpAddArgs('deepwiki', proxiedConfig);
     expect(args).toEqual([
-      'mcp', 'add', '--scope', 'user',
-      'deepwiki', '--', 'npx',
-      'mcp-remote',
-      'https://mcp.deepwiki.com/mcp',
-      '--http',
-      '--static-oauth-client-metadata',
-      `@${metadataPath}`,
+      'mcp', 'add', '--scope', 'user', 'deepwiki', '--', 'allagents',
+      'mcp', 'proxy-stdio', 'https://mcp.deepwiki.com/mcp',
     ]);
   });
 
@@ -36,18 +29,13 @@ describe('CLI args with proxy transform', () => {
       ['deepwiki', { url: 'https://mcp.deepwiki.com/mcp' }],
     ]);
     const config: McpProxyConfig = { clients: ['codex'] };
-    const proxied = applyMcpProxy(servers, 'codex', config, metadataPath);
+    const proxied = applyMcpProxy(servers, 'codex', config);
     const proxiedConfig = proxied.get('deepwiki') as Record<string, unknown>;
 
     const args = buildCodexMcpAddArgs('deepwiki', proxiedConfig);
     expect(args).toEqual([
-      'mcp', 'add',
-      'deepwiki', '--', 'npx',
-      'mcp-remote',
-      'https://mcp.deepwiki.com/mcp',
-      '--http',
-      '--static-oauth-client-metadata',
-      `@${metadataPath}`,
+      'mcp', 'add', 'deepwiki', '--', 'allagents',
+      'mcp', 'proxy-stdio', 'https://mcp.deepwiki.com/mcp',
     ]);
   });
 });
@@ -67,12 +55,10 @@ describe('syncVscodeMcpConfig with serverOverrides', () => {
   });
 
   test('writes proxied stdio config when serverOverrides is provided', () => {
-    const metadataPath = '/home/user/.allagents/mcp-remote/mcp-metadata-settings.json';
     const proxiedServers = new Map<string, unknown>([
       ['deepwiki', {
-        command: 'npx',
-        args: ['mcp-remote', 'https://mcp.deepwiki.com/mcp', '--http',
-          '--static-oauth-client-metadata', `@${metadataPath}`],
+        command: 'allagents',
+        args: ['mcp', 'proxy-stdio', 'https://mcp.deepwiki.com/mcp'],
       }],
     ]);
 
@@ -82,7 +68,7 @@ describe('syncVscodeMcpConfig with serverOverrides', () => {
     expect(result.addedServers).toEqual(['deepwiki']);
 
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.servers.deepwiki.command).toBe('npx');
-    expect(written.servers.deepwiki.args[0]).toBe('mcp-remote');
+    expect(written.servers.deepwiki.command).toBe('allagents');
+    expect(written.servers.deepwiki.args[0]).toBe('mcp');
   });
 });

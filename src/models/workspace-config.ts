@@ -125,40 +125,38 @@ export type InstallMode = z.infer<typeof InstallModeSchema>;
  * { name, install } → explicit object form
  */
 export const ClientEntrySchema = z.union([
-  z
-    .string()
-    .transform((s, ctx) => {
-      const colonIdx = s.indexOf(':');
-      if (colonIdx === -1) {
-        // Bare string — validate as client type
-        const result = ClientTypeSchema.safeParse(s);
-        if (!result.success) {
-          for (const issue of result.error.issues) ctx.addIssue(issue);
-          return z.NEVER;
-        }
-        return result.data;
-      }
-      // Colon shorthand — split on first colon
-      const name = s.slice(0, colonIdx);
-      const mode = s.slice(colonIdx + 1);
-      const nameResult = ClientTypeSchema.safeParse(name);
-      if (!nameResult.success) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Invalid client type: '${name}'`,
-        });
+  z.string().transform((s, ctx) => {
+    const colonIdx = s.indexOf(':');
+    if (colonIdx === -1) {
+      // Bare string — validate as client type
+      const result = ClientTypeSchema.safeParse(s);
+      if (!result.success) {
+        for (const issue of result.error.issues) ctx.addIssue(issue);
         return z.NEVER;
       }
-      const modeResult = InstallModeSchema.safeParse(mode);
-      if (!modeResult.success) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Invalid install mode: '${mode}'. Valid modes: ${InstallModeSchema.options.join(', ')}`,
-        });
-        return z.NEVER;
-      }
-      return { name: nameResult.data, install: modeResult.data };
-    }),
+      return result.data;
+    }
+    // Colon shorthand — split on first colon
+    const name = s.slice(0, colonIdx);
+    const mode = s.slice(colonIdx + 1);
+    const nameResult = ClientTypeSchema.safeParse(name);
+    if (!nameResult.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Invalid client type: '${name}'`,
+      });
+      return z.NEVER;
+    }
+    const modeResult = InstallModeSchema.safeParse(mode);
+    if (!modeResult.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Invalid install mode: '${mode}'. Valid modes: ${InstallModeSchema.options.join(', ')}`,
+      });
+      return z.NEVER;
+    }
+    return { name: nameResult.data, install: modeResult.data };
+  }),
   z.object({
     name: ClientTypeSchema,
     install: InstallModeSchema.default('file'),
@@ -205,14 +203,18 @@ export function getPluginSource(plugin: PluginEntry): string {
 /**
  * Resolve optional plugin-level clients from plugin entry
  */
-export function getPluginClients(plugin: PluginEntry): ClientType[] | undefined {
+export function getPluginClients(
+  plugin: PluginEntry,
+): ClientType[] | undefined {
   return typeof plugin === 'string' ? undefined : plugin.clients;
 }
 
 /**
  * Get plugin-level install mode override (if any)
  */
-export function getPluginInstallMode(plugin: PluginEntry): InstallMode | undefined {
+export function getPluginInstallMode(
+  plugin: PluginEntry,
+): InstallMode | undefined {
   return typeof plugin === 'string' ? undefined : plugin.install;
 }
 
@@ -227,7 +229,10 @@ export function getPluginExclude(plugin: PluginEntry): string[] | undefined {
 /**
  * Normalize a client entry to { name, install } form.
  */
-export function normalizeClientEntry(entry: ClientEntry): { name: ClientType; install: InstallMode } {
+export function normalizeClientEntry(entry: ClientEntry): {
+  name: ClientType;
+  install: InstallMode;
+} {
   if (typeof entry === 'string') {
     return { name: entry, install: 'file' };
   }
@@ -245,7 +250,10 @@ export function getClientTypes(entries: ClientEntry[]): ClientType[] {
  * Get install mode for a specific client from entries.
  * Returns 'file' if client not found.
  */
-export function getClientInstallMode(entries: ClientEntry[], client: ClientType): InstallMode {
+export function getClientInstallMode(
+  entries: ClientEntry[],
+  client: ClientType,
+): InstallMode {
   for (const entry of entries) {
     const normalized = normalizeClientEntry(entry);
     if (normalized.name === client) return normalized.install;
@@ -292,7 +300,8 @@ export const McpProxyServerSchema = z.object({
 });
 
 /**
- * MCP proxy configuration — rewrites HTTP MCP servers to stdio via mcp-remote
+ * MCP proxy configuration — rewrites HTTP MCP servers to stdio via the
+ * built-in AllAgents HTTP proxy helper
  */
 export const McpProxyConfigSchema = z.object({
   clients: z.array(z.string()),
