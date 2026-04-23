@@ -129,7 +129,7 @@ function findFreePort(): Promise<number> {
   });
 }
 
-function tryOpenBrowser(url: string): void {
+function tryOpenBrowser(url: string): Promise<void> {
   const commands: Array<{ command: string; args: string[] }> =
     process.platform === 'darwin'
       ? [{ command: 'open', args: [url] }]
@@ -140,18 +140,29 @@ function tryOpenBrowser(url: string): void {
             { command: 'gio', args: ['open', url] },
           ];
 
-  for (const { command, args } of commands) {
-    try {
+  return new Promise((resolve) => {
+    const tryCommand = (index: number) => {
+      if (index >= commands.length) {
+        resolve();
+        return;
+      }
+
+      const { command, args } = commands[index]!;
       const child = spawn(command, args, {
         detached: true,
         stdio: 'ignore',
       });
-      child.unref();
-      return;
-    } catch {
-      // Try the next launcher.
-    }
-  }
+      child.once('spawn', () => {
+        child.unref();
+        resolve();
+      });
+      child.once('error', () => {
+        tryCommand(index + 1);
+      });
+    };
+
+    tryCommand(0);
+  });
 }
 
 class FileOAuthClientProvider implements OAuthClientProvider {
@@ -304,8 +315,20 @@ class FileOAuthClientProvider implements OAuthClientProvider {
             );
             const code = parsed.searchParams.get('code');
             const error = parsed.searchParams.get('error');
+            const state = parsed.searchParams.get('state');
 
             if (code) {
+              if (state !== this.stateValue) {
+                response.writeHead(400, {
+                  'content-type': 'text/html; charset=utf-8',
+                });
+                response.end(
+                  '<html><body><h1>Authorization failed</h1><p>State validation failed.</p></body></html>',
+                );
+                server.close();
+                reject(new Error('OAuth state validation failed'));
+                return;
+              }
               response.writeHead(200, {
                 'content-type': 'text/html; charset=utf-8',
               });
@@ -347,7 +370,7 @@ class FileOAuthClientProvider implements OAuthClientProvider {
         console.error(
           `If the browser does not open, visit: ${authorizationUrl.toString()}`,
         );
-        tryOpenBrowser(authorizationUrl.toString());
+        void tryOpenBrowser(authorizationUrl.toString());
       });
     });
   }

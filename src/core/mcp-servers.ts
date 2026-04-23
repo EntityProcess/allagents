@@ -39,6 +39,26 @@ export interface McpProxyModifyResult {
   proxyClients?: ClientType[];
 }
 
+function removeServerScopedProxyIntent(
+  workspaceConfig: WorkspaceConfig,
+  name: string,
+): void {
+  if (!workspaceConfig.mcpProxy?.servers?.[name]) {
+    return;
+  }
+
+  delete workspaceConfig.mcpProxy.servers[name];
+  if (Object.keys(workspaceConfig.mcpProxy.servers).length === 0) {
+    workspaceConfig.mcpProxy.servers = undefined;
+  }
+  if (
+    workspaceConfig.mcpProxy.clients.length === 0 &&
+    !workspaceConfig.mcpProxy.servers
+  ) {
+    workspaceConfig.mcpProxy = undefined;
+  }
+}
+
 function getConfigPath(workspacePath: string): string {
   return join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 }
@@ -159,6 +179,33 @@ export async function setWorkspaceMcpServerProxy(
   }
 }
 
+export async function clearWorkspaceMcpServerProxy(
+  name: string,
+  workspacePath: string = process.cwd(),
+): Promise<McpProxyModifyResult> {
+  try {
+    await ensureWorkspace(workspacePath);
+    const configPath = getConfigPath(workspacePath);
+    const workspaceConfig = await readConfig(configPath);
+
+    if (!workspaceConfig.mcpServers || !(name in workspaceConfig.mcpServers)) {
+      return {
+        success: false,
+        error: `MCP server '${name}' not found in workspace.yaml`,
+      };
+    }
+
+    removeServerScopedProxyIntent(workspaceConfig, name);
+    await writeConfig(configPath, workspaceConfig);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 /**
  * Remove an MCP server entry from workspace.yaml. Returns success: false if
  * the server is not defined in workspace.yaml (it may still exist in a plugin).
@@ -189,18 +236,7 @@ export async function removeWorkspaceMcpServer(
       workspaceConfig.mcpServers = undefined;
     }
 
-    if (workspaceConfig.mcpProxy?.servers?.[name]) {
-      delete workspaceConfig.mcpProxy.servers[name];
-      if (Object.keys(workspaceConfig.mcpProxy.servers).length === 0) {
-        workspaceConfig.mcpProxy.servers = undefined;
-      }
-      if (
-        workspaceConfig.mcpProxy.clients.length === 0 &&
-        !workspaceConfig.mcpProxy.servers
-      ) {
-        workspaceConfig.mcpProxy = undefined;
-      }
-    }
+    removeServerScopedProxyIntent(workspaceConfig, name);
 
     await writeConfig(configPath, workspaceConfig);
     return { success: true };

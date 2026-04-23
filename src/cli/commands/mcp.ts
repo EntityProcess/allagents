@@ -12,6 +12,7 @@ import { dump } from 'js-yaml';
 import {
   addWorkspaceMcpServer,
   buildMcpServerConfigFromFlags,
+  clearWorkspaceMcpServerProxy,
   getWorkspaceMcpServer,
   listWorkspaceMcpServers,
   parseKeyValuePairs,
@@ -283,6 +284,17 @@ const mcpAddCmd = command({
         exitWithError(
           'mcp add',
           proxyResult.error ?? 'Failed to persist MCP proxy config',
+        );
+      }
+    } else if (force) {
+      const clearResult = await clearWorkspaceMcpServerProxy(
+        name,
+        process.cwd(),
+      );
+      if (!clearResult.success) {
+        exitWithError(
+          'mcp add',
+          clearResult.error ?? 'Failed to clear MCP proxy config',
         );
       }
     }

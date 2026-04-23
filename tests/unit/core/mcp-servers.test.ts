@@ -6,6 +6,7 @@ import { load } from 'js-yaml';
 import {
   addWorkspaceMcpServer,
   buildMcpServerConfigFromFlags,
+  clearWorkspaceMcpServerProxy,
   getWorkspaceMcpServer,
   listWorkspaceMcpServers,
   parseKeyValuePairs,
@@ -140,6 +141,37 @@ mcpProxy:
       servers: {
         wtgkb: { proxy: ['claude'] },
       },
+    });
+  });
+
+  test('clears server-scoped proxy intent without removing workspace-wide defaults', async () => {
+    writeFileSync(
+      join(dir, '.allagents', 'workspace.yaml'),
+      `repositories: []
+plugins: []
+clients:
+  - claude
+  - codex
+mcpProxy:
+  clients:
+    - codex
+`,
+      'utf-8',
+    );
+
+    await addWorkspaceMcpServer(
+      'wtgkb',
+      { type: 'http', url: 'https://knowledge.mcp.wtg.zone' },
+      dir,
+    );
+    await setWorkspaceMcpServerProxy('wtgkb', dir, ['claude']);
+
+    const result = await clearWorkspaceMcpServerProxy('wtgkb', dir);
+    expect(result.success).toBe(true);
+
+    const cfg = readWorkspace(dir);
+    expect(cfg.mcpProxy).toEqual({
+      clients: ['codex'],
     });
   });
 });
