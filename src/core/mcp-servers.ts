@@ -4,12 +4,24 @@ import { join } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
+  ClientEntry,
   ClientType,
   McpServerConfig,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
-import { McpServerConfigSchema } from '../models/workspace-config.js';
+import {
+  McpServerConfigSchema,
+  getClientTypes,
+} from '../models/workspace-config.js';
 import { ensureWorkspace } from './workspace-modify.js';
+
+const PROJECT_MCP_CLIENTS: ReadonlySet<ClientType> = new Set<ClientType>([
+  'claude',
+  'codex',
+  'vscode',
+  'copilot',
+  'universal',
+]);
 
 /**
  * Result of add/remove/update operations on workspace mcpServers.
@@ -21,6 +33,12 @@ export interface McpServerModifyResult {
   config?: McpServerConfig;
 }
 
+export interface McpProxyModifyResult {
+  success: boolean;
+  error?: string;
+  proxyClients?: ClientType[];
+}
+
 function getConfigPath(workspacePath: string): string {
   return join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 }
@@ -30,8 +48,17 @@ async function readConfig(configPath: string): Promise<WorkspaceConfig> {
   return load(content) as WorkspaceConfig;
 }
 
-async function writeConfig(configPath: string, config: WorkspaceConfig): Promise<void> {
+async function writeConfig(
+  configPath: string,
+  config: WorkspaceConfig,
+): Promise<void> {
   await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+}
+
+function getProjectMcpClients(entries: ClientEntry[]): ClientType[] {
+  return getClientTypes(entries).filter((client): client is ClientType =>
+    PROJECT_MCP_CLIENTS.has(client),
+  );
 }
 
 /**
@@ -43,8 +70,13 @@ function validateServerConfig(
 ): { valid: true; data: McpServerConfig } | { valid: false; error: string } {
   const result = McpServerConfigSchema.safeParse(config);
   if (!result.success) {
-    const issues = result.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`);
-    return { valid: false, error: `Invalid MCP server config:\n${issues.join('\n')}` };
+    const issues = result.error.issues.map(
+      (i) => `  - ${i.path.join('.')}: ${i.message}`,
+    );
+    return {
+      valid: false,
+      error: `Invalid MCP server config:\n${issues.join('\n')}`,
+    };
   }
   return { valid: true, data: result.data };
 }
@@ -89,6 +121,45 @@ export async function addWorkspaceMcpServer(
 }
 
 /**
+ * Persist server-scoped MCP proxy intent for a workspace-defined server.
+ * Keeps any existing workspace-wide proxy defaults unchanged.
+ */
+export async function setWorkspaceMcpServerProxy(
+  name: string,
+  workspacePath: string = process.cwd(),
+  proxyClients?: ClientType[],
+): Promise<McpProxyModifyResult> {
+  try {
+    await ensureWorkspace(workspacePath);
+    const configPath = getConfigPath(workspacePath);
+    const workspaceConfig = await readConfig(configPath);
+
+    if (!workspaceConfig.mcpServers || !(name in workspaceConfig.mcpServers)) {
+      return {
+        success: false,
+        error: `MCP server '${name}' not found in workspace.yaml`,
+      };
+    }
+
+    const resolvedClients = [
+      ...new Set(proxyClients ?? getProjectMcpClients(workspaceConfig.clients)),
+    ];
+    workspaceConfig.mcpProxy ??= { clients: [] };
+    workspaceConfig.mcpProxy.clients ??= [];
+    workspaceConfig.mcpProxy.servers ??= {};
+    workspaceConfig.mcpProxy.servers[name] = { proxy: resolvedClients };
+
+    await writeConfig(configPath, workspaceConfig);
+    return { success: true, proxyClients: resolvedClients };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
  * Remove an MCP server entry from workspace.yaml. Returns success: false if
  * the server is not defined in workspace.yaml (it may still exist in a plugin).
  */
@@ -116,6 +187,19 @@ export async function removeWorkspaceMcpServer(
     delete workspaceConfig.mcpServers[name];
     if (Object.keys(workspaceConfig.mcpServers).length === 0) {
       workspaceConfig.mcpServers = undefined;
+    }
+
+    if (workspaceConfig.mcpProxy?.servers?.[name]) {
+      delete workspaceConfig.mcpProxy.servers[name];
+      if (Object.keys(workspaceConfig.mcpProxy.servers).length === 0) {
+        workspaceConfig.mcpProxy.servers = undefined;
+      }
+      if (
+        workspaceConfig.mcpProxy.clients.length === 0 &&
+        !workspaceConfig.mcpProxy.servers
+      ) {
+        workspaceConfig.mcpProxy = undefined;
+      }
     }
 
     await writeConfig(configPath, workspaceConfig);
@@ -169,7 +253,8 @@ export function buildMcpServerConfigFromFlags(options: {
 }): { config: McpServerConfig } | { error: string } {
   const { commandOrUrl, args, env, headers, clients } = options;
   const transport =
-    options.transport ?? (/^https?:\/\//i.test(commandOrUrl) ? 'http' : 'stdio');
+    options.transport ??
+    (/^https?:\/\//i.test(commandOrUrl) ? 'http' : 'stdio');
 
   if (transport === 'http') {
     if (!/^https?:\/\//i.test(commandOrUrl)) {
