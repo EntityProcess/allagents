@@ -1,4 +1,3 @@
-import { dump } from 'js-yaml';
 import {
   array,
   command,
@@ -9,19 +8,27 @@ import {
   positional,
   string,
 } from 'cmd-ts';
+import { dump } from 'js-yaml';
 import {
   addWorkspaceMcpServer,
   buildMcpServerConfigFromFlags,
+  clearWorkspaceMcpServerProxy,
   getWorkspaceMcpServer,
   listWorkspaceMcpServers,
   parseKeyValuePairs,
   removeWorkspaceMcpServer,
+  setWorkspaceMcpServerProxy,
 } from '../../core/mcp-servers.js';
+import { runHttpMcpStdioProxy } from '../../core/mcp-http-stdio-proxy.js';
 import { syncMcpOnly } from '../../core/mcp-sync.js';
-import { ClientTypeSchema, type ClientType, type McpServerConfig } from '../../models/workspace-config.js';
-import { isJsonMode, jsonOutput } from '../json-output.js';
-import { buildDescription, conciseSubcommands } from '../help.js';
+import {
+  type ClientType,
+  ClientTypeSchema,
+  type McpServerConfig,
+} from '../../models/workspace-config.js';
 import { formatMcpResult } from '../format-sync.js';
+import { buildDescription, conciseSubcommands } from '../help.js';
+import { isJsonMode, jsonOutput } from '../json-output.js';
 import {
   mcpAddMeta,
   mcpGetMeta,
@@ -75,7 +82,10 @@ function buildConfigFromAddFlags(
   client: string | undefined,
 ): McpServerConfig {
   if (transport && transport !== 'http' && transport !== 'stdio') {
-    exitWithError(commandName, `Invalid transport '${transport}'. Expected 'http' or 'stdio'.`);
+    exitWithError(
+      commandName,
+      `Invalid transport '${transport}'. Expected 'http' or 'stdio'.`,
+    );
   }
 
   const envResult = parseKeyValuePairs(env, '-e/--env');
@@ -185,7 +195,8 @@ const addArgs = {
   transport: option({
     type: optional(string),
     long: 'transport',
-    description: "Transport: 'http' or 'stdio' (auto-detected from URL if omitted)",
+    description:
+      "Transport: 'http' or 'stdio' (auto-detected from URL if omitted)",
   }),
   args: multioption({
     type: array(string),
@@ -208,6 +219,11 @@ const addArgs = {
     long: 'client',
     description: 'Comma-separated list of client filters',
   }),
+  proxy: flag({
+    long: 'proxy',
+    description:
+      'Rewrite HTTP MCP server sync through the built-in AllAgents HTTP proxy helper for the targeted clients',
+  }),
 };
 
 const mcpAddCmd = command({
@@ -215,9 +231,23 @@ const mcpAddCmd = command({
   description: buildDescription(mcpAddMeta),
   args: {
     ...addArgs,
-    force: flag({ long: 'force', short: 'f', description: 'Replace an existing server with the same name' }),
+    force: flag({
+      long: 'force',
+      short: 'f',
+      description: 'Replace an existing server with the same name',
+    }),
   },
-  handler: async ({ name, commandOrUrl, transport, args, env, header, client, force }) => {
+  handler: async ({
+    name,
+    commandOrUrl,
+    transport,
+    args,
+    env,
+    header,
+    client,
+    proxy,
+    force,
+  }) => {
     const config = buildConfigFromAddFlags(
       'mcp add',
       commandOrUrl,
@@ -227,12 +257,57 @@ const mcpAddCmd = command({
       header,
       client,
     );
-    const addResult = await addWorkspaceMcpServer(name, config, process.cwd(), force);
-    if (!addResult.success) exitWithError('mcp add', addResult.error ?? 'Unknown error');
-    await runPostMutationSync('mcp add', `\u2713 Added MCP server '${name}' to workspace.yaml`, {
+    const proxyClients = client ? parseClientFilter(client) : undefined;
+    if (proxy && !('url' in config)) {
+      exitWithError(
+        'mcp add',
+        '--proxy is only supported for HTTP MCP servers',
+      );
+    }
+
+    const addResult = await addWorkspaceMcpServer(
       name,
-      config: addResult.config,
-    });
+      config,
+      process.cwd(),
+      force,
+    );
+    if (!addResult.success)
+      exitWithError('mcp add', addResult.error ?? 'Unknown error');
+
+    if (proxy) {
+      const proxyResult = await setWorkspaceMcpServerProxy(
+        name,
+        process.cwd(),
+        proxyClients,
+      );
+      if (!proxyResult.success) {
+        exitWithError(
+          'mcp add',
+          proxyResult.error ?? 'Failed to persist MCP proxy config',
+        );
+      }
+    } else if (force) {
+      const clearResult = await clearWorkspaceMcpServerProxy(
+        name,
+        process.cwd(),
+      );
+      if (!clearResult.success) {
+        exitWithError(
+          'mcp add',
+          clearResult.error ?? 'Failed to clear MCP proxy config',
+        );
+      }
+    }
+
+    await runPostMutationSync(
+      'mcp add',
+      `\u2713 Added MCP server '${name}' to workspace.yaml`,
+      {
+        name,
+        config: addResult.config,
+        proxy,
+      },
+    );
   },
 });
 
@@ -248,12 +323,37 @@ const mcpRemoveCmd = command({
   },
   handler: async ({ name }) => {
     const removeResult = await removeWorkspaceMcpServer(name, process.cwd());
-    if (!removeResult.success) exitWithError('mcp remove', removeResult.error ?? 'Unknown error');
+    if (!removeResult.success)
+      exitWithError('mcp remove', removeResult.error ?? 'Unknown error');
     await runPostMutationSync(
       'mcp remove',
       `\u2713 Removed MCP server '${name}' from workspace.yaml`,
       { name },
     );
+  },
+});
+
+// =============================================================================
+// mcp proxy-stdio (internal)
+// =============================================================================
+
+const mcpProxyStdioCmd = command({
+  name: 'proxy-stdio',
+  description: 'Internal: expose a remote HTTP MCP server as local stdio',
+  args: {
+    serverUrl: positional({ type: string, displayName: 'serverUrl' }),
+    header: multioption({
+      type: array(string),
+      long: 'header',
+      description: 'HTTP header KEY=VALUE (repeatable)',
+    }),
+  },
+  handler: async ({ serverUrl, header }) => {
+    const headerResult = parseKeyValuePairs(header, '--header');
+    if ('error' in headerResult) {
+      exitWithError('mcp proxy-stdio', headerResult.error);
+    }
+    await runHttpMcpStdioProxy(serverUrl, headerResult.values);
   },
 });
 
@@ -322,7 +422,10 @@ const mcpGetCmd = command({
       exitWithError('mcp get', e instanceof Error ? e.message : String(e));
     }
     if (!config) {
-      exitWithError('mcp get', `MCP server '${name}' not found in workspace.yaml`);
+      exitWithError(
+        'mcp get',
+        `MCP server '${name}' not found in workspace.yaml`,
+      );
     }
 
     if (isJsonMode()) {
@@ -346,7 +449,10 @@ const mcpUpdateCmd = command({
   name: 'update',
   description: buildDescription(mcpUpdateMeta),
   args: {
-    offline: flag({ long: 'offline', description: 'Use cached plugins without fetching from remote' }),
+    offline: flag({
+      long: 'offline',
+      description: 'Use cached plugins without fetching from remote',
+    }),
   },
   handler: async ({ offline }) => {
     const result = await syncMcpOnly(process.cwd(), { offline });
@@ -364,7 +470,9 @@ const mcpUpdateCmd = command({
     }
 
     const hasAnyChanges = Object.values(result.mcpResults).some(
-      (r) => r && (r.added > 0 || r.overwritten > 0 || r.removed > 0 || r.skipped > 0),
+      (r) =>
+        r &&
+        (r.added > 0 || r.overwritten > 0 || r.removed > 0 || r.skipped > 0),
     );
 
     if (!hasAnyChanges) {
@@ -398,6 +506,7 @@ export const mcpCmd = conciseSubcommands({
   description: 'Manage MCP servers for AI clients',
   cmds: {
     add: mcpAddCmd,
+    'proxy-stdio': mcpProxyStdioCmd,
     remove: mcpRemoveCmd,
     list: mcpListCmd,
     get: mcpGetCmd,

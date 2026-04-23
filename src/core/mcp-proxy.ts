@@ -1,14 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { getHomeDir } from '../constants.js';
 import type { McpProxyConfig } from '../models/workspace-config.js';
-
-/**
- * Get the path to the mcp-remote metadata settings file.
- */
-export function getProxyMetadataPath(): string {
-  return join(getHomeDir(), '.allagents', 'mcp-remote', 'mcp-metadata-settings.json');
-}
 
 /**
  * Determine if a server+client pair should be proxied.
@@ -31,7 +21,9 @@ export function shouldProxy(
 /**
  * Check if a server config uses HTTP transport (has a `url` field).
  */
-function isHttpServer(config: unknown): config is { url: string } {
+function isHttpServer(
+  config: unknown,
+): config is { url: string; headers?: Record<string, string> } {
   return (
     typeof config === 'object' &&
     config !== null &&
@@ -41,18 +33,23 @@ function isHttpServer(config: unknown): config is { url: string } {
 }
 
 /**
- * Rewrite an HTTP server config to a stdio config using mcp-remote.
+ * Rewrite an HTTP server config to a stdio config using the built-in
+ * AllAgents HTTP-to-stdio proxy helper.
  */
-function toProxiedConfig(url: string, metadataPath: string): Record<string, unknown> {
+function toProxiedConfig(
+  url: string,
+  headers?: Record<string, string>,
+): Record<string, unknown> {
+  const args = ['mcp', 'proxy-stdio', url];
+  if (headers) {
+    for (const [key, value] of Object.entries(headers)) {
+      args.push('--header', `${key}=${value}`);
+    }
+  }
+
   return {
-    command: 'npx',
-    args: [
-      'mcp-remote',
-      url,
-      '--http',
-      '--static-oauth-client-metadata',
-      `@${metadataPath}`,
-    ],
+    command: 'allagents',
+    args,
   };
 }
 
@@ -65,28 +62,14 @@ export function applyMcpProxy(
   servers: Map<string, unknown>,
   client: string,
   config: McpProxyConfig,
-  metadataPath: string,
 ): Map<string, unknown> {
   const result = new Map<string, unknown>();
   for (const [name, serverConfig] of servers) {
     if (isHttpServer(serverConfig) && shouldProxy(name, client, config)) {
-      result.set(name, toProxiedConfig(serverConfig.url, metadataPath));
+      result.set(name, toProxiedConfig(serverConfig.url, serverConfig.headers));
     } else {
       result.set(name, serverConfig);
     }
   }
   return result;
-}
-
-/**
- * Ensure the mcp-remote metadata file exists. Creates it with default
- * content if missing. Does not overwrite existing files.
- */
-export function ensureProxyMetadata(metadataPath?: string): void {
-  const path = metadataPath ?? getProxyMetadataPath();
-  if (existsSync(path)) {
-    return;
-  }
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ client_uri: 'http://localhost' }, null, 2), 'utf-8');
 }

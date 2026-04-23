@@ -1,7 +1,10 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
-import type { ClientType, WorkspaceConfig } from '../models/workspace-config.js';
+import type {
+  ClientType,
+  WorkspaceConfig,
+} from '../models/workspace-config.js';
 import type { SyncState } from '../models/sync-state.js';
 import {
   buildPluginSyncPlans,
@@ -14,7 +17,7 @@ import type { McpMergeResult } from './vscode-mcp.js';
 import { collectMcpServers, syncVscodeMcpConfig } from './vscode-mcp.js';
 import { syncClaudeMcpConfig } from './claude-mcp.js';
 import { syncCodexProjectMcpConfig } from './codex-mcp.js';
-import { applyMcpProxy, ensureProxyMetadata, getProxyMetadataPath } from './mcp-proxy.js';
+import { applyMcpProxy } from './mcp-proxy.js';
 import {
   getPreviouslySyncedMcpServers,
   loadSyncState,
@@ -117,13 +120,6 @@ export function syncMcpServers(
 
   // Prepare MCP proxy transform if configured
   const mcpProxyConfig = config.mcpProxy;
-  let proxyMetadataPath: string | undefined;
-  if (mcpProxyConfig) {
-    if (!dryRun) {
-      ensureProxyMetadata();
-    }
-    proxyMetadataPath = getProxyMetadataPath();
-  }
 
   // Emit collection warnings once (e.g. workspace overriding plugin server)
   // rather than repeating them for every client scope.
@@ -138,8 +134,8 @@ export function syncMcpServers(
       warnings.push(...collectWarnings);
       collectWarningsEmitted = true;
     }
-    if (mcpProxyConfig && proxyMetadataPath) {
-      return applyMcpProxy(servers, client, mcpProxyConfig, proxyMetadataPath);
+    if (mcpProxyConfig) {
+      return applyMcpProxy(servers, client, mcpProxyConfig);
     }
     return servers;
   }
@@ -169,7 +165,9 @@ export function syncMcpServers(
   if (anyServers.size > 0) {
     for (const client of syncClients) {
       if (!PROJECT_MCP_CLIENTS.has(client)) {
-        warnings.push(`MCP servers not synced for ${client} (not supported at project scope)`);
+        warnings.push(
+          `MCP servers not synced for ${client} (not supported at project scope)`,
+        );
       }
     }
   }
@@ -252,10 +250,18 @@ export async function syncMcpOnly(
   }
 
   // Validate plugins so we can read their .mcp.json files
-  const validatedPlugins = await validateAllPlugins(filteredPlans, workspacePath, offline);
-  const validPlugins = validatedPlugins.filter((v): v is ValidatedPlugin => v.success);
+  const validatedPlugins = await validateAllPlugins(
+    filteredPlans,
+    workspacePath,
+    offline,
+  );
+  const validPlugins = validatedPlugins.filter(
+    (v): v is ValidatedPlugin => v.success,
+  );
   warnings.push(
-    ...validatedPlugins.filter((v) => !v.success).map((v) => `${v.plugin}: ${v.error} (skipped)`),
+    ...validatedPlugins
+      .filter((v) => !v.success)
+      .map((v) => `${v.plugin}: ${v.error} (skipped)`),
   );
 
   const previousState = await loadSyncState(workspacePath);
@@ -280,10 +286,18 @@ export async function syncMcpOnly(
       await saveSyncState(workspacePath, {
         files: (previousState?.files as Record<ClientType, string[]>) ?? {},
         mcpServers: syncResult.trackedServers,
-        ...(previousState?.nativePlugins && { nativePlugins: previousState.nativePlugins }),
-        ...(previousState?.vscodeWorkspaceHash && { vscodeWorkspaceHash: previousState.vscodeWorkspaceHash }),
-        ...(previousState?.vscodeWorkspaceRepos && { vscodeWorkspaceRepos: previousState.vscodeWorkspaceRepos }),
-        ...(previousState?.skillsIndex && { skillsIndex: previousState.skillsIndex }),
+        ...(previousState?.nativePlugins && {
+          nativePlugins: previousState.nativePlugins,
+        }),
+        ...(previousState?.vscodeWorkspaceHash && {
+          vscodeWorkspaceHash: previousState.vscodeWorkspaceHash,
+        }),
+        ...(previousState?.vscodeWorkspaceRepos && {
+          vscodeWorkspaceRepos: previousState.vscodeWorkspaceRepos,
+        }),
+        ...(previousState?.skillsIndex && {
+          skillsIndex: previousState.skillsIndex,
+        }),
       });
     }
   }

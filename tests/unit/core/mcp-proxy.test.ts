@@ -1,11 +1,10 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
 import { join } from 'node:path';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   shouldProxy,
   applyMcpProxy,
-  ensureProxyMetadata,
 } from '../../../src/core/mcp-proxy.js';
 import type { McpProxyConfig } from '../../../src/models/workspace-config.js';
 
@@ -53,23 +52,15 @@ describe('shouldProxy', () => {
 });
 
 describe('applyMcpProxy', () => {
-  const metadataPath = '/home/testuser/.allagents/mcp-remote/mcp-metadata-settings.json';
-
   test('rewrites HTTP server config to stdio for proxied client', () => {
     const servers = new Map<string, unknown>([
       ['deepwiki', { url: 'https://mcp.deepwiki.com/mcp' }],
     ]);
     const config: McpProxyConfig = { clients: ['claude'] };
-    const result = applyMcpProxy(servers, 'claude', config, metadataPath);
+    const result = applyMcpProxy(servers, 'claude', config);
     expect(result.get('deepwiki')).toEqual({
-      command: 'npx',
-      args: [
-        'mcp-remote',
-        'https://mcp.deepwiki.com/mcp',
-        '--http',
-        '--static-oauth-client-metadata',
-        `@${metadataPath}`,
-      ],
+      command: 'allagents',
+      args: ['mcp', 'proxy-stdio', 'https://mcp.deepwiki.com/mcp'],
     });
   });
 
@@ -78,7 +69,7 @@ describe('applyMcpProxy', () => {
       ['deepwiki', { url: 'https://mcp.deepwiki.com/mcp' }],
     ]);
     const config: McpProxyConfig = { clients: ['claude'] };
-    const result = applyMcpProxy(servers, 'codex', config, metadataPath);
+    const result = applyMcpProxy(servers, 'codex', config);
     expect(result.get('deepwiki')).toEqual({ url: 'https://mcp.deepwiki.com/mcp' });
   });
 
@@ -87,7 +78,7 @@ describe('applyMcpProxy', () => {
       ['local-server', { command: 'node', args: ['server.js'] }],
     ]);
     const config: McpProxyConfig = { clients: ['claude'] };
-    const result = applyMcpProxy(servers, 'claude', config, metadataPath);
+    const result = applyMcpProxy(servers, 'claude', config);
     expect(result.get('local-server')).toEqual({ command: 'node', args: ['server.js'] });
   });
 
@@ -97,8 +88,8 @@ describe('applyMcpProxy', () => {
       ['stdio-server', { command: 'npx', args: ['some-mcp'] }],
     ]);
     const config: McpProxyConfig = { clients: ['copilot'] };
-    const result = applyMcpProxy(servers, 'copilot', config, metadataPath);
-    expect((result.get('http-server') as Record<string, unknown>).command).toBe('npx');
+    const result = applyMcpProxy(servers, 'copilot', config);
+    expect((result.get('http-server') as Record<string, unknown>).command).toBe('allagents');
     expect((result.get('stdio-server') as Record<string, unknown>).command).toBe('npx');
     expect((result.get('stdio-server') as Record<string, unknown>).args).toEqual(['some-mcp']);
   });
@@ -112,39 +103,34 @@ describe('applyMcpProxy', () => {
       clients: ['claude'],
       servers: { 'my-api': { proxy: ['codex'] } },
     };
-    const result = applyMcpProxy(servers, 'codex', config, metadataPath);
-    expect((result.get('my-api') as Record<string, unknown>).command).toBe('npx');
+    const result = applyMcpProxy(servers, 'codex', config);
+    expect((result.get('my-api') as Record<string, unknown>).command).toBe('allagents');
     expect(result.get('other-api')).toEqual({ url: 'https://other.example.com/mcp' });
   });
-});
 
-describe('ensureProxyMetadata', () => {
-  let tempDir: string;
-
-  beforeEach(() => {
-    tempDir = makeTempDir();
-  });
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  test('creates metadata file if it does not exist', () => {
-    const metadataPath = join(tempDir, 'mcp-remote', 'mcp-metadata-settings.json');
-    ensureProxyMetadata(metadataPath);
-    expect(existsSync(metadataPath)).toBe(true);
-    const content = JSON.parse(readFileSync(metadataPath, 'utf-8'));
-    expect(content).toEqual({ client_uri: 'http://localhost' });
-  });
-
-  test('does not overwrite existing metadata file', () => {
-    const dir = join(tempDir, 'mcp-remote');
-    mkdirSync(dir, { recursive: true });
-    const metadataPath = join(dir, 'mcp-metadata-settings.json');
-    writeFileSync(metadataPath, JSON.stringify({ client_uri: 'http://custom' }));
-
-    ensureProxyMetadata(metadataPath);
-    const content = JSON.parse(readFileSync(metadataPath, 'utf-8'));
-    expect(content).toEqual({ client_uri: 'http://custom' });
+  test('forwards HTTP headers through the proxy helper args', () => {
+    const servers = new Map<string, unknown>([
+      [
+        'secure-api',
+        {
+          url: 'https://api.example.com/mcp',
+          headers: { Authorization: 'Bearer token', 'X-Test': '1' },
+        },
+      ],
+    ]);
+    const config: McpProxyConfig = { clients: ['claude'] };
+    const result = applyMcpProxy(servers, 'claude', config);
+    expect(result.get('secure-api')).toEqual({
+      command: 'allagents',
+      args: [
+        'mcp',
+        'proxy-stdio',
+        'https://api.example.com/mcp',
+        '--header',
+        'Authorization=Bearer token',
+        '--header',
+        'X-Test=1',
+      ],
+    });
   });
 });

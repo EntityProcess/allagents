@@ -2,7 +2,12 @@ import { existsSync, readFileSync, writeFileSync, lstatSync } from 'node:fs';
 import { rm, unlink, rmdir, copyFile } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
 import JSON5 from 'json5';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, getHomeDir } from '../constants.js';
+import {
+  CONFIG_DIR,
+  WORKSPACE_CONFIG_FILE,
+  AGENT_FILES,
+  getHomeDir,
+} from '../constants.js';
 import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import type {
   WorkspaceConfig,
@@ -34,8 +39,19 @@ import {
   type CopyResult,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
-import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from './repo-skills.js';
-import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, CANONICAL_SKILLS_PATH, isUniversalClient, resolveClientMappings } from '../models/client-mapping.js';
+import {
+  discoverWorkspaceSkills,
+  writeSkillsIndex,
+  cleanupSkillsIndex,
+  groupSkillsByRepo,
+} from './repo-skills.js';
+import {
+  CLIENT_MAPPINGS,
+  USER_CLIENT_MAPPINGS,
+  CANONICAL_SKILLS_PATH,
+  isUniversalClient,
+  resolveClientMappings,
+} from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import {
   resolveSkillNames,
@@ -60,22 +76,36 @@ import {
   getPreviouslySyncedNativePlugins,
 } from './sync-state.js';
 import type { SyncState } from '../models/sync-state.js';
-import { getUserWorkspaceConfig, migrateUserWorkspaceSkillsV1toV2 } from './user-workspace.js';
+import {
+  getUserWorkspaceConfig,
+  migrateUserWorkspaceSkillsV1toV2,
+} from './user-workspace.js';
 import {
   generateVscodeWorkspace,
   getWorkspaceOutputPath,
   computeWorkspaceHash,
   reconcileVscodeWorkspaceFolders,
 } from './vscode-workspace.js';
-import { setRepositories, updateRepositories, migrateWorkspaceSkillsV1toV2 } from './workspace-modify.js';
+import {
+  setRepositories,
+  updateRepositories,
+  migrateWorkspaceSkillsV1toV2,
+} from './workspace-modify.js';
 import { collectMcpServers, syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
-import { applyMcpProxy, ensureProxyMetadata, getProxyMetadataPath } from './mcp-proxy.js';
+import { applyMcpProxy } from './mcp-proxy.js';
 import { syncCodexMcpServers } from './codex-mcp.js';
-import { syncClaudeMcpConfig, syncClaudeMcpServersViaCli } from './claude-mcp.js';
+import {
+  syncClaudeMcpConfig,
+  syncClaudeMcpServersViaCli,
+} from './claude-mcp.js';
 import { getCopilotMcpConfigPath } from './copilot-mcp.js';
 import { syncMcpServers as runMcpSync } from './mcp-sync.js';
-import { getNativeClient, mergeNativeSyncResults, type NativeSyncResult } from './native/index.js';
+import {
+  getNativeClient,
+  mergeNativeSyncResults,
+  type NativeSyncResult,
+} from './native/index.js';
 import { Stopwatch } from '../utils/stopwatch.js';
 import { processManagedRepos } from './managed-repos.js';
 
@@ -166,7 +196,10 @@ export interface SyncResult {
   /** Result of native CLI plugin installations */
   nativeResult?: NativeSyncResult;
   /** Timing data for sync steps (when available) */
-  timing?: { totalMs: number; steps: Array<{ label: string; durationMs: number; detail?: string }> };
+  timing?: {
+    totalMs: number;
+    steps: Array<{ label: string; durationMs: number; detail?: string }>;
+  };
   /** Results of managed repository clone/pull operations */
   managedRepoResults?: import('./managed-repos.js').ManagedRepoResult[];
 }
@@ -178,19 +211,33 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const warnings = [...(a.warnings || []), ...(b.warnings || [])];
   const messages = [...(a.messages || []), ...(b.messages || [])];
   const purgedPaths = [...(a.purgedPaths || []), ...(b.purgedPaths || [])];
-  const deletedArtifacts = [...(a.deletedArtifacts || []), ...(b.deletedArtifacts || [])];
-  const mcpResults = (a.mcpResults || b.mcpResults)
-    ? { ...a.mcpResults, ...b.mcpResults }
-    : undefined;
+  const deletedArtifacts = [
+    ...(a.deletedArtifacts || []),
+    ...(b.deletedArtifacts || []),
+  ];
+  const mcpResults =
+    a.mcpResults || b.mcpResults
+      ? { ...a.mcpResults, ...b.mcpResults }
+      : undefined;
   // Merge nativeResults when both scopes produce them
-  const nativeResult = a.nativeResult && b.nativeResult
-    ? {
-        marketplacesAdded: [...a.nativeResult.marketplacesAdded, ...b.nativeResult.marketplacesAdded],
-        pluginsInstalled: [...a.nativeResult.pluginsInstalled, ...b.nativeResult.pluginsInstalled],
-        pluginsFailed: [...a.nativeResult.pluginsFailed, ...b.nativeResult.pluginsFailed],
-        skipped: [...a.nativeResult.skipped, ...b.nativeResult.skipped],
-      }
-    : a.nativeResult ?? b.nativeResult;
+  const nativeResult =
+    a.nativeResult && b.nativeResult
+      ? {
+          marketplacesAdded: [
+            ...a.nativeResult.marketplacesAdded,
+            ...b.nativeResult.marketplacesAdded,
+          ],
+          pluginsInstalled: [
+            ...a.nativeResult.pluginsInstalled,
+            ...b.nativeResult.pluginsInstalled,
+          ],
+          pluginsFailed: [
+            ...a.nativeResult.pluginsFailed,
+            ...b.nativeResult.pluginsFailed,
+          ],
+          skipped: [...a.nativeResult.skipped, ...b.nativeResult.skipped],
+        }
+      : (a.nativeResult ?? b.nativeResult);
   return {
     success: a.success && b.success,
     pluginResults: [...a.pluginResults, ...b.pluginResults],
@@ -205,10 +252,13 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     ...(mcpResults && { mcpResults }),
     ...(nativeResult && { nativeResult }),
     ...(() => {
-      const managedRepoResults = [...(a.managedRepoResults || []), ...(b.managedRepoResults || [])];
+      const managedRepoResults = [
+        ...(a.managedRepoResults || []),
+        ...(b.managedRepoResults || []),
+      ];
       return managedRepoResults.length > 0 ? { managedRepoResults } : {};
     })(),
-    ...(mergeTiming(a.timing, b.timing)),
+    ...mergeTiming(a.timing, b.timing),
   };
 }
 
@@ -217,8 +267,14 @@ function mergeTiming(
   b?: SyncResult['timing'],
 ): { timing: NonNullable<SyncResult['timing']> } | Record<string, never> {
   if (!a && !b) return {};
-  const aSteps = (a?.steps ?? []).map((s) => ({ ...s, label: `user:${s.label}` }));
-  const bSteps = (b?.steps ?? []).map((s) => ({ ...s, label: `project:${s.label}` }));
+  const aSteps = (a?.steps ?? []).map((s) => ({
+    ...s,
+    label: `user:${s.label}`,
+  }));
+  const bSteps = (b?.steps ?? []).map((s) => ({
+    ...s,
+    label: `project:${s.label}`,
+  }));
   return {
     timing: {
       totalMs: (a?.totalMs ?? 0) + (b?.totalMs ?? 0),
@@ -307,19 +363,31 @@ function resolveNativePluginSource(vp: ValidatedPlugin): {
   marketplaceSource?: string;
 } {
   if (!vp.registeredAs) {
-    return { spec: vp.plugin, ...(vp.marketplaceSource && { marketplaceSource: vp.marketplaceSource }) };
+    return {
+      spec: vp.plugin,
+      ...(vp.marketplaceSource && { marketplaceSource: vp.marketplaceSource }),
+    };
   }
 
   const parsed = parsePluginSpec(vp.plugin);
   if (!parsed) {
-    return { spec: vp.plugin, ...(vp.marketplaceSource && { marketplaceSource: vp.marketplaceSource }) };
+    return {
+      spec: vp.plugin,
+      ...(vp.marketplaceSource && { marketplaceSource: vp.marketplaceSource }),
+    };
   }
 
   const canonicalSpec = `${parsed.plugin}@${vp.registeredAs}`;
   if (parsed.owner && parsed.repo) {
-    return { spec: canonicalSpec, marketplaceSource: `${parsed.owner}/${parsed.repo}` };
+    return {
+      spec: canonicalSpec,
+      marketplaceSource: `${parsed.owner}/${parsed.repo}`,
+    };
   }
-  return { spec: canonicalSpec, ...(vp.marketplaceSource && { marketplaceSource: vp.marketplaceSource }) };
+  return {
+    spec: canonicalSpec,
+    ...(vp.marketplaceSource && { marketplaceSource: vp.marketplaceSource }),
+  };
 }
 
 /**
@@ -351,11 +419,20 @@ export function collectNativePluginSources(validPlugins: ValidatedPlugin[]): {
   return { pluginsByClient, marketplaceSourcesByClient };
 }
 
-function attachNativeClientContext(result: NativeSyncResult, clientType: ClientType): NativeSyncResult {
+function attachNativeClientContext(
+  result: NativeSyncResult,
+  clientType: ClientType,
+): NativeSyncResult {
   return {
     ...result,
-    pluginsInstalled: result.pluginsInstalled.map((installed) => ({ ...installed, client: clientType })),
-    pluginsFailed: result.pluginsFailed.map((failure) => ({ ...failure, client: clientType })),
+    pluginsInstalled: result.pluginsInstalled.map((installed) => ({
+      ...installed,
+      client: clientType,
+    })),
+    pluginsFailed: result.pluginsFailed.map((failure) => ({
+      ...failure,
+      client: clientType,
+    })),
   };
 }
 
@@ -364,7 +441,12 @@ export function collectSyncClients(
   plans: PluginSyncPlan[],
 ): ClientType[] {
   const workspaceClientTypes = getClientTypes(clientEntries);
-  return [...new Set([...workspaceClientTypes, ...plans.flatMap((plan) => [...plan.clients, ...plan.nativeClients])])];
+  return [
+    ...new Set([
+      ...workspaceClientTypes,
+      ...plans.flatMap((plan) => [...plan.clients, ...plan.nativeClients]),
+    ]),
+  ];
 }
 
 /**
@@ -450,22 +532,34 @@ export function getPurgePaths(
     const paths: string[] = [];
 
     // Check commands directory
-    if (mapping.commandsPath && existsSync(join(workspacePath, mapping.commandsPath))) {
+    if (
+      mapping.commandsPath &&
+      existsSync(join(workspacePath, mapping.commandsPath))
+    ) {
       paths.push(mapping.commandsPath);
     }
 
     // Check skills directory
-    if (mapping.skillsPath && existsSync(join(workspacePath, mapping.skillsPath))) {
+    if (
+      mapping.skillsPath &&
+      existsSync(join(workspacePath, mapping.skillsPath))
+    ) {
       paths.push(mapping.skillsPath);
     }
 
     // Check hooks directory
-    if (mapping.hooksPath && existsSync(join(workspacePath, mapping.hooksPath))) {
+    if (
+      mapping.hooksPath &&
+      existsSync(join(workspacePath, mapping.hooksPath))
+    ) {
       paths.push(mapping.hooksPath);
     }
 
     // Check agents directory
-    if (mapping.agentsPath && existsSync(join(workspacePath, mapping.agentsPath))) {
+    if (
+      mapping.agentsPath &&
+      existsSync(join(workspacePath, mapping.agentsPath))
+    ) {
       paths.push(mapping.agentsPath);
     }
 
@@ -564,7 +658,10 @@ export async function selectivePurgeWorkspace(
  * Clean up empty parent directories after file deletion
  * Stops at workspace root
  */
-async function cleanupEmptyParents(workspacePath: string, filePath: string): Promise<void> {
+async function cleanupEmptyParents(
+  workspacePath: string,
+  filePath: string,
+): Promise<void> {
   let parentPath = dirname(filePath);
 
   while (parentPath && parentPath !== '.' && parentPath !== '/') {
@@ -615,11 +712,20 @@ function isExplicitGitHubSourceForCollection(source: string): boolean {
   }
 
   // For shorthand format, require at least 3 segments (owner/repo/path)
-  if (!source.startsWith('.') && !source.startsWith('/') && source.includes('/')) {
+  if (
+    !source.startsWith('.') &&
+    !source.startsWith('/') &&
+    source.includes('/')
+  ) {
     const parts = source.split('/');
     if (parts.length >= 3) {
       const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
-      if (parts[0] && parts[1] && validOwnerRepo.test(parts[0]) && validOwnerRepo.test(parts[1])) {
+      if (
+        parts[0] &&
+        parts[1] &&
+        validOwnerRepo.test(parts[0]) &&
+        validOwnerRepo.test(parts[1])
+      ) {
         return true;
       }
     }
@@ -675,7 +781,9 @@ async function fetchFileSourceRepos(
     if (result.success) {
       cache.set(repo.key, result.cachePath);
     } else {
-      errors.push(`Failed to fetch ${repo.key}: ${result.error || 'Unknown error'}`);
+      errors.push(
+        `Failed to fetch ${repo.key}: ${result.error || 'Unknown error'}`,
+      );
     }
   }
 
@@ -697,11 +805,20 @@ function isExplicitGitHubSourceForValidation(source: string): boolean {
   }
 
   // For shorthand format, require at least 3 segments (owner/repo/path)
-  if (!source.startsWith('.') && !source.startsWith('/') && source.includes('/')) {
+  if (
+    !source.startsWith('.') &&
+    !source.startsWith('/') &&
+    source.includes('/')
+  ) {
     const parts = source.split('/');
     if (parts.length >= 3) {
       const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
-      if (parts[0] && parts[1] && validOwnerRepo.test(parts[0]) && validOwnerRepo.test(parts[1])) {
+      if (
+        parts[0] &&
+        parts[1] &&
+        validOwnerRepo.test(parts[0]) &&
+        validOwnerRepo.test(parts[1])
+      ) {
         return true;
       }
     }
@@ -728,7 +845,9 @@ function validateFileSources(
     if (typeof file === 'string') {
       // String entries are resolved relative to defaultSourcePath
       if (!defaultSourcePath) {
-        errors.push(`Cannot resolve file '${file}' - no workspace.source configured`);
+        errors.push(
+          `Cannot resolve file '${file}' - no workspace.source configured`,
+        );
         continue;
       }
       const fullPath = join(defaultSourcePath, file);
@@ -745,7 +864,9 @@ function validateFileSources(
         // GitHub source - validate path exists in cache
         const parsed = parseFileSource(file.source);
         if (!parsed.owner || !parsed.repo || !parsed.filePath) {
-          errors.push(`Invalid GitHub file source: ${file.source}. Must include path to file.`);
+          errors.push(
+            `Invalid GitHub file source: ${file.source}. Must include path to file.`,
+          );
           continue;
         }
         const cacheKey = `${parsed.owner}/${parsed.repo}`;
@@ -756,7 +877,9 @@ function validateFileSources(
         }
         const fullPath = join(cachePath, parsed.filePath);
         if (!existsSync(fullPath)) {
-          errors.push(`Path not found in repository: ${cacheKey}/${parsed.filePath}`);
+          errors.push(
+            `Path not found in repository: ${cacheKey}/${parsed.filePath}`,
+          );
         }
       } else {
         // Local path with explicit source
@@ -781,7 +904,9 @@ function validateFileSources(
     } else {
       // No explicit source - resolve relative to defaultSourcePath
       if (!defaultSourcePath) {
-        errors.push(`Cannot resolve file '${file.dest}' - no workspace.source configured and no explicit source provided`);
+        errors.push(
+          `Cannot resolve file '${file.dest}' - no workspace.source configured and no explicit source provided`,
+        );
         continue;
       }
       const fullPath = join(defaultSourcePath, file.dest ?? '');
@@ -827,7 +952,10 @@ export function collectSyncedPaths(
     }
 
     // Get relative path from workspace (normalize to forward slashes for cross-platform consistency)
-    const relativePath = relative(workspacePath, copyResult.destination).replace(/\\/g, '/');
+    const relativePath = relative(
+      workspacePath,
+      copyResult.destination,
+    ).replace(/\\/g, '/');
 
     // Track file for ALL clients whose paths match (not just the first one)
     // This is important when multiple clients share the same skillsPath
@@ -846,15 +974,16 @@ export function collectSyncedPaths(
         }
       }
 
-
       // Check if file belongs to this client's paths
       if (
-        (mapping.commandsPath && relativePath.startsWith(mapping.commandsPath)) ||
+        (mapping.commandsPath &&
+          relativePath.startsWith(mapping.commandsPath)) ||
         (mapping.skillsPath && relativePath.startsWith(mapping.skillsPath)) ||
         (mapping.hooksPath && relativePath.startsWith(mapping.hooksPath)) ||
         (mapping.agentsPath && relativePath.startsWith(mapping.agentsPath)) ||
         relativePath === mapping.agentFile ||
-        (mapping.agentFileFallback && relativePath === mapping.agentFileFallback)
+        (mapping.agentFileFallback &&
+          relativePath === mapping.agentFileFallback)
       ) {
         result[client]?.push(relativePath);
         // Don't break - continue checking other clients that might share this path
@@ -945,7 +1074,8 @@ export function computeDeletedArtifacts(
       if (!artifact) continue;
 
       // Skip skills that still exist in installed plugins but are just disabled
-      if (artifact.type === 'skill' && availableSkillNames?.has(artifact.name)) continue;
+      if (artifact.type === 'skill' && availableSkillNames?.has(artifact.name))
+        continue;
 
       const key = `${client}:${artifact.type}:${artifact.name}`;
       if (!seen.has(key)) {
@@ -975,7 +1105,6 @@ async function collectAvailableSkillNames(
   }
   return names;
 }
-
 
 /**
  * Validate a single plugin by resolving its path without copying
@@ -1012,7 +1141,9 @@ async function validatePlugin(
       nativeClients: [],
       ...(resolved.pluginName && { pluginName: resolved.pluginName }),
       ...(resolved.registeredAs && { registeredAs: resolved.registeredAs }),
-      ...(resolved.marketplaceSource && { marketplaceSource: resolved.marketplaceSource }),
+      ...(resolved.marketplaceSource && {
+        marketplaceSource: resolved.marketplaceSource,
+      }),
     };
   }
 
@@ -1099,9 +1230,9 @@ export function buildPluginSyncPlans(
 
     for (const client of effectiveClients) {
       const clientEntry = normalizeClientEntry(
-        clientEntries.find((e) =>
-          (typeof e === 'string' ? e : e.name) === client
-        ) ?? client
+        clientEntries.find(
+          (e) => (typeof e === 'string' ? e : e.name) === client,
+        ) ?? client,
       );
       const mode = resolveInstallMode(plugin, clientEntry);
 
@@ -1112,7 +1243,9 @@ export function buildPluginSyncPlans(
           nativeClients.push(client);
         } else {
           fileClients.push(client);
-          warnings.push(`${client} native install only supports user scope, falling back to file copy`);
+          warnings.push(
+            `${client} native install only supports user scope, falling back to file copy`,
+          );
         }
       } else {
         fileClients.push(client);
@@ -1120,7 +1253,8 @@ export function buildPluginSyncPlans(
     }
 
     const exclude = getPluginExclude(plugin);
-    const pluginSkillsConfig = typeof plugin === 'string' ? undefined : plugin.skills;
+    const pluginSkillsConfig =
+      typeof plugin === 'string' ? undefined : plugin.skills;
     return {
       source,
       clients: fileClients,
@@ -1146,13 +1280,26 @@ export async function validateAllPlugins(
   offline: boolean,
 ): Promise<ValidatedPlugin[]> {
   return Promise.all(
-    plans.map(async ({ source, clients, nativeClients, exclude, pluginSkillsConfig }) => {
-      const validated = await validatePlugin(source, workspacePath, offline);
-      const result: ValidatedPlugin = { ...validated, clients, nativeClients };
-      if (exclude) result.exclude = exclude;
-      if (pluginSkillsConfig !== undefined) result.pluginSkillsConfig = pluginSkillsConfig;
-      return result;
-    }),
+    plans.map(
+      async ({
+        source,
+        clients,
+        nativeClients,
+        exclude,
+        pluginSkillsConfig,
+      }) => {
+        const validated = await validatePlugin(source, workspacePath, offline);
+        const result: ValidatedPlugin = {
+          ...validated,
+          clients,
+          nativeClients,
+        };
+        if (exclude) result.exclude = exclude;
+        if (pluginSkillsConfig !== undefined)
+          result.pluginSkillsConfig = pluginSkillsConfig;
+        return result;
+      },
+    ),
   );
 }
 
@@ -1186,7 +1333,10 @@ async function copyValidatedPlugin(
   syncMode: SyncMode = 'symlink',
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
-  const mappings = resolveClientMappings(clients, clientMappings ?? CLIENT_MAPPINGS);
+  const mappings = resolveClientMappings(
+    clients,
+    clientMappings ?? CLIENT_MAPPINGS,
+  );
   const clientList = clients;
 
   const exclude = validatedPlugin.exclude;
@@ -1198,7 +1348,10 @@ async function copyValidatedPlugin(
     //
     // Phase 1: Copy skills to canonical location using deduplication
     // This ensures canonical is only copied once, and tracked under the universal client
-    const { representativeClients } = deduplicateClientsByPath(clientList, mappings);
+    const { representativeClients } = deduplicateClientsByPath(
+      clientList,
+      mappings,
+    );
 
     // Phase 2: Copy for each representative client
     for (const representative of representativeClients) {
@@ -1237,7 +1390,10 @@ async function copyValidatedPlugin(
     }
   } else {
     // No universal client or copy mode: copy directly to each client's path
-    const { representativeClients } = deduplicateClientsByPath(clientList, mappings);
+    const { representativeClients } = deduplicateClientsByPath(
+      clientList,
+      mappings,
+    );
 
     for (const client of representativeClients) {
       const results = await copyPluginToWorkspace(
@@ -1396,7 +1552,10 @@ function generateVscodeWorkspaceFile(
   return contentStr;
 }
 
-function failedSyncResult(error: string, overrides?: Partial<SyncResult>): SyncResult {
+function failedSyncResult(
+  error: string,
+  overrides?: Partial<SyncResult>,
+): SyncResult {
   return {
     success: false,
     pluginResults: [],
@@ -1409,11 +1568,15 @@ function failedSyncResult(error: string, overrides?: Partial<SyncResult>): SyncR
   };
 }
 
-
 function countCopyResults(
   pluginResults: PluginSyncResult[],
   workspaceFileResults: CopyResult[],
-): { totalCopied: number; totalFailed: number; totalSkipped: number; totalGenerated: number } {
+): {
+  totalCopied: number;
+  totalFailed: number;
+  totalSkipped: number;
+  totalGenerated: number;
+} {
   let totalCopied = 0;
   let totalFailed = 0;
   let totalSkipped = 0;
@@ -1471,13 +1634,17 @@ async function syncNativePlugins(
 
   const previousNativeClients = previousState?.nativePlugins
     ? (Object.keys(previousState.nativePlugins) as ClientType[]).filter(
-        (c) => (previousState.nativePlugins?.[c]?.length ?? 0) > 0
+        (c) => (previousState.nativePlugins?.[c]?.length ?? 0) > 0,
       )
     : [];
-  const hasNativeWork = nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
+  const hasNativeWork =
+    nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
 
   if (hasNativeWork && !dryRun) {
-    const allClients = new Set([...nativePluginsByClient.keys(), ...previousNativeClients]);
+    const allClients = new Set([
+      ...nativePluginsByClient.keys(),
+      ...previousNativeClients,
+    ]);
     const perClientResults: NativeSyncResult[] = [];
 
     for (const clientType of allClients) {
@@ -1485,7 +1652,9 @@ async function syncNativePlugins(
       if (!nativeClient) {
         const sources = nativePluginsByClient.get(clientType);
         if (sources && sources.length > 0) {
-          warnings.push(`Native install: no native client for ${clientType}, skipping`);
+          warnings.push(
+            `Native install: no native client for ${clientType}, skipping`,
+          );
         }
         continue;
       }
@@ -1494,7 +1663,9 @@ async function syncNativePlugins(
       if (!cliAvailable) {
         const sources = nativePluginsByClient.get(clientType);
         if (sources && sources.length > 0) {
-          messages.push(`Native install: ${clientType} CLI not found, skipping native plugin installation`);
+          messages.push(
+            `Native install: ${clientType} CLI not found, skipping native plugin installation`,
+          );
         }
         continue;
       }
@@ -1514,22 +1685,30 @@ async function syncNativePlugins(
       const currentSpecs = currentSources
         .map((s) => nativeClient.toPluginSpec(s))
         .filter((s): s is string => s !== null);
-      const previousPlugins = getPreviouslySyncedNativePlugins(previousState, clientType);
+      const previousPlugins = getPreviouslySyncedNativePlugins(
+        previousState,
+        clientType,
+      );
       const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
       for (const plugin of removed) {
         try {
           if (scope === 'project') {
-            await nativeClient.uninstallPlugin(plugin, 'project', { cwd: workspacePath });
+            await nativeClient.uninstallPlugin(plugin, 'project', {
+              cwd: workspacePath,
+            });
           } else {
             await nativeClient.uninstallPlugin(plugin, 'user');
           }
         } catch (err) {
-          warnings.push(`Native uninstall failed for ${plugin}: ${err instanceof Error ? err.message : String(err)}`);
+          warnings.push(
+            `Native uninstall failed for ${plugin}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
       if (currentSources.length > 0) {
-        const syncOpts = scope === 'project' ? { cwd: workspacePath } : undefined;
+        const syncOpts =
+          scope === 'project' ? { cwd: workspacePath } : undefined;
         perClientResults.push(
           attachNativeClientContext(
             await nativeClient.syncPlugins(currentSources, scope, syncOpts),
@@ -1547,9 +1726,10 @@ async function syncNativePlugins(
     for (const [clientType, sources] of nativePluginsByClient) {
       const nativeClient = getNativeClient(clientType);
       if (nativeClient && sources.length > 0) {
-        const syncOpts = scope === 'project'
-          ? { cwd: workspacePath, dryRun: true }
-          : { dryRun: true };
+        const syncOpts =
+          scope === 'project'
+            ? { cwd: workspacePath, dryRun: true }
+            : { dryRun: true };
         perClientResults.push(
           attachNativeClientContext(
             await nativeClient.syncPlugins(sources, scope, syncOpts),
@@ -1575,7 +1755,10 @@ async function syncVscodeWorkspaceFile(
 ): Promise<{ config: WorkspaceConfig; hash?: string; repos?: string[] }> {
   // Reconcile .code-workspace -> workspace.yaml if the file was externally modified
   let updatedConfig = config;
-  if (previousState?.vscodeWorkspaceHash && previousState?.vscodeWorkspaceRepos) {
+  if (
+    previousState?.vscodeWorkspaceHash &&
+    previousState?.vscodeWorkspaceRepos
+  ) {
     const outputPath = getWorkspaceOutputPath(workspacePath, config.vscode);
     if (existsSync(outputPath)) {
       const existingContent = readFileSync(outputPath, 'utf-8');
@@ -1584,7 +1767,9 @@ async function syncVscodeWorkspaceFile(
       if (currentHash !== previousState.vscodeWorkspaceHash) {
         try {
           const existingWorkspace = JSON.parse(existingContent);
-          const folders = Array.isArray(existingWorkspace.folders) ? existingWorkspace.folders : [];
+          const folders = Array.isArray(existingWorkspace.folders)
+            ? existingWorkspace.folders
+            : [];
 
           const reconciled = reconcileVscodeWorkspaceFolders(
             workspacePath,
@@ -1598,25 +1783,37 @@ async function syncVscodeWorkspaceFile(
             reconciled.removed.length > 0 ||
             reconciled.renamed.length > 0
           ) {
-            const updateResult = reconciled.renamed.length > 0
-              ? await setRepositories(reconciled.updatedRepos, workspacePath)
-              : await updateRepositories(
-                  { remove: reconciled.removed, add: reconciled.added.map(p => ({ path: p })) },
-                  workspacePath,
-                );
+            const updateResult =
+              reconciled.renamed.length > 0
+                ? await setRepositories(reconciled.updatedRepos, workspacePath)
+                : await updateRepositories(
+                    {
+                      remove: reconciled.removed,
+                      add: reconciled.added.map((p) => ({ path: p })),
+                    },
+                    workspacePath,
+                  );
             if (!updateResult.success) {
-              throw new Error(updateResult.error ?? 'Failed to update repositories');
+              throw new Error(
+                updateResult.error ?? 'Failed to update repositories',
+              );
             }
             updatedConfig = await parseWorkspaceConfig(configPath);
 
             if (reconciled.removed.length > 0) {
-              messages.push(`Repositories removed (from .code-workspace): ${reconciled.removed.join(', ')}`);
+              messages.push(
+                `Repositories removed (from .code-workspace): ${reconciled.removed.join(', ')}`,
+              );
             }
             if (reconciled.added.length > 0) {
-              messages.push(`Repositories added (from .code-workspace): ${reconciled.added.join(', ')}`);
+              messages.push(
+                `Repositories added (from .code-workspace): ${reconciled.added.join(', ')}`,
+              );
             }
             if (reconciled.renamed.length > 0) {
-              messages.push(`Repository names updated (from .code-workspace): ${reconciled.renamed.join(', ')}`);
+              messages.push(
+                `Repository names updated (from .code-workspace): ${reconciled.renamed.join(', ')}`,
+              );
             }
           }
         } catch {
@@ -1627,10 +1824,13 @@ async function syncVscodeWorkspaceFile(
   }
 
   // Generate .code-workspace (always, even after reconciliation)
-  const writtenContent = generateVscodeWorkspaceFile(workspacePath, updatedConfig);
+  const writtenContent = generateVscodeWorkspaceFile(
+    workspacePath,
+    updatedConfig,
+  );
   const hash = computeWorkspaceHash(writtenContent);
-  const repos = updatedConfig.repositories.map(
-    r => resolve(workspacePath, r.path).replace(/\\/g, '/'),
+  const repos = updatedConfig.repositories.map((r) =>
+    resolve(workspacePath, r.path).replace(/\\/g, '/'),
   );
 
   return { config: updatedConfig, hash, repos };
@@ -1657,11 +1857,18 @@ async function persistSyncState(
 
   const mappings = extra?.clientMappings ?? CLIENT_MAPPINGS;
   const resolvedMappings = resolveClientMappings(syncClients, mappings);
-  const syncedFiles = collectSyncedPaths(allCopyResults, workspacePath, syncClients, resolvedMappings);
+  const syncedFiles = collectSyncedPaths(
+    allCopyResults,
+    workspacePath,
+    syncClients,
+    resolvedMappings,
+  );
 
   // Build native plugin tracking per-client
   const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
-  const installedSet = new Set((nativeResult?.pluginsInstalled ?? []).map((p) => p.plugin));
+  const installedSet = new Set(
+    (nativeResult?.pluginsInstalled ?? []).map((p) => p.plugin),
+  );
   for (const [client, sources] of nativePluginsByClient) {
     const nativeClient = getNativeClient(client);
     if (!nativeClient) continue;
@@ -1675,11 +1882,18 @@ async function persistSyncState(
 
   await saveSyncState(workspacePath, {
     files: syncedFiles,
-    ...(Object.keys(nativePluginsState).length > 0 && { nativePlugins: nativePluginsState }),
-    ...(extra?.vscodeState?.hash && { vscodeWorkspaceHash: extra.vscodeState.hash }),
-    ...(extra?.vscodeState?.repos && { vscodeWorkspaceRepos: extra.vscodeState.repos }),
+    ...(Object.keys(nativePluginsState).length > 0 && {
+      nativePlugins: nativePluginsState,
+    }),
+    ...(extra?.vscodeState?.hash && {
+      vscodeWorkspaceHash: extra.vscodeState.hash,
+    }),
+    ...(extra?.vscodeState?.repos && {
+      vscodeWorkspaceRepos: extra.vscodeState.repos,
+    }),
     ...(extra?.mcpTrackedServers && { mcpServers: extra.mcpTrackedServers }),
-    ...(extra?.skillsIndex && extra.skillsIndex.length > 0 && { skillsIndex: extra.skillsIndex }),
+    ...(extra?.skillsIndex &&
+      extra.skillsIndex.length > 0 && { skillsIndex: extra.skillsIndex }),
   });
 }
 
@@ -1703,7 +1917,13 @@ export async function syncWorkspace(
   // MIGRATION: v1→v2 - remove after v3 release
   await migrateWorkspaceSkillsV1toV2(workspacePath);
 
-  const { offline = false, dryRun = false, workspaceSourceBase, skipAgentFiles = false, skipManaged = false } = options;
+  const {
+    offline = false,
+    dryRun = false,
+    workspaceSourceBase,
+    skipAgentFiles = false,
+    skipManaged = false,
+  } = options;
   const sw = new Stopwatch();
   const configDir = join(workspacePath, CONFIG_DIR);
   const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
@@ -1733,12 +1953,18 @@ export async function syncWorkspace(
     getProjectRegistryPath(workspacePath),
   );
   for (const name of overrides) {
-    console.warn(`Warning: Workspace marketplace '${name}' overrides user marketplace of the same name.`);
+    console.warn(
+      `Warning: Workspace marketplace '${name}' overrides user marketplace of the same name.`,
+    );
   }
 
   // Step 0a: Process managed repositories (clone/pull) before anything else
   const managedRepoResults = await sw.measure('managed-repos', () =>
-    processManagedRepos(config.repositories ?? [], workspacePath, { offline, skipManaged, dryRun }),
+    processManagedRepos(config.repositories ?? [], workspacePath, {
+      offline,
+      skipManaged,
+      dryRun,
+    }),
   );
   const managedWarnings = managedRepoResults
     .filter((r) => r.error)
@@ -1754,7 +1980,9 @@ export async function syncWorkspace(
     'project',
   );
   const workspaceClients = config.clients;
-  const filteredPlans = pluginPlans.filter((plan) => plan.clients.length > 0 || plan.nativeClients.length > 0);
+  const filteredPlans = pluginPlans.filter(
+    (plan) => plan.clients.length > 0 || plan.nativeClients.length > 0,
+  );
   const syncClients = collectSyncClients(workspaceClients, filteredPlans);
 
   // Warn when no clients are configured — the sync will succeed but create no artifacts
@@ -1767,7 +1995,7 @@ export async function syncWorkspace(
       totalSkipped: 0,
       totalGenerated: 0,
       warnings: [
-        'No clients configured in workspace.yaml — no artifacts were synced. Add clients to workspace.yaml or run \'allagents workspace init\' to configure.',
+        "No clients configured in workspace.yaml — no artifacts were synced. Add clients to workspace.yaml or run 'allagents workspace init' to configure.",
       ],
     };
   }
@@ -1781,8 +2009,9 @@ export async function syncWorkspace(
   await seedFetchCacheFromMarketplaces(marketplaceResults);
 
   // Step 1: Validate all plugins before any destructive action
-  const validatedPlugins = await sw.measure('plugin-validation', () =>
-    validateAllPlugins(filteredPlans, workspacePath, offline),
+  const validatedPlugins = await sw.measure(
+    'plugin-validation',
+    () => validateAllPlugins(filteredPlans, workspacePath, offline),
     `${filteredPlans.length} plugin(s)`,
   );
 
@@ -1803,9 +2032,7 @@ export async function syncWorkspace(
       validatedWorkspaceSource = wsSourceResult;
     } else {
       // Non-blocking: warn but continue syncing plugins
-      workspaceSourceWarnings.push(
-        `Workspace source: ${wsSourceResult.error}`,
-      );
+      workspaceSourceWarnings.push(`Workspace source: ${wsSourceResult.error}`);
     }
     sw.stop('workspace-source-validation');
   }
@@ -1854,8 +2081,13 @@ export async function syncWorkspace(
   // Pass 1: Collect all skills from all plugins (excluding disabled/non-enabled skills)
   // v1 fallback: only use top-level disabledSkills/enabledSkills for configs that haven't migrated
   const isV1Fallback = config.version === undefined || config.version < 2;
-  const disabledSkillsSet = isV1Fallback ? new Set(config.disabledSkills ?? []) : undefined;
-  const enabledSkillsSet = isV1Fallback && config.enabledSkills ? new Set(config.enabledSkills) : undefined;
+  const disabledSkillsSet = isV1Fallback
+    ? new Set(config.disabledSkills ?? [])
+    : undefined;
+  const enabledSkillsSet =
+    isV1Fallback && config.enabledSkills
+      ? new Set(config.enabledSkills)
+      : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
     collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet),
   );
@@ -1867,28 +2099,38 @@ export async function syncWorkspace(
   // Pass 2: Copy skills using resolved names
   // Use syncMode from config (defaults to 'symlink')
   const syncMode = config.syncMode ?? 'symlink';
-  const pluginResults = await sw.measure('plugin-copy', () =>
-    Promise.all(
-      validPlugins.map(async (validatedPlugin) => {
-        const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
-        const result = await copyValidatedPlugin(
-          validatedPlugin,
-          workspacePath,
-          validatedPlugin.clients,
-          dryRun,
-          skillNameMap,
-          undefined, // clientMappings
-          syncMode,
-        );
-        return { ...result, scope: 'project' as const };
-      }),
-    ),
+  const pluginResults = await sw.measure(
+    'plugin-copy',
+    () =>
+      Promise.all(
+        validPlugins.map(async (validatedPlugin) => {
+          const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
+          const result = await copyValidatedPlugin(
+            validatedPlugin,
+            workspacePath,
+            validatedPlugin.clients,
+            dryRun,
+            skillNameMap,
+            undefined, // clientMappings
+            syncMode,
+          );
+          return { ...result, scope: 'project' as const };
+        }),
+      ),
     `${validPlugins.length} plugin(s)`,
   );
 
   // Step 4b: Native CLI installations
   const nativeResult = await sw.measure('native-plugin-sync', () =>
-    syncNativePlugins(validPlugins, previousState, 'project', workspacePath, dryRun, warnings, messages),
+    syncNativePlugins(
+      validPlugins,
+      previousState,
+      'project',
+      workspacePath,
+      dryRun,
+      warnings,
+      messages,
+    ),
   );
 
   // Step 5: Copy workspace files if configured
@@ -1896,7 +2138,8 @@ export async function syncWorkspace(
   // Skip when workspace.source was configured but validation failed (plugins still synced above)
   let workspaceFileResults: CopyResult[] = [];
   let writtenSkillsIndexFiles: string[] = [];
-  const skipWorkspaceFiles = !!config.workspace?.source && !validatedWorkspaceSource;
+  const skipWorkspaceFiles =
+    !!config.workspace?.source && !validatedWorkspaceSource;
   if (config.workspace && !skipWorkspaceFiles) {
     sw.start('workspace-files');
     const sourcePath = validatedWorkspaceSource?.resolved;
@@ -1930,7 +2173,11 @@ export async function syncWorkspace(
     }
 
     // Step 5b: Validate all file sources exist before copying
-    const fileValidationErrors = validateFileSources(filesToCopy, sourcePath, githubCache);
+    const fileValidationErrors = validateFileSources(
+      filesToCopy,
+      sourcePath,
+      githubCache,
+    );
     if (fileValidationErrors.length > 0) {
       return failedSyncResult(
         `File source validation failed (workspace unchanged):\n${fileValidationErrors.map((e) => `  - ${e}`).join('\n')}`,
@@ -1939,9 +2186,14 @@ export async function syncWorkspace(
     }
 
     // Step 5c: Discover skills from workspace repositories
-    const repoSkills = hasRepositories && !dryRun
-      ? await discoverWorkspaceSkills(workspacePath, config.repositories, syncClients as string[])
-      : [];
+    const repoSkills =
+      hasRepositories && !dryRun
+        ? await discoverWorkspaceSkills(
+            workspacePath,
+            config.repositories,
+            syncClients as string[],
+          )
+        : [];
 
     // Step 5c.1: Write skills-index files and clean up stale ones
     let skillsIndexRefs: { repoName: string; indexPath: string }[] = [];
@@ -1962,18 +2214,32 @@ export async function syncWorkspace(
       sourcePath,
       workspacePath,
       filesToCopy,
-      { dryRun, githubCache, repositories: config.repositories, skillsIndexRefs },
+      {
+        dryRun,
+        githubCache,
+        repositories: config.repositories,
+        skillsIndexRefs,
+      },
     );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
     // Skip when repositories is empty (no agent files should be created)
-    if (hasRepositories && !dryRun && syncClients.includes('claude') && sourcePath) {
+    if (
+      hasRepositories &&
+      !dryRun &&
+      syncClients.includes('claude') &&
+      sourcePath
+    ) {
       const claudePath = join(workspacePath, 'CLAUDE.md');
       const agentsPath = join(workspacePath, 'AGENTS.md');
       const claudeExistsInSource = existsSync(join(sourcePath, 'CLAUDE.md'));
 
       // Only copy if CLAUDE.md wasn't in source and AGENTS.md exists
-      if (!claudeExistsInSource && existsSync(agentsPath) && !existsSync(claudePath)) {
+      if (
+        !claudeExistsInSource &&
+        existsSync(agentsPath) &&
+        !existsSync(claudePath)
+      ) {
         await copyFile(agentsPath, claudePath);
       }
     }
@@ -1992,7 +2258,13 @@ export async function syncWorkspace(
   let vscodeState: { hash: string; repos: string[] } | undefined;
   if (syncClients.includes('vscode') && !dryRun) {
     const result = await sw.measure('vscode-workspace-file', () =>
-      syncVscodeWorkspaceFile(workspacePath, config, configPath, previousState, messages),
+      syncVscodeWorkspaceFile(
+        workspacePath,
+        config,
+        configPath,
+        previousState,
+        messages,
+      ),
     );
     config = result.config;
     if (result.hash && result.repos) {
@@ -2012,38 +2284,65 @@ export async function syncWorkspace(
     syncClients,
     { dryRun },
   );
-  const mcpResults: Record<string, McpMergeResult> = { ...mcpSyncResult.mcpResults };
+  const mcpResults: Record<string, McpMergeResult> = {
+    ...mcpSyncResult.mcpResults,
+  };
   warnings.push(...mcpSyncResult.warnings);
   sw.stop('mcp-sync');
 
   // Count results
-  const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, workspaceFileResults);
+  const { totalCopied, totalFailed, totalSkipped, totalGenerated } =
+    countCopyResults(pluginResults, workspaceFileResults);
   const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
 
   // Compute deleted artifacts: compare previous state vs what was just synced
   // Collect all skill names from installed plugins (including disabled) so that
   // skills that are still available but just not synced are not reported as deleted.
   const availableSkillNames = await collectAvailableSkillNames(validPlugins);
-  const allCopyResultsForState = [...pluginResults.flatMap((r) => r.copyResults), ...workspaceFileResults];
+  const allCopyResultsForState = [
+    ...pluginResults.flatMap((r) => r.copyResults),
+    ...workspaceFileResults,
+  ];
   const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
-  const newStatePaths = collectSyncedPaths(allCopyResultsForState, workspacePath, syncClients, resolvedMappings);
-  const deletedArtifacts = computeDeletedArtifacts(previousState, newStatePaths, syncClients, resolvedMappings, availableSkillNames);
+  const newStatePaths = collectSyncedPaths(
+    allCopyResultsForState,
+    workspacePath,
+    syncClients,
+    resolvedMappings,
+  );
+  const deletedArtifacts = computeDeletedArtifacts(
+    previousState,
+    newStatePaths,
+    syncClients,
+    resolvedMappings,
+    availableSkillNames,
+  );
 
   // Persist sync state (skip in dry-run mode)
-  const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
+  const { pluginsByClient: nativePluginsByClient } =
+    collectNativePluginSources(validPlugins);
   if (!dryRun) {
     await sw.measure('persist-state', () =>
       persistSyncState(
-        workspacePath, pluginResults, workspaceFileResults, syncClients,
-        nativePluginsByClient, nativeResult,
+        workspacePath,
+        pluginResults,
+        workspaceFileResults,
+        syncClients,
+        nativePluginsByClient,
+        nativeResult,
         {
           ...(vscodeState && { vscodeState }),
           ...(Object.keys(mcpResults).length > 0 && {
             mcpTrackedServers: Object.fromEntries(
-              Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
+              Object.entries(mcpResults).map(([scope, r]) => [
+                scope,
+                r.trackedServers,
+              ]),
             ),
           }),
-          ...(writtenSkillsIndexFiles.length > 0 && { skillsIndex: writtenSkillsIndexFiles }),
+          ...(writtenSkillsIndexFiles.length > 0 && {
+            skillsIndex: writtenSkillsIndexFiles,
+          }),
         },
       ),
     );
@@ -2140,7 +2439,8 @@ export async function syncUserWorkspace(
   const workspaceClients = config.clients;
   const { offline = false, dryRun = false, force = false } = options;
 
-  const { plans: allPluginPlans, warnings: planWarnings } = buildPluginSyncPlans(config.plugins, workspaceClients, 'user');
+  const { plans: allPluginPlans, warnings: planWarnings } =
+    buildPluginSyncPlans(config.plugins, workspaceClients, 'user');
   const pluginPlans = allPluginPlans.filter(
     (plan) => plan.clients.length > 0 || plan.nativeClients.length > 0,
   );
@@ -2155,8 +2455,9 @@ export async function syncUserWorkspace(
   await seedFetchCacheFromMarketplaces(marketplaceResults);
 
   // Validate all plugins
-  const validatedPlugins = await sw.measure('plugin-validation', () =>
-    validateAllPlugins(pluginPlans, homeDir, offline),
+  const validatedPlugins = await sw.measure(
+    'plugin-validation',
+    () => validateAllPlugins(pluginPlans, homeDir, offline),
     `${pluginPlans.length} plugin(s)`,
   );
   const failedValidations = validatedPlugins.filter((v) => !v.success);
@@ -2188,8 +2489,13 @@ export async function syncUserWorkspace(
   // Two-pass skill name resolution (excluding disabled/non-enabled skills)
   // v1 fallback: only use top-level disabledSkills/enabledSkills for configs that haven't migrated
   const isV1FallbackUser = config.version === undefined || config.version < 2;
-  const disabledSkillsSet = isV1FallbackUser ? new Set(config.disabledSkills ?? []) : undefined;
-  const enabledSkillsSet = isV1FallbackUser && config.enabledSkills ? new Set(config.enabledSkills) : undefined;
+  const disabledSkillsSet = isV1FallbackUser
+    ? new Set(config.disabledSkills ?? [])
+    : undefined;
+  const enabledSkillsSet =
+    isV1FallbackUser && config.enabledSkills
+      ? new Set(config.enabledSkills)
+      : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
     collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet),
   );
@@ -2198,31 +2504,38 @@ export async function syncUserWorkspace(
   // Copy plugins using USER_CLIENT_MAPPINGS
   // Use syncMode from config (defaults to 'symlink')
   const syncMode = config.syncMode ?? 'symlink';
-  const pluginResults = await sw.measure('plugin-copy', () =>
-    Promise.all(
-      validPlugins.map(async (vp) => {
-        const skillNameMap = pluginSkillMaps.get(vp.resolved);
-        const resolvedUserMappings = resolveClientMappings(vp.clients, USER_CLIENT_MAPPINGS);
-        const result = await copyValidatedPlugin(vp, homeDir, vp.clients, dryRun, skillNameMap, resolvedUserMappings, syncMode);
-        return { ...result, scope: 'user' as const };
-      }),
-    ),
+  const pluginResults = await sw.measure(
+    'plugin-copy',
+    () =>
+      Promise.all(
+        validPlugins.map(async (vp) => {
+          const skillNameMap = pluginSkillMaps.get(vp.resolved);
+          const resolvedUserMappings = resolveClientMappings(
+            vp.clients,
+            USER_CLIENT_MAPPINGS,
+          );
+          const result = await copyValidatedPlugin(
+            vp,
+            homeDir,
+            vp.clients,
+            dryRun,
+            skillNameMap,
+            resolvedUserMappings,
+            syncMode,
+          );
+          return { ...result, scope: 'user' as const };
+        }),
+      ),
     `${validPlugins.length} plugin(s)`,
   );
 
   // Count results
-  const { totalCopied, totalFailed, totalSkipped, totalGenerated } = countCopyResults(pluginResults, []);
+  const { totalCopied, totalFailed, totalSkipped, totalGenerated } =
+    countCopyResults(pluginResults, []);
 
   // MCP Proxy: prepare transform if configured (user-scoped)
   const userMcpProxyConfig = config.mcpProxy;
   const userWorkspaceMcpServers = config.mcpServers;
-  let userProxyMetadataPath: string | undefined;
-  if (userMcpProxyConfig) {
-    if (!dryRun) {
-      ensureProxyMetadata();
-    }
-    userProxyMetadataPath = getProxyMetadataPath();
-  }
 
   // Emit collection warnings once across all user-scoped client syncs.
   let userCollectWarningsEmitted = false;
@@ -2236,8 +2549,8 @@ export async function syncUserWorkspace(
       warnings.push(...collectWarnings);
       userCollectWarningsEmitted = true;
     }
-    if (userMcpProxyConfig && userProxyMetadataPath) {
-      return applyMcpProxy(servers, client, userMcpProxyConfig, userProxyMetadataPath);
+    if (userMcpProxyConfig) {
+      return applyMcpProxy(servers, client, userMcpProxyConfig);
     }
     return servers;
   }
@@ -2246,7 +2559,10 @@ export async function syncUserWorkspace(
   sw.start('mcp-sync');
   const mcpResults: Record<string, McpMergeResult> = {};
   if (syncClients.includes('vscode')) {
-    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'vscode');
+    const trackedMcpServers = getPreviouslySyncedMcpServers(
+      previousState,
+      'vscode',
+    );
     const vscodeMcpOverrides = getUserServersForClient('vscode');
     const vscodeMcp = syncVscodeMcpConfig(validPlugins, {
       dryRun,
@@ -2262,7 +2578,10 @@ export async function syncUserWorkspace(
 
   // Sync MCP servers to Codex CLI if codex client is configured
   if (syncClients.includes('codex')) {
-    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'codex');
+    const trackedMcpServers = getPreviouslySyncedMcpServers(
+      previousState,
+      'codex',
+    );
     const codexMcpOverrides = getUserServersForClient('codex');
     const codexMcp = await syncCodexMcpServers(validPlugins, {
       dryRun,
@@ -2277,7 +2596,10 @@ export async function syncUserWorkspace(
 
   // Sync MCP servers to Claude Code via CLI if claude client is configured
   if (syncClients.includes('claude')) {
-    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'claude');
+    const trackedMcpServers = getPreviouslySyncedMcpServers(
+      previousState,
+      'claude',
+    );
     const claudeMcpOverrides = getUserServersForClient('claude');
     const claudeMcp = await syncClaudeMcpServersViaCli(validPlugins, {
       dryRun,
@@ -2292,7 +2614,10 @@ export async function syncUserWorkspace(
 
   // Sync MCP servers to Copilot CLI config if copilot client is configured
   if (syncClients.includes('copilot')) {
-    const trackedMcpServers = getPreviouslySyncedMcpServers(previousState, 'copilot');
+    const trackedMcpServers = getPreviouslySyncedMcpServers(
+      previousState,
+      'copilot',
+    );
     const copilotMcpPath = getCopilotMcpConfigPath();
     const copilotMcpOverrides = getUserServersForClient('copilot');
     const copilotMcp = syncClaudeMcpConfig(validPlugins, {
@@ -2311,40 +2636,82 @@ export async function syncUserWorkspace(
   sw.stop('mcp-sync');
 
   // Warn about clients that don't support user-scoped MCP sync
-  const USER_MCP_CLIENTS = new Set(['claude', 'codex', 'vscode', 'copilot', 'universal']);
-  const allUserMcpServers = collectMcpServers(validPlugins, userWorkspaceMcpServers).servers;
+  const USER_MCP_CLIENTS = new Set([
+    'claude',
+    'codex',
+    'vscode',
+    'copilot',
+    'universal',
+  ]);
+  const allUserMcpServers = collectMcpServers(
+    validPlugins,
+    userWorkspaceMcpServers,
+  ).servers;
   if (allUserMcpServers.size > 0) {
     for (const client of syncClients) {
       if (!USER_MCP_CLIENTS.has(client)) {
-        warnings.push(`MCP servers not synced for ${client} (not supported at user scope)`);
+        warnings.push(
+          `MCP servers not synced for ${client} (not supported at user scope)`,
+        );
       }
     }
   }
 
   // Run native CLI installations for user scope
   const nativeResult = await sw.measure('native-plugin-sync', () =>
-    syncNativePlugins(validPlugins, previousState, 'user', homeDir, dryRun, warnings, messages),
+    syncNativePlugins(
+      validPlugins,
+      previousState,
+      'user',
+      homeDir,
+      dryRun,
+      warnings,
+      messages,
+    ),
   );
 
   // Compute deleted artifacts: compare previous state vs what was just synced
-  const availableUserSkillNames = await collectAvailableSkillNames(validPlugins);
+  const availableUserSkillNames =
+    await collectAvailableSkillNames(validPlugins);
   const allCopyResultsForState = pluginResults.flatMap((r) => r.copyResults);
-  const resolvedUserMappings = resolveClientMappings(syncClients, USER_CLIENT_MAPPINGS);
-  const newStatePaths = collectSyncedPaths(allCopyResultsForState, homeDir, syncClients, resolvedUserMappings);
-  const deletedArtifacts = computeDeletedArtifacts(previousState, newStatePaths, syncClients, resolvedUserMappings, availableUserSkillNames);
+  const resolvedUserMappings = resolveClientMappings(
+    syncClients,
+    USER_CLIENT_MAPPINGS,
+  );
+  const newStatePaths = collectSyncedPaths(
+    allCopyResultsForState,
+    homeDir,
+    syncClients,
+    resolvedUserMappings,
+  );
+  const deletedArtifacts = computeDeletedArtifacts(
+    previousState,
+    newStatePaths,
+    syncClients,
+    resolvedUserMappings,
+    availableUserSkillNames,
+  );
 
   // Save sync state (including MCP servers and native plugins)
   if (!dryRun) {
-    const { pluginsByClient: nativePluginsByClient } = collectNativePluginSources(validPlugins);
+    const { pluginsByClient: nativePluginsByClient } =
+      collectNativePluginSources(validPlugins);
     await sw.measure('persist-state', () =>
       persistSyncState(
-        homeDir, pluginResults, [], syncClients,
-        nativePluginsByClient, nativeResult,
+        homeDir,
+        pluginResults,
+        [],
+        syncClients,
+        nativePluginsByClient,
+        nativeResult,
         {
           clientMappings: USER_CLIENT_MAPPINGS,
           ...(Object.keys(mcpResults).length > 0 && {
             mcpTrackedServers: Object.fromEntries(
-              Object.entries(mcpResults).map(([scope, r]) => [scope, r.trackedServers]),
+              Object.entries(mcpResults).map(([scope, r]) => [
+                scope,
+                r.trackedServers,
+              ]),
             ),
           }),
         },

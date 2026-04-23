@@ -6,10 +6,12 @@ import { load } from 'js-yaml';
 import {
   addWorkspaceMcpServer,
   buildMcpServerConfigFromFlags,
+  clearWorkspaceMcpServerProxy,
   getWorkspaceMcpServer,
   listWorkspaceMcpServers,
   parseKeyValuePairs,
   removeWorkspaceMcpServer,
+  setWorkspaceMcpServerProxy,
 } from '../../../src/core/mcp-servers.js';
 
 function makeTempWorkspace(): string {
@@ -89,6 +91,89 @@ describe('addWorkspaceMcpServer', () => {
     expect(cfg.plugins).toEqual([]);
     expect(cfg.clients).toEqual(['claude']);
   });
+
+  test('persists server-scoped proxy intent without widening global proxy clients', async () => {
+    await addWorkspaceMcpServer(
+      'wtgkb',
+      { type: 'http', url: 'https://knowledge.mcp.wtg.zone' },
+      dir,
+    );
+
+    const result = await setWorkspaceMcpServerProxy('wtgkb', dir);
+    expect(result.success).toBe(true);
+    expect(result.proxyClients).toEqual(['claude']);
+
+    const cfg = readWorkspace(dir);
+    expect(cfg.mcpProxy).toEqual({
+      clients: [],
+      servers: {
+        wtgkb: { proxy: ['claude'] },
+      },
+    });
+  });
+
+  test('preserves existing workspace-wide proxy defaults when adding server-scoped proxy intent', async () => {
+    writeFileSync(
+      join(dir, '.allagents', 'workspace.yaml'),
+      `repositories: []
+plugins: []
+clients:
+  - claude
+  - codex
+mcpProxy:
+  clients:
+    - codex
+`,
+      'utf-8',
+    );
+
+    await addWorkspaceMcpServer(
+      'wtgkb',
+      { type: 'http', url: 'https://knowledge.mcp.wtg.zone' },
+      dir,
+    );
+    const result = await setWorkspaceMcpServerProxy('wtgkb', dir, ['claude']);
+    expect(result.success).toBe(true);
+
+    const cfg = readWorkspace(dir);
+    expect(cfg.mcpProxy).toEqual({
+      clients: ['codex'],
+      servers: {
+        wtgkb: { proxy: ['claude'] },
+      },
+    });
+  });
+
+  test('clears server-scoped proxy intent without removing workspace-wide defaults', async () => {
+    writeFileSync(
+      join(dir, '.allagents', 'workspace.yaml'),
+      `repositories: []
+plugins: []
+clients:
+  - claude
+  - codex
+mcpProxy:
+  clients:
+    - codex
+`,
+      'utf-8',
+    );
+
+    await addWorkspaceMcpServer(
+      'wtgkb',
+      { type: 'http', url: 'https://knowledge.mcp.wtg.zone' },
+      dir,
+    );
+    await setWorkspaceMcpServerProxy('wtgkb', dir, ['claude']);
+
+    const result = await clearWorkspaceMcpServerProxy('wtgkb', dir);
+    expect(result.success).toBe(true);
+
+    const cfg = readWorkspace(dir);
+    expect(cfg.mcpProxy).toEqual({
+      clients: ['codex'],
+    });
+  });
 });
 
 describe('removeWorkspaceMcpServer', () => {
@@ -112,6 +197,21 @@ describe('removeWorkspaceMcpServer', () => {
     const result = await removeWorkspaceMcpServer('nonexistent', dir);
     expect(result.success).toBe(false);
     expect(result.error).toContain('not found');
+  });
+
+  test('removes server-scoped proxy intent when removing a server', async () => {
+    await addWorkspaceMcpServer(
+      'wtgkb',
+      { type: 'http', url: 'https://knowledge.mcp.wtg.zone' },
+      dir,
+    );
+    await setWorkspaceMcpServerProxy('wtgkb', dir, ['claude']);
+
+    const result = await removeWorkspaceMcpServer('wtgkb', dir);
+    expect(result.success).toBe(true);
+
+    const cfg = readWorkspace(dir);
+    expect(cfg.mcpProxy).toBeUndefined();
   });
 });
 
