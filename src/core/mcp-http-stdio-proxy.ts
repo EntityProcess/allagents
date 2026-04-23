@@ -147,7 +147,12 @@ function tryOpenBrowser(url: string): Promise<void> {
         return;
       }
 
-      const { command, args } = commands[index]!;
+      const entry = commands[index];
+      if (!entry) {
+        resolve();
+        return;
+      }
+      const { command, args } = entry;
       const child = spawn(command, args, {
         detached: true,
         stdio: 'ignore',
