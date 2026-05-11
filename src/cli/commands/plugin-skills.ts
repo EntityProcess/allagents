@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import chalk from 'chalk';
-import { command, positional, option, string, optional } from 'cmd-ts';
+import { command, positional, option, flag, string, optional } from 'cmd-ts';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import {
   addDisabledSkill,
@@ -39,7 +39,7 @@ import {
   listMarketplacePlugins,
   updateMarketplace,
 } from '../../core/marketplace.js';
-import { parseMarketplaceManifest } from '../../utils/marketplace-manifest-parser.js';
+import { parseMarketplaceManifest, resolvePluginSourcePath } from '../../utils/marketplace-manifest-parser.js';
 
 /**
  * Check if a directory has a project-level .allagents config
@@ -608,6 +608,270 @@ async function applySkillAllowlist(opts: {
 }
 
 // =============================================================================
+// Skill discovery helpers (for --list and --all)
+// =============================================================================
+
+interface DiscoveredSkill {
+  name: string;
+  description: string;
+  pluginName?: string;
+}
+
+/**
+ * Resolve the SKILL.md path for a skill name in a plugin directory.
+ * Handles standard (skills/<name>/), flat (<name>/), and root layouts.
+ */
+function resolveSkillMdPath(pluginPath: string, skillName: string): string {
+  const standardPath = join(pluginPath, 'skills', skillName, 'SKILL.md');
+  if (existsSync(standardPath)) return standardPath;
+
+  const flatPath = join(pluginPath, skillName, 'SKILL.md');
+  if (existsSync(flatPath)) return flatPath;
+
+  return join(pluginPath, 'SKILL.md');
+}
+
+/**
+ * Read SKILL.md frontmatter for each discovered skill in a plugin directory.
+ */
+export async function discoverSkillsWithMetadata(
+  pluginPath: string,
+  pluginName?: string,
+): Promise<DiscoveredSkill[]> {
+  const names = await discoverSkillNames(pluginPath);
+  const results: DiscoveredSkill[] = [];
+
+  for (const name of names) {
+    const skillMdPath = resolveSkillMdPath(pluginPath, name);
+    let description = '';
+    try {
+      const content = await readFile(skillMdPath, 'utf-8');
+      const metadata = parseSkillMetadata(content);
+      description = metadata?.description ?? '';
+    } catch {
+      // Leave description empty
+    }
+    results.push({ name, description, ...(pluginName && { pluginName }) });
+  }
+
+  return results;
+}
+
+/**
+ * Discover all skills available at a --from source. Handles both direct plugins
+ * and marketplaces (in which case skills from all marketplace plugins are returned).
+ */
+async function discoverSkillsFromSource(from: string): Promise<
+  | { success: true; skills: DiscoveredSkill[]; isMarketplace: boolean }
+  | { success: false; error: string }
+> {
+  const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
+  const fetchResult = await fetchPlugin(from, {
+    ...(parsed?.branch && { branch: parsed.branch }),
+  });
+  if (!fetchResult.success) {
+    return { success: false, error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}` };
+  }
+
+  const manifestResult = await parseMarketplaceManifest(fetchResult.cachePath);
+  if (manifestResult.success) {
+    const all: DiscoveredSkill[] = [];
+    for (const plugin of manifestResult.data.plugins) {
+      const resolved = resolvePluginSourcePath(plugin.source, fetchResult.cachePath);
+      // Skip remote URL sources for now — listing would need extra fetches
+      if (typeof plugin.source === 'object') continue;
+      if (!existsSync(resolved)) continue;
+      const skills = await discoverSkillsWithMetadata(resolved, plugin.name);
+      all.push(...skills);
+    }
+    return { success: true, skills: all, isMarketplace: true };
+  }
+
+  const skills = await discoverSkillsWithMetadata(fetchResult.cachePath);
+  return { success: true, skills, isMarketplace: false };
+}
+
+/**
+ * Install all skills from a --from source. Mirrors installSkillFromSource but
+ * enables every discovered skill rather than a single named one.
+ */
+async function installAllSkillsFromSource(opts: {
+  from: string;
+  isUser: boolean;
+  workspacePath: string;
+}): Promise<
+  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: { copied: number; failed: number } }
+  | { success: false; error: string }
+> {
+  const { from, isUser, workspacePath } = opts;
+
+  if (!isJsonMode()) {
+    console.log(`Installing all skills from ${from}...`);
+  }
+
+  const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
+  const fetchResult = await fetchPlugin(from, {
+    ...(parsed?.branch && { branch: parsed.branch }),
+  });
+  if (!fetchResult.success) {
+    return { success: false, error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}` };
+  }
+
+  const manifestResult = await parseMarketplaceManifest(fetchResult.cachePath);
+
+  if (manifestResult.success) {
+    return installAllViaMarketplace({ from, isUser, workspacePath });
+  }
+
+  // Direct plugin install — enable every discovered skill
+  const skillNames = await discoverSkillNames(fetchResult.cachePath);
+  if (skillNames.length === 0) {
+    return { success: false, error: `No skills found in '${from}'.` };
+  }
+
+  const installResult = isUser ? await addUserPlugin(from) : await addPlugin(from, workspacePath);
+  if (!installResult.success) {
+    if (!installResult.error?.includes('already exists') && !installResult.error?.includes('duplicates existing')) {
+      return { success: false, error: `Failed to install plugin '${from}': ${installResult.error ?? 'Unknown error'}` };
+    }
+    if (!isJsonMode()) {
+      console.log('Plugin already installed.');
+    }
+  }
+
+  const pluginName = getPluginName(fetchResult.cachePath);
+
+  const setModeResult = isUser
+    ? await setUserPluginSkillsMode(pluginName, 'allowlist', skillNames)
+    : await setPluginSkillsMode(pluginName, 'allowlist', skillNames, workspacePath);
+
+  if (!setModeResult.success) {
+    return { success: false, error: `Failed to configure skill allowlist: ${setModeResult.error ?? 'Unknown error'}` };
+  }
+
+  if (!isJsonMode()) {
+    console.log(`✓ Enabled ${skillNames.length} skill(s) from ${pluginName}: ${skillNames.join(', ')}`);
+    console.log('\nSyncing workspace...\n');
+  }
+
+  const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+  if (!syncResult.success) {
+    return { success: false, error: 'Sync failed' };
+  }
+
+  return {
+    success: true,
+    installed: [{ pluginName, skills: skillNames }],
+    syncResult: { copied: syncResult.totalCopied, failed: syncResult.totalFailed },
+  };
+}
+
+/**
+ * Install every plugin from a marketplace source and enable every skill in each.
+ */
+async function installAllViaMarketplace(opts: {
+  from: string;
+  isUser: boolean;
+  workspacePath: string;
+}): Promise<
+  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: { copied: number; failed: number } }
+  | { success: false; error: string }
+> {
+  const { from, isUser, workspacePath } = opts;
+  const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
+  const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
+
+  let marketplaceName: string | undefined;
+  const existingAnyScope = await findMarketplace(
+    parsed?.repo ?? from,
+    sourceLocation,
+    isUser ? undefined : workspacePath,
+  );
+
+  if (existingAnyScope) {
+    marketplaceName = existingAnyScope.name;
+    await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
+  } else {
+    const scopeOptions = isUser
+      ? undefined
+      : { scope: 'project' as const, workspacePath };
+
+    const mktResult = await addMarketplace(
+      from,
+      parsed?.branch ? `${parsed.repo}-${parsed.branch}` : undefined,
+      parsed?.branch ?? undefined,
+      undefined,
+      scopeOptions,
+    );
+
+    if (mktResult.success) {
+      marketplaceName = mktResult.marketplace?.name;
+    }
+  }
+
+  if (!marketplaceName) {
+    return { success: false, error: `Failed to register marketplace from '${from}'` };
+  }
+
+  const mktPlugins = await listMarketplacePlugins(marketplaceName, isUser ? undefined : workspacePath);
+  if (mktPlugins.plugins.length === 0) {
+    return { success: false, error: `No plugins found in marketplace '${marketplaceName}'.` };
+  }
+
+  const installed: Array<{ pluginName: string; skills: string[] }> = [];
+
+  for (const mktPlugin of mktPlugins.plugins) {
+    const skillNames = mktPlugin.skills
+      ? mktPlugin.skills.map((s) => s.split('/').pop() ?? '').filter(Boolean)
+      : await discoverSkillNames(mktPlugin.path);
+
+    if (skillNames.length === 0) continue;
+
+    const pluginSpec = `${mktPlugin.name}@${marketplaceName}`;
+    const installResult = isUser
+      ? await addUserPlugin(pluginSpec)
+      : await addPlugin(pluginSpec, workspacePath);
+
+    if (!installResult.success) {
+      if (!installResult.error?.includes('already exists') && !installResult.error?.includes('duplicates existing')) {
+        return { success: false, error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}` };
+      }
+    }
+
+    const setModeResult = isUser
+      ? await setUserPluginSkillsMode(mktPlugin.name, 'allowlist', skillNames)
+      : await setPluginSkillsMode(mktPlugin.name, 'allowlist', skillNames, workspacePath);
+
+    if (!setModeResult.success) {
+      return { success: false, error: `Failed to configure skill allowlist for '${mktPlugin.name}': ${setModeResult.error ?? 'Unknown error'}` };
+    }
+
+    installed.push({ pluginName: mktPlugin.name, skills: skillNames });
+  }
+
+  if (installed.length === 0) {
+    return { success: false, error: `No skills found across plugins in marketplace '${marketplaceName}'.` };
+  }
+
+  if (!isJsonMode()) {
+    const total = installed.reduce((sum, i) => sum + i.skills.length, 0);
+    console.log(`✓ Enabled ${total} skill(s) across ${installed.length} plugin(s)`);
+    console.log('\nSyncing workspace...\n');
+  }
+
+  const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+  if (!syncResult.success) {
+    return { success: false, error: 'Sync failed' };
+  }
+
+  return {
+    success: true,
+    installed,
+    syncResult: { copied: syncResult.totalCopied, failed: syncResult.totalFailed },
+  };
+}
+
+// =============================================================================
 // plugin skills add
 // =============================================================================
 
@@ -615,7 +879,7 @@ const addCmd = command({
   name: 'add',
   description: buildDescription(skillsAddMeta),
   args: {
-    skill: positional({ type: string, displayName: 'skill' }),
+    skill: positional({ type: optional(string), displayName: 'skill' }),
     scope: option({
       type: optional(string),
       long: 'scope',
@@ -634,9 +898,148 @@ const addCmd = command({
       short: 'f',
       description: 'Plugin source to install if the skill is not already available',
     }),
+    list: flag({
+      long: 'list',
+      short: 'l',
+      description: 'List available skills at --from without installing',
+    }),
+    all: flag({
+      long: 'all',
+      description: 'Install every skill from --from',
+    }),
   },
-  handler: async ({ skill: skillArg, scope, plugin, from: fromArg }) => {
+  handler: async ({ skill: skillArg, scope, plugin, from: fromArg, list, all }) => {
     try {
+      // --list: dry-run discovery, no workspace changes
+      if (list) {
+        if (!fromArg) {
+          const error = '--list requires --from to specify a plugin source.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+        if (all) {
+          const error = '--list and --all cannot be used together.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+
+        const discovered = await discoverSkillsFromSource(fromArg);
+        if (!discovered.success) {
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error: discovered.error });
+            process.exit(1);
+          }
+          console.error(`Error: ${discovered.error}`);
+          process.exit(1);
+        }
+
+        if (isJsonMode()) {
+          jsonOutput({
+            success: true,
+            command: 'plugin skills add',
+            data: {
+              source: fromArg,
+              isMarketplace: discovered.isMarketplace,
+              skills: discovered.skills.map((s) => ({
+                name: s.name,
+                description: s.description,
+                ...(s.pluginName && { plugin: s.pluginName }),
+              })),
+            },
+          });
+          return;
+        }
+
+        if (discovered.skills.length === 0) {
+          console.log(`No skills found in ${fromArg}.`);
+          return;
+        }
+
+        console.log(`\nAvailable skills in ${fromArg}:\n`);
+        for (const s of discovered.skills) {
+          const label = s.pluginName ? `${s.name} ${chalk.gray(`(${s.pluginName})`)}` : s.name;
+          console.log(`  ${chalk.hex('#89b4fa')(label)}`);
+          if (s.description) console.log(`    ${s.description}`);
+          console.log();
+        }
+        return;
+      }
+
+      // --all: bulk install
+      if (all) {
+        if (!fromArg) {
+          const error = '--all requires --from to specify a plugin source.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+        if (skillArg) {
+          const error = 'Cannot combine a skill argument with --all. Use --all alone to install every skill.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+
+        const isUserAll = scope === 'user';
+        const workspacePathAll = isUserAll ? getHomeDir() : process.cwd();
+
+        const installResult = await installAllSkillsFromSource({
+          from: fromArg,
+          isUser: isUserAll,
+          workspacePath: workspacePathAll,
+        });
+
+        if (!installResult.success) {
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error: installResult.error });
+            process.exit(1);
+          }
+          console.error(`Error: ${installResult.error}`);
+          process.exit(1);
+        }
+
+        if (isJsonMode()) {
+          jsonOutput({
+            success: true,
+            command: 'plugin skills add',
+            data: {
+              source: fromArg,
+              installed: installResult.installed,
+              syncResult: installResult.syncResult,
+            },
+          });
+          return;
+        }
+
+        console.log('Sync complete.');
+        return;
+      }
+
+      // Without --list or --all, skill argument is required.
+      if (!skillArg) {
+        const error = 'A skill name is required. Use --list to discover available skills or --all to install everything.';
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'plugin skills add', error });
+          process.exit(1);
+        }
+        console.error(`Error: ${error}`);
+        process.exit(1);
+      }
+
       let skill = skillArg;
       let from = fromArg;
 
