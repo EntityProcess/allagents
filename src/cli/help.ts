@@ -31,6 +31,15 @@ export interface AgentCommandMeta extends CommandMeta {
   positionals?: CommandPositional[];
   options?: CommandOption[];
   outputSchema?: Record<string, unknown>;
+  /**
+   * Allowlist of fields that may be requested via `--json=<f1>,<f2>`.
+   *
+   * When the data envelope contains a single top-level array of objects,
+   * the listed fields select which keys remain on each array item. Otherwise
+   * the fields are pulled from the top-level data object. Unknown fields are
+   * rejected with a sorted suggestion list and exit code 2.
+   */
+  jsonFields?: readonly string[];
 }
 
 /**

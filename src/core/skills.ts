@@ -50,6 +50,7 @@ async function resolvePluginPath(
   if (isPluginSpec(pluginSource)) {
     const resolved = await resolvePluginSpecWithAutoRegister(pluginSource, {
       offline: true,
+      workspacePath,
     });
     if (!resolved.success || !resolved.path) return null;
     return {

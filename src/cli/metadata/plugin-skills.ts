@@ -7,6 +7,7 @@ export const skillsListMeta: AgentCommandMeta = {
   examples: [
     'allagents skill list',
     'allagents skill list --scope user',
+    'allagents --json=name,plugin skill list',
   ],
   expectedOutput: 'Lists skills grouped by plugin with enabled/disabled status',
   options: [
@@ -15,6 +16,7 @@ export const skillsListMeta: AgentCommandMeta = {
   outputSchema: {
     skills: [{ name: 'string', plugin: 'string', disabled: 'boolean' }],
   },
+  jsonFields: ['name', 'plugin', 'disabled'] as const,
 };
 
 export const skillsRemoveMeta: AgentCommandMeta = {

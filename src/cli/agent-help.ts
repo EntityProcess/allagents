@@ -63,7 +63,20 @@ function formatForAgent(meta: AgentCommandMeta) {
   if (meta.outputSchema) {
     result.output_schema = meta.outputSchema;
   }
+  if (meta.jsonFields && meta.jsonFields.length > 0) {
+    result.json_fields = [...meta.jsonFields];
+  }
   return result;
+}
+
+/**
+ * Look up a meta by the runtime command path (e.g. "skills list").
+ * Used by index.ts to validate `--json=<fields>` against the per-command
+ * allowlist before dispatching.
+ */
+export function findMetaByCommand(commandPath: string): AgentCommandMeta | undefined {
+  if (!commandPath) return undefined;
+  return allCommands.find((c) => c.command === commandPath);
 }
 
 export function printAgentHelp(args: string[], version: string): void {
