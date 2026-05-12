@@ -114,8 +114,8 @@ export interface SkillSearchQuery {
  * Build the parallel Code Search query set, ordered by priority.
  *
  * Always emits:
- *   - Priority 1 — `filename:SKILL.md path:<pathTerm>` (+ optional user filter)
- *   - Priority 4 — `filename:SKILL.md <query>`           (+ optional user filter)
+ *   - Priority 1 — `filename:SKILL.md in:path <pathTerm>` (+ optional user filter)
+ *   - Priority 4 — `filename:SKILL.md <query>`              (+ optional user filter)
  *
  * Conditionally emits:
  *   - Priority 2 — `filename:SKILL.md <pathTerm>` (only when the hyphenated
@@ -124,9 +124,12 @@ export interface SkillSearchQuery {
  *     `--owner` is set AND the query itself could plausibly be a GitHub
  *     login)
  *
- * The path query is what surfaces e.g. CargoWise skills at
- * `plugins/cargowise/skills/...` even when the SKILL.md content doesn't
- * mention "cargowise" — `path:cargowise` matches the directory name.
+ * P1 uses `in:path <term>` rather than `path:<term>`. The two qualifiers
+ * differ on the live API: `path:foo` is prefix-on-path-components (so
+ * `path:cargowise` doesn't match `plugins/cargowise/skills/...`), while
+ * `in:path foo` matches the term anywhere in the path. The substring form
+ * is what surfaces nested skills like `plugins/cargowise/skills/cw-yard/SKILL.md`
+ * when the SKILL.md body itself doesn't mention "cargowise".
  */
 export function buildSearchQueries(
   query: string,
@@ -138,7 +141,7 @@ export function buildSearchQueries(
   const join = (...parts: string[]) => parts.filter(Boolean).join(' ');
 
   const queries: SkillSearchQuery[] = [
-    { priority: 1, label: 'path', q: join('filename:SKILL.md', `path:${pathTerm}`, userClause) },
+    { priority: 1, label: 'path', q: join('filename:SKILL.md', `in:path ${pathTerm}`, userClause) },
   ];
 
   if (pathTerm !== trimmed) {
@@ -386,7 +389,7 @@ export async function searchSkills(
 
 /**
  * Drop duplicate hits by `repo + qualifiedName`. Same folder surfaced by
- * multiple query buckets (e.g. both `path:` and content match) collapses to
+ * multiple query buckets (e.g. both `in:path` and content match) collapses to
  * one entry, with the higher-priority bucket's occurrence winning because
  * items are merged in priority order before this runs.
  */

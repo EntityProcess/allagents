@@ -183,7 +183,11 @@ describe('buildSearchQueries', () => {
     expect(queries.map((q) => q.label)).toEqual(['path', 'owner', 'primary']);
     const labels = new Map(queries.map((q) => [q.label, q.q]));
     expect(labels.get('path')).toContain('filename:SKILL.md');
-    expect(labels.get('path')).toContain('path:cargowise');
+    // P1 uses `in:path <term>` so the term substring-matches anywhere in
+    // the path. (GitHub's `path:<term>` qualifier is prefix-only and
+    // misses nested layouts like `plugins/cargowise/skills/...`.)
+    expect(labels.get('path')).toContain('in:path cargowise');
+    expect(labels.get('path')).not.toContain('path:cargowise');
     expect(labels.get('primary')).toBe('filename:SKILL.md cargowise');
   });
 
@@ -191,7 +195,7 @@ describe('buildSearchQueries', () => {
     const queries = buildSearchQueries('cargowise', 'WiseTechGlobal');
     expect(queries.map((q) => q.label)).toEqual(['path', 'primary']);
     expect(queries.find((q) => q.label === 'path')?.q).toBe(
-      'filename:SKILL.md path:cargowise user:WiseTechGlobal',
+      'filename:SKILL.md in:path cargowise user:WiseTechGlobal',
     );
     expect(queries.find((q) => q.label === 'primary')?.q).toBe(
       'filename:SKILL.md cargowise user:WiseTechGlobal',
@@ -202,7 +206,7 @@ describe('buildSearchQueries', () => {
     const queries = buildSearchQueries('build worker', undefined);
     const path = queries.find((q) => q.label === 'path');
     const hyphen = queries.find((q) => q.label === 'hyphen');
-    expect(path?.q).toContain('path:build-worker');
+    expect(path?.q).toContain('in:path build-worker');
     expect(hyphen?.q).toBe('filename:SKILL.md build-worker');
   });
 
@@ -268,7 +272,7 @@ describe('searchSkills error mapping', () => {
     const fakeFetch = makeFakeFetch([
       // Path query (P1) fails with 422.
       {
-        match: (q) => q.includes('path:'),
+        match: (q) => q.includes('in:path'),
         items: [],
         status: 422,
         message: 'Path query rejected',
@@ -379,8 +383,11 @@ describe('multi-query merge + dedup', () => {
   it('returns a path-only hit even when content has no mention of the query (cargowise case)', async () => {
     const fakeFetch = makeFakeFetch([
       // P1 path query: finds CargoWise skill at plugins/cargowise/skills/...
+      // The `in:path cargowise` qualifier substring-matches the term anywhere
+      // in the file path, so it picks up the nested `plugins/cargowise/...`
+      // layout even though the SKILL.md body has no mention of "cargowise".
       {
-        match: (q) => q.includes('path:cargowise'),
+        match: (q) => q.includes('in:path cargowise'),
         items: [
           {
             path: 'plugins/cargowise/skills/cw-deploy/SKILL.md',
@@ -405,7 +412,7 @@ describe('multi-query merge + dedup', () => {
     const fakeFetch = makeFakeFetch([
       // Path query → only the kynan/commit folder (path contains the literal "kynan/commit").
       {
-        match: (q) => q.includes('path:kynan/commit'),
+        match: (q) => q.includes('in:path kynan/commit'),
         items: [
           {
             path: 'skills/kynan/commit/SKILL.md',
@@ -481,9 +488,9 @@ describe('multi-query merge + dedup', () => {
 
   it('places the hyphen (P2) bucket between path (P1) and primary (P4) for multi-word queries', async () => {
     const fakeFetch = makeFakeFetch([
-      // P1 path query (`path:build-worker`) → path-only hit
+      // P1 path query (`in:path build-worker`) → path-only hit
       {
-        match: (q) => q.includes('path:build-worker'),
+        match: (q) => q.includes('in:path build-worker'),
         items: [
           {
             path: 'plugins/build-worker/skills/run/SKILL.md',
@@ -494,7 +501,7 @@ describe('multi-query merge + dedup', () => {
       },
       // P2 hyphen content query (`build-worker`) → distinct hit
       {
-        match: (q) => q.includes('build-worker') && !q.includes('path:'),
+        match: (q) => q.includes('build-worker') && !q.includes('in:path'),
         items: [
           {
             path: 'skills/build-worker-utils/SKILL.md',
