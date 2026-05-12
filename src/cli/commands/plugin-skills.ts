@@ -28,7 +28,13 @@ import {
   skillsListMeta,
   skillsRemoveMeta,
   skillsAddMeta,
+  skillsSearchMeta,
 } from '../metadata/plugin-skills.js';
+import {
+  searchSkills,
+  SkillSearchError,
+  type SkillSearchOptions,
+} from '../../core/skill-search.js';
 import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
 import { isGitHubUrl, parseGitHubUrl } from '../../utils/plugin-path.js';
 import { fetchPlugin, getPluginName, seedFetchCache } from '../../core/plugin.js';
@@ -1246,6 +1252,108 @@ const addCmd = command({
 });
 
 // =============================================================================
+// skill search (GitHub Code Search)
+// =============================================================================
+
+const searchCmd = command({
+  name: 'search',
+  description: buildDescription(skillsSearchMeta),
+  args: {
+    query: positional({ type: string, displayName: 'query' }),
+    owner: option({
+      type: optional(string),
+      long: 'owner',
+      description: 'Scope to a single GitHub owner (org or user).',
+    }),
+    page: option({
+      type: optional(string),
+      long: 'page',
+      description: 'Result page (1-indexed, default 1).',
+    }),
+    limit: option({
+      type: optional(string),
+      long: 'limit',
+      description: 'Results per page (1–100, default 30).',
+    }),
+  },
+  handler: async ({ query, owner, page, limit }) => {
+    try {
+      const opts: SkillSearchOptions = {};
+      if (owner) opts.owner = owner;
+      if (page !== undefined) {
+        const n = Number.parseInt(page, 10);
+        if (Number.isNaN(n)) {
+          const err = '--page must be an integer.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'skill search', error: err });
+            process.exit(2);
+          }
+          console.error(`Error: ${err}`);
+          process.exit(2);
+        }
+        opts.page = n;
+      }
+      if (limit !== undefined) {
+        const n = Number.parseInt(limit, 10);
+        if (Number.isNaN(n)) {
+          const err = '--limit must be an integer.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'skill search', error: err });
+            process.exit(2);
+          }
+          console.error(`Error: ${err}`);
+          process.exit(2);
+        }
+        opts.limit = n;
+      }
+
+      const result = await searchSkills(query, opts);
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'skill search',
+          data: result,
+        });
+        return;
+      }
+
+      if (result.items.length === 0) {
+        console.log(`No skills found for "${query}".`);
+        return;
+      }
+
+      console.log(`Found ${result.total} skill(s)${result.truncated ? ' (results truncated)' : ''}:`);
+      for (const item of result.items) {
+        const repoCol = item.repo.padEnd(28);
+        const nameCol = item.name.padEnd(28);
+        const desc = item.description ? `  ${item.description}` : '';
+        console.log(`  ${repoCol}  ${nameCol}${desc}`);
+      }
+    } catch (error) {
+      if (error instanceof SkillSearchError) {
+        const exitCode = error.kind === 'validation' ? 2 : 1;
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'skill search', error: error.message });
+          process.exit(exitCode);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(exitCode);
+      }
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'skill search', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
 // skill subcommands group (canonical singular; `skills` is a CLI alias)
 // =============================================================================
 
@@ -1256,5 +1364,6 @@ export const skillsCmd = conciseSubcommands({
     list: listCmd,
     remove: removeCmd,
     add: addCmd,
+    search: searchCmd,
   },
 });
