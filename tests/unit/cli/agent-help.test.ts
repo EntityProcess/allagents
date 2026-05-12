@@ -18,6 +18,7 @@ import {
   skillsAddMeta,
   skillsRemoveMeta,
   skillsSearchMeta,
+  skillsUpdateMeta,
 } from '../../../src/cli/metadata/plugin-skills.js';
 import type { AgentCommandMeta } from '../../../src/cli/help.js';
 
@@ -38,6 +39,7 @@ const allCommands: AgentCommandMeta[] = [
   skillsAddMeta,
   skillsRemoveMeta,
   skillsSearchMeta,
+  skillsUpdateMeta,
   updateMeta,
 ];
 
@@ -68,8 +70,8 @@ describe('extractAgentHelpFlag', () => {
 });
 
 describe('agent command metadata', () => {
-  test('contains exactly 17 commands', () => {
-    expect(allCommands.length).toBe(17);
+  test('contains exactly 18 commands', () => {
+    expect(allCommands.length).toBe(18);
   });
 
   test('all expected commands are present', () => {
@@ -89,6 +91,7 @@ describe('agent command metadata', () => {
       'skill list',
       'skill remove',
       'skill search',
+      'skill update',
       'update',
       'workspace init',
       'workspace status',

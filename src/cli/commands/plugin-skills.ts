@@ -29,6 +29,7 @@ import {
   skillsRemoveMeta,
   skillsAddMeta,
   skillsSearchMeta,
+  skillsUpdateMeta,
 } from '../metadata/plugin-skills.js';
 import {
   searchSkills,
@@ -40,6 +41,7 @@ import { isGitHubUrl, parseGitHubUrl, stripGitRef } from '../../utils/plugin-pat
 import { fetchPlugin, getPluginName, seedFetchCache } from '../../core/plugin.js';
 import {
   computeSkillFolderHash,
+  loadSyncState,
   upsertSyncStateSource,
   upsertSyncStateSkill,
 } from '../../core/sync-state.js';
@@ -1516,6 +1518,221 @@ const searchCmd = command({
 });
 
 // =============================================================================
+// skill update
+// =============================================================================
+
+/**
+ * Output row for skill update (per skill, both for human print and JSON).
+ */
+type SkillUpdateRow = {
+  skill: string;
+  source: string;
+  from: string;
+  to: string;
+  status: 'up-to-date' | 'available' | 'updated' | 'pinned' | 'skipped';
+};
+
+const updateCmd = command({
+  name: 'update',
+  description: buildDescription(skillsUpdateMeta),
+  args: {
+    skill: positional({ type: optional(string), displayName: 'skill' }),
+    all: flag({ long: 'all', description: 'Apply updates without prompting (default in non-TTY).' }),
+    force: flag({ long: 'force', description: 'Re-download even when content hashes match.' }),
+    dryRun: flag({ long: 'dry-run', description: 'Report drift without writing any files.' }),
+    unpin: flag({ long: 'unpin', description: 'Clear pinnedRef before resolving (move to latest).' }),
+    scope: option({
+      type: optional(string),
+      long: 'scope',
+      short: 's',
+      description: 'Scope: "project" (default) or "user"',
+    }),
+  },
+  handler: async ({ skill: skillFilter, all, force, dryRun, unpin, scope }) => {
+    try {
+      const isUser = scope === 'user' || (!scope && resolveScope(process.cwd()) === 'user');
+      const workspacePath = isUser ? getHomeDir() : process.cwd();
+
+      const state = await loadSyncState(workspacePath);
+      const sources = state?.sources ?? {};
+
+      // Build the list of (source, skill) tuples to consider. When a skill
+      // name is supplied, only entries matching that name are processed.
+      type Candidate = {
+        sourceKey: string;
+        source: import('../../models/sync-state.js').SyncStateSource;
+        skillName: string;
+        recordedHash: string;
+      };
+      const candidates: Candidate[] = [];
+      for (const [key, source] of Object.entries(sources)) {
+        if (!source.skills) continue;
+        for (const [skillName, entry] of Object.entries(source.skills)) {
+          if (skillFilter && skillName !== skillFilter) continue;
+          candidates.push({
+            sourceKey: key,
+            source,
+            skillName,
+            recordedHash: entry.contentHash,
+          });
+        }
+      }
+
+      const updates: SkillUpdateRow[] = [];
+      const upToDate: string[] = [];
+      const pinned: string[] = [];
+
+      // Non-TTY default: skip skills that would otherwise prompt; equivalent
+      // to running with --all from the user's perspective.
+      const applyImplicitly = all || !process.stdin.isTTY;
+
+      for (const cand of candidates) {
+        const currentlyPinned = Boolean(cand.source.pinnedRef);
+        if (currentlyPinned && !unpin) {
+          pinned.push(cand.skillName);
+          continue;
+        }
+
+        // Resolve upstream (cached fetch). When --unpin, drop the pin from the
+        // spec so we resolve against the default branch.
+        const spec = cand.sourceKey;
+        const fetchOpts = unpin
+          ? {}
+          : cand.source.pinnedRef
+            ? { branch: cand.source.pinnedRef }
+            : {};
+        const fetchResult = await fetchPlugin(spec, fetchOpts);
+        if (!fetchResult.success || !fetchResult.resolvedSha) {
+          updates.push({
+            skill: cand.skillName,
+            source: cand.sourceKey,
+            from: cand.source.resolvedSha.slice(0, 7),
+            to: '?',
+            status: 'skipped',
+          });
+          continue;
+        }
+
+        const pluginRoot = fetchResult.cachePath;
+        const folder = resolveSkillFolder(pluginRoot, cand.skillName);
+        const upstreamHash = folder ? await computeSkillFolderHash(folder) : null;
+        const matches = upstreamHash !== null && upstreamHash === cand.recordedHash;
+
+        if (matches && !force) {
+          upToDate.push(cand.skillName);
+          continue;
+        }
+
+        const fromShort = cand.source.resolvedSha.slice(0, 7);
+        const toShort = fetchResult.resolvedSha.slice(0, 7);
+
+        if (dryRun) {
+          updates.push({
+            skill: cand.skillName,
+            source: cand.sourceKey,
+            from: fromShort,
+            to: toShort,
+            status: 'available',
+          });
+          continue;
+        }
+
+        // Apply: refresh the source provenance entry and re-hash the skill.
+        if (applyImplicitly) {
+          const now = new Date().toISOString();
+          await upsertSyncStateSource(workspacePath, cand.sourceKey, {
+            pluginSpec: cand.sourceKey,
+            resolvedRef: fetchResult.resolvedRef ?? cand.source.resolvedRef,
+            resolvedSha: fetchResult.resolvedSha,
+            ...(unpin
+              ? {}
+              : cand.source.pinnedRef
+                ? { pinnedRef: cand.source.pinnedRef }
+                : {}),
+          });
+          if (upstreamHash) {
+            await upsertSyncStateSkill(workspacePath, cand.sourceKey, cand.skillName, {
+              contentHash: upstreamHash,
+              installedAt: cand.source.skills?.[cand.skillName]?.installedAt ?? now,
+              updatedAt: now,
+            });
+          }
+          updates.push({
+            skill: cand.skillName,
+            source: cand.sourceKey,
+            from: fromShort,
+            to: toShort,
+            status: 'updated',
+          });
+        } else {
+          // No --all in TTY: report rather than apply, leaving the choice to a follow-up.
+          updates.push({
+            skill: cand.skillName,
+            source: cand.sourceKey,
+            from: fromShort,
+            to: toShort,
+            status: 'available',
+          });
+        }
+      }
+
+      const checked = candidates.length;
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'skill update',
+          data: {
+            checked,
+            updates,
+            upToDate,
+            pinned,
+            ...(dryRun && { dryRun: true }),
+          },
+        });
+        return;
+      }
+
+      if (checked === 0) {
+        console.log('No installed skills with recorded content hashes found.');
+        return;
+      }
+
+      console.log(`Checking ${checked} skill(s)...`);
+      for (const s of upToDate) {
+        console.log(`  ${chalk.green('✓')} ${s.padEnd(28)} up to date`);
+      }
+      for (const u of updates) {
+        const marker =
+          u.status === 'updated' ? chalk.cyan('↑')
+            : u.status === 'available' ? chalk.yellow('*')
+              : chalk.dim('-');
+        const tail =
+          u.status === 'updated' ? `${u.from} → ${u.to} (updated)`
+            : u.status === 'available' ? `${u.from} → ${u.to} (would update)`
+              : u.status;
+        console.log(`  ${marker} ${u.skill.padEnd(28)} ${tail}`);
+      }
+      for (const p of pinned) {
+        console.log(`  ${chalk.dim('-')} ${p.padEnd(28)} pinned, skipping (--unpin to override)`);
+      }
+      console.log(
+        `\n${upToDate.length} up to date, ${updates.length} update${updates.length === 1 ? '' : 's'} ${dryRun ? 'available' : 'reported'}, ${pinned.length} pinned`,
+      );
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'skill update', error: error.message });
+          process.exit(1);
+        }
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
 // skill subcommands group (canonical singular; `skills` is a CLI alias)
 // =============================================================================
 
@@ -1527,5 +1744,6 @@ export const skillsCmd = conciseSubcommands({
     remove: removeCmd,
     add: addCmd,
     search: searchCmd,
+    update: updateCmd,
   },
 });
