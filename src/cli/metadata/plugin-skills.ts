@@ -71,6 +71,51 @@ export const skillsSearchMeta: AgentCommandMeta = {
   },
 };
 
+export const skillsUpdateMeta: AgentCommandMeta = {
+  command: 'skill update',
+  description: 'Refresh installed skills against their source (per-skill, separate from workspace sync)',
+  whenToUse:
+    'To check or apply updates for installed skills without re-syncing the entire workspace. Pinned skills are skipped unless --unpin is passed.',
+  examples: [
+    'allagents skill update',
+    'allagents skill update brainstorming',
+    'allagents skill update --all',
+    'allagents skill update --dry-run',
+    'allagents skill update --force --all',
+    'allagents skill update git-commit --unpin',
+  ],
+  expectedOutput: 'Per-skill report of up-to-date / updates available / pinned',
+  positionals: [
+    {
+      name: 'skill',
+      type: 'string',
+      required: false,
+      description: 'Optional skill name. Omit to update across every installed skill.',
+    },
+  ],
+  options: [
+    { flag: '--all', type: 'boolean', description: 'Apply updates without prompting (default in non-TTY).' },
+    { flag: '--force', type: 'boolean', description: 'Re-download even when content hashes match.' },
+    { flag: '--dry-run', type: 'boolean', description: 'Report drift without writing any files.' },
+    { flag: '--unpin', type: 'boolean', description: 'Clear any pinnedRef before resolving (move to latest).' },
+    { flag: '--scope', short: '-s', type: 'string', description: 'Scope: "project" (default) or "user".' },
+  ],
+  outputSchema: {
+    checked: 'number',
+    updates: [
+      {
+        skill: 'string',
+        source: 'string',
+        from: 'string',
+        to: 'string',
+        status: 'string',
+      },
+    ],
+    upToDate: ['string'],
+    pinned: ['string'],
+  },
+};
+
 export const skillsAddMeta: AgentCommandMeta = {
   command: 'skill add',
   description: 'Add a skill from a plugin, or re-enable a previously disabled skill',
