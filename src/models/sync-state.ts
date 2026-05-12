@@ -2,9 +2,28 @@ import { z } from 'zod';
 import { ClientTypeSchema } from './workspace-config.js';
 
 /**
+ * Per-skill content provenance: deterministic hash of the skill folder
+ * contents at install time, plus install/update timestamps.
+ *
+ * `contentHash` is `"sha256:<hex>"` where <hex> is sha256 over a sorted list
+ * of per-file `sha256(content)` digests. Excludes file mtimes so the value is
+ * reproducible across machines and clones.
+ *
+ * Field name `contentHash` is intentionally a strict subset of gh-skill's
+ * `skillFolderHash` so a future migration to `.skill-lock.json` is mechanical.
+ */
+export const SyncStateSkillSchema = z.object({
+  contentHash: z.string(),
+  installedAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type SyncStateSkill = z.infer<typeof SyncStateSkillSchema>;
+
+/**
  * Per-plugin source provenance: which ref was resolved when the plugin was
- * installed, and (optionally) the explicit pin the user requested. Keys are
- * indexed by plugin spec (e.g., "anthropics/superpowers" or "plugin@market").
+ * installed, optional explicit pin, and a map of per-skill content hashes.
+ * Keys are indexed by canonical plugin spec (e.g., "owner/repo").
  *
  * Field names are a strict subset of the gh-skill lockfile so a future
  * migration to `.skill-lock.json` is mechanical.
@@ -14,6 +33,7 @@ export const SyncStateSourceSchema = z.object({
   resolvedRef: z.string(),
   resolvedSha: z.string(),
   pinnedRef: z.string().optional(),
+  skills: z.record(z.string(), SyncStateSkillSchema).optional(),
 });
 
 export type SyncStateSource = z.infer<typeof SyncStateSourceSchema>;
@@ -36,7 +56,7 @@ export const SyncStateSchema = z.object({
   vscodeWorkspaceRepos: z.array(z.string()).optional(),
   // Skills-index files tracked for cleanup (relative to .allagents/)
   skillsIndex: z.array(z.string()).optional(),
-  // Per-source resolved ref + SHA + optional pin (drift / lockfile data).
+  // Per-source resolved ref + SHA + optional pin + per-skill content hashes.
   sources: z.record(z.string(), SyncStateSourceSchema).optional(),
 });
 

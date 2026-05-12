@@ -32,7 +32,11 @@ import {
 import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
 import { isGitHubUrl, parseGitHubUrl, stripGitRef } from '../../utils/plugin-path.js';
 import { fetchPlugin, getPluginName, seedFetchCache } from '../../core/plugin.js';
-import { upsertSyncStateSource } from '../../core/sync-state.js';
+import {
+  computeSkillFolderHash,
+  upsertSyncStateSource,
+  upsertSyncStateSkill,
+} from '../../core/sync-state.js';
 import { parseSkillMetadata } from '../../validators/skill.js';
 import {
   addMarketplace,
@@ -62,39 +66,76 @@ function resolveScope(cwd: string): 'user' | 'project' {
 }
 
 /**
- * Record a per-source provenance entry (resolved ref + SHA + pin) into the
- * workspace's sync-state. The key is the spec with any `@<ref>` suffix stripped
- * so all installs of `owner/repo` map to one entry regardless of pin.
- *
- * Silently no-ops for non-GitHub sources (local paths, marketplace shorthand)
- * since we can't resolve a SHA from them.
+ * Resolve the on-disk skill folder for a given plugin cache path and skill name.
+ * Mirrors `resolveSkillMdPath` further down but returns the *folder* containing
+ * the SKILL.md rather than the file itself.
  */
-async function recordSourceProvenance(opts: {
+function resolveSkillFolder(pluginPath: string, skillName: string): string | null {
+  const candidates = [
+    join(pluginPath, 'skills', skillName),
+    join(pluginPath, skillName),
+    pluginPath,
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, 'SKILL.md'))) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Record per-source provenance (resolvedRef + resolvedSha + optional pin) and
+ * per-skill content hash + timestamps into sync-state for the given install.
+ *
+ * The source key is the spec with any `@<ref>` suffix stripped so all installs
+ * of `owner/repo` map to one entry regardless of pin.
+ *
+ * No-op for non-GitHub sources (local paths, marketplace shorthand) since we
+ * can't resolve a SHA from them.
+ */
+async function recordContentProvenance(opts: {
   from: string;
-  pinnedRef: string | undefined;
+  skills: string[];
+  pinnedRef?: string | undefined;
   workspacePath: string;
   isUser: boolean;
 }): Promise<void> {
-  const { from, pinnedRef, workspacePath, isUser } = opts;
+  const { from, skills, pinnedRef, workspacePath, isUser } = opts;
   if (!isGitHubUrl(from)) return;
   const parsed = parseGitHubUrl(from);
   if (!parsed) return;
 
-  // The fetch ran during install so this hits the cache and returns the
-  // resolvedSha without another git operation.
   const fetchResult = await fetchPlugin(from, {
     ...(parsed.branch && { branch: parsed.branch }),
   });
   if (!fetchResult.success || !fetchResult.resolvedSha) return;
 
-  const targetPath = isUser ? getHomeDir() : workspacePath;
+  const stateRoot = isUser ? getHomeDir() : workspacePath;
   const key = stripGitRef(`${parsed.owner}/${parsed.repo}`);
-  await upsertSyncStateSource(targetPath, key, {
+
+  await upsertSyncStateSource(stateRoot, key, {
     pluginSpec: key,
     resolvedRef: fetchResult.resolvedRef ?? parsed.branch ?? 'HEAD',
     resolvedSha: fetchResult.resolvedSha,
     ...(pinnedRef && { pinnedRef }),
   });
+
+  // Resolve the plugin root inside the cached repo (handle subpath layouts).
+  const pluginRoot = parsed.subpath
+    ? join(fetchResult.cachePath, parsed.subpath)
+    : fetchResult.cachePath;
+
+  const now = new Date().toISOString();
+  for (const skillName of skills) {
+    const folder = resolveSkillFolder(pluginRoot, skillName);
+    if (!folder) continue;
+    const hash = await computeSkillFolderHash(folder);
+    if (!hash) continue;
+    await upsertSyncStateSkill(stateRoot, key, skillName, {
+      contentHash: hash,
+      installedAt: now,
+      updatedAt: now,
+    });
+  }
 }
 
 /**
@@ -1123,9 +1164,12 @@ const addCmd = command({
           process.exit(1);
         }
 
-        // Record source provenance for the --all install path too.
-        await recordSourceProvenance({
+        // Record provenance (resolved ref/SHA + optional pin + per-skill
+        // content hashes) for every skill installed via --all.
+        const everySkill = installResult.installed.flatMap((i) => i.skills);
+        await recordContentProvenance({
           from: fromArg,
+          skills: everySkill,
           pinnedRef,
           workspacePath: workspacePathAll,
           isUser: isUserAll,
@@ -1225,10 +1269,11 @@ const addCmd = command({
             process.exit(1);
           }
 
-          // Record source provenance (resolved ref + SHA + optional pin) for
-          // drift detection on subsequent syncs.
-          await recordSourceProvenance({
+          // Record per-source ref/SHA + optional pin + per-skill content
+          // hash for drift detection on subsequent syncs.
+          await recordContentProvenance({
             from,
+            skills: [skill],
             pinnedRef,
             workspacePath,
             isUser,
