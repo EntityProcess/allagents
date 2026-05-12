@@ -1,13 +1,11 @@
-import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { join, dirname, relative } from 'node:path';
+import { join, dirname } from 'node:path';
 import { CONFIG_DIR, SYNC_STATE_FILE } from '../constants.js';
 import {
   SyncStateSchema,
   type SyncState,
   type SyncStateSource,
-  type SyncStateSkill,
 } from '../models/sync-state.js';
 import type { ClientType } from '../models/workspace-config.js';
 import { ensureConfigGitignore } from './config-gitignore.js';
@@ -150,49 +148,6 @@ export function getPreviouslySyncedNativePlugins(
 }
 
 /**
- * Compute a deterministic content hash of a skill folder.
- *
- * Algorithm: for every regular file under `skillDir` (recursive),
- * compute `sha256(content)`. Sort by relative path (POSIX-style slashes) and
- * fold each as `relPath + ":" + sha + "\n"` into a final sha256. The result is
- * `"sha256:<hex>"`.
- *
- * Excludes file mtimes / inode metadata so the hash is reproducible across
- * machines and re-clones.
- *
- * Returns null if the directory does not exist or is empty.
- */
-export async function computeSkillFolderHash(skillDir: string): Promise<string | null> {
-  if (!existsSync(skillDir)) return null;
-  const entries: Array<{ rel: string; sha: string }> = [];
-
-  async function walk(dir: string): Promise<void> {
-    const dirEntries = await readdir(dir, { withFileTypes: true });
-    for (const entry of dirEntries) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(full);
-      } else if (entry.isFile()) {
-        const content = await readFile(full);
-        const sha = createHash('sha256').update(content).digest('hex');
-        const rel = relative(skillDir, full).split(/[\\/]/).join('/');
-        entries.push({ rel, sha });
-      }
-    }
-  }
-
-  await walk(skillDir);
-  if (entries.length === 0) return null;
-
-  entries.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
-  const outer = createHash('sha256');
-  for (const { rel, sha } of entries) {
-    outer.update(`${rel}:${sha}\n`);
-  }
-  return `sha256:${outer.digest('hex')}`;
-}
-
-/**
  * Upsert a source provenance record into sync-state, preserving all other
  * fields. Use when recording the resolved ref/SHA after a fetch.
  */
@@ -203,37 +158,7 @@ export async function upsertSyncStateSource(
 ): Promise<void> {
   const existing = await loadSyncState(workspacePath);
   const sources = { ...(existing?.sources ?? {}), [key]: source };
-  await persistMergedSyncState(workspacePath, existing, sources);
-}
 
-/**
- * Upsert per-skill provenance (contentHash + timestamps) under the given
- * source key. Creates the source entry if it doesn't exist yet (with
- * placeholder ref/sha — callers usually call upsertSyncStateSource first).
- */
-export async function upsertSyncStateSkill(
-  workspacePath: string,
-  sourceKey: string,
-  skillName: string,
-  skill: SyncStateSkill,
-): Promise<void> {
-  const existing = await loadSyncState(workspacePath);
-  const currentSources = { ...(existing?.sources ?? {}) };
-  const currentSource: SyncStateSource = currentSources[sourceKey] ?? {
-    pluginSpec: sourceKey,
-    resolvedRef: 'HEAD',
-    resolvedSha: '',
-  };
-  const updatedSkills = { ...(currentSource.skills ?? {}), [skillName]: skill };
-  currentSources[sourceKey] = { ...currentSource, skills: updatedSkills };
-  await persistMergedSyncState(workspacePath, existing, currentSources);
-}
-
-async function persistMergedSyncState(
-  workspacePath: string,
-  existing: SyncState | null,
-  sources: Record<string, SyncStateSource>,
-): Promise<void> {
   await saveSyncState(workspacePath, {
     files: (existing?.files ?? {}) as Partial<Record<ClientType, string[]>>,
     ...(existing?.mcpServers && {

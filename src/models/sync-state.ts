@@ -2,38 +2,24 @@ import { z } from 'zod';
 import { ClientTypeSchema } from './workspace-config.js';
 
 /**
- * Per-skill content provenance: deterministic hash of the skill folder
- * contents at install time, plus install/update timestamps.
+ * Per-plugin source provenance.
  *
- * `contentHash` is `"sha256:<hex>"` where <hex> is sha256 over a sorted list
- * of per-file `sha256(content)` digests. Excludes file mtimes so the value is
- * reproducible across machines and clones.
+ * Identity for git-based plugins is `url + ref`. `resolvedSha` is the commit
+ * SHA returned by `git rev-parse HEAD` after the fetch and is what actually
+ * uniquely identifies the installed content; `resolvedRef` is the symbolic
+ * name (branch/tag) that was asked for. `pinnedRef` records the user's
+ * explicit pin (via `@<ref>` or `--pin`), distinct from whatever the resolver
+ * settled on.
  *
- * Field name `contentHash` is intentionally a strict subset of gh-skill's
- * `skillFolderHash` so a future migration to `.skill-lock.json` is mechanical.
- */
-export const SyncStateSkillSchema = z.object({
-  contentHash: z.string(),
-  installedAt: z.string(),
-  updatedAt: z.string(),
-});
-
-export type SyncStateSkill = z.infer<typeof SyncStateSkillSchema>;
-
-/**
- * Per-plugin source provenance: which ref was resolved when the plugin was
- * installed, optional explicit pin, and a map of per-skill content hashes.
- * Keys are indexed by canonical plugin spec (e.g., "owner/repo").
- *
- * Field names are a strict subset of the gh-skill lockfile so a future
- * migration to `.skill-lock.json` is mechanical.
+ * Per-skill content hashing was removed in #388 — `git rev-parse HEAD`
+ * already gives content identity for free, and recomputing per-skill
+ * sha256 trees on every sync was overhead without practical benefit.
  */
 export const SyncStateSourceSchema = z.object({
   pluginSpec: z.string(),
   resolvedRef: z.string(),
   resolvedSha: z.string(),
   pinnedRef: z.string().optional(),
-  skills: z.record(z.string(), SyncStateSkillSchema).optional(),
 });
 
 export type SyncStateSource = z.infer<typeof SyncStateSourceSchema>;
@@ -56,7 +42,7 @@ export const SyncStateSchema = z.object({
   vscodeWorkspaceRepos: z.array(z.string()).optional(),
   // Skills-index files tracked for cleanup (relative to .allagents/)
   skillsIndex: z.array(z.string()).optional(),
-  // Per-source resolved ref + SHA + optional pin + per-skill content hashes.
+  // Per-source resolved ref + SHA + optional pin.
   sources: z.record(z.string(), SyncStateSourceSchema).optional(),
 });
 
