@@ -104,9 +104,9 @@ allagents plugin marketplace add <source> [--name <name>] [--branch <branch>]
 allagents plugin marketplace list
 allagents plugin marketplace remove <name>
 allagents plugin marketplace update [name]
-allagents plugin skills list [--scope <scope>]
-allagents plugin skills remove <skill> [--plugin <plugin>] [--scope <scope>]
-allagents plugin skills add <skill> [--from <source>] [--plugin <plugin>] [--scope <scope>]
+allagents skill list [--scope <scope>]
+allagents skill remove <skill> [--plugin <plugin>] [--scope <scope>]
+allagents skill add <skill> [--from <source>] [--plugin <plugin>] [--scope <scope>]
 ```
 
 ### plugin install
@@ -126,9 +126,9 @@ Only enable specific skills from the plugin. Can be specified multiple times:
 allagents plugin install superpowers@marketplace --skill brainstorming --skill tdd
 ```
 
-When used, all other skills from the plugin are implicitly disabled. Skills can be added later with `plugin skills add`.
+When used, all other skills from the plugin are implicitly disabled. Skills can be added later with `skill add`.
 
-### plugin skills list
+### skill list
 
 List all skills from installed plugins with their enabled/disabled status.
 
@@ -136,7 +136,7 @@ List all skills from installed plugins with their enabled/disabled status.
 |------|-------------|
 | `-s, --scope <scope>` | Scope: `project` (default) or `user` |
 
-### plugin skills remove
+### skill remove
 
 Disable a skill, preventing it from being synced to the workspace.
 
@@ -147,7 +147,7 @@ Disable a skill, preventing it from being synced to the workspace.
 
 After disabling, the skill is added to `disabledSkills` in workspace.yaml and sync is run to remove it.
 
-### plugin skills add
+### skill add
 
 Add a skill from a plugin, or re-enable a previously disabled skill. The `<skill>` argument can be a skill name or a GitHub URL pointing to a skill.
 
@@ -163,10 +163,10 @@ Use `--from` to specify the plugin source when the skill isn't already installed
 
 ```bash
 # Add a specific skill from a GitHub repo
-allagents skills add reddit --from ReScienceLab/opc-skills
+allagents skill add reddit --from ReScienceLab/opc-skills
 
 # Or pass a GitHub URL directly — the skill name is extracted from the URL path
-allagents skills add https://github.com/owner/repo/tree/main/skills/my-skill
+allagents skill add https://github.com/owner/repo/tree/main/skills/my-skill
 ```
 
 **Source formats for `--from`:**
@@ -177,14 +177,15 @@ allagents skills add https://github.com/owner/repo/tree/main/skills/my-skill
 #### Re-enabling a disabled skill
 
 ```bash
-allagents skills add brainstorming
-allagents skills add brainstorming --plugin superpowers
+allagents skill add brainstorming
+allagents skill add brainstorming --plugin superpowers
 ```
 
 After enabling, the skill is removed from `disabledSkills` and sync is run to restore it.
 
 :::tip
-`allagents skills add` is a shorthand for `allagents plugin skills add`.
+`allagents skill ...` is the canonical singular form. The plural alias
+`allagents skills ...` is also accepted and produces identical output.
 :::
 
 ## MCP Commands

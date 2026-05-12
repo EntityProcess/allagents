@@ -13,6 +13,11 @@ import {
   pluginUninstallMeta,
 } from './metadata/plugin.js';
 import { updateMeta } from './metadata/self.js';
+import {
+  skillsListMeta,
+  skillsAddMeta,
+  skillsRemoveMeta,
+} from './metadata/plugin-skills.js';
 
 const allCommands: AgentCommandMeta[] = [
   initMeta,
@@ -27,6 +32,9 @@ const allCommands: AgentCommandMeta[] = [
   marketplaceBrowseMeta,
   pluginListMeta,
   pluginValidateMeta,
+  skillsListMeta,
+  skillsAddMeta,
+  skillsRemoveMeta,
   updateMeta,
 ];
 
@@ -59,8 +67,15 @@ function formatForAgent(meta: AgentCommandMeta) {
 }
 
 export function printAgentHelp(args: string[], version: string): void {
-  // Determine which command is being asked about by looking at remaining args
-  const commandPath = args.filter(a => !a.startsWith('-')).join(' ');
+  // Determine which command is being asked about by looking at remaining args.
+  // `skills` is a permanent alias for the canonical singular `skill`; normalize
+  // the lookup key so `--agent-help "skills list"` resolves to the `skill list`
+  // meta.
+  const positional = args.filter(a => !a.startsWith('-'));
+  const normalized = positional[0] === 'skills'
+    ? ['skill', ...positional.slice(1)]
+    : positional;
+  const commandPath = normalized.join(' ');
 
   if (!commandPath) {
     // Full tree

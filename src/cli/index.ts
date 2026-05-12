@@ -24,13 +24,19 @@ const app = conciseSubcommands({
     plugin: pluginCmd,
     mcp: mcpCmd,
     self: selfCmd,
-    skills: skillsCmd,
+    skill: skillsCmd,
   },
 });
 
 const rawArgs = process.argv.slice(2);
 const { args: argsNoJson, json } = extractJsonFlag(rawArgs);
-const { args: finalArgs, agentHelp } = extractAgentHelpFlag(argsNoJson);
+const { args: argsWithSkillAlias, agentHelp } = extractAgentHelpFlag(argsNoJson);
+// `skills` is a permanent alias for the canonical singular `skill`. Normalize
+// up-front so cmd-ts only ever dispatches the singular and both invocations
+// produce byte-identical help/output.
+const finalArgs = argsWithSkillAlias[0] === 'skills'
+  ? ['skill', ...argsWithSkillAlias.slice(1)]
+  : argsWithSkillAlias;
 setJsonMode(json);
 
 // Kick off update check for non-json, non-agent-help invocations.
