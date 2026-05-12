@@ -31,7 +31,7 @@ import {
 } from '../metadata/plugin-skills.js';
 import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
 import { isGitHubUrl, parseGitHubUrl } from '../../utils/plugin-path.js';
-import { fetchPlugin, getPluginName } from '../../core/plugin.js';
+import { fetchPlugin, getPluginName, seedFetchCache } from '../../core/plugin.js';
 import { parseSkillMetadata } from '../../validators/skill.js';
 import {
   addMarketplace,
@@ -40,6 +40,8 @@ import {
   updateMarketplace,
 } from '../../core/marketplace.js';
 import { parseMarketplaceManifest, resolvePluginSourcePath } from '../../utils/marketplace-manifest-parser.js';
+import { formatSyncHeader, formatSyncSummary } from '../format-sync.js';
+import type { SyncResult } from '../../core/sync.js';
 
 /**
  * Check if a directory has a project-level .allagents config
@@ -677,9 +679,9 @@ async function discoverSkillsFromSource(from: string): Promise<
   if (manifestResult.success) {
     const all: DiscoveredSkill[] = [];
     for (const plugin of manifestResult.data.plugins) {
-      const resolved = resolvePluginSourcePath(plugin.source, fetchResult.cachePath);
-      // Skip remote URL sources for now — listing would need extra fetches
+      // Skip remote URL sources — listing would need extra fetches
       if (typeof plugin.source === 'object') continue;
+      const resolved = resolvePluginSourcePath(plugin.source, fetchResult.cachePath);
       if (!existsSync(resolved)) continue;
       const skills = await discoverSkillsWithMetadata(resolved, plugin.name);
       all.push(...skills);
@@ -700,7 +702,7 @@ async function installAllSkillsFromSource(opts: {
   isUser: boolean;
   workspacePath: string;
 }): Promise<
-  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: { copied: number; failed: number } }
+  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: SyncResult }
   | { success: false; error: string }
 > {
   const { from, isUser, workspacePath } = opts;
@@ -720,7 +722,7 @@ async function installAllSkillsFromSource(opts: {
   const manifestResult = await parseMarketplaceManifest(fetchResult.cachePath);
 
   if (manifestResult.success) {
-    return installAllViaMarketplace({ from, isUser, workspacePath });
+    return installAllViaMarketplace({ from, isUser, workspacePath, cachedPath: fetchResult.cachePath });
   }
 
   // Direct plugin install — enable every discovered skill
@@ -762,7 +764,7 @@ async function installAllSkillsFromSource(opts: {
   return {
     success: true,
     installed: [{ pluginName, skills: skillNames }],
-    syncResult: { copied: syncResult.totalCopied, failed: syncResult.totalFailed },
+    syncResult,
   };
 }
 
@@ -773,11 +775,12 @@ async function installAllViaMarketplace(opts: {
   from: string;
   isUser: boolean;
   workspacePath: string;
+  cachedPath?: string;
 }): Promise<
-  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: { copied: number; failed: number } }
+  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: SyncResult }
   | { success: false; error: string }
 > {
-  const { from, isUser, workspacePath } = opts;
+  const { from, isUser, workspacePath, cachedPath } = opts;
   const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
   const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
 
@@ -792,6 +795,10 @@ async function installAllViaMarketplace(opts: {
     marketplaceName = existingAnyScope.name;
     await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
   } else {
+    // Seed the fetch cache so any fetchPlugin calls for individual plugins
+    // within the marketplace reuse the already-fetched content.
+    if (cachedPath) seedFetchCache(from, cachedPath);
+
     const scopeOptions = isUser
       ? undefined
       : { scope: 'project' as const, workspacePath };
@@ -867,7 +874,7 @@ async function installAllViaMarketplace(opts: {
   return {
     success: true,
     installed,
-    syncResult: { copied: syncResult.totalCopied, failed: syncResult.totalFailed },
+    syncResult,
   };
 }
 
@@ -912,6 +919,15 @@ const addCmd = command({
     try {
       // --list: dry-run discovery, no workspace changes
       if (list) {
+        if (skillArg) {
+          const error = 'Cannot combine a skill argument with --list. Use --list alone to discover available skills.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'plugin skills add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
         if (!fromArg) {
           const error = '--list requires --from to specify a plugin source.';
           if (isJsonMode()) {
@@ -1019,13 +1035,25 @@ const addCmd = command({
             data: {
               source: fromArg,
               installed: installResult.installed,
-              syncResult: installResult.syncResult,
+              syncResult: {
+                copied: installResult.syncResult.totalCopied,
+                failed: installResult.syncResult.totalFailed,
+              },
             },
           });
           return;
         }
 
-        console.log('Sync complete.');
+        for (const line of formatSyncHeader(installResult.syncResult)) {
+          console.log(line);
+        }
+        const summaryLines = formatSyncSummary(installResult.syncResult);
+        if (summaryLines.length > 0) {
+          console.log('');
+          for (const line of summaryLines) {
+            console.log(line);
+          }
+        }
         return;
       }
 

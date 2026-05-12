@@ -73,4 +73,41 @@ describe('discoverSkillsWithMetadata', () => {
     const result = await discoverSkillsWithMetadata(tmpDir);
     expect(result).toEqual([]);
   });
+
+  it('falls back to root SKILL.md when skill has no skills/ or flat-layout dir', async () => {
+    // Root-layout: the repo itself is a single skill, no skills/ subdir
+    await writeFile(
+      join(tmpDir, 'SKILL.md'),
+      '---\nname: root-skill\ndescription: Root layout skill\n---\n# Root Skill\n',
+    );
+
+    const result = await discoverSkillsWithMetadata(tmpDir);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe('root-skill');
+    expect(result[0]?.description).toBe('Root layout skill');
+  });
+
+  it('returns empty description when no SKILL.md exists anywhere for a discovered skill', async () => {
+    // discoverSkillNames finds the dir via flat layout check, but SKILL.md is missing
+    // resolveSkillMdPath falls back to pluginPath/SKILL.md which also doesn't exist
+    // the catch block should yield description = ''
+    await mkdir(join(tmpDir, 'skills/eta'), { recursive: true });
+    // Intentionally no SKILL.md written
+
+    const result = await discoverSkillsWithMetadata(tmpDir);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe('eta');
+    expect(result[0]?.description).toBe('');
+  });
+
+  it('returns pluginName: undefined when not provided', async () => {
+    await mkdir(join(tmpDir, 'skills/theta'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'skills/theta/SKILL.md'),
+      '---\nname: theta\ndescription: No plugin context\n---\n',
+    );
+
+    const result = await discoverSkillsWithMetadata(tmpDir);
+    expect(result[0]?.pluginName).toBeUndefined();
+  });
 });
