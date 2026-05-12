@@ -1,12 +1,12 @@
 import type { AgentCommandMeta } from '../help.js';
 
 export const skillsListMeta: AgentCommandMeta = {
-  command: 'plugin skills list',
+  command: 'skill list',
   description: 'List all skills from installed plugins',
   whenToUse: 'To see available skills and their enabled/disabled status',
   examples: [
-    'allagents plugin skills list',
-    'allagents plugin skills list --scope user',
+    'allagents skill list',
+    'allagents skill list --scope user',
   ],
   expectedOutput: 'Lists skills grouped by plugin with enabled/disabled status',
   options: [
@@ -18,13 +18,13 @@ export const skillsListMeta: AgentCommandMeta = {
 };
 
 export const skillsRemoveMeta: AgentCommandMeta = {
-  command: 'plugin skills remove',
+  command: 'skill remove',
   description: 'Disable a skill (exclude from sync)',
   whenToUse: 'To prevent a specific skill from being synced to your workspace',
   examples: [
-    'allagents plugin skills remove brainstorming',
-    'allagents plugin skills remove brainstorming --plugin superpowers',
-    'allagents plugin skills remove brainstorming --scope user',
+    'allagents skill remove brainstorming',
+    'allagents skill remove brainstorming --plugin superpowers',
+    'allagents skill remove brainstorming --scope user',
   ],
   expectedOutput: 'Confirms skill was disabled and runs sync',
   positionals: [
@@ -42,17 +42,17 @@ export const skillsRemoveMeta: AgentCommandMeta = {
 };
 
 export const skillsAddMeta: AgentCommandMeta = {
-  command: 'plugin skills add',
+  command: 'skill add',
   description: 'Add a skill from a plugin, or re-enable a previously disabled skill',
   whenToUse:
     'To add a skill from a GitHub repo or marketplace plugin, or to re-enable a skill that was previously disabled',
   examples: [
-    'allagents skills add reddit --from ReScienceLab/opc-skills',
-    'allagents skills add https://github.com/owner/repo/tree/main/skills/my-skill',
-    'allagents skills add brainstorming',
-    'allagents skills add brainstorming --plugin superpowers',
-    'allagents skills add --list --from rstackjs/agent-skills',
-    'allagents skills add --all --from rstackjs/agent-skills',
+    'allagents skill add reddit --from ReScienceLab/opc-skills',
+    'allagents skill add https://github.com/owner/repo/tree/main/skills/my-skill',
+    'allagents skill add brainstorming',
+    'allagents skill add brainstorming --plugin superpowers',
+    'allagents skill add --list --from rstackjs/agent-skills',
+    'allagents skill add --all --from rstackjs/agent-skills',
   ],
   expectedOutput: 'Confirms skill was enabled and runs sync',
   positionals: [

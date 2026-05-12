@@ -94,8 +94,8 @@ clients:
 | `allagents plugin install <spec>` | Install a plugin |
 | `allagents plugin uninstall <spec>` | Remove a plugin |
 | `allagents plugin list` | List available plugins |
-| `allagents skills add <name>` | Add a skill from a repo |
-| `allagents skills list` | List skills and status |
+| `allagents skill add <name>` | Add a skill from a repo (plural `skills` alias supported) |
+| `allagents skill list` | List skills and status |
 | `allagents mcp add <name> <commandOrUrl>` | Add an MCP server and sync to clients |
 | `allagents mcp list` | List workspace MCP servers |
 | `allagents workspace status` | Show workspace state |

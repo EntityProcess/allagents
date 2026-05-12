@@ -170,7 +170,7 @@ const listCmd = command({
         const allSkills = [...userSkills, ...dedupedProjectSkills];
         jsonOutput({
           success: true,
-          command: 'plugin skills list',
+          command: 'skill list',
           data: {
             scope: effectiveScope,
             skills: allSkills.map((s) => ({
@@ -220,7 +220,7 @@ const listCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills list', error: error.message });
+          jsonOutput({ success: false, command: 'skill list', error: error.message });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -266,7 +266,7 @@ const removeCmd = command({
         const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
         const error = `Skill '${skill}' not found in any installed plugin.\n\nAvailable skills: ${skillNames || 'none'}`;
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills remove', error });
+          jsonOutput({ success: false, command: 'skill remove', error });
           process.exit(1);
         }
         console.error(`Error: ${error}`);
@@ -282,9 +282,9 @@ const removeCmd = command({
       if (matches.length > 1) {
         if (!plugin) {
           const pluginList = matches.map((m) => `  - ${m.pluginName} (${m.pluginSource})`).join('\n');
-          const error = `'${skill}' exists in multiple plugins:\n${pluginList}\n\nUse --plugin to specify: allagents plugin skills remove ${skill} --plugin <name>`;
+          const error = `'${skill}' exists in multiple plugins:\n${pluginList}\n\nUse --plugin to specify: allagents skill remove ${skill} --plugin <name>`;
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills remove', error });
+            jsonOutput({ success: false, command: 'skill remove', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -294,7 +294,7 @@ const removeCmd = command({
         if (!filtered) {
           const error = `Plugin '${plugin}' not found. Installed plugins: ${matches.map((m) => m.pluginName).join(', ')}`;
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills remove', error });
+            jsonOutput({ success: false, command: 'skill remove', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -307,7 +307,7 @@ const removeCmd = command({
       if (targetSkill.disabled) {
         const msg = `Skill '${skill}' is already disabled.`;
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills remove', error: msg });
+          jsonOutput({ success: false, command: 'skill remove', error: msg });
           process.exit(1);
         }
         console.log(msg);
@@ -322,7 +322,7 @@ const removeCmd = command({
 
       if (!result.success) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills remove', error: result.error ?? 'Unknown error' });
+          jsonOutput({ success: false, command: 'skill remove', error: result.error ?? 'Unknown error' });
           process.exit(1);
         }
         console.error(`Error: ${result.error}`);
@@ -340,7 +340,7 @@ const removeCmd = command({
       if (isJsonMode()) {
         jsonOutput({
           success: syncResult.success,
-          command: 'plugin skills remove',
+          command: 'skill remove',
           data: {
             skill,
             plugin: targetSkill.pluginName,
@@ -358,7 +358,7 @@ const removeCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills remove', error: error.message });
+          jsonOutput({ success: false, command: 'skill remove', error: error.message });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -527,7 +527,7 @@ async function installSkillDirect(opts: {
   if (!availableSkills.includes(skill)) {
     return {
       success: false,
-      error: `Skill '${skill}' not found in plugin '${from}'.\n\nAvailable skills: ${availableSkills.join(', ') || 'none'}\n\nTip: run \`allagents skills list\` to see all installed skills.`,
+      error: `Skill '${skill}' not found in plugin '${from}'.\n\nAvailable skills: ${availableSkills.join(', ') || 'none'}\n\nTip: run \`allagents skill list\` to see all installed skills.`,
     };
   }
 
@@ -922,7 +922,7 @@ const addCmd = command({
         if (skillArg) {
           const error = 'Cannot combine a skill argument with --list. Use --list alone to discover available skills.';
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error });
+            jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -931,7 +931,7 @@ const addCmd = command({
         if (!fromArg) {
           const error = '--list requires --from to specify a plugin source.';
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error });
+            jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -940,7 +940,7 @@ const addCmd = command({
         if (all) {
           const error = '--list and --all cannot be used together.';
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error });
+            jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -950,7 +950,7 @@ const addCmd = command({
         const discovered = await discoverSkillsFromSource(fromArg);
         if (!discovered.success) {
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error: discovered.error });
+            jsonOutput({ success: false, command: 'skill add', error: discovered.error });
             process.exit(1);
           }
           console.error(`Error: ${discovered.error}`);
@@ -960,7 +960,7 @@ const addCmd = command({
         if (isJsonMode()) {
           jsonOutput({
             success: true,
-            command: 'plugin skills add',
+            command: 'skill add',
             data: {
               source: fromArg,
               isMarketplace: discovered.isMarketplace,
@@ -994,7 +994,7 @@ const addCmd = command({
         if (!fromArg) {
           const error = '--all requires --from to specify a plugin source.';
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error });
+            jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -1003,7 +1003,7 @@ const addCmd = command({
         if (skillArg) {
           const error = 'Cannot combine a skill argument with --all. Use --all alone to install every skill.';
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error });
+            jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -1021,7 +1021,7 @@ const addCmd = command({
 
         if (!installResult.success) {
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error: installResult.error });
+            jsonOutput({ success: false, command: 'skill add', error: installResult.error });
             process.exit(1);
           }
           console.error(`Error: ${installResult.error}`);
@@ -1031,7 +1031,7 @@ const addCmd = command({
         if (isJsonMode()) {
           jsonOutput({
             success: true,
-            command: 'plugin skills add',
+            command: 'skill add',
             data: {
               source: fromArg,
               installed: installResult.installed,
@@ -1061,7 +1061,7 @@ const addCmd = command({
       if (!skillArg) {
         const error = 'A skill name is required. Use --list to discover available skills or --all to install everything.';
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills add', error });
+          jsonOutput({ success: false, command: 'skill add', error });
           process.exit(1);
         }
         console.error(`Error: ${error}`);
@@ -1078,7 +1078,7 @@ const addCmd = command({
           const error =
             'Cannot use --from when the skill argument is a GitHub URL. The URL is used as the plugin source automatically.';
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error });
+            jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -1114,7 +1114,7 @@ const addCmd = command({
 
           if (!installFromResult.success) {
             if (isJsonMode()) {
-              jsonOutput({ success: false, command: 'plugin skills add', error: installFromResult.error });
+              jsonOutput({ success: false, command: 'skill add', error: installFromResult.error });
               process.exit(1);
             }
             console.error(`Error: ${installFromResult.error}`);
@@ -1124,7 +1124,7 @@ const addCmd = command({
           if (isJsonMode()) {
             jsonOutput({
               success: true,
-              command: 'plugin skills add',
+              command: 'skill add',
               data: {
                 skill,
                 plugin: installFromResult.pluginName,
@@ -1142,7 +1142,7 @@ const addCmd = command({
         const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
         const error = `Skill '${skill}' not found in any installed plugin.\n\nAvailable skills: ${skillNames || 'none'}`;
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills add', error });
+          jsonOutput({ success: false, command: 'skill add', error });
           process.exit(1);
         }
         console.error(`Error: ${error}`);
@@ -1158,9 +1158,9 @@ const addCmd = command({
       if (matches.length > 1) {
         if (!plugin) {
           const pluginList = matches.map((m) => `  - ${m.pluginName} (${m.pluginSource})`).join('\n');
-          const error = `'${skill}' exists in multiple plugins:\n${pluginList}\n\nUse --plugin to specify: allagents plugin skills add ${skill} --plugin <name>`;
+          const error = `'${skill}' exists in multiple plugins:\n${pluginList}\n\nUse --plugin to specify: allagents skill add ${skill} --plugin <name>`;
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error });
+            jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -1170,7 +1170,7 @@ const addCmd = command({
         if (!filtered) {
           const error = `Plugin '${plugin}' not found. Installed plugins: ${matches.map((m) => m.pluginName).join(', ')}`;
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin skills add', error });
+            jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
           }
           console.error(`Error: ${error}`);
@@ -1183,7 +1183,7 @@ const addCmd = command({
       if (!targetSkill.disabled) {
         const msg = `Skill '${skill}' is already enabled.`;
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills add', error: msg });
+          jsonOutput({ success: false, command: 'skill add', error: msg });
           process.exit(1);
         }
         console.log(msg);
@@ -1198,7 +1198,7 @@ const addCmd = command({
 
       if (!result.success) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills add', error: result.error ?? 'Unknown error' });
+          jsonOutput({ success: false, command: 'skill add', error: result.error ?? 'Unknown error' });
           process.exit(1);
         }
         console.error(`Error: ${result.error}`);
@@ -1216,7 +1216,7 @@ const addCmd = command({
       if (isJsonMode()) {
         jsonOutput({
           success: syncResult.success,
-          command: 'plugin skills add',
+          command: 'skill add',
           data: {
             skill,
             plugin: targetSkill.pluginName,
@@ -1234,7 +1234,7 @@ const addCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'plugin skills add', error: error.message });
+          jsonOutput({ success: false, command: 'skill add', error: error.message });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -1246,11 +1246,11 @@ const addCmd = command({
 });
 
 // =============================================================================
-// plugin skills subcommands group
+// skill subcommands group (canonical singular; `skills` is a CLI alias)
 // =============================================================================
 
 export const skillsCmd = conciseSubcommands({
-  name: 'skills',
+  name: 'skill',
   description: 'Manage individual skills from plugins',
   cmds: {
     list: listCmd,
