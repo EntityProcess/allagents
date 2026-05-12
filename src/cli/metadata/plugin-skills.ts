@@ -1,12 +1,12 @@
 import type { AgentCommandMeta } from '../help.js';
 
 export const skillsListMeta: AgentCommandMeta = {
-  command: 'plugin skills list',
+  command: 'skills list',
   description: 'List all skills from installed plugins',
   whenToUse: 'To see available skills and their enabled/disabled status',
   examples: [
-    'allagents plugin skills list',
-    'allagents plugin skills list --scope user',
+    'allagents skills list',
+    'allagents skills list --scope user',
   ],
   expectedOutput: 'Lists skills grouped by plugin with enabled/disabled status',
   options: [
@@ -18,13 +18,13 @@ export const skillsListMeta: AgentCommandMeta = {
 };
 
 export const skillsRemoveMeta: AgentCommandMeta = {
-  command: 'plugin skills remove',
+  command: 'skills remove',
   description: 'Disable a skill (exclude from sync)',
   whenToUse: 'To prevent a specific skill from being synced to your workspace',
   examples: [
-    'allagents plugin skills remove brainstorming',
-    'allagents plugin skills remove brainstorming --plugin superpowers',
-    'allagents plugin skills remove brainstorming --scope user',
+    'allagents skills remove brainstorming',
+    'allagents skills remove brainstorming --plugin superpowers',
+    'allagents skills remove brainstorming --scope user',
   ],
   expectedOutput: 'Confirms skill was disabled and runs sync',
   positionals: [
@@ -42,7 +42,7 @@ export const skillsRemoveMeta: AgentCommandMeta = {
 };
 
 export const skillsAddMeta: AgentCommandMeta = {
-  command: 'plugin skills add',
+  command: 'skills add',
   description: 'Add a skill from a plugin, or re-enable a previously disabled skill',
   whenToUse:
     'To add a skill from a GitHub repo or marketplace plugin, or to re-enable a skill that was previously disabled',

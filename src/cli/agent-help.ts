@@ -13,6 +13,11 @@ import {
   pluginUninstallMeta,
 } from './metadata/plugin.js';
 import { updateMeta } from './metadata/self.js';
+import {
+  skillsListMeta,
+  skillsAddMeta,
+  skillsRemoveMeta,
+} from './metadata/plugin-skills.js';
 
 const allCommands: AgentCommandMeta[] = [
   initMeta,
@@ -27,6 +32,9 @@ const allCommands: AgentCommandMeta[] = [
   marketplaceBrowseMeta,
   pluginListMeta,
   pluginValidateMeta,
+  skillsListMeta,
+  skillsAddMeta,
+  skillsRemoveMeta,
   updateMeta,
 ];
 

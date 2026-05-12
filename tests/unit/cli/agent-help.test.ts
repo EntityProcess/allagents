@@ -13,6 +13,11 @@ import {
   pluginUninstallMeta,
 } from '../../../src/cli/metadata/plugin.js';
 import { updateMeta } from '../../../src/cli/metadata/self.js';
+import {
+  skillsListMeta,
+  skillsAddMeta,
+  skillsRemoveMeta,
+} from '../../../src/cli/metadata/plugin-skills.js';
 import type { AgentCommandMeta } from '../../../src/cli/help.js';
 
 const allCommands: AgentCommandMeta[] = [
@@ -28,6 +33,9 @@ const allCommands: AgentCommandMeta[] = [
   marketplaceBrowseMeta,
   pluginListMeta,
   pluginValidateMeta,
+  skillsListMeta,
+  skillsAddMeta,
+  skillsRemoveMeta,
   updateMeta,
 ];
 
@@ -58,8 +66,8 @@ describe('extractAgentHelpFlag', () => {
 });
 
 describe('agent command metadata', () => {
-  test('contains exactly 13 commands', () => {
-    expect(allCommands.length).toBe(13);
+  test('contains exactly 16 commands', () => {
+    expect(allCommands.length).toBe(16);
   });
 
   test('all expected commands are present', () => {
@@ -75,6 +83,9 @@ describe('agent command metadata', () => {
       'plugin uninstall',
       'plugin validate',
       'self update',
+      'skills add',
+      'skills list',
+      'skills remove',
       'update',
       'workspace init',
       'workspace status',
