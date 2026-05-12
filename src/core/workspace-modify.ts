@@ -116,7 +116,7 @@ export async function addPlugin(
 
   // Handle plugin@marketplace format
   if (isPluginSpec(plugin)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(plugin);
+    const resolved = await resolvePluginSpecWithAutoRegister(plugin, { workspacePath });
     if (!resolved.success) {
       return {
         success: false,

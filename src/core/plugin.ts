@@ -57,8 +57,8 @@ export interface FetchDeps {
 
 /**
  * Resolve the HEAD commit SHA of a local repository. Returns undefined if the
- * directory isn't a git repo or rev-parse fails (e.g., a cached marketplace
- * subdirectory that was copied rather than cloned).
+ * directory isn't a git repo (e.g., a marketplace subdirectory that was
+ * copied rather than cloned) or rev-parse fails for any other reason.
  */
 async function resolveHeadSha(repoPath: string): Promise<string | undefined> {
   try {
