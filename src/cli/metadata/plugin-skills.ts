@@ -43,6 +43,34 @@ export const skillsRemoveMeta: AgentCommandMeta = {
   },
 };
 
+export const skillsSearchMeta: AgentCommandMeta = {
+  command: 'skill search',
+  description: 'Search GitHub for skills by querying SKILL.md files via the Code Search API',
+  whenToUse:
+    'To discover available skills from public GitHub repositories without leaving the CLI. Bridges "I want a skill that does X" → install.',
+  examples: [
+    'allagents skill search terraform',
+    'allagents skill search terraform --owner hashicorp',
+    'allagents skill search docs --page 2 --limit 10',
+    'allagents --json skill search docs --limit 5',
+  ],
+  expectedOutput: 'Ranked list of matching skills with repo, path, and description',
+  positionals: [
+    { name: 'query', type: 'string', required: true, description: 'Search query (≥2 characters).' },
+  ],
+  options: [
+    { flag: '--owner', type: 'string', description: 'Scope to a single GitHub owner (org or user).' },
+    { flag: '--page', type: 'string', description: 'Result page (1-indexed, default 1).' },
+    { flag: '--limit', type: 'string', description: 'Results per page (1–100, default 30).' },
+  ],
+  outputSchema: {
+    query: 'string',
+    items: [{ name: 'string', repo: 'string', path: 'string', description: 'string', sha: 'string' }],
+    total: 'number',
+    truncated: 'boolean',
+  },
+};
+
 export const skillsAddMeta: AgentCommandMeta = {
   command: 'skill add',
   description: 'Add a skill from a plugin, or re-enable a previously disabled skill',
