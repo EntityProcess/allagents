@@ -38,11 +38,7 @@ import {
 import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
 import { isGitHubUrl, parseGitHubUrl, stripGitRef } from '../../utils/plugin-path.js';
 import { fetchPlugin, getPluginName, seedFetchCache } from '../../core/plugin.js';
-import {
-  computeSkillFolderHash,
-  upsertSyncStateSource,
-  upsertSyncStateSkill,
-} from '../../core/sync-state.js';
+import { upsertSyncStateSource } from '../../core/sync-state.js';
 import { parseSkillMetadata } from '../../validators/skill.js';
 import {
   addMarketplace,
@@ -72,25 +68,10 @@ function resolveScope(cwd: string): 'user' | 'project' {
 }
 
 /**
- * Resolve the on-disk skill folder for a given plugin cache path and skill name.
- * Mirrors `resolveSkillMdPath` further down but returns the *folder* containing
- * the SKILL.md rather than the file itself.
- */
-function resolveSkillFolder(pluginPath: string, skillName: string): string | null {
-  const candidates = [
-    join(pluginPath, 'skills', skillName),
-    join(pluginPath, skillName),
-    pluginPath,
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, 'SKILL.md'))) return candidate;
-  }
-  return null;
-}
-
-/**
- * Record per-source provenance (resolvedRef + resolvedSha + optional pin) and
- * per-skill content hash + timestamps into sync-state for the given install.
+ * Record per-source provenance (resolvedRef + resolvedSha + optional pin)
+ * into sync-state for the given install. Identity for git-based plugins is
+ * `url + ref`; `resolvedSha` (from `git rev-parse HEAD` after fetch) gives
+ * content identity, so per-skill content hashing is unnecessary.
  *
  * The source key is the spec with any `@<ref>` suffix stripped so all installs
  * of `owner/repo` map to one entry regardless of pin.
@@ -98,14 +79,13 @@ function resolveSkillFolder(pluginPath: string, skillName: string): string | nul
  * No-op for non-GitHub sources (local paths, marketplace shorthand) since we
  * can't resolve a SHA from them.
  */
-async function recordContentProvenance(opts: {
+async function recordSourceProvenance(opts: {
   from: string;
-  skills: string[];
   pinnedRef?: string | undefined;
   workspacePath: string;
   isUser: boolean;
 }): Promise<void> {
-  const { from, skills, pinnedRef, workspacePath, isUser } = opts;
+  const { from, pinnedRef, workspacePath, isUser } = opts;
   if (!isGitHubUrl(from)) return;
   const parsed = parseGitHubUrl(from);
   if (!parsed) return;
@@ -124,24 +104,6 @@ async function recordContentProvenance(opts: {
     resolvedSha: fetchResult.resolvedSha,
     ...(pinnedRef && { pinnedRef }),
   });
-
-  // Resolve the plugin root inside the cached repo (handle subpath layouts).
-  const pluginRoot = parsed.subpath
-    ? join(fetchResult.cachePath, parsed.subpath)
-    : fetchResult.cachePath;
-
-  const now = new Date().toISOString();
-  for (const skillName of skills) {
-    const folder = resolveSkillFolder(pluginRoot, skillName);
-    if (!folder) continue;
-    const hash = await computeSkillFolderHash(folder);
-    if (!hash) continue;
-    await upsertSyncStateSkill(stateRoot, key, skillName, {
-      contentHash: hash,
-      installedAt: now,
-      updatedAt: now,
-    });
-  }
 }
 
 /**
@@ -1162,12 +1124,9 @@ const addCmd = command({
           process.exit(1);
         }
 
-        // Record provenance (resolved ref/SHA + optional pin + per-skill
-        // content hashes) for every skill installed via --all.
-        const everySkill = installResult.installed.flatMap((i) => i.skills);
-        await recordContentProvenance({
+        // Record per-source ref/SHA + optional pin for the --all install path.
+        await recordSourceProvenance({
           from: fromArg,
-          skills: everySkill,
           pinnedRef,
           workspacePath: workspacePathAll,
           isUser: isUserAll,
@@ -1267,11 +1226,9 @@ const addCmd = command({
             process.exit(1);
           }
 
-          // Record per-source ref/SHA + optional pin + per-skill content
-          // hash for drift detection on subsequent syncs.
-          await recordContentProvenance({
+          // Record per-source ref/SHA + optional pin in sync-state.
+          await recordSourceProvenance({
             from,
-            skills: [skill],
             pinnedRef,
             workspacePath,
             isUser,
