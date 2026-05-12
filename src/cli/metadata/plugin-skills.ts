@@ -51,14 +51,16 @@ export const skillsAddMeta: AgentCommandMeta = {
     'allagents skills add https://github.com/owner/repo/tree/main/skills/my-skill',
     'allagents skills add brainstorming',
     'allagents skills add brainstorming --plugin superpowers',
+    'allagents skills add --list --from rstackjs/agent-skills',
+    'allagents skills add --all --from rstackjs/agent-skills',
   ],
   expectedOutput: 'Confirms skill was enabled and runs sync',
   positionals: [
     {
       name: 'skill',
       type: 'string',
-      required: true,
-      description: 'Skill name to add, or a GitHub URL pointing to a skill',
+      required: false,
+      description: 'Skill name to add, or a GitHub URL pointing to a skill. Omit with --list or --all.',
     },
   ],
   options: [
@@ -75,6 +77,17 @@ export const skillsAddMeta: AgentCommandMeta = {
       type: 'string',
       description:
         'Plugin source (GitHub URL, owner/repo, or plugin@marketplace) to install if the skill is not already available',
+    },
+    {
+      flag: '--list',
+      short: '-l',
+      type: 'boolean',
+      description: 'List skills at the --from source without installing',
+    },
+    {
+      flag: '--all',
+      type: 'boolean',
+      description: 'Install every skill from the --from source',
     },
   ],
   outputSchema: {
