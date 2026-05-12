@@ -1,9 +1,12 @@
 /**
  * GitHub Code Search wrapper for `allagents skill search`.
  *
- * Hits `GET /search/code` with a `path:SKILL.md filename:SKILL.md <query>`
- * pattern, ranks results by relevance, and maps rate-limit errors to a
- * single actionable message so callers never see a raw 403 / HTML dump.
+ * Mirrors upstream `gh skill search`: runs up to four parallel Code Search
+ * queries with descending priority (path → hyphenated content → query-as-owner
+ * → primary content) and merges the results. This is what surfaces skills
+ * that live at `plugins/<thing>/skills/...` but whose SKILL.md content never
+ * mentions `<thing>` — the path-targeted query finds them when the bare
+ * content query can't.
  *
  * Auth comes from `GITHUB_TOKEN` when present; unauthenticated requests are
  * subject to the public Code Search rate limit (10 req/min). See cli/cli
@@ -11,6 +14,13 @@
  */
 
 const OWNER_REGEX = /^[A-Za-z0-9-]{1,39}$/;
+
+/**
+ * GitHub username pattern: starts and ends with alphanumeric, may contain
+ * single hyphens in between, 1–39 chars total. Matches what GitHub allows
+ * for user/org logins.
+ */
+const COULD_BE_OWNER_REGEX = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
 
 export interface SkillSearchItem {
   /** Skill folder name (parent directory of SKILL.md). */
@@ -78,6 +88,76 @@ export function validateSkillSearchArgs(
 }
 
 /**
+ * Whether `query` could plausibly be a GitHub user/org login (so it's worth
+ * speculatively searching `user:<query>` for skills owned by that account).
+ *
+ * Matches the same rules GitHub enforces for new logins.
+ */
+export function couldBeOwner(query: string): boolean {
+  return COULD_BE_OWNER_REGEX.test(query);
+}
+
+/**
+ * One Code Search query, with its merge priority. Lower priority numbers
+ * sort earlier in the merged result list.
+ */
+export interface SkillSearchQuery {
+  /** 1 = path, 2 = hyphenated, 3 = query-as-owner, 4 = primary content. */
+  priority: 1 | 2 | 3 | 4;
+  /** Short label used in failure logging. */
+  label: 'path' | 'hyphen' | 'owner' | 'primary';
+  /** The `q=` querystring value (no URL encoding). */
+  q: string;
+}
+
+/**
+ * Build the parallel Code Search query set, ordered by priority.
+ *
+ * Always emits:
+ *   - Priority 1 — `filename:SKILL.md in:path <pathTerm>` (+ optional user filter)
+ *   - Priority 4 — `filename:SKILL.md <query>`              (+ optional user filter)
+ *
+ * Conditionally emits:
+ *   - Priority 2 — `filename:SKILL.md <pathTerm>` (only when the hyphenated
+ *     pathTerm differs from the bare query, i.e. when the query has spaces)
+ *   - Priority 3 — `filename:SKILL.md user:<query>` (only when no explicit
+ *     `--owner` is set AND the query itself could plausibly be a GitHub
+ *     login)
+ *
+ * P1 uses `in:path <term>` rather than `path:<term>`. The two qualifiers
+ * differ on the live API: `path:foo` is prefix-on-path-components (so
+ * `path:cargowise` doesn't match `plugins/cargowise/skills/...`), while
+ * `in:path foo` matches the term anywhere in the path. The substring form
+ * is what surfaces nested skills like `plugins/cargowise/skills/cw-yard/SKILL.md`
+ * when the SKILL.md body itself doesn't mention "cargowise".
+ */
+export function buildSearchQueries(
+  query: string,
+  owner: string | undefined,
+): SkillSearchQuery[] {
+  const trimmed = query.trim();
+  const pathTerm = trimmed.replace(/ /g, '-');
+  const userClause = owner ? `user:${owner}` : '';
+  const join = (...parts: string[]) => parts.filter(Boolean).join(' ');
+
+  const queries: SkillSearchQuery[] = [
+    { priority: 1, label: 'path', q: join('filename:SKILL.md', `in:path ${pathTerm}`, userClause) },
+  ];
+
+  if (pathTerm !== trimmed) {
+    queries.push({ priority: 2, label: 'hyphen', q: join('filename:SKILL.md', pathTerm, userClause) });
+  }
+
+  if (!owner && couldBeOwner(trimmed)) {
+    queries.push({ priority: 3, label: 'owner', q: `filename:SKILL.md user:${trimmed}` });
+  }
+
+  queries.push({ priority: 4, label: 'primary', q: join('filename:SKILL.md', trimmed, userClause) });
+
+  return queries;
+}
+
+/**
  * Map a GitHub API response to a SkillSearchError. The 403 / rate-limit body
  * has a distinctive `documentation_url` and `message` shape; everything else
  * falls back to a generic API error.
@@ -105,19 +185,9 @@ function classifyApiError(status: number, body: unknown): SkillSearchError {
 }
 
 /**
- * Build the `q=` querystring value: `<query> filename:SKILL.md path:SKILL.md [user:<owner>]`.
- */
-function buildQueryString(query: string, owner: string | undefined): string {
-  const parts = [query.trim(), 'filename:SKILL.md', 'path:SKILL.md'];
-  if (owner) parts.push(`user:${owner}`);
-  return parts.join(' ');
-}
-
-/**
  * Render the namespace-qualified skill name (`<namespace>/<name>`) when a
- * namespace is set, or just `<name>` otherwise. Used both for ranking
- * (so `kynan/commit` matches the query "kynan/commit") and as the dedup
- * key together with the repo full name.
+ * namespace is set, or just `<name>` otherwise. Used as the dedup key
+ * together with the repo full name.
  */
 export function qualifiedName(item: Pick<SkillSearchItem, 'name' | 'namespace'>): string {
   return item.namespace ? `${item.namespace}/${item.name}` : item.name;
@@ -172,25 +242,24 @@ function parseSkillPath(
 }
 
 /**
- * Run the GitHub Code Search request. Network/auth comes from the environment
- * via fetch + GITHUB_TOKEN; no extra deps.
- *
- * Items are returned in upstream relevance order, then re-ranked by
- * qualified-name match against the query and deduped by
- * `repo + qualifiedName`. Dedup matters because Code Search will sometimes
- * return the same skill folder twice via different match contexts.
+ * Result of running a single Code Search query.
  */
-export async function searchSkills(
-  query: string,
-  options: SkillSearchOptions = {},
-  deps: { fetch?: typeof fetch } = {},
-): Promise<SkillSearchResult> {
-  validateSkillSearchArgs(query, options);
-  const fetchFn = deps.fetch ?? fetch;
+interface QueryRunResult {
+  items: SkillSearchItem[];
+  total: number;
+  truncated: boolean;
+}
 
-  const page = options.page ?? 1;
-  const limit = options.limit ?? 30;
-  const q = buildQueryString(query, options.owner);
+/**
+ * Issue one Code Search request and parse the response into SkillSearchItem.
+ */
+async function runOneQuery(
+  q: string,
+  page: number,
+  limit: number,
+  token: string | undefined,
+  fetchFn: typeof fetch,
+): Promise<QueryRunResult> {
   const url = new URL('https://api.github.com/search/code');
   url.searchParams.set('q', q);
   url.searchParams.set('per_page', String(limit));
@@ -201,7 +270,6 @@ export async function searchSkills(
     'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'allagents-cli',
   };
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (token) headers.Authorization = `token ${token}`;
 
   const response = await fetchFn(url.toString(), { headers });
@@ -215,7 +283,6 @@ export async function searchSkills(
     throw classifyApiError(response.status, body);
   }
 
-  // GitHub Code Search response shape: { total_count, incomplete_results, items: [...] }
   const parsed = body as {
     total_count?: number;
     incomplete_results?: boolean;
@@ -241,23 +308,90 @@ export async function searchSkills(
     };
   });
 
-  const deduped = dedupeItems(items);
-
   return {
-    query,
-    items: rankItems(deduped, query),
-    total: parsed.total_count ?? deduped.length,
+    items,
+    total: parsed.total_count ?? items.length,
     truncated: Boolean(parsed.incomplete_results),
   };
 }
 
 /**
- * Drop duplicate hits by `repo + qualifiedName`. The Code Search API can
- * return the same skill folder more than once when multiple lines in
- * SKILL.md match the query; the user only cares about the folder.
+ * Run the multi-query Code Search and merge results.
  *
- * Preserves the first occurrence so upstream relevance order is respected
- * before re-ranking.
+ * Behaviour:
+ *   - Up to four queries are built via `buildSearchQueries` and dispatched in
+ *     parallel with `Promise.allSettled`.
+ *   - The primary (priority 4) result is required: if it fails, the error
+ *     propagates. Other queries are advisory — failures are logged and the
+ *     surviving buckets still merge.
+ *   - Items are concatenated in priority order (1 → 4), then deduped by
+ *     `repo + qualifiedName` keeping the first occurrence. That makes the
+ *     path bucket win over the content bucket when both match the same skill.
+ *
+ * Network/auth come from `process.env.GITHUB_TOKEN` / `GH_TOKEN` when set;
+ * unauthenticated requests share the public 10 req/min Code Search rate limit.
+ */
+export async function searchSkills(
+  query: string,
+  options: SkillSearchOptions = {},
+  deps: { fetch?: typeof fetch; logger?: (msg: string) => void } = {},
+): Promise<SkillSearchResult> {
+  validateSkillSearchArgs(query, options);
+  const fetchFn = deps.fetch ?? fetch;
+  const logger = deps.logger ?? ((msg: string) => process.stderr.write(`${msg}\n`));
+
+  const page = options.page ?? 1;
+  const limit = options.limit ?? 30;
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+
+  const queries = buildSearchQueries(query, options.owner);
+  const settled = await Promise.allSettled(
+    queries.map((entry) => runOneQuery(entry.q, page, limit, token, fetchFn)),
+  );
+
+  // Locate the primary (priority 4) result. If it failed, surface its error.
+  const primaryIdx = queries.findIndex((q) => q.priority === 4);
+  const primarySettled = settled[primaryIdx];
+  if (primarySettled?.status === 'rejected') {
+    throw primarySettled.reason;
+  }
+
+  // Collect successful buckets paired with their queries; log failures.
+  type Bucket = { priority: number; result: QueryRunResult };
+  const buckets: Bucket[] = [];
+  for (let i = 0; i < queries.length; i++) {
+    const entry = queries[i];
+    const outcome = settled[i];
+    if (!entry || !outcome) continue;
+    if (outcome.status === 'fulfilled') {
+      buckets.push({ priority: entry.priority, result: outcome.value });
+    } else {
+      // Non-primary failure — log and continue. Primary failures are handled above.
+      const reason =
+        outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+      logger(`Warning: skill search "${entry.label}" query failed: ${reason}`);
+    }
+  }
+
+  // Concatenate items in priority order (lower priority number first).
+  buckets.sort((a, b) => a.priority - b.priority);
+  const mergedItems = buckets.flatMap((b) => b.result.items);
+
+  const deduped = dedupeItems(mergedItems);
+
+  return {
+    query,
+    items: deduped,
+    total: deduped.length,
+    truncated: buckets.some((b) => b.result.truncated),
+  };
+}
+
+/**
+ * Drop duplicate hits by `repo + qualifiedName`. Same folder surfaced by
+ * multiple query buckets (e.g. both `in:path` and content match) collapses to
+ * one entry, with the higher-priority bucket's occurrence winning because
+ * items are merged in priority order before this runs.
  */
 function dedupeItems(items: SkillSearchItem[]): SkillSearchItem[] {
   const seen = new Set<string>();
@@ -269,28 +403,4 @@ function dedupeItems(items: SkillSearchItem[]): SkillSearchItem[] {
     out.push(item);
   }
   return out;
-}
-
-/**
- * Rank items: exact qualified-name match first, then prefix-match, then
- * substring, then upstream order. Using `qualifiedName` means a query like
- * `kynan/commit` matches the namespaced skill exactly while a query like
- * `commit` still falls through to substring matches on both
- * `kynan/commit` and `will/commit`.
- */
-function rankItems(items: SkillSearchItem[], query: string): SkillSearchItem[] {
-  const q = query.toLowerCase();
-  return [...items].sort((a, b) => {
-    const aScore = score(a, q);
-    const bScore = score(b, q);
-    return bScore - aScore;
-  });
-}
-
-function score(item: SkillSearchItem, q: string): number {
-  const qn = qualifiedName(item).toLowerCase();
-  if (qn === q) return 3;
-  if (qn.startsWith(q)) return 2;
-  if (qn.includes(q)) return 1;
-  return 0;
 }
