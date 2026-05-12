@@ -7,8 +7,17 @@ import { pluginCmd } from './commands/plugin.js';
 import { mcpCmd } from './commands/mcp.js';
 import { selfCmd } from './commands/self.js';
 import { skillsCmd } from './commands/plugin-skills.js';
-import { extractJsonFlag, setJsonMode } from './json-output.js';
-import { extractAgentHelpFlag, printAgentHelp } from './agent-help.js';
+import {
+  extractJsonFlag,
+  extractJqFlag,
+  setJsonMode,
+  validateJsonFields,
+} from './json-output.js';
+import {
+  extractAgentHelpFlag,
+  findMetaByCommand,
+  printAgentHelp,
+} from './agent-help.js';
 import { getUpdateNotice } from './update-check.js';
 import packageJson from '../../package.json';
 
@@ -29,15 +38,37 @@ const app = conciseSubcommands({
 });
 
 const rawArgs = process.argv.slice(2);
-const { args: argsNoJson, json } = extractJsonFlag(rawArgs);
-const { args: argsWithSkillAlias, agentHelp } = extractAgentHelpFlag(argsNoJson);
+const { args: argsNoJson, json, jsonFields } = extractJsonFlag(rawArgs);
+const { args: argsNoJq, jqExpr } = extractJqFlag(argsNoJson);
+const { args: argsWithSkillAlias, agentHelp } = extractAgentHelpFlag(argsNoJq);
 // `skills` is a permanent alias for the canonical singular `skill`. Normalize
 // up-front so cmd-ts only ever dispatches the singular and both invocations
 // produce byte-identical help/output.
 const finalArgs = argsWithSkillAlias[0] === 'skills'
   ? ['skill', ...argsWithSkillAlias.slice(1)]
   : argsWithSkillAlias;
-setJsonMode(json);
+
+// `--jq` requires `--json` so we have an envelope to pipe through.
+if (jqExpr && !json) {
+  process.stderr.write('Error: --jq requires --json.\n');
+  process.exit(2);
+}
+
+// Validate `--json=<fields>` against the meta allowlist for the invoked command.
+// `findMetaByCommand` looks up by the canonical command path (singular form),
+// matching what's in the metas after the rename.
+let validatedFields: string[] | undefined;
+if (jsonFields) {
+  const commandPath = finalArgs.filter((a) => !a.startsWith('-')).join(' ');
+  const meta = findMetaByCommand(commandPath);
+  const result = validateJsonFields(jsonFields, meta);
+  validatedFields = result ? [...result] : undefined;
+}
+
+setJsonMode(json, {
+  ...(validatedFields && { fields: validatedFields }),
+  ...(jqExpr && { jqExpr }),
+});
 
 // Kick off update check for non-json, non-agent-help invocations.
 // Reads from local cache (fast), spawns a detached child to refresh if stale.
