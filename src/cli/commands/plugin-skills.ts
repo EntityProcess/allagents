@@ -30,8 +30,9 @@ import {
   skillsAddMeta,
 } from '../metadata/plugin-skills.js';
 import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
-import { isGitHubUrl, parseGitHubUrl } from '../../utils/plugin-path.js';
+import { isGitHubUrl, parseGitHubUrl, stripGitRef } from '../../utils/plugin-path.js';
 import { fetchPlugin, getPluginName, seedFetchCache } from '../../core/plugin.js';
+import { upsertSyncStateSource } from '../../core/sync-state.js';
 import { parseSkillMetadata } from '../../validators/skill.js';
 import {
   addMarketplace,
@@ -58,6 +59,60 @@ function resolveScope(cwd: string): 'user' | 'project' {
   if (isUserConfigPath(cwd)) return 'user';
   if (hasProjectConfig(cwd)) return 'project';
   return 'user';
+}
+
+/**
+ * Record a per-source provenance entry (resolved ref + SHA + pin) into the
+ * workspace's sync-state. The key is the spec with any `@<ref>` suffix stripped
+ * so all installs of `owner/repo` map to one entry regardless of pin.
+ *
+ * Silently no-ops for non-GitHub sources (local paths, marketplace shorthand)
+ * since we can't resolve a SHA from them.
+ */
+async function recordSourceProvenance(opts: {
+  from: string;
+  pinnedRef: string | undefined;
+  workspacePath: string;
+  isUser: boolean;
+}): Promise<void> {
+  const { from, pinnedRef, workspacePath, isUser } = opts;
+  if (!isGitHubUrl(from)) return;
+  const parsed = parseGitHubUrl(from);
+  if (!parsed) return;
+
+  // The fetch ran during install so this hits the cache and returns the
+  // resolvedSha without another git operation.
+  const fetchResult = await fetchPlugin(from, {
+    ...(parsed.branch && { branch: parsed.branch }),
+  });
+  if (!fetchResult.success || !fetchResult.resolvedSha) return;
+
+  const targetPath = isUser ? getHomeDir() : workspacePath;
+  const key = stripGitRef(`${parsed.owner}/${parsed.repo}`);
+  await upsertSyncStateSource(targetPath, key, {
+    pluginSpec: key,
+    resolvedRef: fetchResult.resolvedRef ?? parsed.branch ?? 'HEAD',
+    resolvedSha: fetchResult.resolvedSha,
+    ...(pinnedRef && { pinnedRef }),
+  });
+}
+
+/**
+ * Extract the inline `@<ref>` suffix from a plugin source spec, if present.
+ * Only matches owner/repo-style sources (must have a slash before the `@`),
+ * so `plugin@marketplace` returns undefined.
+ */
+function extractInlineRef(spec: string): string | undefined {
+  const slashIdx = spec.indexOf('/');
+  if (slashIdx === -1) return undefined;
+  const atIdx = spec.indexOf('@', slashIdx);
+  if (atIdx === -1) return undefined;
+  const ref = spec.slice(atIdx + 1);
+  // If the @ref contains another slash, it's the subpath portion; the ref is
+  // the chunk between @ and the next slash.
+  const nextSlash = ref.indexOf('/');
+  const cleanRef = nextSlash === -1 ? ref : ref.slice(0, nextSlash);
+  return cleanRef.length > 0 ? cleanRef : undefined;
 }
 
 /**
@@ -905,6 +960,11 @@ const addCmd = command({
       short: 'f',
       description: 'Plugin source to install if the skill is not already available',
     }),
+    pin: option({
+      type: optional(string),
+      long: 'pin',
+      description: 'Pin the plugin to a specific Git ref (tag, branch, or SHA). Mutually exclusive with inline @ref in --from.',
+    }),
     list: flag({
       long: 'list',
       short: 'l',
@@ -915,8 +975,43 @@ const addCmd = command({
       description: 'Install every skill from --from',
     }),
   },
-  handler: async ({ skill: skillArg, scope, plugin, from: fromArg, list, all }) => {
+  handler: async ({ skill: skillArg, scope, plugin, from: fromArg, pin, list, all }) => {
     try {
+      // Resolve --pin together with inline @ref. Three legal states:
+      //   • --pin only  → splice into fromArg
+      //   • inline @ref → leave fromArg alone, remember pinnedRef
+      //   • neither     → no pin
+      // Mutex: --pin combined with inline @ref is rejected.
+      let pinnedRef: string | undefined;
+      if (pin || fromArg) {
+        const inlineRef = fromArg ? extractInlineRef(fromArg) : undefined;
+        if (pin && inlineRef) {
+          const error = 'Cannot combine inline @version in --from with --pin. Use one or the other.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'skill add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+        if (pin && fromArg) {
+          // Splice the pin into the source string so downstream parseGitHubUrl
+          // picks it up as the branch/tag.
+          fromArg = `${fromArg}@${pin}`;
+          pinnedRef = pin;
+        } else if (inlineRef) {
+          pinnedRef = inlineRef;
+        } else if (pin && !fromArg) {
+          const error = '--pin requires --from to specify a plugin source.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'skill add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+      }
+
       // --list: dry-run discovery, no workspace changes
       if (list) {
         if (skillArg) {
@@ -1028,6 +1123,14 @@ const addCmd = command({
           process.exit(1);
         }
 
+        // Record source provenance for the --all install path too.
+        await recordSourceProvenance({
+          from: fromArg,
+          pinnedRef,
+          workspacePath: workspacePathAll,
+          isUser: isUserAll,
+        });
+
         if (isJsonMode()) {
           jsonOutput({
             success: true,
@@ -1039,6 +1142,7 @@ const addCmd = command({
                 copied: installResult.syncResult.totalCopied,
                 failed: installResult.syncResult.totalFailed,
               },
+              ...(pinnedRef && { pinnedRef }),
             },
           });
           return;
@@ -1121,6 +1225,15 @@ const addCmd = command({
             process.exit(1);
           }
 
+          // Record source provenance (resolved ref + SHA + optional pin) for
+          // drift detection on subsequent syncs.
+          await recordSourceProvenance({
+            from,
+            pinnedRef,
+            workspacePath,
+            isUser,
+          });
+
           if (isJsonMode()) {
             jsonOutput({
               success: true,
@@ -1129,11 +1242,15 @@ const addCmd = command({
                 skill,
                 plugin: installFromResult.pluginName,
                 syncResult: installFromResult.syncResult,
+                ...(pinnedRef && { pinnedRef }),
               },
             });
             return;
           }
 
+          if (pinnedRef) {
+            console.log(`Pinned to ${pinnedRef}.`);
+          }
           console.log('Sync complete.');
           return;
         }

@@ -19,6 +19,7 @@ import type {
 } from '../models/workspace-config.js';
 import {
   getPluginClients,
+  getPluginPin,
   getPluginSource,
   getPluginExclude,
   getClientTypes,
@@ -30,6 +31,7 @@ import {
   isGitHubUrl,
   parseGitHubUrl,
   parseFileSource,
+  stripGitRef,
 } from '../utils/plugin-path.js';
 import { fetchPlugin, getPluginName, seedFetchCache } from './plugin.js';
 import {
@@ -75,7 +77,7 @@ import {
   getPreviouslySyncedMcpServers,
   getPreviouslySyncedNativePlugins,
 } from './sync-state.js';
-import type { SyncState } from '../models/sync-state.js';
+import type { SyncState, SyncStateSource } from '../models/sync-state.js';
 import {
   getUserWorkspaceConfig,
   migrateUserWorkspaceSkillsV1toV2,
@@ -1213,7 +1215,14 @@ export function buildPluginSyncPlans(
   const workspaceClientTypes = getClientTypes(clientEntries);
 
   const plans = plugins.map((plugin) => {
-    const source = getPluginSource(plugin);
+    const rawSource = getPluginSource(plugin);
+    const pin = getPluginPin(plugin);
+    // Apply the optional `pin:` workspace.yaml field by splicing `@<ref>` into
+    // GitHub-shaped sources. Marketplace and local sources ignore the pin
+    // since they don't go through fetchPlugin.
+    const source = pin && isGitHubUrl(rawSource) && !rawSource.includes('@')
+      ? `${rawSource}@${pin}`
+      : rawSource;
     const pluginClientTypes = getPluginClients(plugin) ?? workspaceClientTypes;
 
     if (pluginClientTypes.length === 0) {
@@ -1836,6 +1845,53 @@ async function syncVscodeWorkspaceFile(
   return { config: updatedConfig, hash, repos };
 }
 
+/**
+ * Build the `sources` block for sync-state from validated plugins. Each
+ * GitHub-shaped source contributes one entry keyed by `owner/repo` (without
+ * the `@<ref>` suffix). Local plugins and marketplace specs are skipped since
+ * they have no remote ref to record.
+ */
+async function buildSourcesProvenance(
+  validatedPlugins: ValidatedPlugin[],
+  pluginEntries: PluginEntry[],
+): Promise<Record<string, SyncStateSource>> {
+  const sources: Record<string, SyncStateSource> = {};
+
+  // Index user-declared pins by their raw source string so we can attach them
+  // to the matching validated plugin (whose `.plugin` may have `@pin` spliced in).
+  const pinByRawSource = new Map<string, string>();
+  for (const entry of pluginEntries) {
+    if (typeof entry === 'string') continue;
+    if (entry.pin) pinByRawSource.set(entry.source, entry.pin);
+  }
+
+  for (const validated of validatedPlugins) {
+    if (!validated.success) continue;
+    const spec = validated.plugin;
+    if (!isGitHubUrl(spec)) continue;
+    const parsed = parseGitHubUrl(spec);
+    if (!parsed) continue;
+
+    // Re-call fetchPlugin to pick up the cached resolvedSha / resolvedRef.
+    const fetchResult = await fetchPlugin(spec, {
+      ...(parsed.branch && { branch: parsed.branch }),
+    });
+    if (!fetchResult.success || !fetchResult.resolvedSha) continue;
+
+    const rawBase = stripGitRef(`${parsed.owner}/${parsed.repo}`);
+    const pinned = pinByRawSource.get(rawBase) ?? parsed.branch;
+
+    sources[rawBase] = {
+      pluginSpec: rawBase,
+      resolvedRef: fetchResult.resolvedRef ?? parsed.branch ?? 'HEAD',
+      resolvedSha: fetchResult.resolvedSha,
+      ...(pinned && { pinnedRef: pinned }),
+    };
+  }
+
+  return sources;
+}
+
 async function persistSyncState(
   workspacePath: string,
   pluginResults: PluginSyncResult[],
@@ -1848,6 +1904,7 @@ async function persistSyncState(
     mcpTrackedServers?: Partial<Record<string, string[]>>;
     clientMappings?: Record<ClientType, ClientMapping>;
     skillsIndex?: string[];
+    sources?: Record<string, SyncStateSource>;
   },
 ): Promise<void> {
   const allCopyResults: CopyResult[] = [
@@ -1894,6 +1951,8 @@ async function persistSyncState(
     ...(extra?.mcpTrackedServers && { mcpServers: extra.mcpTrackedServers }),
     ...(extra?.skillsIndex &&
       extra.skillsIndex.length > 0 && { skillsIndex: extra.skillsIndex }),
+    ...(extra?.sources &&
+      Object.keys(extra.sources).length > 0 && { sources: extra.sources }),
   });
 }
 
@@ -2322,6 +2381,7 @@ export async function syncWorkspace(
   const { pluginsByClient: nativePluginsByClient } =
     collectNativePluginSources(validPlugins);
   if (!dryRun) {
+    const sources = await buildSourcesProvenance(validPlugins, config.plugins);
     await sw.measure('persist-state', () =>
       persistSyncState(
         workspacePath,
@@ -2343,6 +2403,7 @@ export async function syncWorkspace(
           ...(writtenSkillsIndexFiles.length > 0 && {
             skillsIndex: writtenSkillsIndexFiles,
           }),
+          ...(Object.keys(sources).length > 0 && { sources }),
         },
       ),
     );

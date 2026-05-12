@@ -1,6 +1,7 @@
 import { mkdir, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import simpleGit from 'simple-git';
 import {
   parseGitHubUrl,
   getPluginCachePath,
@@ -28,6 +29,10 @@ export interface FetchResult {
   error?: string;
   /** Duration of the git operation in milliseconds */
   durationMs?: number;
+  /** The ref (branch/tag) the fetch resolved against, if known. */
+  resolvedRef?: string;
+  /** Resolved commit SHA of the cached working tree, if known. */
+  resolvedSha?: string;
 }
 
 /**
@@ -48,6 +53,21 @@ export interface FetchDeps {
   mkdir?: typeof mkdir;
   cloneTo?: typeof cloneTo;
   pull?: typeof pull;
+}
+
+/**
+ * Resolve the HEAD commit SHA of a local repository. Returns undefined if the
+ * directory isn't a git repo or rev-parse fails (e.g., a cached marketplace
+ * subdirectory that was copied rather than cloned).
+ */
+async function resolveHeadSha(repoPath: string): Promise<string | undefined> {
+  try {
+    const sha = await simpleGit(repoPath).revparse(['HEAD']);
+    const trimmed = sha.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // Deduplicates git operations for the same cache directory within a sync session.
@@ -197,9 +217,24 @@ async function doFetchPlugin(
       const pullStart = performance.now();
       await pullFn(cachePath);
       const pullMs = Math.round(performance.now() - pullStart);
-      return { success: true, action: 'updated', cachePath, durationMs: pullMs };
+      const sha = await resolveHeadSha(cachePath);
+      return {
+        success: true,
+        action: 'updated',
+        cachePath,
+        durationMs: pullMs,
+        ...(branch && { resolvedRef: branch }),
+        ...(sha && { resolvedSha: sha }),
+      };
     } catch {
-      return { success: true, action: 'skipped', cachePath };
+      const sha = await resolveHeadSha(cachePath);
+      return {
+        success: true,
+        action: 'skipped',
+        cachePath,
+        ...(branch && { resolvedRef: branch }),
+        ...(sha && { resolvedSha: sha }),
+      };
     }
   }
 
@@ -212,12 +247,15 @@ async function doFetchPlugin(
     const cloneStart = performance.now();
     await cloneToFn(repoUrl, cachePath, branch);
     const cloneMs = Math.round(performance.now() - cloneStart);
+    const sha = await resolveHeadSha(cachePath);
 
     return {
       success: true,
       action: 'fetched',
       cachePath,
       durationMs: cloneMs,
+      ...(branch && { resolvedRef: branch }),
+      ...(sha && { resolvedSha: sha }),
     };
   } catch (error) {
     if (error instanceof GitCloneError) {
@@ -339,12 +377,21 @@ export async function updateCachedPlugins(
 }
 
 /**
- * Get the plugin name from the directory name
+ * Get the plugin name from the directory name.
+ *
+ * Cache directories for branch/tag-pinned clones use the form
+ * `<owner>-<repo>@<sanitized-ref>`. The pin suffix is part of the on-disk
+ * layout for collision avoidance, but the logical plugin name is the
+ * base — strip the suffix so callers that key workspace.yaml entries by
+ * plugin name (e.g., setPluginSkillsMode) match against the unpinned form.
+ *
  * @param pluginPath - Resolved path to the plugin directory
- * @returns The plugin name (directory basename)
+ * @returns The plugin name (directory basename, without any `@ref` suffix)
  */
 export function getPluginName(pluginPath: string): string {
-  return basename(pluginPath);
+  const base = basename(pluginPath);
+  const atIdx = base.indexOf('@');
+  return atIdx === -1 ? base : base.slice(0, atIdx);
 }
 
 /**
