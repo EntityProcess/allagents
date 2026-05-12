@@ -1,10 +1,15 @@
 import { describe, expect, it, test } from 'bun:test';
 import {
+  AGENT_HOSTS,
   CLIENT_MAPPINGS,
   USER_CLIENT_MAPPINGS,
+  findHostById,
+  getMapping,
   resolveClientMappings,
   getDisplayName,
+  uniqueProjectSkillsPaths,
 } from '../../../src/models/client-mapping.js';
+import { ClientTypeSchema } from '../../../src/models/workspace-config.js';
 
 describe('CLIENT_MAPPINGS', () => {
   test('defines project-level paths for all supported clients', () => {
@@ -244,5 +249,48 @@ describe('getDisplayName', () => {
     expect(getDisplayName('claude')).toBe('claude');
     expect(getDisplayName('copilot')).toBe('copilot');
     expect(getDisplayName('codex')).toBe('codex');
+  });
+});
+
+describe('AGENT_HOSTS (single source of truth)', () => {
+  it('covers every ClientType exactly once', () => {
+    const ids = new Set(AGENT_HOSTS.map((h) => h.id));
+    expect(ids.size).toBe(AGENT_HOSTS.length); // no duplicates
+    const enumValues = new Set(ClientTypeSchema.options);
+    expect(ids.size).toBe(enumValues.size);
+    for (const value of enumValues) {
+      expect(ids.has(value)).toBe(true);
+    }
+  });
+
+  it('findHostById returns the entry for known clients and undefined otherwise', () => {
+    expect(findHostById('claude')?.id).toBe('claude');
+    // Casting to bypass the strict ClientType for the negative case.
+    expect(findHostById('nonexistent' as 'claude')).toBeUndefined();
+  });
+
+  it('getMapping yields identical content to the derived legacy records for every (client, scope) pair', () => {
+    for (const id of ClientTypeSchema.options) {
+      expect(getMapping(id, 'project')).toEqual(CLIENT_MAPPINGS[id]);
+      expect(getMapping(id, 'user')).toEqual(USER_CLIENT_MAPPINGS[id]);
+    }
+  });
+
+  it('preserves intentional windsurf project/user delta', () => {
+    expect(getMapping('windsurf', 'project').skillsPath).toBe('.windsurf/skills/');
+    expect(getMapping('windsurf', 'user').skillsPath).toBe('.codeium/windsurf/skills/');
+  });
+
+  it('preserves intentional copilot project/user delta', () => {
+    expect(getMapping('copilot', 'project').githubPath).toBe('.github/');
+    expect(getMapping('copilot', 'user').githubPath).toBe('.copilot/');
+  });
+
+  it('uniqueProjectSkillsPaths deduplicates shared paths (universal == vscode)', () => {
+    const paths = uniqueProjectSkillsPaths();
+    // universal and vscode both default to .agents/skills/, so the set is
+    // smaller than the host count by at least one.
+    expect(paths.length).toBeLessThan(AGENT_HOSTS.length);
+    expect(paths).toContain('.agents/skills/');
   });
 });
