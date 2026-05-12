@@ -15,6 +15,13 @@ const OWNER_REGEX = /^[A-Za-z0-9-]{1,39}$/;
 export interface SkillSearchItem {
   /** Skill folder name (parent directory of SKILL.md). */
   name: string;
+  /**
+   * Optional namespace segment from `skills/<namespace>/<name>/SKILL.md`.
+   * Empty string when the path is `skills/<name>/SKILL.md` or otherwise
+   * non-namespaced. Two repos with the same skill name in different
+   * namespaces (`kynan/commit` vs `will/commit`) stay distinct.
+   */
+  namespace: string;
   /** `owner/repo` */
   repo: string;
   /** Path to SKILL.md inside the repo. */
@@ -107,12 +114,71 @@ function buildQueryString(query: string, owner: string | undefined): string {
 }
 
 /**
+ * Render the namespace-qualified skill name (`<namespace>/<name>`) when a
+ * namespace is set, or just `<name>` otherwise. Used both for ranking
+ * (so `kynan/commit` matches the query "kynan/commit") and as the dedup
+ * key together with the repo full name.
+ */
+export function qualifiedName(item: Pick<SkillSearchItem, 'name' | 'namespace'>): string {
+  return item.namespace ? `${item.namespace}/${item.name}` : item.name;
+}
+
+/**
+ * Extract `(namespace, name)` from a Code Search `path` entry.
+ *
+ * Layouts handled:
+ *   - `skills/<ns>/<name>/SKILL.md`   → { namespace: <ns>, name: <name> }
+ *   - `<prefix>/skills/<ns>/<name>/SKILL.md` (plugin subdir)
+ *                                     → { namespace: <ns>, name: <name> }
+ *   - `skills/<name>/SKILL.md`        → { namespace: '',   name: <name> }
+ *   - `<name>/SKILL.md`               → { namespace: '',   name: <name> }
+ *   - `SKILL.md` at repo root         → { namespace: '',   name: <repoFallback> }
+ *
+ * Anything that doesn't fit drops to the bare parent-directory fallback.
+ */
+function parseSkillPath(
+  path: string,
+  repoFallback: string,
+): { namespace: string; name: string } {
+  const parts = path.split('/').filter(Boolean);
+
+  // Find the last `skills` segment so nested layouts
+  // (e.g., `plugins/foo/skills/<ns>/<name>/SKILL.md`) still parse.
+  const skillsIdx = parts.lastIndexOf('skills');
+  if (skillsIdx !== -1) {
+    const afterSkills = parts.slice(skillsIdx + 1);
+    // Drop a trailing `SKILL.md` segment if present.
+    const meaningful =
+      afterSkills[afterSkills.length - 1] === 'SKILL.md'
+        ? afterSkills.slice(0, -1)
+        : afterSkills;
+    if (meaningful.length >= 2) {
+      const namespace = meaningful[0] ?? '';
+      const name = meaningful[1] ?? '';
+      if (namespace && name) return { namespace, name };
+    }
+    if (meaningful.length === 1 && meaningful[0]) {
+      return { namespace: '', name: meaningful[0] };
+    }
+  }
+
+  // No `skills` segment — use the parent directory of SKILL.md as the name.
+  if (parts.length >= 2) {
+    const parent = parts[parts.length - 2];
+    if (parent) return { namespace: '', name: parent };
+  }
+
+  return { namespace: '', name: repoFallback };
+}
+
+/**
  * Run the GitHub Code Search request. Network/auth comes from the environment
  * via fetch + GITHUB_TOKEN; no extra deps.
  *
- * Items are returned in upstream relevance order. The handler may apply
- * name-match-first re-ranking on top of this — kept separate so the wire
- * format stays close to the gh-skill reference impl.
+ * Items are returned in upstream relevance order, then re-ranked by
+ * qualified-name match against the query and deduped by
+ * `repo + qualifiedName`. Dedup matters because Code Search will sometimes
+ * return the same skill folder twice via different match contexts.
  */
 export async function searchSkills(
   query: string,
@@ -159,32 +225,58 @@ export async function searchSkills(
       repository?: { full_name?: string; description?: string };
     }>;
   };
+
   const items: SkillSearchItem[] = (parsed.items ?? []).map((item) => {
     const path = item.path ?? '';
-    // Skill name = parent dir of SKILL.md. For `skills/<name>/SKILL.md` this is
-    // <name>; for repo-root `SKILL.md` the parent is the repo name.
-    const parts = path.split('/');
-    const name = parts.length >= 2 ? parts[parts.length - 2] ?? '' : item.repository?.full_name?.split('/').pop() ?? '';
+    const repo = item.repository?.full_name ?? '';
+    const repoFallback = repo.split('/').pop() ?? '';
+    const { namespace, name } = parseSkillPath(path, repoFallback);
     return {
       name,
-      repo: item.repository?.full_name ?? '',
+      namespace,
+      repo,
       path,
       description: item.repository?.description ?? '',
       sha: item.sha ?? '',
     };
   });
 
+  const deduped = dedupeItems(items);
+
   return {
     query,
-    items: rankItems(items, query),
-    total: parsed.total_count ?? items.length,
+    items: rankItems(deduped, query),
+    total: parsed.total_count ?? deduped.length,
     truncated: Boolean(parsed.incomplete_results),
   };
 }
 
 /**
- * Rank items: exact name match first, then prefix-match, then upstream order.
- * Mirrors gh-skill's relevance heuristic so users see the obvious hits up top.
+ * Drop duplicate hits by `repo + qualifiedName`. The Code Search API can
+ * return the same skill folder more than once when multiple lines in
+ * SKILL.md match the query; the user only cares about the folder.
+ *
+ * Preserves the first occurrence so upstream relevance order is respected
+ * before re-ranking.
+ */
+function dedupeItems(items: SkillSearchItem[]): SkillSearchItem[] {
+  const seen = new Set<string>();
+  const out: SkillSearchItem[] = [];
+  for (const item of items) {
+    const key = `${item.repo}#${qualifiedName(item)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+/**
+ * Rank items: exact qualified-name match first, then prefix-match, then
+ * substring, then upstream order. Using `qualifiedName` means a query like
+ * `kynan/commit` matches the namespaced skill exactly while a query like
+ * `commit` still falls through to substring matches on both
+ * `kynan/commit` and `will/commit`.
  */
 function rankItems(items: SkillSearchItem[], query: string): SkillSearchItem[] {
   const q = query.toLowerCase();
@@ -196,9 +288,9 @@ function rankItems(items: SkillSearchItem[], query: string): SkillSearchItem[] {
 }
 
 function score(item: SkillSearchItem, q: string): number {
-  const name = item.name.toLowerCase();
-  if (name === q) return 3;
-  if (name.startsWith(q)) return 2;
-  if (name.includes(q)) return 1;
+  const qn = qualifiedName(item).toLowerCase();
+  if (qn === q) return 3;
+  if (qn.startsWith(q)) return 2;
+  if (qn.includes(q)) return 1;
   return 0;
 }
