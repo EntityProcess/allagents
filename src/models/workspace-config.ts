@@ -188,6 +188,12 @@ export const PluginEntrySchema = z.union([
     install: InstallModeSchema.optional(),
     exclude: z.array(z.string()).optional(),
     skills: PluginSkillsConfigSchema.optional(),
+    /**
+     * Optional Git ref (tag/branch/SHA) to pin the plugin to. Equivalent to
+     * passing the `owner/repo@<ref>` shorthand on install. When set, every
+     * sync resolves the plugin at this ref instead of the default branch.
+     */
+    pin: z.string().optional(),
   }),
 ]);
 
@@ -224,6 +230,14 @@ export function getPluginInstallMode(
  */
 export function getPluginExclude(plugin: PluginEntry): string[] | undefined {
   return typeof plugin === 'string' ? undefined : plugin.exclude;
+}
+
+/**
+ * Get the pinned Git ref for a plugin entry (if any). Returns undefined for
+ * both the string-shorthand form and object entries without `pin:`.
+ */
+export function getPluginPin(plugin: PluginEntry): string | undefined {
+  return typeof plugin === 'string' ? undefined : plugin.pin;
 }
 
 /**

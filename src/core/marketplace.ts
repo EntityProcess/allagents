@@ -1243,10 +1243,23 @@ async function autoRegisterMarketplace(
 
 /**
  * Check if a spec is in plugin@marketplace format
+ *
+ * `plugin@marketplace`        → true   (plain marketplace shorthand)
+ * `plugin@owner/repo[/sub]`   → true   (marketplace by GitHub repo)
+ * `owner/repo@ref[/sub]`      → false  (GitHub plugin with `@ref` version pin)
+ *
+ * The disambiguation: when the segment before the last `@` itself contains a
+ * `/`, the spec is an `owner/repo` GitHub URL with a `@ref` pin, not a
+ * plugin@marketplace pair. Plugin names in marketplaces are bare identifiers
+ * without slashes.
  */
 export function isPluginSpec(spec: string): boolean {
   const atIndex = spec.lastIndexOf('@');
   if (atIndex === -1 || atIndex === 0 || atIndex === spec.length - 1) {
+    return false;
+  }
+  const beforeAt = spec.slice(0, atIndex);
+  if (beforeAt.includes('/')) {
     return false;
   }
   return true;

@@ -15,6 +15,31 @@ import { getHomeDir } from '../constants.js';
 export type PluginSourceType = 'github' | 'local';
 
 /**
+ * Strip an inline `@<ref>` pin suffix from a plugin spec.
+ *
+ * `owner/repo@v1.2.0`       → `owner/repo`
+ * `owner/repo@main/sub`     → `owner/repo/sub` (the subpath is preserved)
+ * `plugin@marketplace`      → unchanged (no slash before `@`, so the `@` is a marketplace marker)
+ * `owner/repo`              → unchanged
+ *
+ * Used as the canonical key for sync-state's `sources` block so the same
+ * plugin keyed across different installs maps to one provenance entry.
+ */
+export function stripGitRef(spec: string): string {
+  const slash = spec.indexOf('/');
+  if (slash === -1) return spec; // `name@marketplace`
+  const parts = spec.split('/');
+  const ownerSeg = parts[0];
+  const repoSeg = parts[1];
+  if (!ownerSeg || !repoSeg) return spec;
+  const atIdx = repoSeg.indexOf('@');
+  if (atIdx === -1) return spec;
+  const cleanRepo = repoSeg.slice(0, atIdx);
+  const rest = parts.slice(2);
+  return rest.length === 0 ? `${ownerSeg}/${cleanRepo}` : `${ownerSeg}/${cleanRepo}/${rest.join('/')}`;
+}
+
+/**
  * Parsed plugin source information
  */
 export interface ParsedPluginSource {
@@ -49,7 +74,8 @@ export function isGitHubUrl(source: string): boolean {
     return true;
   }
 
-  // Shorthand: owner/repo or owner/repo/subpath
+  // Shorthand: owner/repo or owner/repo/subpath, optionally suffixed with @ref
+  // (e.g. owner/repo@v1.2.0 or owner/repo@main/subpath).
   // Must not start with . or / (local paths) and must contain at least one /
   // Also must not look like a Windows path (C:/) or contain backslashes
   if (
@@ -59,12 +85,15 @@ export function isGitHubUrl(source: string): boolean {
     !/^[a-zA-Z]:/.test(source) &&
     source.includes('/')
   ) {
-    // Check if it looks like owner/repo format (alphanumeric, hyphens, underscores, dots)
-    // GitHub allows dots in repo names (e.g., WTG.AI.Prompts)
+    // Check if it looks like owner/repo format (alphanumeric, hyphens, underscores, dots).
+    // GitHub allows dots in repo names (e.g., WTG.AI.Prompts).
+    // For pinning, the repo segment may carry an @ref suffix — strip it before validating.
     const parts = source.split('/');
     if (parts.length >= 2 && parts[0] && parts[1]) {
       const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
-      if (validOwnerRepo.test(parts[0]) && validOwnerRepo.test(parts[1])) {
+      const atIdx = parts[1].indexOf('@');
+      const repoPart = atIdx === -1 ? parts[1] : parts[1].slice(0, atIdx);
+      if (validOwnerRepo.test(parts[0]) && validOwnerRepo.test(repoPart)) {
         return true;
       }
     }
@@ -102,26 +131,32 @@ export function parseGitHubUrl(
   }
 
   // Handle shorthand: owner/repo or owner/repo/subpath (no protocol, no github.com)
+  // Also accept an optional @ref suffix on the repo segment for version pinning:
+  //   owner/repo@v1.2.0
+  //   owner/repo@main/subpath
+  // Distinguishing from `name@marketplace`: that form has no slash, so isGitHubUrl
+  // rejects it before this function is reached.
   if (!normalized.includes('://') && !normalized.startsWith('github.com')) {
     const parts = normalized.split('/');
     if (parts.length >= 2) {
       const owner = parts[0];
-      const repo = parts[1];
-      // Allow dots in repo names (e.g., WTG.AI.Prompts)
+      const rawRepo = parts[1];
       const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
-      if (
-        owner &&
-        repo &&
-        validOwnerRepo.test(owner) &&
-        validOwnerRepo.test(repo)
-      ) {
-        if (parts.length > 2) {
-          // Has subpath: owner/repo/path/to/plugin
-          const subpath = parts.slice(2).join('/');
-          return { owner, repo, subpath };
-        }
-        return { owner, repo };
+      if (!owner || !rawRepo || !validOwnerRepo.test(owner)) return null;
+
+      // Split @ref off the repo segment, if present.
+      const atIdx = rawRepo.indexOf('@');
+      const repo = atIdx === -1 ? rawRepo : rawRepo.slice(0, atIdx);
+      const branch = atIdx === -1 ? undefined : rawRepo.slice(atIdx + 1) || undefined;
+      if (!validOwnerRepo.test(repo)) return null;
+
+      if (parts.length > 2) {
+        const subpath = parts.slice(2).join('/');
+        return branch
+          ? { owner, repo, branch, subpath }
+          : { owner, repo, subpath };
       }
+      return branch ? { owner, repo, branch } : { owner, repo };
     }
     return null;
   }

@@ -178,6 +178,33 @@ describe('parseGitHubUrl', () => {
     expect(parseGitHubUrl('not-a-url')).toBeNull();
     expect(parseGitHubUrl('')).toBeNull();
   });
+
+  it('should parse shorthand owner/repo@ref version pin', () => {
+    expect(parseGitHubUrl('owner/repo@v1.2.0')).toEqual({
+      owner: 'owner',
+      repo: 'repo',
+      branch: 'v1.2.0',
+    });
+  });
+
+  it('should parse owner/repo@ref/subpath with both pin and subpath', () => {
+    expect(parseGitHubUrl('owner/repo@main/plugins/foo')).toEqual({
+      owner: 'owner',
+      repo: 'repo',
+      branch: 'main',
+      subpath: 'plugins/foo',
+    });
+  });
+});
+
+describe('isGitHubUrl with @ref pin', () => {
+  it('accepts owner/repo@ref shorthand', () => {
+    expect(isGitHubUrl('owner/repo@v1.2.0')).toBe(true);
+  });
+
+  it('still rejects plugin@marketplace (no slash before @)', () => {
+    expect(isGitHubUrl('plugin@marketplace')).toBe(false);
+  });
 });
 
 describe('normalizePluginPath', () => {

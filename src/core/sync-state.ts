@@ -2,7 +2,11 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { CONFIG_DIR, SYNC_STATE_FILE } from '../constants.js';
-import { SyncStateSchema, type SyncState } from '../models/sync-state.js';
+import {
+  SyncStateSchema,
+  type SyncState,
+  type SyncStateSource,
+} from '../models/sync-state.js';
 import type { ClientType } from '../models/workspace-config.js';
 import { ensureConfigGitignore } from './config-gitignore.js';
 
@@ -19,6 +23,7 @@ export interface SyncStateData {
   vscodeWorkspaceHash?: string;
   vscodeWorkspaceRepos?: string[];
   skillsIndex?: string[];
+  sources?: Record<string, SyncStateSource>;
 }
 
 /**
@@ -85,6 +90,7 @@ export async function saveSyncState(
     ...(normalizedData.vscodeWorkspaceHash && { vscodeWorkspaceHash: normalizedData.vscodeWorkspaceHash }),
     ...(normalizedData.vscodeWorkspaceRepos && { vscodeWorkspaceRepos: normalizedData.vscodeWorkspaceRepos }),
     ...(normalizedData.skillsIndex && normalizedData.skillsIndex.length > 0 && { skillsIndex: normalizedData.skillsIndex }),
+    ...(normalizedData.sources && Object.keys(normalizedData.sources).length > 0 && { sources: normalizedData.sources }),
   };
 
   await mkdir(dirname(statePath), { recursive: true });
@@ -138,4 +144,40 @@ export function getPreviouslySyncedNativePlugins(
 ): string[] {
   if (!state?.nativePlugins) return [];
   return state.nativePlugins[client] ?? [];
+}
+
+/**
+ * Upsert a single per-source provenance record into the workspace sync state.
+ * Preserves every other field of the existing sync-state file.
+ *
+ * If no sync-state exists yet, a fresh one is created with only this entry.
+ */
+export async function upsertSyncStateSource(
+  workspacePath: string,
+  key: string,
+  source: SyncStateSource,
+): Promise<void> {
+  const existing = await loadSyncState(workspacePath);
+  const sources = {
+    ...(existing?.sources ?? {}),
+    [key]: source,
+  };
+
+  await saveSyncState(workspacePath, {
+    files: (existing?.files ?? {}) as Partial<Record<ClientType, string[]>>,
+    ...(existing?.mcpServers && {
+      mcpServers: existing.mcpServers as Partial<Record<McpScope, string[]>>,
+    }),
+    ...(existing?.nativePlugins && {
+      nativePlugins: existing.nativePlugins as Partial<Record<ClientType, string[]>>,
+    }),
+    ...(existing?.vscodeWorkspaceHash && {
+      vscodeWorkspaceHash: existing.vscodeWorkspaceHash,
+    }),
+    ...(existing?.vscodeWorkspaceRepos && {
+      vscodeWorkspaceRepos: existing.vscodeWorkspaceRepos,
+    }),
+    ...(existing?.skillsIndex && { skillsIndex: existing.skillsIndex }),
+    sources,
+  });
 }
