@@ -35,6 +35,7 @@ clients:
     const content = JSON.parse(readFileSync(expectedPath, 'utf-8'));
     expect(content.folders).toHaveLength(2);
     expect(content.folders[0].path).toBe('.');
+    expect(content.folders[1].path).toBe('../myrepo');
     expect(content.settings).toEqual({ 'chat.agent.maxRequests': 999 });
   });
 
