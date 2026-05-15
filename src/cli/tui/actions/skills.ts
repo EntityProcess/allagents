@@ -20,12 +20,13 @@ import {
   listMarketplaces,
   listMarketplacePlugins,
 } from '../../../core/marketplace.js';
+import { searchSkills, qualifiedName, type SkillSearchItem } from '../../../core/skill-search.js';
 import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 import { installSelectedPlugin, runBrowsePluginSkills } from './plugins.js';
 
-const { multiselect, select, autocomplete } = p;
+const { multiselect, select, autocomplete, text } = p;
 
 interface ScopedSkill extends SkillInfo {
   scope: 'user' | 'project';
@@ -138,13 +139,14 @@ export async function runSkills(context: TuiContext, cache?: TuiCache): Promise<
       return;
     }
 
-    // Skills exist — show toggle + browse option
+    // Skills exist — show toggle + browse + search options
     while (true) {
       const action = await select({
         message: 'Skills',
         options: [
           { label: 'Toggle installed skills', value: 'toggle' as const },
           { label: 'Browse marketplace skills...', value: 'browse' as const },
+          { label: 'Search online...', value: 'search' as const },
           { label: 'Back', value: 'back' as const },
         ],
       });
@@ -155,6 +157,11 @@ export async function runSkills(context: TuiContext, cache?: TuiCache): Promise<
 
       if (action === 'browse') {
         await runBrowseMarketplaceSkills(context, cache);
+        continue;
+      }
+
+      if (action === 'search') {
+        await runSearchOnlineSkills(context, cache);
         continue;
       }
 
@@ -358,6 +365,76 @@ async function runBrowseMarketplaceSkills(
   const installed = await installSelectedPlugin(selected, context, cache);
   if (installed) {
     // Determine which scope it was installed to by checking again
+    const nowInstalledUser = await hasUserPlugin(selected);
+    const scope = nowInstalledUser ? 'user' : 'project';
+    await runBrowsePluginSkills(selected, scope, context, cache);
+  }
+}
+
+/**
+ * Search GitHub for skills by keyword, display results, and install a selected plugin.
+ */
+async function runSearchOnlineSkills(context: TuiContext, cache?: TuiCache): Promise<void> {
+  const query = await text({
+    message: 'Search for skills on GitHub',
+    placeholder: 'e.g. commit, deploy, aws',
+  });
+
+  if (p.isCancel(query) || !query || query.trim().length === 0) {
+    return;
+  }
+
+  const s = p.spinner();
+  s.start('Searching GitHub...');
+
+  let items: SkillSearchItem[];
+  try {
+    const result = await searchSkills(query.trim());
+    items = result.items;
+  } catch (error) {
+    s.stop('Search failed');
+    p.note(error instanceof Error ? error.message : String(error), 'Search Error');
+    return;
+  }
+
+  s.stop(`Found ${items.length} skill${items.length !== 1 ? 's' : ''}`);
+
+  if (items.length === 0) {
+    p.note(`No skills found for "${query.trim()}".`, 'Search');
+    return;
+  }
+
+  // One option per skill, showing name and repo
+  const options: Array<{ label: string; value: string; hint?: string }> = items.map((item) => ({
+    label: qualifiedName(item),
+    value: item.repo,
+    hint: item.repo + (item.description ? ` · ${item.description}` : ''),
+  }));
+  options.push({ label: 'Back', value: '__back__' });
+
+  const selected = await autocomplete({
+    message: `Results for "${query.trim()}"`,
+    options,
+    placeholder: 'Type to filter...',
+  });
+
+  if (p.isCancel(selected) || selected === '__back__') {
+    return;
+  }
+
+  // Check if plugin is already installed in either scope
+  const workspacePath = context.workspacePath ?? process.cwd();
+  const isInstalledProject = context.workspacePath ? await hasPlugin(selected, workspacePath) : false;
+  const isInstalledUser = await hasUserPlugin(selected);
+
+  if (isInstalledProject || isInstalledUser) {
+    const scope = isInstalledUser ? 'user' : 'project';
+    await runBrowsePluginSkills(selected, scope, context, cache);
+    return;
+  }
+
+  const installed = await installSelectedPlugin(selected, context, cache);
+  if (installed) {
     const nowInstalledUser = await hasUserPlugin(selected);
     const scope = nowInstalledUser ? 'user' : 'project';
     await runBrowsePluginSkills(selected, scope, context, cache);
