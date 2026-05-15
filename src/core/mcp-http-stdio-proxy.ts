@@ -129,16 +129,22 @@ function findFreePort(): Promise<number> {
   });
 }
 
+export function getBrowserOpenCommands(
+  url: string,
+  platform: NodeJS.Platform = process.platform,
+): Array<{ command: string; args: string[] }> {
+  return platform === 'darwin'
+    ? [{ command: 'open', args: [url] }]
+    : platform === 'win32'
+      ? [{ command: 'explorer.exe', args: [url] }]
+      : [
+          { command: 'xdg-open', args: [url] },
+          { command: 'gio', args: ['open', url] },
+        ];
+}
+
 function tryOpenBrowser(url: string): Promise<void> {
-  const commands: Array<{ command: string; args: string[] }> =
-    process.platform === 'darwin'
-      ? [{ command: 'open', args: [url] }]
-      : process.platform === 'win32'
-        ? [{ command: 'cmd', args: ['/c', 'start', '', url] }]
-        : [
-            { command: 'xdg-open', args: [url] },
-            { command: 'gio', args: ['open', url] },
-          ];
+  const commands = getBrowserOpenCommands(url);
 
   return new Promise((resolve) => {
     const tryCommand = (index: number) => {
