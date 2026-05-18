@@ -32,6 +32,21 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
  */
 export type PathPlaceholderMap = Map<string, string>;
 
+function normalizeWorkspacePath(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
+function resolveFolderAbsolutePath(workspacePath: string, folderPath: string): string {
+  return (isAbsolute(folderPath)
+    ? folderPath
+    : resolve(workspacePath, folderPath)
+  ).replace(/\\/g, '/');
+}
+
+function resolveFolderDisplayPath(folderPath: string): string {
+  return normalizeWorkspacePath(folderPath);
+}
+
 /**
  * Build a placeholder map from repositories using path as the lookup key.
  *
@@ -127,8 +142,8 @@ export function generateVscodeWorkspace(
 
   // 1. Repository folders (from workspace.yaml)
   for (const repo of repositories) {
-    const absolutePath = resolve(workspacePath, repo.path).replace(/\\/g, '/');
-    const entry: WorkspaceFolder = { path: absolutePath };
+    const absolutePath = resolveFolderAbsolutePath(workspacePath, repo.path);
+    const entry: WorkspaceFolder = { path: resolveFolderDisplayPath(repo.path) };
     if (repo.name) entry.name = repo.name;
     folders.push(entry);
     seenPaths.add(absolutePath);
@@ -138,11 +153,9 @@ export function generateVscodeWorkspace(
   if (resolvedTemplate && Array.isArray(resolvedTemplate.folders)) {
     for (const folder of resolvedTemplate.folders as WorkspaceFolder[]) {
       const rawPath = folder.path as string;
-      const normalizedPath = (typeof rawPath === 'string' && !isAbsolute(rawPath)
-        ? resolve(workspacePath, rawPath)
-        : rawPath).replace(/\\/g, '/');
+      const normalizedPath = resolveFolderAbsolutePath(workspacePath, rawPath);
       if (!seenPaths.has(normalizedPath)) {
-        const entry: WorkspaceFolder = { path: normalizedPath };
+        const entry: WorkspaceFolder = { path: resolveFolderDisplayPath(rawPath) };
         if (folder.name) entry.name = folder.name;
         folders.push(entry);
         seenPaths.add(normalizedPath);

@@ -14,7 +14,7 @@ import {
 const testBase = join(tmpdir(), 'allagents-test');
 
 describe('generateVscodeWorkspace', () => {
-  test('generates workspace with repository folders resolved to absolute paths', () => {
+  test('generates workspace with repository folders preserving relative paths from workspace.yaml', () => {
     const workspacePath = join(testBase, 'myapp');
     const result = generateVscodeWorkspace({
       workspacePath,
@@ -27,8 +27,8 @@ describe('generateVscodeWorkspace', () => {
 
     expect(result.folders).toEqual([
       { path: '.' },
-      { path: resolve(workspacePath, '../backend').replace(/\\/g, '/') },
-      { path: resolve(workspacePath, '../frontend').replace(/\\/g, '/') },
+      { path: '../backend' },
+      { path: '../frontend' },
     ]);
   });
 
@@ -45,8 +45,8 @@ describe('generateVscodeWorkspace', () => {
 
     expect(result.folders).toEqual([
       { path: '.' },
-      { path: resolve(workspacePath, '../backend').replace(/\\/g, '/'), name: 'API Server' },
-      { path: resolve(workspacePath, '../frontend').replace(/\\/g, '/') },
+      { path: '../backend', name: 'API Server' },
+      { path: '../frontend' },
     ]);
   });
 
@@ -85,8 +85,8 @@ describe('generateVscodeWorkspace', () => {
     // extra is not a duplicate, so it's kept with its name
     expect(result.folders).toEqual([
       { path: '.' },
-      { path: resolve(workspacePath, '../backend').replace(/\\/g, '/') },
-      { path: sharedPath },
+      { path: '../backend' },
+      { path: '../shared' },
       { path: extraPath, name: 'ExtraLib' },
     ]);
   });
