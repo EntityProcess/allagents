@@ -19,7 +19,7 @@ describe('vscode workspace folder reconciliation e2e', () => {
   });
 
   test('removes repo from workspace.yaml when folder removed from .code-workspace', async () => {
-    const repoBPath = resolve(testDir, '../repoB').replace(/\\/g, '/');
+    const repoBPath = '../repoB';
 
     writeFileSync(
       join(testDir, '.allagents', 'workspace.yaml'),
