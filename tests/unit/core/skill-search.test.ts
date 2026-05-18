@@ -190,25 +190,30 @@ describe('couldBeOwner', () => {
 });
 
 describe('buildSearchQueries', () => {
-  it('emits primary (P1) for a single-word query without owner', () => {
+  it('always emits path (P1) and primary (P4) for a single-word query without owner', () => {
     const queries = buildSearchQueries('cargowise', undefined);
     // cargowise looks like a valid GitHub owner, so P3 is also emitted.
-    expect(queries.map((q) => q.label)).toEqual(['primary', 'owner']);
+    expect(queries.map((q) => q.label)).toEqual(['path', 'owner', 'primary']);
     const labels = new Map(queries.map((q) => [q.label, q.q]));
+    expect(labels.get('path')).toBe('filename:SKILL.md path:cargowise');
     expect(labels.get('primary')).toBe('filename:SKILL.md cargowise');
   });
 
-  it('never emits the in:path query (removed to avoid workspace-repo pollution)', () => {
+  it('uses path: qualifier (not in:path) for the path query', () => {
     const queries = buildSearchQueries('cargowise', undefined);
     for (const q of queries) {
       expect(q.q).not.toContain('in:path');
     }
+    const pathQuery = queries.find((q) => q.label === 'path');
+    expect(pathQuery?.q).toContain('path:cargowise');
   });
 
-  it('threads --owner onto primary, but skips the query-as-owner (P3) query', () => {
+  it('threads --owner onto path and primary, but skips the query-as-owner (P3) query', () => {
     const queries = buildSearchQueries('cargowise', 'WiseTechGlobal');
-    expect(queries.map((q) => q.label)).toEqual(['primary']);
-    expect(queries[0]?.q).toBe('filename:SKILL.md cargowise user:WiseTechGlobal');
+    expect(queries.map((q) => q.label)).toEqual(['path', 'primary']);
+    const labels = new Map(queries.map((q) => [q.label, q.q]));
+    expect(labels.get('path')).toBe('filename:SKILL.md path:cargowise user:WiseTechGlobal');
+    expect(labels.get('primary')).toBe('filename:SKILL.md cargowise user:WiseTechGlobal');
   });
 
   it('adds the hyphen (P2) query when the query has spaces', () => {
@@ -216,6 +221,8 @@ describe('buildSearchQueries', () => {
     const hyphen = queries.find((q) => q.label === 'hyphen');
     expect(hyphen?.q).toBe('filename:SKILL.md build-worker');
     expect(queries.find((q) => q.label === 'primary')?.q).toBe('filename:SKILL.md build worker');
+    // Path query uses hyphenated form too.
+    expect(queries.find((q) => q.label === 'path')?.q).toBe('filename:SKILL.md path:build-worker');
   });
 
   it('skips P3 when --owner is explicitly set', () => {
@@ -472,26 +479,26 @@ describe('multi-query merge + dedup', () => {
     expect(new Set(result.items.map((i) => i.repo)).size).toBe(2);
   });
 
-  it('merges primary (P1) and hyphen (P2) buckets for multi-word queries', async () => {
+  it('merges path (P1) and primary (P4) buckets for multi-word queries', async () => {
     const fakeFetch = makeFakeFetch([
-      // P1 primary content query (`build worker` with space)
+      // P4 primary content query (`build worker` with space) → unique hit
       {
         match: (q) => q.includes('build worker'),
         items: [
           {
             path: 'skills/spaced/SKILL.md',
-            sha: 'p1',
+            sha: 'primary-sha',
             repository: { full_name: 'org/repo' },
           },
         ],
       },
-      // P2 hyphen content query (`build-worker`) → distinct hit
+      // P1 path + P2 hyphen both match `build-worker` → same distinct hit; path wins dedup
       {
         match: (q) => q.includes('build-worker'),
         items: [
           {
             path: 'skills/build-worker-utils/SKILL.md',
-            sha: 'p2',
+            sha: 'path-sha',
             repository: { full_name: 'org/repo' },
           },
         ],
@@ -499,13 +506,13 @@ describe('multi-query merge + dedup', () => {
     ]);
 
     const result = await searchSkills('build worker', {}, { fetch: fakeFetch, logger: silentLogger });
-    // Both results appear; primary (P1) first, then hyphen (P2).
-    expect(result.items.map((i) => i.sha)).toContain('p1');
-    expect(result.items.map((i) => i.sha)).toContain('p2');
-    // P1 should sort before P2 since both have 0 stars (priority order preserved).
-    const p1idx = result.items.findIndex((i) => i.sha === 'p1');
-    const p2idx = result.items.findIndex((i) => i.sha === 'p2');
-    expect(p1idx).toBeLessThan(p2idx);
+    // Both results appear.
+    expect(result.items.map((i) => i.sha)).toContain('primary-sha');
+    expect(result.items.map((i) => i.sha)).toContain('path-sha');
+    // Path (P1) sorts before primary (P4) when both have 0 stars — priority order preserved.
+    const pathIdx = result.items.findIndex((i) => i.sha === 'path-sha');
+    const primaryIdx = result.items.findIndex((i) => i.sha === 'primary-sha');
+    expect(pathIdx).toBeLessThan(primaryIdx);
   });
 });
 

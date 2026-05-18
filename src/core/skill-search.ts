@@ -104,10 +104,10 @@ export function couldBeOwner(query: string): boolean {
  * sort earlier in the merged result list.
  */
 export interface SkillSearchQuery {
-  /** 1 = primary content, 2 = hyphenated form, 3 = query-as-owner. */
-  priority: 1 | 2 | 3;
+  /** 1 = path, 2 = hyphenated content, 3 = query-as-owner, 4 = primary content. */
+  priority: 1 | 2 | 3 | 4;
   /** Short label used in failure logging. */
-  label: 'primary' | 'hyphen' | 'owner';
+  label: 'path' | 'hyphen' | 'owner' | 'primary';
   /** The `q=` querystring value (no URL encoding). */
   q: string;
 }
@@ -116,22 +116,17 @@ export interface SkillSearchQuery {
  * Build the Code Search query set, mirroring what `gh skill search` does.
  *
  * Always emits:
- *   - Priority 1 — `filename:SKILL.md <query>` (primary content search)
+ *   - Priority 1 — `filename:SKILL.md path:<hyphenated>` (path search — finds
+ *     skills nested under `plugins/<ns>/skills/<name>/` even when the SKILL.md
+ *     body never mentions the query term; highest merge priority so path hits
+ *     win dedup over content hits for the same skill)
+ *   - Priority 4 — `filename:SKILL.md <query>` (primary content search)
  *
  * Conditionally emits:
  *   - Priority 2 — `filename:SKILL.md <hyphenated>` (only when the query has
  *     spaces, so both "build worker" and "build-worker" forms are tried)
  *   - Priority 3 — `filename:SKILL.md user:<query>` (only when no explicit
  *     `--owner` is set AND the query looks like a GitHub login)
- *
- * The `in:path` qualifier was previously used to find skills in plugin-nested
- * paths (e.g. `plugins/cargowise/skills/cw-yard/SKILL.md`) when the SKILL.md
- * body didn't mention the query term. In practice this causes more problems
- * than it solves: it matches plugin cache files committed to workspace repos,
- * files on non-default branches, and unrelated SKILL.md files whose path
- * happens to contain the query string. `gh skill search` omits this qualifier
- * entirely and gets clean results; the namespace is recovered from the path
- * structure by `parseSkillPath` regardless of how the hit was found.
  */
 export function buildSearchQueries(
   query: string,
@@ -142,8 +137,11 @@ export function buildSearchQueries(
   const userClause = owner ? `user:${owner}` : '';
   const join = (...parts: string[]) => parts.filter(Boolean).join(' ');
 
+  // P1 always: path search — finds skills by directory path even when content
+  // doesn't mention the query term (e.g. `plugins/cargowise/skills/*/SKILL.md`
+  // when searching "cargowise").
   const queries: SkillSearchQuery[] = [
-    { priority: 1, label: 'primary', q: join('filename:SKILL.md', trimmed, userClause) },
+    { priority: 1, label: 'path', q: join('filename:SKILL.md', `path:${pathTerm}`, userClause) },
   ];
 
   if (pathTerm !== trimmed) {
@@ -153,6 +151,9 @@ export function buildSearchQueries(
   if (!owner && couldBeOwner(trimmed)) {
     queries.push({ priority: 3, label: 'owner', q: `filename:SKILL.md user:${trimmed}` });
   }
+
+  // P4 always: primary content search.
+  queries.push({ priority: 4, label: 'primary', q: join('filename:SKILL.md', trimmed, userClause) });
 
   return queries;
 }
@@ -364,12 +365,12 @@ async function runOneQuery(
  * Behaviour:
  *   - Up to four queries are built via `buildSearchQueries` and dispatched in
  *     parallel with `Promise.allSettled`.
- *   - The primary (priority 4) result is required: if it fails, the error
- *     propagates. Other queries are advisory — failures are logged and the
- *     surviving buckets still merge.
- *   - Items are concatenated in priority order (1 → 4), then deduped by
- *     `repo + qualifiedName` keeping the first occurrence. That makes the
- *     path bucket win over the content bucket when both match the same skill.
+ *   - The primary content (priority 4) result is required: if it fails, the
+ *     error propagates. Other queries are advisory — failures are logged and
+ *     the surviving buckets still merge.
+ *   - Items are concatenated in priority order (path=1 → hyphen=2 → owner=3
+ *     → primary=4), then deduped by `repo + qualifiedName` keeping the first
+ *     occurrence. Path hits win over content hits for the same skill.
  *
  * Auth is resolved by `resolveGhToken` (env vars → `gh auth token`) so
  * credentials from `gh auth login` are used automatically.
@@ -396,8 +397,8 @@ export async function searchSkills(
     queries.map((entry) => runOneQuery(entry.q, page, limit, token, fetchFn)),
   );
 
-  // Locate the primary (priority 1) result. If it failed, surface its error.
-  const primaryIdx = queries.findIndex((q) => q.priority === 1);
+  // Locate the primary content (priority 4) result. If it failed, surface its error.
+  const primaryIdx = queries.findIndex((q) => q.priority === 4);
   const primarySettled = settled[primaryIdx];
   if (primarySettled?.status === 'rejected') {
     throw primarySettled.reason;
