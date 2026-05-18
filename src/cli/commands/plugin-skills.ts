@@ -10,6 +10,7 @@ import {
   removeEnabledSkill,
   addEnabledSkill,
   addPlugin,
+  hasPlugin,
   setPluginSkillsMode,
 } from '../../core/workspace-modify.js';
 import {
@@ -19,6 +20,7 @@ import {
   addUserEnabledSkill,
   isUserConfigPath,
   addUserPlugin,
+  hasUserPlugin,
   setUserPluginSkillsMode,
 } from '../../core/user-workspace.js';
 import { getAllSkillsFromPlugins, findSkillByName, discoverSkillNames } from '../../core/skills.js';
@@ -33,7 +35,9 @@ import {
 import {
   searchSkills,
   SkillSearchError,
+  qualifiedName,
   type SkillSearchOptions,
+  type SkillSearchItem,
 } from '../../core/skill-search.js';
 import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
 import { isGitHubUrl, parseGitHubUrl, stripGitRef } from '../../utils/plugin-path.js';
@@ -47,7 +51,7 @@ import {
   updateMarketplace,
 } from '../../core/marketplace.js';
 import { parseMarketplaceManifest, resolvePluginSourcePath } from '../../utils/marketplace-manifest-parser.js';
-import { formatSyncHeader, formatSyncSummary } from '../format-sync.js';
+import { formatSyncHeader, formatSyncSummary, formatVerboseSyncLines } from '../format-sync.js';
 import type { SyncResult } from '../../core/sync.js';
 
 /**
@@ -1361,6 +1365,86 @@ const addCmd = command({
 // skill search (GitHub Code Search)
 // =============================================================================
 
+/** Print results in gh-compatible tabular format: repo, skillName, description, stars. */
+function printSearchResults(items: SkillSearchItem[], query: string, truncated: boolean): void {
+  console.log(`\nShowing ${items.length} result${items.length !== 1 ? 's' : ''} for "${query}"${truncated ? ' (truncated)' : ''}\n`);
+  for (const item of items) {
+    const repoCol = item.repo.padEnd(30);
+    const nameCol = qualifiedName(item).padEnd(24);
+    const stars = item.stars > 0 ? chalk.yellow(`★ ${item.stars}`) : '';
+    const desc = item.description
+      ? chalk.dim(item.description.length > 60 ? `${item.description.slice(0, 57)}...` : item.description)
+      : '';
+    const starsAndDesc = [stars, desc].filter(Boolean).join('  ');
+    console.log(`  ${chalk.cyan(repoCol)}  ${chalk.bold(nameCol)}  ${starsAndDesc}`);
+  }
+  console.log('');
+}
+
+/**
+ * Interactive install flow for a selected plugin from search results.
+ * Returns true if plugin was installed.
+ */
+async function installFromSearch(repo: string): Promise<boolean> {
+  const p = await import('@clack/prompts');
+
+  const workspacePath = process.cwd();
+  const isInstalledProject = hasProjectConfig(workspacePath) ? await hasPlugin(repo, workspacePath) : false;
+  const isInstalledUser = await hasUserPlugin(repo);
+
+  if (isInstalledProject || isInstalledUser) {
+    const scopeLabel = isInstalledUser ? 'user' : 'project';
+    p.log.info(`Plugin ${chalk.bold(repo)} is already installed (${scopeLabel} scope).`);
+    return false;
+  }
+
+  const scopeChoice = await p.select({
+    message: 'Install scope',
+    options: [
+      { label: 'Project (this workspace)', value: 'project' as const },
+      { label: 'User (global)', value: 'user' as const },
+    ],
+  });
+
+  if (p.isCancel(scopeChoice)) return false;
+
+  const s = p.spinner();
+  s.start('Installing plugin...');
+
+  try {
+    if (scopeChoice === 'project') {
+      const result = await addPlugin(repo, workspacePath);
+      if (!result.success) {
+        s.stop('Installation failed');
+        p.log.error(result.error ?? 'Unknown error');
+        return false;
+      }
+      s.message('Syncing...');
+      const syncResult = await syncWorkspace(workspacePath);
+      s.stop('Installed and synced');
+      const lines = formatVerboseSyncLines(syncResult);
+      if (lines.length > 0) p.note(lines.join('\n'), `Installed: ${repo}`);
+    } else {
+      const result = await addUserPlugin(repo);
+      if (!result.success) {
+        s.stop('Installation failed');
+        p.log.error(result.error ?? 'Unknown error');
+        return false;
+      }
+      s.message('Syncing...');
+      const syncResult = await syncUserWorkspace();
+      s.stop('Installed and synced');
+      const lines = formatVerboseSyncLines(syncResult);
+      if (lines.length > 0) p.note(lines.join('\n'), `Installed: ${repo}`);
+    }
+    return true;
+  } catch (err) {
+    s.stop('Installation failed');
+    p.log.error(err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
 const searchCmd = command({
   name: 'search',
   description: buildDescription(skillsSearchMeta),
@@ -1379,7 +1463,7 @@ const searchCmd = command({
     limit: option({
       type: optional(string),
       long: 'limit',
-      description: 'Results per page (1–100, default 30).',
+      description: 'Results per page (1–100, default 15).',
     }),
   },
   handler: async ({ query, owner, page, limit }) => {
@@ -1429,13 +1513,40 @@ const searchCmd = command({
         return;
       }
 
-      console.log(`Found ${result.total} skill(s)${result.truncated ? ' (results truncated)' : ''}:`);
-      for (const item of result.items) {
-        const repoCol = item.repo.padEnd(28);
-        const nameCol = item.name.padEnd(28);
-        const desc = item.description ? `  ${item.description}` : '';
-        console.log(`  ${repoCol}  ${nameCol}${desc}`);
+      const isTTY = process.stdout.isTTY && process.stdin.isTTY;
+
+      if (!isTTY) {
+        // Non-interactive: print table with stars and exit
+        printSearchResults(result.items, query, result.truncated);
+        return;
       }
+
+      // Interactive mode: filter-as-you-type select with install support
+      const { autocomplete, isCancel } = await import('@clack/prompts');
+
+      printSearchResults(result.items, query, result.truncated);
+
+      const options = result.items.map((item) => {
+        const stars = item.stars > 0 ? ` ★${item.stars}` : '';
+        return {
+          label: `${qualifiedName(item)}  ${chalk.dim(item.repo)}`,
+          value: item.repo,
+          hint: `${item.stars > 0 ? `★${item.stars}  ` : ''}${item.description ?? ''}`,
+        };
+      });
+      options.push({ label: 'Cancel', value: '__cancel__', hint: '' });
+
+      const selected = await autocomplete({
+        message: `Select a skill to install (type to filter ${result.items.length} results)`,
+        options,
+        placeholder: 'Type to filter...',
+      });
+
+      if (isCancel(selected) || selected === '__cancel__') {
+        return;
+      }
+
+      await installFromSearch(selected as string);
     } catch (error) {
       if (error instanceof SkillSearchError) {
         const exitCode = error.kind === 'validation' ? 2 : 1;

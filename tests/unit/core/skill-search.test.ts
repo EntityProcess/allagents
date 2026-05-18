@@ -46,6 +46,17 @@ function makeFakeFetch(
 
   const fn = (async (url: string) => {
     const u = new URL(url);
+
+    // Repo star-fetch calls go to /repos/{owner}/{repo} — return 0 stars by default
+    // so existing tests that don't care about stars continue to work unchanged.
+    if (u.pathname.startsWith('/repos/') && !u.pathname.includes('/search/')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ stargazers_count: 0, full_name: u.pathname.slice('/repos/'.length) }),
+      };
+    }
+
     const q = u.searchParams.get('q') ?? '';
 
     if (isFlat) {

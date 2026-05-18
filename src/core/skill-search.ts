@@ -40,6 +40,8 @@ export interface SkillSearchItem {
   description: string;
   /** File blob SHA. */
   sha: string;
+  /** Repository star count (0 when unavailable). */
+  stars: number;
 }
 
 export interface SkillSearchResult {
@@ -247,9 +249,10 @@ function parseSkillPath(
   const skillsIdx = parts.lastIndexOf('skills');
   if (skillsIdx !== -1) {
     const afterSkills = parts.slice(skillsIdx + 1);
-    // Drop a trailing `SKILL.md` segment if present.
+    // Drop a trailing SKILL.md segment (case-insensitive — the Code Search
+    // API matches filename:SKILL.md against skill.md, SKILL.MD, etc.).
     const meaningful =
-      afterSkills[afterSkills.length - 1] === 'SKILL.md'
+      afterSkills[afterSkills.length - 1]?.toLowerCase() === 'skill.md'
         ? afterSkills.slice(0, -1)
         : afterSkills;
     if (meaningful.length >= 2) {
@@ -262,9 +265,12 @@ function parseSkillPath(
     }
   }
 
-  // No `skills` segment — use the parent directory of SKILL.md as the name.
-  if (parts.length >= 2) {
-    const parent = parts[parts.length - 2];
+  // No `skills` segment — use the parent directory of the skill file as the name.
+  // Skip the file itself (last segment) and use the directory before it.
+  const lastPart = parts[parts.length - 1]?.toLowerCase() ?? '';
+  const fileIdx = lastPart.endsWith('.md') ? parts.length - 2 : parts.length - 1;
+  if (fileIdx >= 0) {
+    const parent = parts[fileIdx];
     if (parent) return { namespace: '', name: parent };
   }
 
@@ -319,7 +325,7 @@ async function runOneQuery(
     items?: Array<{
       path?: string;
       sha?: string;
-      repository?: { full_name?: string; description?: string };
+      repository?: { full_name?: string; description?: string; stargazers_count?: number };
     }>;
   };
 
@@ -335,6 +341,7 @@ async function runOneQuery(
       path,
       description: item.repository?.description ?? '',
       sha: item.sha ?? '',
+      stars: item.repository?.stargazers_count ?? 0,
     };
   });
 
@@ -375,7 +382,7 @@ export async function searchSkills(
   const logger = deps.logger ?? ((msg: string) => process.stderr.write(`${msg}\n`));
 
   const page = options.page ?? 1;
-  const limit = options.limit ?? 30;
+  const limit = options.limit ?? 15;
   const token = await (deps.tokenResolver ?? resolveGhToken)();
 
   const queries = buildSearchQueries(query, options.owner);
@@ -412,12 +419,17 @@ export async function searchSkills(
   const mergedItems = buckets.flatMap((b) => b.result.items);
 
   const deduped = dedupeItems(mergedItems);
+  await fetchStarsForItems(deduped, token, fetchFn);
+  deduped.sort((a, b) => b.stars - a.stars);
+  // Apply the limit to the merged output so `--limit N` caps total results,
+  // not just per-query results (each query runs with the same limit).
+  const finalItems = deduped.slice(0, limit);
 
   return {
     query,
-    items: deduped,
-    total: deduped.length,
-    truncated: buckets.some((b) => b.result.truncated),
+    items: finalItems,
+    total: finalItems.length,
+    truncated: buckets.some((b) => b.result.truncated) || deduped.length > limit,
   };
 }
 
@@ -437,4 +449,43 @@ function dedupeItems(items: SkillSearchItem[]): SkillSearchItem[] {
     out.push(item);
   }
   return out;
+}
+
+/**
+ * Fetch star counts for unique repos in parallel and annotate items in-place.
+ * The GitHub Code Search API does not include stargazers_count in repository
+ * objects, so we call /repos/{owner}/{repo} for each unique repo. Failures
+ * are silently ignored (stars stay 0) so the search still succeeds.
+ */
+async function fetchStarsForItems(
+  items: SkillSearchItem[],
+  token: string | undefined,
+  fetchFn: typeof fetch,
+): Promise<void> {
+  const uniqueRepos = [...new Set(items.map((i) => i.repo))];
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'allagents-cli',
+  };
+  if (token) headers.Authorization = `token ${token}`;
+
+  const starsMap = new Map<string, number>();
+  await Promise.allSettled(
+    uniqueRepos.map(async (repo) => {
+      try {
+        const res = await fetchFn(`https://api.github.com/repos/${repo}`, { headers });
+        if (!res.ok) return;
+        const body = await res.json() as { stargazers_count?: number };
+        starsMap.set(repo, body.stargazers_count ?? 0);
+      } catch {
+        // ignore — stars stay 0
+      }
+    }),
+  );
+
+  for (const item of items) {
+    const s = starsMap.get(item.repo);
+    if (s !== undefined) item.stars = s;
+  }
 }
