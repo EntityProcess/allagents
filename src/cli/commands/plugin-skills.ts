@@ -1526,14 +1526,11 @@ const searchCmd = command({
 
       printSearchResults(result.items, query, result.truncated);
 
-      const options = result.items.map((item) => {
-        const stars = item.stars > 0 ? ` ★${item.stars}` : '';
-        return {
-          label: `${qualifiedName(item)}  ${chalk.dim(item.repo)}`,
-          value: item.repo,
-          hint: `${item.stars > 0 ? `★${item.stars}  ` : ''}${item.description ?? ''}`,
-        };
-      });
+      const options = result.items.map((item) => ({
+        label: `${qualifiedName(item)}  ${chalk.dim(item.repo)}`,
+        value: item.repo,
+        hint: `${item.stars > 0 ? `★${item.stars}  ` : ''}${item.description ?? ''}`,
+      }));
       options.push({ label: 'Cancel', value: '__cancel__', hint: '' });
 
       const selected = await autocomplete({
