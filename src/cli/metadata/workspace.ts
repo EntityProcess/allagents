@@ -1,14 +1,14 @@
 import type { AgentCommandMeta } from '../help.js';
 
 export const initMeta: AgentCommandMeta = {
-  command: 'workspace init',
+  command: 'init',
   description: 'Create new workspace and sync plugins',
   whenToUse: 'When starting a new project or adding allagents to an existing repo for the first time',
   examples: [
-    'allagents workspace init',
-    'allagents workspace init ./my-project',
-    'allagents workspace init --from ../template-workspace/.allagents/workspace.yaml',
-    'allagents workspace init --client claude,copilot,cursor',
+    'allagents init',
+    'allagents init ./my-project',
+    'allagents init --from ../template-workspace/.allagents/workspace.yaml',
+    'allagents init --client claude,copilot,cursor',
   ],
   expectedOutput:
     'Creates .allagents/workspace.yaml and syncs plugins. Shows sync results per plugin. Exit 0 on success, exit 1 on failure.',
