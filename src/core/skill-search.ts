@@ -104,34 +104,34 @@ export function couldBeOwner(query: string): boolean {
  * sort earlier in the merged result list.
  */
 export interface SkillSearchQuery {
-  /** 1 = path, 2 = hyphenated, 3 = query-as-owner, 4 = primary content. */
-  priority: 1 | 2 | 3 | 4;
+  /** 1 = primary content, 2 = hyphenated form, 3 = query-as-owner. */
+  priority: 1 | 2 | 3;
   /** Short label used in failure logging. */
-  label: 'path' | 'hyphen' | 'owner' | 'primary';
+  label: 'primary' | 'hyphen' | 'owner';
   /** The `q=` querystring value (no URL encoding). */
   q: string;
 }
 
 /**
- * Build the parallel Code Search query set, ordered by priority.
+ * Build the Code Search query set, mirroring what `gh skill search` does.
  *
  * Always emits:
- *   - Priority 1 — `filename:SKILL.md in:path <pathTerm>` (+ optional user filter)
- *   - Priority 4 — `filename:SKILL.md <query>`              (+ optional user filter)
+ *   - Priority 1 — `filename:SKILL.md <query>` (primary content search)
  *
  * Conditionally emits:
- *   - Priority 2 — `filename:SKILL.md <pathTerm>` (only when the hyphenated
- *     pathTerm differs from the bare query, i.e. when the query has spaces)
+ *   - Priority 2 — `filename:SKILL.md <hyphenated>` (only when the query has
+ *     spaces, so both "build worker" and "build-worker" forms are tried)
  *   - Priority 3 — `filename:SKILL.md user:<query>` (only when no explicit
- *     `--owner` is set AND the query itself could plausibly be a GitHub
- *     login)
+ *     `--owner` is set AND the query looks like a GitHub login)
  *
- * P1 uses `in:path <term>` rather than `path:<term>`. The two qualifiers
- * differ on the live API: `path:foo` is prefix-on-path-components (so
- * `path:cargowise` doesn't match `plugins/cargowise/skills/...`), while
- * `in:path foo` matches the term anywhere in the path. The substring form
- * is what surfaces nested skills like `plugins/cargowise/skills/cw-yard/SKILL.md`
- * when the SKILL.md body itself doesn't mention "cargowise".
+ * The `in:path` qualifier was previously used to find skills in plugin-nested
+ * paths (e.g. `plugins/cargowise/skills/cw-yard/SKILL.md`) when the SKILL.md
+ * body didn't mention the query term. In practice this causes more problems
+ * than it solves: it matches plugin cache files committed to workspace repos,
+ * files on non-default branches, and unrelated SKILL.md files whose path
+ * happens to contain the query string. `gh skill search` omits this qualifier
+ * entirely and gets clean results; the namespace is recovered from the path
+ * structure by `parseSkillPath` regardless of how the hit was found.
  */
 export function buildSearchQueries(
   query: string,
@@ -143,7 +143,7 @@ export function buildSearchQueries(
   const join = (...parts: string[]) => parts.filter(Boolean).join(' ');
 
   const queries: SkillSearchQuery[] = [
-    { priority: 1, label: 'path', q: join('filename:SKILL.md', `in:path ${pathTerm}`, userClause) },
+    { priority: 1, label: 'primary', q: join('filename:SKILL.md', trimmed, userClause) },
   ];
 
   if (pathTerm !== trimmed) {
@@ -153,8 +153,6 @@ export function buildSearchQueries(
   if (!owner && couldBeOwner(trimmed)) {
     queries.push({ priority: 3, label: 'owner', q: `filename:SKILL.md user:${trimmed}` });
   }
-
-  queries.push({ priority: 4, label: 'primary', q: join('filename:SKILL.md', trimmed, userClause) });
 
   return queries;
 }
@@ -261,7 +259,15 @@ function parseSkillPath(
       if (namespace && name) return { namespace, name };
     }
     if (meaningful.length === 1 && meaningful[0]) {
-      return { namespace: '', name: meaningful[0] };
+      // Only use the segment before `skills` as namespace when it sits inside a
+      // `plugins/` directory (e.g. `plugins/cargowise/skills/<name>/SKILL.md`).
+      // Hidden output dirs like `.agents/skills/` or `.copilot/skills/` must
+      // not leak their directory name as a namespace.
+      const nsFromPlugin =
+        skillsIdx >= 2 && parts[skillsIdx - 2] === 'plugins'
+          ? (parts[skillsIdx - 1] ?? '')
+          : '';
+      return { namespace: nsFromPlugin, name: meaningful[0] };
     }
   }
 
@@ -390,8 +396,8 @@ export async function searchSkills(
     queries.map((entry) => runOneQuery(entry.q, page, limit, token, fetchFn)),
   );
 
-  // Locate the primary (priority 4) result. If it failed, surface its error.
-  const primaryIdx = queries.findIndex((q) => q.priority === 4);
+  // Locate the primary (priority 1) result. If it failed, surface its error.
+  const primaryIdx = queries.findIndex((q) => q.priority === 1);
   const primarySettled = settled[primaryIdx];
   if (primarySettled?.status === 'rejected') {
     throw primarySettled.reason;
@@ -419,17 +425,25 @@ export async function searchSkills(
   const mergedItems = buckets.flatMap((b) => b.result.items);
 
   const deduped = dedupeItems(mergedItems);
-  await fetchStarsForItems(deduped, token, fetchFn);
-  deduped.sort((a, b) => b.stars - a.stars);
+  // Drop workspace-synced output paths. Repos that commit synced plugin files
+  // to hidden output dirs (`.agents/skills/`, `.copilot/skills/`) produce
+  // duplicate hits with identical content. Filter by the first path segment:
+  // any segment starting with `.` is a hidden directory we never want to show.
+  const visible = deduped.filter((item) => {
+    const firstSegment = item.path.split('/')[0] ?? '';
+    return !firstSegment.startsWith('.');
+  });
+  await fetchStarsForItems(visible, token, fetchFn);
+  visible.sort((a, b) => b.stars - a.stars);
   // Apply the limit to the merged output so `--limit N` caps total results,
   // not just per-query results (each query runs with the same limit).
-  const finalItems = deduped.slice(0, limit);
+  const finalItems = visible.slice(0, limit);
 
   return {
     query,
     items: finalItems,
     total: finalItems.length,
-    truncated: buckets.some((b) => b.result.truncated) || deduped.length > limit,
+    truncated: buckets.some((b) => b.result.truncated) || visible.length > limit,
   };
 }
 
