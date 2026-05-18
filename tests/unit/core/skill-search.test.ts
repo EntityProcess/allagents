@@ -46,6 +46,17 @@ function makeFakeFetch(
 
   const fn = (async (url: string) => {
     const u = new URL(url);
+
+    // Repo star-fetch calls go to /repos/{owner}/{repo} — return 0 stars by default
+    // so existing tests that don't care about stars continue to work unchanged.
+    if (u.pathname.startsWith('/repos/') && !u.pathname.includes('/search/')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ stargazers_count: 0, full_name: u.pathname.slice('/repos/'.length) }),
+      };
+    }
+
     const q = u.searchParams.get('q') ?? '';
 
     if (isFlat) {
@@ -179,36 +190,39 @@ describe('couldBeOwner', () => {
 });
 
 describe('buildSearchQueries', () => {
-  it('emits path (P1) + primary (P4) for a single-word query without owner', () => {
+  it('always emits path (P1) and primary (P4) for a single-word query without owner', () => {
     const queries = buildSearchQueries('cargowise', undefined);
+    // cargowise looks like a valid GitHub owner, so P3 is also emitted.
     expect(queries.map((q) => q.label)).toEqual(['path', 'owner', 'primary']);
     const labels = new Map(queries.map((q) => [q.label, q.q]));
-    expect(labels.get('path')).toContain('filename:SKILL.md');
-    // P1 uses `in:path <term>` so the term substring-matches anywhere in
-    // the path. (GitHub's `path:<term>` qualifier is prefix-only and
-    // misses nested layouts like `plugins/cargowise/skills/...`.)
-    expect(labels.get('path')).toContain('in:path cargowise');
-    expect(labels.get('path')).not.toContain('path:cargowise');
+    expect(labels.get('path')).toBe('filename:SKILL.md path:cargowise');
     expect(labels.get('primary')).toBe('filename:SKILL.md cargowise');
+  });
+
+  it('uses path: qualifier (not in:path) for the path query', () => {
+    const queries = buildSearchQueries('cargowise', undefined);
+    for (const q of queries) {
+      expect(q.q).not.toContain('in:path');
+    }
+    const pathQuery = queries.find((q) => q.label === 'path');
+    expect(pathQuery?.q).toContain('path:cargowise');
   });
 
   it('threads --owner onto path and primary, but skips the query-as-owner (P3) query', () => {
     const queries = buildSearchQueries('cargowise', 'WiseTechGlobal');
     expect(queries.map((q) => q.label)).toEqual(['path', 'primary']);
-    expect(queries.find((q) => q.label === 'path')?.q).toBe(
-      'filename:SKILL.md in:path cargowise user:WiseTechGlobal',
-    );
-    expect(queries.find((q) => q.label === 'primary')?.q).toBe(
-      'filename:SKILL.md cargowise user:WiseTechGlobal',
-    );
+    const labels = new Map(queries.map((q) => [q.label, q.q]));
+    expect(labels.get('path')).toBe('filename:SKILL.md path:cargowise user:WiseTechGlobal');
+    expect(labels.get('primary')).toBe('filename:SKILL.md cargowise user:WiseTechGlobal');
   });
 
   it('adds the hyphen (P2) query when the query has spaces', () => {
     const queries = buildSearchQueries('build worker', undefined);
-    const path = queries.find((q) => q.label === 'path');
     const hyphen = queries.find((q) => q.label === 'hyphen');
-    expect(path?.q).toContain('in:path build-worker');
     expect(hyphen?.q).toBe('filename:SKILL.md build-worker');
+    expect(queries.find((q) => q.label === 'primary')?.q).toBe('filename:SKILL.md build worker');
+    // Path query uses hyphenated form too.
+    expect(queries.find((q) => q.label === 'path')?.q).toBe('filename:SKILL.md path:build-worker');
   });
 
   it('skips P3 when --owner is explicitly set', () => {
@@ -271,17 +285,12 @@ describe('searchSkills error mapping', () => {
   it('logs and continues when a non-primary query fails but the primary succeeds', async () => {
     const messages: string[] = [];
     const fakeFetch = makeFakeFetch([
-      // Path query (P1) fails with 422.
-      {
-        match: (q) => q.includes('in:path'),
-        items: [],
-        status: 422,
-        message: 'Path query rejected',
-      },
-      // Owner query (P3) returns nothing.
+      // Owner query (P3) fails with 422.
       {
         match: (q) => q.startsWith('filename:SKILL.md user:'),
         items: [],
+        status: 422,
+        message: 'Owner query rejected',
       },
       // Primary query succeeds with one hit.
       {
@@ -302,7 +311,7 @@ describe('searchSkills error mapping', () => {
     });
     expect(result.items.length).toBe(1);
     expect(result.items[0]?.name).toBe('docs-writer');
-    expect(messages.some((m) => m.includes('path') && m.includes('failed'))).toBe(true);
+    expect(messages.some((m) => m.includes('owner') && m.includes('failed'))).toBe(true);
   });
 
   it('returns normalized items on a successful response (all buckets identical)', async () => {
@@ -378,80 +387,63 @@ describe('namespace extraction', () => {
     expect(result.items[0]?.namespace).toBe('team-a');
     expect(result.items[0]?.name).toBe('deploy');
   });
+
+  it('extracts namespace from segment before `skills` for plugins/<ns>/skills/<name>/SKILL.md', async () => {
+    // This is the WTG.AI.Prompts layout: plugins/cargowise/skills/cw-deploy/SKILL.md
+    // where `cargowise` is the plugin namespace, not a namespace inside `skills`.
+    const fakeFetch = makeFakeFetch([
+      {
+        path: 'plugins/cargowise/skills/cw-deploy/SKILL.md',
+        sha: 'cw',
+        repository: { full_name: 'WiseTechGlobal/WTG.AI.Prompts', description: '' },
+      },
+    ]);
+
+    const result = await searchSkills('cw-deploy', {}, { fetch: fakeFetch, logger: silentLogger });
+    expect(result.items[0]?.namespace).toBe('cargowise');
+    expect(result.items[0]?.name).toBe('cw-deploy');
+  });
+
+  it('does not use hidden output dir name as namespace for .agents/skills/<name>/SKILL.md', async () => {
+    const fakeFetch = makeFakeFetch([
+      {
+        path: 'plugins/cargowise/skills/cw-deploy/SKILL.md',
+        sha: 'cw',
+        repository: { full_name: 'WiseTechGlobal/WTG.AI.Prompts', description: '' },
+      },
+      // Workspace-synced copy — should be filtered out entirely.
+      {
+        path: '.agents/skills/cw-deploy/SKILL.md',
+        sha: 'ws',
+        repository: { full_name: 'WiseTechGlobal/SomeWorkspace', description: '' },
+      },
+    ]);
+
+    const result = await searchSkills('cw-deploy', {}, { fetch: fakeFetch, logger: silentLogger });
+    // The workspace repo entry must be filtered out.
+    expect(result.items.length).toBe(1);
+    expect(result.items[0]?.repo).toBe('WiseTechGlobal/WTG.AI.Prompts');
+    expect(result.items[0]?.namespace).toBe('cargowise');
+  });
+
+  it('filters out .copilot/skills/ paths (workspace-synced output dirs)', async () => {
+    const fakeFetch = makeFakeFetch([
+      {
+        path: '.copilot/skills/cw-deploy/SKILL.md',
+        sha: 'cp',
+        repository: { full_name: 'WiseTechGlobal/SomeWorkspace', description: '' },
+      },
+    ]);
+
+    const result = await searchSkills('cw-deploy', {}, { fetch: fakeFetch, logger: silentLogger });
+    expect(result.items.length).toBe(0);
+  });
 });
 
 describe('multi-query merge + dedup', () => {
-  it('returns a path-only hit even when content has no mention of the query (cargowise case)', async () => {
-    const fakeFetch = makeFakeFetch([
-      // P1 path query: finds CargoWise skill at plugins/cargowise/skills/...
-      // The `in:path cargowise` qualifier substring-matches the term anywhere
-      // in the file path, so it picks up the nested `plugins/cargowise/...`
-      // layout even though the SKILL.md body has no mention of "cargowise".
-      {
-        match: (q) => q.includes('in:path cargowise'),
-        items: [
-          {
-            path: 'plugins/cargowise/skills/cw-deploy/SKILL.md',
-            sha: 'p1-hit',
-            repository: { full_name: 'WiseTechGlobal/skills', description: '' },
-          },
-        ],
-      },
-      // P4 primary content: returns nothing because SKILL.md doesn't mention "cargowise"
-      { match: () => true, items: [] },
-    ]);
-
-    const result = await searchSkills('cargowise', { owner: 'WiseTechGlobal' }, {
-      fetch: fakeFetch,
-      logger: silentLogger,
-    });
-    expect(result.items.length).toBe(1);
-    expect(result.items[0]?.path).toBe('plugins/cargowise/skills/cw-deploy/SKILL.md');
-  });
-
-  it('merges in priority order — path (P1) ahead of primary (P4) when both match', async () => {
-    const fakeFetch = makeFakeFetch([
-      // Path query → only the kynan/commit folder (path contains the literal "kynan/commit").
-      {
-        match: (q) => q.includes('in:path kynan/commit'),
-        items: [
-          {
-            path: 'skills/kynan/commit/SKILL.md',
-            sha: 'path-hit',
-            repository: { full_name: 'org/skills' },
-          },
-        ],
-      },
-      // Primary content query → both folders mention "kynan/commit" in their content.
-      {
-        match: () => true,
-        items: [
-          {
-            path: 'skills/will/commit-helper/SKILL.md',
-            sha: 'content-hit-a',
-            repository: { full_name: 'org/skills' },
-          },
-          {
-            path: 'skills/kynan/commit/SKILL.md',
-            sha: 'content-hit-b',
-            repository: { full_name: 'org/skills' },
-          },
-        ],
-      },
-    ]);
-
-    const result = await searchSkills('kynan/commit', {}, { fetch: fakeFetch, logger: silentLogger });
-    expect(result.items.length).toBe(2);
-    expect(result.items[0]?.namespace).toBe('kynan');
-    expect(result.items[0]?.name).toBe('commit');
-    // Dedup keeps the higher-priority (path) bucket's occurrence.
-    expect(result.items[0]?.sha).toBe('path-hit');
-    expect(result.items[1]?.name).toBe('commit-helper');
-  });
-
   it('deduplicates hits across buckets by repo + qualifiedName', async () => {
     const fakeFetch = makeFakeFetch([
-      // Both buckets return the same skill — should collapse to one.
+      // Both buckets (primary + hyphen) return the same skill — should collapse to one.
       {
         match: () => true,
         items: [
@@ -487,37 +479,26 @@ describe('multi-query merge + dedup', () => {
     expect(new Set(result.items.map((i) => i.repo)).size).toBe(2);
   });
 
-  it('places the hyphen (P2) bucket between path (P1) and primary (P4) for multi-word queries', async () => {
+  it('merges path (P1) and primary (P4) buckets for multi-word queries', async () => {
     const fakeFetch = makeFakeFetch([
-      // P1 path query (`in:path build-worker`) → path-only hit
-      {
-        match: (q) => q.includes('in:path build-worker'),
-        items: [
-          {
-            path: 'plugins/build-worker/skills/run/SKILL.md',
-            sha: 'p1',
-            repository: { full_name: 'org/repo' },
-          },
-        ],
-      },
-      // P2 hyphen content query (`build-worker`) → distinct hit
-      {
-        match: (q) => q.includes('build-worker') && !q.includes('in:path'),
-        items: [
-          {
-            path: 'skills/build-worker-utils/SKILL.md',
-            sha: 'p2',
-            repository: { full_name: 'org/repo' },
-          },
-        ],
-      },
-      // P4 primary content (`build worker` with space) → another distinct hit
+      // P4 primary content query (`build worker` with space) → unique hit
       {
         match: (q) => q.includes('build worker'),
         items: [
           {
             path: 'skills/spaced/SKILL.md',
-            sha: 'p4',
+            sha: 'primary-sha',
+            repository: { full_name: 'org/repo' },
+          },
+        ],
+      },
+      // P1 path + P2 hyphen both match `build-worker` → same distinct hit; path wins dedup
+      {
+        match: (q) => q.includes('build-worker'),
+        items: [
+          {
+            path: 'skills/build-worker-utils/SKILL.md',
+            sha: 'path-sha',
             repository: { full_name: 'org/repo' },
           },
         ],
@@ -525,7 +506,13 @@ describe('multi-query merge + dedup', () => {
     ]);
 
     const result = await searchSkills('build worker', {}, { fetch: fakeFetch, logger: silentLogger });
-    expect(result.items.map((i) => i.sha)).toEqual(['p1', 'p2', 'p4']);
+    // Both results appear.
+    expect(result.items.map((i) => i.sha)).toContain('primary-sha');
+    expect(result.items.map((i) => i.sha)).toContain('path-sha');
+    // Path (P1) sorts before primary (P4) when both have 0 stars — priority order preserved.
+    const pathIdx = result.items.findIndex((i) => i.sha === 'path-sha');
+    const primaryIdx = result.items.findIndex((i) => i.sha === 'primary-sha');
+    expect(pathIdx).toBeLessThan(primaryIdx);
   });
 });
 

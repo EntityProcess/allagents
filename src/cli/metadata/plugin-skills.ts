@@ -45,7 +45,7 @@ export const skillsRemoveMeta: AgentCommandMeta = {
 
 export const skillsSearchMeta: AgentCommandMeta = {
   command: 'skill search',
-  description: 'Search GitHub for skills by querying SKILL.md files via the Code Search API',
+  description: 'Search GitHub for skills by querying SKILL.md files via the Code Search API. Results are sorted by star count. In TTY mode, shows a filter-as-you-type picker and offers to install the selected skill.',
   whenToUse:
     'To discover available skills from public GitHub repositories without leaving the CLI. Bridges "I want a skill that does X" → install.',
   examples: [
@@ -54,18 +54,18 @@ export const skillsSearchMeta: AgentCommandMeta = {
     'allagents skill search docs --page 2 --limit 10',
     'allagents --json skill search docs --limit 5',
   ],
-  expectedOutput: 'Ranked list of matching skills with repo, path, and description',
+  expectedOutput: 'Skills sorted by star count: repo, skill name, stars, description. In TTY mode, followed by a filter-as-you-type install prompt.',
   positionals: [
     { name: 'query', type: 'string', required: true, description: 'Search query (≥2 characters).' },
   ],
   options: [
     { flag: '--owner', type: 'string', description: 'Scope to a single GitHub owner (org or user).' },
     { flag: '--page', type: 'string', description: 'Result page (1-indexed, default 1).' },
-    { flag: '--limit', type: 'string', description: 'Results per page (1–100, default 30).' },
+    { flag: '--limit', type: 'string', description: 'Results per page (1–100, default 15).' },
   ],
   outputSchema: {
     query: 'string',
-    items: [{ name: 'string', repo: 'string', path: 'string', description: 'string', sha: 'string' }],
+    items: [{ name: 'string', namespace: 'string', repo: 'string', path: 'string', description: 'string', sha: 'string', stars: 'number' }],
     total: 'number',
     truncated: 'boolean',
   },
