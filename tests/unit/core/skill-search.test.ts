@@ -4,6 +4,7 @@ import {
   buildSearchQueries,
   couldBeOwner,
   qualifiedName,
+  resolveGhToken,
   searchSkills,
   validateSkillSearchArgs,
 } from '../../../src/core/skill-search.js';
@@ -525,5 +526,90 @@ describe('multi-query merge + dedup', () => {
 
     const result = await searchSkills('build worker', {}, { fetch: fakeFetch, logger: silentLogger });
     expect(result.items.map((i) => i.sha)).toEqual(['p1', 'p2', 'p4']);
+  });
+});
+
+describe('token resolution', () => {
+  it('sends Authorization header from injected tokenResolver', async () => {
+    let capturedAuth: string | undefined;
+    const capturingFetch = (async (_url: string, init?: RequestInit) => {
+      capturedAuth = (init?.headers as Record<string, string>)?.Authorization;
+      return new Response(
+        JSON.stringify({ total_count: 0, incomplete_results: false, items: [] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    await searchSkills('docs', {}, {
+      fetch: capturingFetch,
+      logger: silentLogger,
+      tokenResolver: async () => 'test-token-xyz',
+    });
+
+    expect(capturedAuth).toBe('token test-token-xyz');
+  });
+
+  it('omits Authorization header when tokenResolver returns undefined', async () => {
+    let capturedAuth: string | undefined;
+    const capturingFetch = (async (_url: string, init?: RequestInit) => {
+      capturedAuth = (init?.headers as Record<string, string>)?.Authorization;
+      return new Response(
+        JSON.stringify({ total_count: 0, incomplete_results: false, items: [] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    await searchSkills('docs', {}, {
+      fetch: capturingFetch,
+      logger: silentLogger,
+      tokenResolver: async () => undefined,
+    });
+
+    expect(capturedAuth).toBeUndefined();
+  });
+});
+
+describe('resolveGhToken', () => {
+  it('returns GITHUB_TOKEN env var when set', async () => {
+    const orig = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'ghp_fromenv';
+    try {
+      expect(await resolveGhToken()).toBe('ghp_fromenv');
+    } finally {
+      if (orig === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = orig;
+    }
+  });
+
+  it('returns GH_TOKEN env var when GITHUB_TOKEN is absent', async () => {
+    const origG = process.env.GITHUB_TOKEN;
+    const origGH = process.env.GH_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+    process.env.GH_TOKEN = 'ghp_fromgh';
+    try {
+      expect(await resolveGhToken()).toBe('ghp_fromgh');
+    } finally {
+      if (origG === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = origG;
+      if (origGH === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = origGH;
+    }
+  });
+});
+
+describe('searchSkills 401 error', () => {
+  it('maps 401 on the primary query to a SkillSearchError with kind "api"', async () => {
+    const fakeFetch = makeFakeFetch([
+      { match: () => true, items: [], status: 401, message: 'Requires authentication' },
+    ]);
+
+    try {
+      await searchSkills('docs', {}, { fetch: fakeFetch, logger: silentLogger, tokenResolver: async () => undefined });
+      throw new Error('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SkillSearchError);
+      expect((error as SkillSearchError).kind).toBe('api');
+      expect((error as SkillSearchError).message).toContain('gh auth login');
+    }
   });
 });
