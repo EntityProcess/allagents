@@ -8,9 +8,9 @@
  * mentions `<thing>` — the path-targeted query finds them when the bare
  * content query can't.
  *
- * Auth comes from `GITHUB_TOKEN` when present; unauthenticated requests are
- * subject to the public Code Search rate limit (10 req/min). See cli/cli
- * issue #13293 for upstream tracking.
+ * Auth is resolved by `resolveGhToken`: env vars first, then `gh auth token`
+ * so that credentials from `gh auth login` are picked up automatically. See
+ * cli/cli issue #13293 for upstream tracking.
  */
 
 const OWNER_REGEX = /^[A-Za-z0-9-]{1,39}$/;
@@ -166,6 +166,12 @@ function classifyApiError(status: number, body: unknown): SkillSearchError {
   const msg = typeof body === 'object' && body !== null && 'message' in body
     ? String((body as { message: unknown }).message ?? '')
     : '';
+  if (status === 401) {
+    return new SkillSearchError(
+      'GitHub Code Search requires authentication. Run `gh auth login` or set GITHUB_TOKEN.',
+      'api',
+    );
+  }
   if (status === 403 && /rate limit/i.test(msg)) {
     return new SkillSearchError(
       'GitHub Code Search rate limit exceeded. Authenticate with `gh auth login` or set GITHUB_TOKEN to raise the quota.',
@@ -182,6 +188,30 @@ function classifyApiError(status: number, body: unknown): SkillSearchError {
     `GitHub Code Search returned ${status}${msg ? `: ${msg}` : ''}.`,
     'api',
   );
+}
+
+/**
+ * Resolve a GitHub API token for Code Search, mirroring the lookup order used
+ * by the `gh` CLI:
+ *   1. `GITHUB_TOKEN` env var
+ *   2. `GH_TOKEN` env var
+ *   3. `gh auth token` — reads the active credential from `gh`'s config/keyring
+ *
+ * Returns `undefined` when no credential is available (unauthenticated).
+ */
+export async function resolveGhToken(): Promise<string | undefined> {
+  const env = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (env) return env;
+  try {
+    const { execFile } = await import('node:child_process');
+    return await new Promise<string | undefined>((resolve) => {
+      execFile('gh', ['auth', 'token'], { timeout: 3000 }, (err, stdout) => {
+        resolve(err ? undefined : stdout.trim() || undefined);
+      });
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -328,13 +358,17 @@ async function runOneQuery(
  *     `repo + qualifiedName` keeping the first occurrence. That makes the
  *     path bucket win over the content bucket when both match the same skill.
  *
- * Network/auth come from `process.env.GITHUB_TOKEN` / `GH_TOKEN` when set;
- * unauthenticated requests share the public 10 req/min Code Search rate limit.
+ * Auth is resolved by `resolveGhToken` (env vars → `gh auth token`) so
+ * credentials from `gh auth login` are used automatically.
  */
 export async function searchSkills(
   query: string,
   options: SkillSearchOptions = {},
-  deps: { fetch?: typeof fetch; logger?: (msg: string) => void } = {},
+  deps: {
+    fetch?: typeof fetch;
+    logger?: (msg: string) => void;
+    tokenResolver?: () => Promise<string | undefined>;
+  } = {},
 ): Promise<SkillSearchResult> {
   validateSkillSearchArgs(query, options);
   const fetchFn = deps.fetch ?? fetch;
@@ -342,7 +376,7 @@ export async function searchSkills(
 
   const page = options.page ?? 1;
   const limit = options.limit ?? 30;
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const token = await (deps.tokenResolver ?? resolveGhToken)();
 
   const queries = buildSearchQueries(query, options.owner);
   const settled = await Promise.allSettled(
