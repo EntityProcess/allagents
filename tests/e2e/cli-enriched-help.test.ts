@@ -8,7 +8,7 @@ import { updateMeta } from '../../src/cli/metadata/self.js';
  * All command metadata objects that must have enriched help.
  */
 const allCommandMetas: { name: string; meta: CommandMeta }[] = [
-  { name: 'workspace init', meta: initMeta },
+  { name: 'init', meta: initMeta },
   { name: 'update', meta: syncMeta },
   { name: 'workspace status', meta: statusMeta },
   { name: 'plugin install', meta: pluginInstallMeta },

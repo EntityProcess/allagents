@@ -75,6 +75,7 @@ describe('agent command metadata', () => {
   test('all expected commands are present', () => {
     const names = allCommands.map((c) => c.command).sort();
     expect(names).toEqual([
+      'init',
       'plugin install',
       'plugin list',
       'plugin marketplace add',
@@ -90,7 +91,6 @@ describe('agent command metadata', () => {
       'skill remove',
       'skill search',
       'update',
-      'workspace init',
       'workspace status',
     ]);
   });

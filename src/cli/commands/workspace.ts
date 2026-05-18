@@ -675,7 +675,7 @@ const repoCmd = conciseSubcommands({
 // workspace subcommands group
 // =============================================================================
 
-export { syncCmd };
+export { syncCmd, initCmd };
 
 export const workspaceCmd = conciseSubcommands({
   name: 'workspace',

@@ -2,7 +2,7 @@
 
 import { run } from 'cmd-ts';
 import { conciseSubcommands } from './help.js';
-import { workspaceCmd, syncCmd } from './commands/workspace.js';
+import { workspaceCmd, syncCmd, initCmd } from './commands/workspace.js';
 import { pluginCmd } from './commands/plugin.js';
 import { mcpCmd } from './commands/mcp.js';
 import { selfCmd } from './commands/self.js';
@@ -28,6 +28,7 @@ const app = conciseSubcommands({
     'For AI agents: use --agent-help for machine-readable help, or --json for structured output',
   version: packageJson.version,
   cmds: {
+    init: initCmd,
     update: syncCmd,
     workspace: workspaceCmd,
     plugin: pluginCmd,

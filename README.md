@@ -12,7 +12,7 @@ AllAgents keeps your AI tooling (skills, agents, hooks, MCP servers) in one work
 
 ```bash
 # Create a workspace from a shared template
-npx allagents workspace init my-workspace --from myorg/templates/nodejs
+npx allagents init my-workspace --from myorg/templates/nodejs
 cd my-workspace
 
 # Install plugins
@@ -89,7 +89,7 @@ clients:
 
 | Command | Description |
 |---|---|
-| `allagents workspace init <path>` | Create a workspace (optionally `--from owner/repo`) |
+| `allagents init <path>` | Create a workspace (optionally `--from owner/repo`) |
 | `allagents update` | Sync all plugins to workspace |
 | `allagents plugin install <spec>` | Install a plugin |
 | `allagents plugin uninstall <spec>` | Remove a plugin |
