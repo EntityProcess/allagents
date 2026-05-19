@@ -110,6 +110,12 @@ async function recordSourceProvenance(opts: {
   });
 }
 
+function resolveFetchedSourcePath(source: string, cachePath: string): string {
+  if (!isGitHubUrl(source)) return cachePath;
+  const parsed = parseGitHubUrl(source);
+  return parsed?.subpath ? join(cachePath, parsed.subpath) : cachePath;
+}
+
 /**
  * Extract the inline `@<ref>` suffix from a plugin source spec, if present.
  * Only matches owner/repo-style sources (must have a slash before the `@`),
@@ -585,9 +591,10 @@ async function installSkillDirect(opts: {
   cachePath: string;
 }): Promise<InstallSkillResult> {
   const { skill, from, isUser, workspacePath, cachePath } = opts;
+  const sourcePath = resolveFetchedSourcePath(from, cachePath);
 
   // Verify the skill exists in the cached plugin before installing
-  const availableSkills = await discoverSkillNames(cachePath);
+  const availableSkills = await discoverSkillNames(sourcePath);
   if (!availableSkills.includes(skill)) {
     return {
       success: false,
@@ -608,7 +615,7 @@ async function installSkillDirect(opts: {
     }
   }
 
-  const pluginName = getPluginName(cachePath);
+  const pluginName = getPluginName(sourcePath);
   return applySkillAllowlist({ skill, pluginName, isUser, workspacePath });
 }
 
@@ -751,7 +758,8 @@ async function discoverSkillsFromSource(from: string): Promise<
     return { success: true, skills: all, isMarketplace: true };
   }
 
-  const skills = await discoverSkillsWithMetadata(fetchResult.cachePath);
+  const sourcePath = resolveFetchedSourcePath(from, fetchResult.cachePath);
+  const skills = await discoverSkillsWithMetadata(sourcePath);
   return { success: true, skills, isMarketplace: false };
 }
 
@@ -788,7 +796,8 @@ async function installAllSkillsFromSource(opts: {
   }
 
   // Direct plugin install — enable every discovered skill
-  const skillNames = await discoverSkillNames(fetchResult.cachePath);
+  const sourcePath = resolveFetchedSourcePath(from, fetchResult.cachePath);
+  const skillNames = await discoverSkillNames(sourcePath);
   if (skillNames.length === 0) {
     return { success: false, error: `No skills found in '${from}'.` };
   }
@@ -803,7 +812,7 @@ async function installAllSkillsFromSource(opts: {
     }
   }
 
-  const pluginName = getPluginName(fetchResult.cachePath);
+  const pluginName = getPluginName(sourcePath);
 
   const setModeResult = isUser
     ? await setUserPluginSkillsMode(pluginName, 'allowlist', skillNames)

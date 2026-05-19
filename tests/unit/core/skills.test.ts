@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dump } from 'js-yaml';
 import { getAllSkillsFromPlugins, type SkillInfo } from '../../../src/core/skills.js';
+import { getPluginCachePath } from '../../../src/utils/plugin-path.js';
 
 describe('getAllSkillsFromPlugins', () => {
   let tmpDir: string;
@@ -134,5 +135,26 @@ describe('getAllSkillsFromPlugins', () => {
     const skills = await getAllSkillsFromPlugins(tmpDir);
     expect(skills).toHaveLength(1);
     expect(skills[0]!.name).toBe('sub-skill');
+  });
+
+  it('skips GitHub URL entries whose subpath no longer exists in cache', async () => {
+    const originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    try {
+      const cachePath = getPluginCachePath('owner', 'repo', 'main');
+      await mkdir(cachePath, { recursive: true });
+
+      const config = {
+        repositories: [],
+        plugins: ['https://github.com/owner/repo/tree/main/missing/path'],
+        clients: ['claude'],
+      };
+      await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+      const skills = await getAllSkillsFromPlugins(tmpDir);
+      expect(skills).toEqual([]);
+    } finally {
+      process.env.HOME = originalHome;
+    }
   });
 });
