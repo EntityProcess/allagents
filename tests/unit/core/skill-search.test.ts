@@ -338,6 +338,118 @@ describe('searchSkills error mapping', () => {
   });
 });
 
+describe('searchSkills description enrichment', () => {
+  it('prefers SKILL.md frontmatter description over the repository description', async () => {
+    const fakeFetch = (async (url: string) => {
+      const u = new URL(url);
+
+      if (u.pathname === '/search/code') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_count: 1,
+            incomplete_results: false,
+            items: [
+              {
+                path: 'plugins/wzg/skills/skill-source-mapping/SKILL.md',
+                sha: 'blob-sha',
+                repository: {
+                  full_name: 'WiseTechGlobal/WZG.Playbook.Content',
+                  description: 'Walter Zhang\'s personal engineering playbook',
+                },
+              },
+            ],
+          }),
+        };
+      }
+
+      if (u.pathname === '/repos/WiseTechGlobal/WZG.Playbook.Content') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ stargazers_count: 1 }),
+        };
+      }
+
+      if (u.pathname === '/repos/WiseTechGlobal/WZG.Playbook.Content/git/blobs/blob-sha') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            encoding: 'base64',
+            content: Buffer.from(
+              '---\nname: skill-source-mapping\ndescription: Locate source repositories for AI skills.\n---\n',
+            ).toString('base64'),
+          }),
+        };
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    }) as unknown as typeof fetch;
+
+    const result = await searchSkills(
+      'skill-source-mapping',
+      {},
+      { fetch: fakeFetch, logger: silentLogger },
+    );
+
+    expect(result.items[0]?.description).toBe('Locate source repositories for AI skills.');
+  });
+
+  it('falls back to the repository description when SKILL.md metadata cannot be parsed', async () => {
+    const fakeFetch = (async (url: string) => {
+      const u = new URL(url);
+
+      if (u.pathname === '/search/code') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_count: 1,
+            incomplete_results: false,
+            items: [
+              {
+                path: 'skills/docs-writer/SKILL.md',
+                sha: 'blob-sha',
+                repository: {
+                  full_name: 'org/repo',
+                  description: 'Repository description fallback',
+                },
+              },
+            ],
+          }),
+        };
+      }
+
+      if (u.pathname === '/repos/org/repo') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ stargazers_count: 0 }),
+        };
+      }
+
+      if (u.pathname === '/repos/org/repo/git/blobs/blob-sha') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            encoding: 'base64',
+            content: Buffer.from('# No frontmatter here\n').toString('base64'),
+          }),
+        };
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    }) as unknown as typeof fetch;
+
+    const result = await searchSkills('docs', {}, { fetch: fakeFetch, logger: silentLogger });
+
+    expect(result.items[0]?.description).toBe('Repository description fallback');
+  });
+});
+
 describe('namespace extraction', () => {
   it('parses skills/<ns>/<name>/SKILL.md into namespace + name', async () => {
     const fakeFetch = makeFakeFetch([
