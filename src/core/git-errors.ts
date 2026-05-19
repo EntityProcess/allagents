@@ -22,7 +22,11 @@ export class GitCloneError extends Error {
   }
 }
 
-export function classifyError(error: unknown, url: string): GitCloneError {
+export function classifyError(
+  error: unknown,
+  url: string,
+  timeoutMs = 60_000,
+): GitCloneError {
   const errorMessage =
     error instanceof Error ? error.message : String(error);
 
@@ -44,8 +48,9 @@ export function classifyError(error: unknown, url: string): GitCloneError {
     errorMessage.includes('Internal Server Error');
 
   if (isTimeout) {
+    const timeoutSeconds = Math.round(timeoutMs / 1000);
     return new GitCloneError(
-      `Clone timed out after 60s for ${url}.\n  Check your network connection and repository access.\n  For SSH: ssh-add -l (to check loaded keys)\n  For HTTPS: Check your git credentials`,
+      `Clone timed out after ${timeoutSeconds}s for ${url}.\n  Check your network connection and repository access.\n  For SSH: ssh-add -l (to check loaded keys)\n  For HTTPS: Check your git credentials`,
       url,
       true,
       false,

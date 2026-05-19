@@ -19,6 +19,18 @@ describe('extractPluginNames', () => {
     expect(names).toContain('anthropics-skills');
   });
 
+  it('includes subpath basename for GitHub URLs with subpath', () => {
+    const names = extractPluginNames('https://github.com/NousResearch/hermes-agent/tree/main/skills/research/llm-wiki');
+    expect(names).toContain('hermes-agent');
+    expect(names).toContain('NousResearch-hermes-agent');
+    expect(names).toContain('llm-wiki');
+  });
+
+  it('includes subpath basename for GitHub shorthand with subpath', () => {
+    const names = extractPluginNames('NousResearch/hermes-agent/skills/research/llm-wiki');
+    expect(names).toContain('llm-wiki');
+  });
+
   it('handles plugin@marketplace spec', () => {
     const names = extractPluginNames('document-skills@anthropic-agent-skills');
     expect(names).toContain('document-skills');
@@ -75,6 +87,17 @@ describe('findPluginEntryByName with GitHub URL entries', () => {
       version: 2,
     };
     const index = findPluginEntryByName(config, 'anthropics-skills');
+    expect(index).toBe(0);
+  });
+
+  it('matches subpath basename against URL entry with deep skill path', () => {
+    const config: WorkspaceConfig = {
+      plugins: ['https://github.com/NousResearch/hermes-agent/tree/main/skills/research/llm-wiki'],
+      repositories: [],
+      clients: ['copilot'],
+      version: 2,
+    };
+    const index = findPluginEntryByName(config, 'llm-wiki');
     expect(index).toBe(0);
   });
 

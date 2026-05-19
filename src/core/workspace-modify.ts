@@ -409,14 +409,11 @@ export function extractPluginNames(pluginSource: string): string[] {
     if (parsed) {
       const names: string[] = [];
       const ownerRepo = `${parsed.owner}-${parsed.repo}`;
-
+      if (ownerRepo !== parsed.repo) names.push(ownerRepo);
       if (parsed.subpath) {
-        const subpathName = basename(parsed.subpath);
-        if (subpathName.length > 0) names.push(subpathName);
-      } else if (ownerRepo !== parsed.repo) {
-        names.push(ownerRepo);
+        const subpathName = parsed.subpath.split('/').filter(Boolean).pop();
+        if (subpathName && !names.includes(subpathName)) names.push(subpathName);
       }
-
       if (!names.includes(parsed.repo)) names.push(parsed.repo);
       if (!names.includes(ownerRepo)) names.push(ownerRepo);
       return names;

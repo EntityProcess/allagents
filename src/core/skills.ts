@@ -74,7 +74,7 @@ async function resolvePluginPath(
     const path = parsed?.subpath
       ? join(result.cachePath, parsed.subpath)
       : result.cachePath;
-    return { path };
+    return existsSync(path) ? { path } : null;
   }
 
   // Local path
