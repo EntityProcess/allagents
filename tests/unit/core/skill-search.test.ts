@@ -618,13 +618,177 @@ describe('multi-query merge + dedup', () => {
     ]);
 
     const result = await searchSkills('build worker', {}, { fetch: fakeFetch, logger: silentLogger });
-    // Both results appear.
-    expect(result.items.map((i) => i.sha)).toContain('primary-sha');
-    expect(result.items.map((i) => i.sha)).toContain('path-sha');
-    // Path (P1) sorts before primary (P4) when both have 0 stars — priority order preserved.
-    const pathIdx = result.items.findIndex((i) => i.sha === 'path-sha');
-    const primaryIdx = result.items.findIndex((i) => i.sha === 'primary-sha');
-    expect(pathIdx).toBeLessThan(primaryIdx);
+    // The path hit survives because it matches the query in the skill name.
+    // The broad primary hit is filtered out after relevance enrichment.
+    expect(result.items.map((i) => i.sha)).toEqual(['path-sha']);
+  });
+});
+
+describe('search relevance', () => {
+  it('filters noisy broad matches that do not mention the query after enrichment', async () => {
+    const fakeFetch = (async (url: string) => {
+      const u = new URL(url);
+
+      if (u.pathname === '/search/code') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_count: 3,
+            incomplete_results: false,
+            items: [
+              {
+                path: 'skills/docs-writer/SKILL.md',
+                sha: 'docs-sha',
+                repository: { full_name: 'org/docs-skill', description: 'General repo' },
+              },
+              {
+                path: 'SKILL.md',
+                sha: 'noise-sha',
+                repository: { full_name: 'org/noise-repo', description: 'General repo' },
+              },
+              {
+                path: 'skills/api-docs/SKILL.md',
+                sha: 'api-sha',
+                repository: { full_name: 'org/api-repo', description: 'General repo' },
+              },
+            ],
+          }),
+        };
+      }
+
+      if (u.pathname === '/repos/org/docs-skill') {
+        return { ok: true, status: 200, json: async () => ({ stargazers_count: 1 }) };
+      }
+      if (u.pathname === '/repos/org/noise-repo') {
+        return { ok: true, status: 200, json: async () => ({ stargazers_count: 5000 }) };
+      }
+      if (u.pathname === '/repos/org/api-repo') {
+        return { ok: true, status: 200, json: async () => ({ stargazers_count: 2 }) };
+      }
+
+      if (u.pathname === '/repos/org/docs-skill/git/blobs/docs-sha') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            encoding: 'base64',
+            content: Buffer.from('---\nname: docs-writer\ndescription: Write docs for developer workflows.\n---\n').toString('base64'),
+          }),
+        };
+      }
+      if (u.pathname === '/repos/org/noise-repo/git/blobs/noise-sha') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            encoding: 'base64',
+            content: Buffer.from('---\nname: paper\ndescription: Completely unrelated writing helper.\n---\n').toString('base64'),
+          }),
+        };
+      }
+      if (u.pathname === '/repos/org/api-repo/git/blobs/api-sha') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            encoding: 'base64',
+            content: Buffer.from('---\nname: api-docs\ndescription: Generate API docs from code.\n---\n').toString('base64'),
+          }),
+        };
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    }) as unknown as typeof fetch;
+
+    const result = await searchSkills('docs', {}, { fetch: fakeFetch, logger: silentLogger });
+
+    expect(result.items.map((item) => item.name)).toEqual(['api-docs', 'docs-writer']);
+  });
+
+  it('ranks exact and partial name matches ahead of description-only matches even with fewer stars', async () => {
+    const fakeFetch = (async (url: string) => {
+      const u = new URL(url);
+
+      if (u.pathname === '/search/code') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_count: 3,
+            incomplete_results: false,
+            items: [
+              {
+                path: 'skills/terraform/SKILL.md',
+                sha: 'exact-sha',
+                repository: { full_name: 'org/exact', description: '' },
+              },
+              {
+                path: 'skills/terraform-plan/SKILL.md',
+                sha: 'partial-sha',
+                repository: { full_name: 'org/partial', description: '' },
+              },
+              {
+                path: 'skills/iac-helper/SKILL.md',
+                sha: 'desc-sha',
+                repository: { full_name: 'org/desc', description: '' },
+              },
+            ],
+          }),
+        };
+      }
+
+      if (u.pathname === '/repos/org/exact') {
+        return { ok: true, status: 200, json: async () => ({ stargazers_count: 1 }) };
+      }
+      if (u.pathname === '/repos/org/partial') {
+        return { ok: true, status: 200, json: async () => ({ stargazers_count: 10 }) };
+      }
+      if (u.pathname === '/repos/org/desc') {
+        return { ok: true, status: 200, json: async () => ({ stargazers_count: 900 }) };
+      }
+
+      if (u.pathname === '/repos/org/exact/git/blobs/exact-sha') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            encoding: 'base64',
+            content: Buffer.from('---\nname: terraform\ndescription: Core Terraform skill.\n---\n').toString('base64'),
+          }),
+        };
+      }
+      if (u.pathname === '/repos/org/partial/git/blobs/partial-sha') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            encoding: 'base64',
+            content: Buffer.from('---\nname: terraform-plan\ndescription: Plan Terraform changes safely.\n---\n').toString('base64'),
+          }),
+        };
+      }
+      if (u.pathname === '/repos/org/desc/git/blobs/desc-sha') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            encoding: 'base64',
+            content: Buffer.from('---\nname: iac-helper\ndescription: Review terraform changes and summarize impact.\n---\n').toString('base64'),
+          }),
+        };
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    }) as unknown as typeof fetch;
+
+    const result = await searchSkills('terraform', {}, { fetch: fakeFetch, logger: silentLogger });
+
+    expect(result.items.map((item) => item.name)).toEqual([
+      'terraform',
+      'terraform-plan',
+      'iac-helper',
+    ]);
   });
 });
 

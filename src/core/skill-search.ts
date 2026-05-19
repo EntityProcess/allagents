@@ -16,6 +16,8 @@ import { parseSkillMetadata } from '../validators/skill.js';
  */
 
 const OWNER_REGEX = /^[A-Za-z0-9-]{1,39}$/;
+const SEARCH_PAGE_SIZE = 100;
+const MAX_RESULTS = 1000;
 
 /**
  * GitHub username pattern: starts and ends with alphanumeric, may contain
@@ -363,6 +365,37 @@ async function runOneQuery(
   };
 }
 
+async function fetchPrimaryPages(
+  q: string,
+  page: number,
+  limit: number,
+  token: string | undefined,
+  fetchFn: typeof fetch,
+): Promise<QueryRunResult> {
+  const needed = page * limit * 3;
+  const numPages = Math.min(
+    Math.max(1, Math.ceil(needed / SEARCH_PAGE_SIZE)),
+    MAX_RESULTS / SEARCH_PAGE_SIZE,
+  );
+
+  const items: SkillSearchItem[] = [];
+  let total = 0;
+  let truncated = false;
+
+  for (let currentPage = 1; currentPage <= numPages; currentPage += 1) {
+    const result = await runOneQuery(q, currentPage, SEARCH_PAGE_SIZE, token, fetchFn);
+    items.push(...result.items);
+    total = result.total;
+    truncated = truncated || result.truncated;
+
+    if (result.items.length < SEARCH_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return { items, total, truncated };
+}
+
 /**
  * Run the multi-query Code Search and merge results.
  *
@@ -398,7 +431,11 @@ export async function searchSkills(
 
   const queries = buildSearchQueries(query, options.owner);
   const settled = await Promise.allSettled(
-    queries.map((entry) => runOneQuery(entry.q, page, limit, token, fetchFn)),
+    queries.map((entry) =>
+      entry.priority === 4
+        ? fetchPrimaryPages(entry.q, page, limit, token, fetchFn)
+        : runOneQuery(entry.q, 1, SEARCH_PAGE_SIZE, token, fetchFn)
+    ),
   );
 
   // Locate the primary content (priority 4) result. If it failed, surface its error.
@@ -438,20 +475,24 @@ export async function searchSkills(
     const firstSegment = item.path.split('/')[0] ?? '';
     return !firstSegment.startsWith('.');
   });
+
+  rankByRelevance(visible, query);
+  const workingSet = truncateForProcessing(visible, page, limit);
   await Promise.all([
-    fetchStarsForItems(visible, token, fetchFn),
-    enrichDescriptionsForItems(visible, token, fetchFn),
+    fetchStarsForItems(workingSet, token, fetchFn),
+    enrichDescriptionsForItems(workingSet, token, fetchFn),
   ]);
-  visible.sort((a, b) => b.stars - a.stars);
-  // Apply the limit to the merged output so `--limit N` caps total results,
-  // not just per-query results (each query runs with the same limit).
-  const finalItems = visible.slice(0, limit);
+
+  const filtered = filterByRelevance(workingSet, query);
+  rankByRelevance(filtered, query);
+  const dedupedByName = deduplicateByName(filtered);
+  const { items: finalItems, totalPages } = paginate(dedupedByName, page, limit);
 
   return {
     query,
     items: finalItems,
-    total: finalItems.length,
-    truncated: buckets.some((b) => b.result.truncated) || visible.length > limit,
+    total: dedupedByName.length,
+    truncated: buckets.some((b) => b.result.truncated) || totalPages > page,
   };
 }
 
@@ -471,6 +512,101 @@ function dedupeItems(items: SkillSearchItem[]): SkillSearchItem[] {
     out.push(item);
   }
   return out;
+}
+
+function splitRepo(item: Pick<SkillSearchItem, 'repo'>): { owner: string; repoName: string } {
+  const [owner = item.repo, repoName = ''] = item.repo.split('/', 2);
+  return { owner, repoName };
+}
+
+function relevanceScore(item: SkillSearchItem, query: string): number {
+  const term = query.trim().toLowerCase();
+  const termHyphen = term.replace(/ /g, '-');
+  const name = item.name.toLowerCase();
+  const namespace = item.namespace.toLowerCase();
+  const description = item.description.toLowerCase();
+
+  let score = 0;
+  if (name === term || name === termHyphen) {
+    score += 3000;
+  } else if (name.includes(term) || name.includes(termHyphen)) {
+    score += 1000;
+  }
+
+  if (namespace?.includes(term)) {
+    score += 500;
+  }
+
+  if (description.includes(term)) {
+    score += 100;
+  }
+
+  if (item.stars > 0) {
+    score += Math.floor(Math.sqrt(item.stars) * 30);
+  }
+
+  return score;
+}
+
+function rankByRelevance(items: SkillSearchItem[], query: string): void {
+  items.sort((a, b) => relevanceScore(b, query) - relevanceScore(a, query));
+}
+
+function filterByRelevance(items: SkillSearchItem[], query: string): SkillSearchItem[] {
+  const term = query.trim().toLowerCase();
+  const termHyphen = term.replace(/ /g, '-');
+
+  return items.filter((item) => {
+    const { owner, repoName } = splitRepo(item);
+    return (
+      item.name.toLowerCase().includes(term) ||
+      item.name.toLowerCase().includes(termHyphen) ||
+      item.namespace.toLowerCase().includes(term) ||
+      item.description.toLowerCase().includes(term) ||
+      owner.toLowerCase().includes(term) ||
+      repoName.toLowerCase().includes(term)
+    );
+  });
+}
+
+function truncateForProcessing(items: SkillSearchItem[], page: number, limit: number): SkillSearchItem[] {
+  const maxToProcess = Math.max(page * limit * 3, limit * 3);
+  return items.length > maxToProcess
+    ? items.slice(0, maxToProcess)
+    : items;
+}
+
+function deduplicateByName(items: SkillSearchItem[]): SkillSearchItem[] {
+  const maxPerName = 3;
+  const counts = new Map<string, number>();
+  const out: SkillSearchItem[] = [];
+
+  for (const item of items) {
+    const key = qualifiedName(item).toLowerCase();
+    const count = counts.get(key) ?? 0;
+    if (count >= maxPerName) continue;
+    counts.set(key, count + 1);
+    out.push(item);
+  }
+
+  return out;
+}
+
+function paginate(
+  items: SkillSearchItem[],
+  page: number,
+  limit: number,
+): { items: SkillSearchItem[]; totalPages: number } {
+  if (items.length === 0) {
+    return { items: [], totalPages: 0 };
+  }
+
+  const totalPages = Math.ceil(items.length / limit);
+  const start = (page - 1) * limit;
+  return {
+    items: items.slice(start, start + limit),
+    totalPages,
+  };
 }
 
 /**
