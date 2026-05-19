@@ -50,6 +50,8 @@ export const skillsSearchMeta: AgentCommandMeta = {
     'To discover available skills from public GitHub repositories without leaving the CLI. Bridges "I want a skill that does X" → install.',
   examples: [
     'allagents skill search terraform',
+    'allagents skill pr-search',
+    'allagents skill "pr search"',
     'allagents skill search terraform --owner hashicorp',
     'allagents skill search docs --page 2 --limit 10',
     'allagents --json skill search docs --limit 5',

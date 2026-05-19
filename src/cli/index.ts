@@ -19,6 +19,7 @@ import {
   printAgentHelp,
 } from './agent-help.js';
 import { getUpdateNotice } from './update-check.js';
+import { normalizeSkillArgs, normalizeSkillHelpArgs } from './skill-arg-normalizer.js';
 import packageJson from '../../package.json';
 
 const app = conciseSubcommands({
@@ -41,13 +42,8 @@ const app = conciseSubcommands({
 const rawArgs = process.argv.slice(2);
 const { args: argsNoJson, json, jsonFields } = extractJsonFlag(rawArgs);
 const { args: argsNoJq, jqExpr } = extractJqFlag(argsNoJson);
-const { args: argsWithSkillAlias, agentHelp } = extractAgentHelpFlag(argsNoJq);
-// `skills` is a permanent alias for the canonical singular `skill`. Normalize
-// up-front so cmd-ts only ever dispatches the singular and both invocations
-// produce byte-identical help/output.
-const finalArgs = argsWithSkillAlias[0] === 'skills'
-  ? ['skill', ...argsWithSkillAlias.slice(1)]
-  : argsWithSkillAlias;
+const { args: argsAfterAgentHelp, agentHelp } = extractAgentHelpFlag(argsNoJq);
+const finalArgs = normalizeSkillArgs(argsAfterAgentHelp);
 
 // `--jq` requires `--json` so we have an envelope to pipe through.
 if (jqExpr && !json) {
@@ -81,7 +77,7 @@ if (!agentHelp && !json && !isWizard) {
 }
 
 if (agentHelp) {
-  printAgentHelp(finalArgs, packageJson.version);
+  printAgentHelp(normalizeSkillHelpArgs(argsAfterAgentHelp), packageJson.version);
 } else if (isWizard) {
   // Interactive wizard when no args and running in a terminal
   const { runWizard } = await import('./tui/wizard.js');
