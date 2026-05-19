@@ -11,7 +11,9 @@ import {
   addEnabledSkill,
   addPlugin,
   hasPlugin,
+  resolveGitHubIdentity,
   setPluginSkillsMode,
+  upsertGitHubPluginSourceAllowlist,
 } from '../../core/workspace-modify.js';
 import {
   addUserDisabledSkill,
@@ -22,6 +24,7 @@ import {
   addUserPlugin,
   hasUserPlugin,
   setUserPluginSkillsMode,
+  upsertUserGitHubPluginSourceAllowlist,
 } from '../../core/user-workspace.js';
 import { getAllSkillsFromPlugins, findSkillByName, discoverSkillNames } from '../../core/skills.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
@@ -470,15 +473,17 @@ async function installSkillFromSource(opts: {
     return { success: false, error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}` };
   }
 
+  const sourcePath = resolveFetchedSourcePath(from, fetchResult.cachePath);
+
   // Check if the source is a marketplace
-  const manifestResult = await parseMarketplaceManifest(fetchResult.cachePath);
+  const manifestResult = await parseMarketplaceManifest(sourcePath);
 
   if (manifestResult.success) {
     return installSkillViaMarketplace({ skill, from, isUser, workspacePath });
   }
 
   // Not a marketplace — install as a direct plugin
-  return installSkillDirect({ skill, from, isUser, workspacePath, cachePath: fetchResult.cachePath });
+  return installSkillDirect({ skill, from, isUser, workspacePath, cachePath: sourcePath });
 }
 
 /**
@@ -595,6 +600,30 @@ async function installSkillDirect(opts: {
     };
   }
 
+  if (isGitHubUrl(from)) {
+    const existingEnabledSkills = await getEnabledSkillsForGitHubSource(from, workspacePath);
+    const desiredSkills = [...existingEnabledSkills];
+    if (!desiredSkills.includes(skill)) desiredSkills.push(skill);
+
+    const updateResult = isUser
+      ? await upsertUserGitHubPluginSourceAllowlist(from, desiredSkills)
+      : await upsertGitHubPluginSourceAllowlist(from, desiredSkills, workspacePath);
+
+    if (!updateResult.success) {
+      return {
+        success: false,
+        error: `Failed to update plugin '${from}': ${updateResult.error ?? 'Unknown error'}`,
+      };
+    }
+
+    return finishSkillEnable({
+      skill,
+      pluginName: extractPrimaryPluginName(updateResult.normalizedPlugin ?? from),
+      isUser,
+      workspacePath,
+    });
+  }
+
   const installResult = isUser
     ? await addUserPlugin(from)
     : await addPlugin(from, workspacePath);
@@ -610,6 +639,42 @@ async function installSkillDirect(opts: {
 
   const pluginName = getPluginName(cachePath);
   return applySkillAllowlist({ skill, pluginName, isUser, workspacePath });
+}
+
+function resolveFetchedSourcePath(source: string, cachePath: string): string {
+  const parsed = isGitHubUrl(source) ? parseGitHubUrl(source) : null;
+  return parsed?.subpath ? join(cachePath, parsed.subpath) : cachePath;
+}
+
+function extractPrimaryPluginName(source: string): string {
+  const parsed = isGitHubUrl(source) ? parseGitHubUrl(source) : null;
+  if (parsed?.subpath) {
+    const segments = parsed.subpath.split('/').filter(Boolean);
+    const leaf = segments[segments.length - 1];
+    if (leaf) return leaf;
+  }
+
+  return getPluginName(source);
+}
+
+async function getEnabledSkillsForGitHubSource(
+  source: string,
+  workspacePath: string,
+): Promise<string[]> {
+  const identity = await resolveGitHubIdentity(source);
+  if (!identity) return [];
+
+  const enabledSkills: string[] = [];
+  const allSkills = await getAllSkillsFromPlugins(workspacePath);
+
+  for (const skill of allSkills) {
+    if (skill.disabled) continue;
+    const skillIdentity = await resolveGitHubIdentity(skill.pluginSource);
+    if (skillIdentity !== identity) continue;
+    if (!enabledSkills.includes(skill.name)) enabledSkills.push(skill.name);
+  }
+
+  return enabledSkills;
 }
 
 /**
@@ -651,6 +716,17 @@ async function applySkillAllowlist(opts: {
       return { success: false, error: `Failed to configure skill allowlist: ${setModeResult.error ?? 'Unknown error'}` };
     }
   }
+
+  return finishSkillEnable({ skill, pluginName, isUser, workspacePath });
+}
+
+async function finishSkillEnable(opts: {
+  skill: string;
+  pluginName: string;
+  isUser: boolean;
+  workspacePath: string;
+}): Promise<InstallSkillResult> {
+  const { skill, pluginName, isUser, workspacePath } = opts;
 
   if (!isJsonMode()) {
     console.log(`\u2713 Enabled skill: ${skill} (${pluginName})`);
@@ -737,13 +813,14 @@ async function discoverSkillsFromSource(from: string): Promise<
     return { success: false, error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}` };
   }
 
-  const manifestResult = await parseMarketplaceManifest(fetchResult.cachePath);
+  const sourcePath = resolveFetchedSourcePath(from, fetchResult.cachePath);
+  const manifestResult = await parseMarketplaceManifest(sourcePath);
   if (manifestResult.success) {
     const all: DiscoveredSkill[] = [];
     for (const plugin of manifestResult.data.plugins) {
       // Skip remote URL sources — listing would need extra fetches
       if (typeof plugin.source === 'object') continue;
-      const resolved = resolvePluginSourcePath(plugin.source, fetchResult.cachePath);
+      const resolved = resolvePluginSourcePath(plugin.source, sourcePath);
       if (!existsSync(resolved)) continue;
       const skills = await discoverSkillsWithMetadata(resolved, plugin.name);
       all.push(...skills);
@@ -751,7 +828,7 @@ async function discoverSkillsFromSource(from: string): Promise<
     return { success: true, skills: all, isMarketplace: true };
   }
 
-  const skills = await discoverSkillsWithMetadata(fetchResult.cachePath);
+  const skills = await discoverSkillsWithMetadata(sourcePath);
   return { success: true, skills, isMarketplace: false };
 }
 
@@ -781,16 +858,53 @@ async function installAllSkillsFromSource(opts: {
     return { success: false, error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}` };
   }
 
-  const manifestResult = await parseMarketplaceManifest(fetchResult.cachePath);
+  const sourcePath = resolveFetchedSourcePath(from, fetchResult.cachePath);
+  const manifestResult = await parseMarketplaceManifest(sourcePath);
 
   if (manifestResult.success) {
     return installAllViaMarketplace({ from, isUser, workspacePath, cachedPath: fetchResult.cachePath });
   }
 
   // Direct plugin install — enable every discovered skill
-  const skillNames = await discoverSkillNames(fetchResult.cachePath);
+  const skillNames = await discoverSkillNames(sourcePath);
   if (skillNames.length === 0) {
     return { success: false, error: `No skills found in '${from}'.` };
+  }
+
+  if (isGitHubUrl(from)) {
+    const existingEnabledSkills = await getEnabledSkillsForGitHubSource(from, workspacePath);
+    const desiredSkills = [...existingEnabledSkills];
+    for (const skillName of skillNames) {
+      if (!desiredSkills.includes(skillName)) desiredSkills.push(skillName);
+    }
+
+    const updateResult = isUser
+      ? await upsertUserGitHubPluginSourceAllowlist(from, desiredSkills)
+      : await upsertGitHubPluginSourceAllowlist(from, desiredSkills, workspacePath);
+
+    if (!updateResult.success) {
+      return {
+        success: false,
+        error: `Failed to configure skill allowlist: ${updateResult.error ?? 'Unknown error'}`,
+      };
+    }
+
+    const pluginName = extractPrimaryPluginName(updateResult.normalizedPlugin ?? from);
+
+    if (!isJsonMode()) {
+      console.log(`✓ Enabled ${skillNames.length} skill(s) from ${pluginName}: ${skillNames.join(', ')}`);
+    }
+
+    const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+    if (!syncResult.success) {
+      return { success: false, error: 'Sync failed' };
+    }
+
+    return {
+      success: true,
+      installed: [{ pluginName, skills: desiredSkills }],
+      syncResult,
+    };
   }
 
   const installResult = isUser ? await addUserPlugin(from) : await addPlugin(from, workspacePath);
@@ -803,7 +917,7 @@ async function installAllSkillsFromSource(opts: {
     }
   }
 
-  const pluginName = getPluginName(fetchResult.cachePath);
+  const pluginName = getPluginName(sourcePath);
 
   const setModeResult = isUser
     ? await setUserPluginSkillsMode(pluginName, 'allowlist', skillNames)

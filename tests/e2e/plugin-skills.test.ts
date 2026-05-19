@@ -13,7 +13,9 @@ import {
   removeDisabledSkill,
   setPluginSkillsMode,
   addEnabledSkill,
+  upsertGitHubPluginSourceAllowlist,
 } from '../../src/core/workspace-modify.js';
+import { resetFetchCache } from '../../src/core/plugin.js';
 import type { WorkspaceConfig } from '../../src/models/workspace-config.js';
 
 describe('plugin skills e2e', () => {
@@ -184,6 +186,67 @@ description: Test skill
     expect(pluginEntry).toBeDefined();
     if (typeof pluginEntry !== 'string' && pluginEntry) {
       expect(pluginEntry.skills).toEqual(['skill-a', 'skill-b']);
+    }
+  });
+
+  it('promoted GitHub skill sources stay coherent for listing and sync', async () => {
+    const originalHome = process.env.HOME;
+    const fakeHome = join(tmpDir, 'home');
+    const cacheDir = join(
+      fakeHome,
+      '.allagents/plugins/marketplaces/NousResearch-hermes-agent@main/skills/research',
+    );
+
+    process.env.HOME = fakeHome;
+    resetFetchCache();
+
+    try {
+      await mkdir(join(cacheDir, 'llm-wiki'), { recursive: true });
+      await mkdir(join(cacheDir, 'blogwatcher'), { recursive: true });
+      await writeFile(join(cacheDir, 'llm-wiki/SKILL.md'), `---
+name: llm-wiki
+description: Wiki skill
+---
+# llm-wiki
+`);
+      await writeFile(join(cacheDir, 'blogwatcher/SKILL.md'), `---
+name: blogwatcher
+description: Blog watcher
+---
+# blogwatcher
+`);
+
+      const config: WorkspaceConfig = {
+        repositories: [],
+        plugins: [{
+          source: 'https://github.com/NousResearch/hermes-agent/tree/main/skills/research/llm-wiki',
+          skills: ['llm-wiki'],
+        }],
+        clients: ['claude'],
+        version: 2,
+      };
+      await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config), 'utf-8');
+
+      const updateResult = await upsertGitHubPluginSourceAllowlist(
+        'https://github.com/NousResearch/hermes-agent/tree/main/skills/research/blogwatcher',
+        ['llm-wiki', 'blogwatcher'],
+        tmpDir,
+      );
+      expect(updateResult.success).toBe(true);
+
+      const skills = await getAllSkillsFromPlugins(tmpDir);
+      expect(skills.filter((skill) => !skill.disabled).map((skill) => skill.name).sort()).toEqual([
+        'blogwatcher',
+        'llm-wiki',
+      ]);
+      expect(skills.every((skill) => skill.pluginSource === 'https://github.com/NousResearch/hermes-agent/tree/main/skills/research')).toBe(true);
+
+      await syncWorkspace(tmpDir);
+      expect(existsSync(join(tmpDir, '.claude/skills/llm-wiki'))).toBe(true);
+      expect(existsSync(join(tmpDir, '.claude/skills/blogwatcher'))).toBe(true);
+    } finally {
+      resetFetchCache();
+      process.env.HOME = originalHome;
     }
   });
 });

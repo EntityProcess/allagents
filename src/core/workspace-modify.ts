@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
@@ -407,9 +407,18 @@ export function extractPluginNames(pluginSource: string): string[] {
   if (isGitHubUrl(pluginSource)) {
     const parsed = parseGitHubUrl(pluginSource);
     if (parsed) {
-      const names = [parsed.repo];
+      const names: string[] = [];
       const ownerRepo = `${parsed.owner}-${parsed.repo}`;
-      if (ownerRepo !== parsed.repo) names.push(ownerRepo);
+
+      if (parsed.subpath) {
+        const subpathName = basename(parsed.subpath);
+        if (subpathName.length > 0) names.push(subpathName);
+      } else if (ownerRepo !== parsed.repo) {
+        names.push(ownerRepo);
+      }
+
+      if (!names.includes(parsed.repo)) names.push(parsed.repo);
+      if (!names.includes(ownerRepo)) names.push(ownerRepo);
       return names;
     }
   }
@@ -450,6 +459,131 @@ export function ensureObjectPluginEntry(
     return objectEntry;
   }
   return entry;
+}
+
+function uniqueSkillNames(skillNames: string[]): string[] {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+
+  for (const skillName of skillNames) {
+    if (seen.has(skillName)) continue;
+    seen.add(skillName);
+    unique.push(skillName);
+  }
+
+  return unique;
+}
+
+function formatGitHubSource(
+  parsed: { owner: string; repo: string; branch?: string; subpath?: string },
+  styleSource: string,
+): string {
+  const basePath = `${parsed.owner}/${parsed.repo}`;
+
+  if (
+    styleSource.startsWith('http://') ||
+    styleSource.startsWith('https://') ||
+    styleSource.startsWith('github.com/')
+  ) {
+    const baseUrl = `https://github.com/${basePath}`;
+    if (!parsed.branch) return baseUrl;
+    return parsed.subpath
+      ? `${baseUrl}/tree/${parsed.branch}/${parsed.subpath}`
+      : `${baseUrl}/tree/${parsed.branch}`;
+  }
+
+  if (!parsed.branch) {
+    return parsed.subpath ? `${basePath}/${parsed.subpath}` : basePath;
+  }
+
+  return parsed.subpath
+    ? `${basePath}@${parsed.branch}/${parsed.subpath}`
+    : `${basePath}@${parsed.branch}`;
+}
+
+export function canonicalizeGitHubPluginSource(
+  currentSource: string,
+  nextSource: string,
+): string {
+  const current = parseGitHubUrl(currentSource);
+  const next = parseGitHubUrl(nextSource);
+
+  if (!current || !next) return nextSource;
+  if (
+    current.owner.toLowerCase() !== next.owner.toLowerCase() ||
+    current.repo.toLowerCase() !== next.repo.toLowerCase()
+  ) {
+    return nextSource;
+  }
+
+  if (current.branch && next.branch && current.branch !== next.branch) {
+    return currentSource;
+  }
+
+  const currentParts = current.subpath?.split('/').filter(Boolean) ?? [];
+  const nextParts = next.subpath?.split('/').filter(Boolean) ?? [];
+  const sharedParts: string[] = [];
+  const sharedLength = Math.min(currentParts.length, nextParts.length);
+
+  for (let i = 0; i < sharedLength; i++) {
+    if (currentParts[i] !== nextParts[i]) break;
+    sharedParts.push(currentParts[i] as string);
+  }
+
+  return formatGitHubSource(
+    {
+      owner: current.owner,
+      repo: current.repo,
+      ...(current.branch || next.branch ? { branch: current.branch ?? next.branch } : {}),
+      ...(sharedParts.length > 0 ? { subpath: sharedParts.join('/') } : {}),
+    },
+    currentSource,
+  );
+}
+
+async function findPluginEntryByGitHubIdentity(
+  config: WorkspaceConfig,
+  source: string,
+): Promise<number> {
+  const identity = await resolveGitHubIdentity(source);
+  if (!identity) return -1;
+
+  for (let i = 0; i < config.plugins.length; i++) {
+    const entry = config.plugins[i];
+    if (!entry) continue;
+    const existingIdentity = await resolveGitHubIdentity(getPluginSource(entry));
+    if (existingIdentity === identity) return i;
+  }
+
+  return -1;
+}
+
+export async function upsertGitHubPluginSourceAllowlistInConfig(
+  config: WorkspaceConfig,
+  source: string,
+  skillNames: string[],
+): Promise<ModifyResult> {
+  const normalizedSkills = uniqueSkillNames(skillNames);
+  const exactIndex = config.plugins.findIndex((entry) => getPluginSource(entry) === source);
+
+  if (exactIndex !== -1) {
+    const entry = ensureObjectPluginEntry(config, exactIndex);
+    entry.source = source;
+    entry.skills = normalizedSkills;
+    return { success: true, normalizedPlugin: source };
+  }
+
+  const semanticIndex = await findPluginEntryByGitHubIdentity(config, source);
+  if (semanticIndex === -1) {
+    config.plugins.push({ source, skills: normalizedSkills });
+    return { success: true, normalizedPlugin: source };
+  }
+
+  const entry = ensureObjectPluginEntry(config, semanticIndex);
+  const normalizedSource = canonicalizeGitHubPluginSource(entry.source, source);
+  entry.source = normalizedSource;
+  entry.skills = normalizedSkills;
+  return { success: true, normalizedPlugin: normalizedSource };
 }
 
 /** Parse "pluginName:skillName" into its two parts, or return null on bad format. */
@@ -872,6 +1006,40 @@ export async function setPluginSkillsMode(
 
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function upsertGitHubPluginSourceAllowlist(
+  source: string,
+  skillNames: string[],
+  workspacePath: string = process.cwd(),
+): Promise<ModifyResult> {
+  await ensureWorkspace(workspacePath);
+  const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      error: `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE} not found in ${workspacePath}`,
+    };
+  }
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const result = await upsertGitHubPluginSourceAllowlistInConfig(
+      config,
+      source,
+      skillNames,
+    );
+    if (!result.success) return result;
+
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return result;
   } catch (error) {
     return {
       success: false,

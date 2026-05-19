@@ -29,6 +29,7 @@ import {
   pruneDisabledSkillsForPlugin,
   pruneEnabledSkillsForPlugin,
   resolveGitHubIdentity,
+  upsertGitHubPluginSourceAllowlistInConfig,
 } from './workspace-modify.js';
 
 /**
@@ -747,6 +748,33 @@ export async function setUserPluginSkillsMode(
 
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function upsertUserGitHubPluginSourceAllowlist(
+  source: string,
+  skillNames: string[],
+): Promise<ModifyResult> {
+  await ensureUserWorkspace();
+  const configPath = getUserWorkspaceConfigPath();
+
+  try {
+    const content = await readFile(configPath, 'utf-8');
+    const config = load(content) as WorkspaceConfig;
+    const result = await upsertGitHubPluginSourceAllowlistInConfig(
+      config,
+      source,
+      skillNames,
+    );
+    if (!result.success) return result;
+
+    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    return result;
   } catch (error) {
     return {
       success: false,
