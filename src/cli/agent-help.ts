@@ -1,4 +1,5 @@
 import type { AgentCommandMeta } from './help.js';
+import { normalizeSkillHelpArgs } from './skill-arg-normalizer.js';
 
 import { initMeta, syncMeta, statusMeta } from './metadata/workspace.js';
 import {
@@ -83,13 +84,8 @@ export function findMetaByCommand(commandPath: string): AgentCommandMeta | undef
 
 export function printAgentHelp(args: string[], version: string): void {
   // Determine which command is being asked about by looking at remaining args.
-  // `skills` is a permanent alias for the canonical singular `skill`; normalize
-  // the lookup key so `--agent-help "skills list"` resolves to the `skill list`
-  // meta.
   const positional = args.filter(a => !a.startsWith('-'));
-  const normalized = positional[0] === 'skills'
-    ? ['skill', ...positional.slice(1)]
-    : positional;
+  const normalized = normalizeSkillHelpArgs(positional);
   const commandPath = normalized.join(' ');
 
   if (!commandPath) {

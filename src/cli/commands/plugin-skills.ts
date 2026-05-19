@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import chalk from 'chalk';
-import { command, positional, option, flag, string, optional } from 'cmd-ts';
+import { command, positional, option, flag, string, optional, restPositionals } from 'cmd-ts';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import {
   addDisabledSkill,
@@ -1508,7 +1508,7 @@ const searchCmd = command({
   name: 'search',
   description: buildDescription(skillsSearchMeta),
   args: {
-    query: positional({ type: string, displayName: 'query' }),
+    query: restPositionals({ type: string, displayName: 'query' }),
     owner: option({
       type: optional(string),
       long: 'owner',
@@ -1527,6 +1527,7 @@ const searchCmd = command({
   },
   handler: async ({ query, owner, page, limit }) => {
     try {
+      const searchQuery = query.join(' ').trim();
       const opts: SkillSearchOptions = {};
       if (owner) opts.owner = owner;
       if (page !== undefined) {
@@ -1556,7 +1557,7 @@ const searchCmd = command({
         opts.limit = n;
       }
 
-      const result = await searchSkills(query, opts);
+      const result = await searchSkills(searchQuery, opts);
 
       if (isJsonMode()) {
         jsonOutput({
@@ -1568,7 +1569,7 @@ const searchCmd = command({
       }
 
       if (result.items.length === 0) {
-        console.log(`No skills found for "${query}".`);
+        console.log(`No skills found for "${searchQuery}".`);
         return;
       }
 
@@ -1576,14 +1577,14 @@ const searchCmd = command({
 
       if (!isTTY) {
         // Non-interactive: print table with stars and exit
-        printSearchResults(result.items, query, result.truncated);
+        printSearchResults(result.items, searchQuery, result.truncated);
         return;
       }
 
       // Interactive mode: filter-as-you-type multiselect with install support
       const { autocompleteMultiselect, isCancel, log } = await import('@clack/prompts');
 
-      log.success(formatSkillSearchSummary(result.items.length, query, result.truncated));
+      log.success(formatSkillSearchSummary(result.items.length, searchQuery, result.truncated));
 
       const options = result.items.map((item) => ({
         label: `${qualifiedName(item)}  ${chalk.dim(item.repo)}`,
