@@ -59,6 +59,8 @@ export interface SkillSearchOptions {
   limit?: number;
 }
 
+const ENRICHMENT_CONCURRENCY = 10;
+
 export class SkillSearchError extends Error {
   constructor(message: string, public readonly kind: 'validation' | 'rate-limit' | 'api') {
     super(message);
@@ -436,12 +438,14 @@ export async function searchSkills(
     const firstSegment = item.path.split('/')[0] ?? '';
     return !firstSegment.startsWith('.');
   });
-  await fetchStarsForItems(visible, token, fetchFn);
+  await Promise.all([
+    fetchStarsForItems(visible, token, fetchFn),
+    enrichDescriptionsForItems(visible, token, fetchFn),
+  ]);
   visible.sort((a, b) => b.stars - a.stars);
   // Apply the limit to the merged output so `--limit N` caps total results,
   // not just per-query results (each query runs with the same limit).
   const finalItems = visible.slice(0, limit);
-  await enrichDescriptionsForItems(finalItems, token, fetchFn);
 
   return {
     query,
@@ -481,26 +485,19 @@ async function fetchStarsForItems(
   fetchFn: typeof fetch,
 ): Promise<void> {
   const uniqueRepos = [...new Set(items.map((i) => i.repo))];
-  const headers: Record<string, string> = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'allagents-cli',
-  };
-  if (token) headers.Authorization = `token ${token}`;
+  const headers = buildGitHubApiHeaders(token);
 
   const starsMap = new Map<string, number>();
-  await Promise.allSettled(
-    uniqueRepos.map(async (repo) => {
-      try {
-        const res = await fetchFn(`https://api.github.com/repos/${repo}`, { headers });
-        if (!res.ok) return;
-        const body = await res.json() as { stargazers_count?: number };
-        starsMap.set(repo, body.stargazers_count ?? 0);
-      } catch {
-        // ignore — stars stay 0
-      }
-    }),
-  );
+  await forEachWithConcurrency(uniqueRepos, ENRICHMENT_CONCURRENCY, async (repo) => {
+    try {
+      const res = await fetchFn(`https://api.github.com/repos/${repo}`, { headers });
+      if (!res.ok) return;
+      const body = await res.json() as { stargazers_count?: number };
+      starsMap.set(repo, body.stargazers_count ?? 0);
+    } catch {
+      // ignore — stars stay 0
+    }
+  });
 
   for (const item of items) {
     const s = starsMap.get(item.repo);
@@ -513,43 +510,66 @@ async function enrichDescriptionsForItems(
   token: string | undefined,
   fetchFn: typeof fetch,
 ): Promise<void> {
+  const headers = buildGitHubApiHeaders(token);
+
+  const descriptionMap = new Map<string, string>();
+  const uniqueSkills = [...new Set(items.map((item) => `${item.repo}#${item.sha}`))];
+
+  await forEachWithConcurrency(uniqueSkills, ENRICHMENT_CONCURRENCY, async (key) => {
+    const [repo, sha] = key.split('#');
+    if (!repo || !sha) return;
+
+    try {
+      const res = await fetchFn(`https://api.github.com/repos/${repo}/git/blobs/${sha}`, { headers });
+      if (!res.ok) return;
+
+      const body = await res.json() as { content?: string; encoding?: string };
+      const content = decodeGitBlob(body.content, body.encoding);
+      if (!content) return;
+
+      const metadata = parseSkillMetadata(content);
+      if (!metadata?.description) return;
+
+      descriptionMap.set(key, metadata.description);
+    } catch {
+      // Ignore metadata fetch failures and keep the repo description fallback.
+    }
+  });
+
+  for (const item of items) {
+    const description = descriptionMap.get(`${item.repo}#${item.sha}`);
+    if (description) item.description = description;
+  }
+}
+
+async function forEachWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return;
+
+  let nextIndex = 0;
+  const runWorker = async () => {
+    while (true) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= items.length) return;
+      await worker(items[currentIndex] as T);
+    }
+  };
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+}
+
+function buildGitHubApiHeaders(token: string | undefined): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'allagents-cli',
   };
   if (token) headers.Authorization = `token ${token}`;
-
-  const descriptionMap = new Map<string, string>();
-  const uniqueSkills = [...new Set(items.map((item) => `${item.repo}#${item.sha}`))];
-
-  await Promise.allSettled(
-    uniqueSkills.map(async (key) => {
-      const [repo, sha] = key.split('#');
-      if (!repo || !sha) return;
-
-      try {
-        const res = await fetchFn(`https://api.github.com/repos/${repo}/git/blobs/${sha}`, { headers });
-        if (!res.ok) return;
-
-        const body = await res.json() as { content?: string; encoding?: string };
-        const content = decodeGitBlob(body.content, body.encoding);
-        if (!content) return;
-
-        const metadata = parseSkillMetadata(content);
-        if (!metadata?.description) return;
-
-        descriptionMap.set(key, metadata.description);
-      } catch {
-        // Ignore metadata fetch failures and keep the repo description fallback.
-      }
-    }),
-  );
-
-  for (const item of items) {
-    const description = descriptionMap.get(`${item.repo}#${item.sha}`);
-    if (description) item.description = description;
-  }
+  return headers;
 }
 
 function decodeGitBlob(content: string | undefined, encoding: string | undefined): string | undefined {
