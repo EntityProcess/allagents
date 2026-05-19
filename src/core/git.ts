@@ -6,7 +6,30 @@ import { GitCloneError, classifyError } from './git-errors.js';
 
 export { GitCloneError, classifyError };
 
-const CLONE_TIMEOUT_MS = 60_000; // 60 seconds
+const DEFAULT_CLONE_TIMEOUT_MS = 300_000;
+const CLONE_TIMEOUT_MS = (() => {
+  const raw = process.env.ALLAGENTS_CLONE_TIMEOUT_MS;
+  if (!raw) return DEFAULT_CLONE_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLONE_TIMEOUT_MS;
+})();
+
+function createGit(baseDir?: string) {
+  return simpleGit(baseDir, {
+    timeout: { block: CLONE_TIMEOUT_MS },
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_LFS_SKIP_SMUDGE: '1',
+    },
+    config: [
+      'filter.lfs.required=false',
+      'filter.lfs.smudge=',
+      'filter.lfs.clean=',
+      'filter.lfs.process=',
+    ],
+  });
+}
 
 /**
  * Build an HTTPS GitHub URL from owner/repo.
@@ -24,7 +47,7 @@ export async function cloneToTemp(
   ref?: string,
 ): Promise<string> {
   const tempDir = await mkdtemp(join(tmpdir(), 'allagents-'));
-  const git = simpleGit({ timeout: { block: CLONE_TIMEOUT_MS } });
+  const git = createGit();
   const cloneOptions = ref
     ? ['--depth', '1', '--branch', ref]
     : ['--depth', '1'];
@@ -34,7 +57,7 @@ export async function cloneToTemp(
     return tempDir;
   } catch (error) {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
-    throw classifyError(error, url);
+    throw classifyError(error, url, CLONE_TIMEOUT_MS);
   }
 }
 
@@ -46,7 +69,7 @@ export async function cloneTo(
   dest: string,
   ref?: string,
 ): Promise<void> {
-  const git = simpleGit({ timeout: { block: CLONE_TIMEOUT_MS } });
+  const git = createGit();
   const cloneOptions = ref
     ? ['--depth', '1', '--branch', ref]
     : ['--depth', '1'];
@@ -54,7 +77,7 @@ export async function cloneTo(
   try {
     await git.clone(url, dest, cloneOptions);
   } catch (error) {
-    throw classifyError(error, url);
+    throw classifyError(error, url, CLONE_TIMEOUT_MS);
   }
 }
 
@@ -62,9 +85,7 @@ export async function cloneTo(
  * Pull latest changes in an existing repository.
  */
 export async function pull(repoPath: string): Promise<void> {
-  const git = simpleGit(repoPath, {
-    timeout: { block: CLONE_TIMEOUT_MS },
-  });
+  const git = createGit(repoPath);
   await git.pull();
 }
 
@@ -73,7 +94,7 @@ export async function pull(repoPath: string): Promise<void> {
  * Returns true if accessible, false otherwise.
  */
 export async function repoExists(url: string): Promise<boolean> {
-  const git = simpleGit({ timeout: { block: CLONE_TIMEOUT_MS } });
+  const git = createGit();
   try {
     await git.listRemote([url]);
     return true;
@@ -89,7 +110,7 @@ export async function refExists(
   url: string,
   ref: string,
 ): Promise<boolean> {
-  const git = simpleGit({ timeout: { block: CLONE_TIMEOUT_MS } });
+  const git = createGit();
   try {
     const result = await git.listRemote([
       '--refs',
