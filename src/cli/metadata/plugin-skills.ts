@@ -45,16 +45,18 @@ export const skillsRemoveMeta: AgentCommandMeta = {
 
 export const skillsSearchMeta: AgentCommandMeta = {
   command: 'skill search',
-  description: 'Search GitHub for skills by querying SKILL.md files via the Code Search API. Results are sorted by star count. In TTY mode, shows a filter-as-you-type multi-select picker and offers to install the selected skills.',
+  description: 'Search GitHub for skills by querying SKILL.md files via the Code Search API. Results are ranked by relevance, with skill-name matches first. In TTY mode, shows a filter-as-you-type multi-select picker and offers to install the selected skills.',
   whenToUse:
     'To discover available skills from public GitHub repositories without leaving the CLI. Bridges "I want a skill that does X" → install.',
   examples: [
     'allagents skill search terraform',
+    'allagents skill pr-search',
+    'allagents skill "pr search"',
     'allagents skill search terraform --owner hashicorp',
     'allagents skill search docs --page 2 --limit 10',
     'allagents --json skill search docs --limit 5',
   ],
-  expectedOutput: 'Skills sorted by star count: repo, skill name, stars, description. In TTY mode, followed by a searchable multi-select install prompt.',
+  expectedOutput: 'Skills ranked by relevance: repo, skill name, stars, description. In TTY mode, followed by a searchable multi-select install prompt.',
   positionals: [
     { name: 'query', type: 'string', required: true, description: 'Search query (≥2 characters).' },
   ],
