@@ -5,6 +5,8 @@ description: Transparently proxy HTTP MCP servers through mcp-remote for clients
 
 Some MCP servers use HTTP transport with OAuth authentication, but not every AI client supports HTTP natively. The MCP proxy feature rewrites HTTP server configs to use [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) as a local stdio bridge, so all clients connect through an already-authenticated proxy.
 
+When AllAgents generates a proxied client config, it does so through the public `allagents mcp proxy <serverUrl>` helper command.
+
 ## Quick Start
 
 The fastest way to try MCP proxy is to scaffold the ready-made

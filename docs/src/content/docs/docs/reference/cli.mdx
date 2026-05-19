@@ -192,6 +192,7 @@ After enabling, the skill is removed from `disabledSkills` and sync is run to re
 
 ```bash
 allagents mcp add <name> <commandOrUrl> [options]
+allagents mcp proxy <serverUrl> [--header KEY=VALUE...]
 allagents mcp remove <name>
 allagents mcp list
 allagents mcp get <name>
@@ -228,6 +229,21 @@ allagents mcp add gh-server npx --arg=-y --arg=@modelcontextprotocol/server-gith
 # Replace an existing server (update workflow)
 allagents mcp add deepwiki https://new.example.com --force
 ```
+
+### mcp proxy
+
+Expose a remote HTTP MCP server locally over stdio. This is the helper command AllAgents writes into proxied client configs when `mcpProxy` rewrites an HTTP server for clients that only support stdio transport.
+
+| Flag | Description |
+|------|-------------|
+| `--header <KEY=VALUE>` | HTTP header forwarded to the upstream MCP server (repeatable) |
+
+```bash
+allagents mcp proxy https://mcp.deepwiki.com/mcp
+allagents mcp proxy https://mcp.internal.corp --header Authorization=Bearer-token
+```
+
+`proxy` is the only supported public command shown in help and generated configs.
 
 ### mcp remove
 

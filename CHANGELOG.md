@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **MCP proxy command**: Removed the temporary `allagents mcp proxy-stdio` alias. Use `allagents mcp proxy <serverUrl>` instead.
+
+  **Migration**: Re-run `allagents mcp update` or `allagents update` after upgrading so synced client configs are regenerated with `mcp proxy`.
+
 ## [1.0.0] - 2026-03-13
 
 ### Breaking Changes
