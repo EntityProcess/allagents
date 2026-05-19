@@ -40,7 +40,7 @@ function toProxiedConfig(
   url: string,
   headers?: Record<string, string>,
 ): Record<string, unknown> {
-  const args = ['mcp', 'proxy-stdio', url];
+  const args = ['mcp', 'proxy', url];
   if (headers) {
     for (const [key, value] of Object.entries(headers)) {
       args.push('--header', `${key}=${value}`);

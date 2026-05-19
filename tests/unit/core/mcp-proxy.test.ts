@@ -60,7 +60,7 @@ describe('applyMcpProxy', () => {
     const result = applyMcpProxy(servers, 'claude', config);
     expect(result.get('deepwiki')).toEqual({
       command: 'allagents',
-      args: ['mcp', 'proxy-stdio', 'https://mcp.deepwiki.com/mcp'],
+      args: ['mcp', 'proxy', 'https://mcp.deepwiki.com/mcp'],
     });
   });
 
@@ -124,7 +124,7 @@ describe('applyMcpProxy', () => {
       command: 'allagents',
       args: [
         'mcp',
-        'proxy-stdio',
+        'proxy',
         'https://api.example.com/mcp',
         '--header',
         'Authorization=Bearer token',

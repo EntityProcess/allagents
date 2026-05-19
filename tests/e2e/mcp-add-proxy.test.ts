@@ -95,12 +95,12 @@ clients:
     expect(claudeConfig.mcpServers.deepwiki.command).toBe('allagents');
     expect(claudeConfig.mcpServers.deepwiki.args).toEqual([
       'mcp',
-      'proxy-stdio',
+      'proxy',
       'https://mcp.deepwiki.com/mcp',
     ]);
 
     const codexConfig = readFileSync(join(workspaceDir, '.codex', 'config.toml'), 'utf-8');
-    expect(codexConfig).toContain('proxy-stdio');
+    expect(codexConfig).toContain('proxy');
     expect(codexConfig).toContain('https://mcp.deepwiki.com/mcp');
 
     const vscodeConfig = JSON.parse(readFileSync(join(workspaceDir, '.vscode', 'mcp.json'), 'utf-8'));

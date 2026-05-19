@@ -20,7 +20,7 @@ describe('CLI args with proxy transform', () => {
     const args = buildClaudeMcpAddArgs('deepwiki', proxiedConfig);
     expect(args).toEqual([
       'mcp', 'add', '--scope', 'user', 'deepwiki', '--', 'allagents',
-      'mcp', 'proxy-stdio', 'https://mcp.deepwiki.com/mcp',
+      'mcp', 'proxy', 'https://mcp.deepwiki.com/mcp',
     ]);
   });
 
@@ -35,7 +35,7 @@ describe('CLI args with proxy transform', () => {
     const args = buildCodexMcpAddArgs('deepwiki', proxiedConfig);
     expect(args).toEqual([
       'mcp', 'add', 'deepwiki', '--', 'allagents',
-      'mcp', 'proxy-stdio', 'https://mcp.deepwiki.com/mcp',
+      'mcp', 'proxy', 'https://mcp.deepwiki.com/mcp',
     ]);
   });
 });
@@ -58,7 +58,7 @@ describe('syncVscodeMcpConfig with serverOverrides', () => {
     const proxiedServers = new Map<string, unknown>([
       ['deepwiki', {
         command: 'allagents',
-        args: ['mcp', 'proxy-stdio', 'https://mcp.deepwiki.com/mcp'],
+        args: ['mcp', 'proxy', 'https://mcp.deepwiki.com/mcp'],
       }],
     ]);
 

@@ -334,12 +334,14 @@ const mcpRemoveCmd = command({
 });
 
 // =============================================================================
-// mcp proxy-stdio (internal)
+// mcp proxy
 // =============================================================================
 
-const mcpProxyStdioCmd = command({
-  name: 'proxy-stdio',
-  description: 'Internal: expose a remote HTTP MCP server as local stdio',
+const mcpProxyCmd = command({
+  name: 'proxy',
+  aliases: ['proxy-stdio'],
+  description:
+    'Expose a remote HTTP MCP server locally over stdio (proxy-stdio is kept as a compatibility alias)',
   args: {
     serverUrl: positional({ type: string, displayName: 'serverUrl' }),
     header: multioption({
@@ -351,7 +353,7 @@ const mcpProxyStdioCmd = command({
   handler: async ({ serverUrl, header }) => {
     const headerResult = parseKeyValuePairs(header, '--header');
     if ('error' in headerResult) {
-      exitWithError('mcp proxy-stdio', headerResult.error);
+      exitWithError('mcp proxy', headerResult.error);
     }
     await runHttpMcpStdioProxy(serverUrl, headerResult.values);
   },
@@ -506,7 +508,7 @@ export const mcpCmd = conciseSubcommands({
   description: 'Manage MCP servers for AI clients',
   cmds: {
     add: mcpAddCmd,
-    'proxy-stdio': mcpProxyStdioCmd,
+    proxy: mcpProxyCmd,
     remove: mcpRemoveCmd,
     list: mcpListCmd,
     get: mcpGetCmd,
