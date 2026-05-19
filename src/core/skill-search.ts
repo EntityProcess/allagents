@@ -1,3 +1,5 @@
+import { parseSkillMetadata } from '../validators/skill.js';
+
 /**
  * GitHub Code Search wrapper for `allagents skill search`.
  *
@@ -36,7 +38,7 @@ export interface SkillSearchItem {
   repo: string;
   /** Path to SKILL.md inside the repo. */
   path: string;
-  /** Repo description (often empty for Code Search results). */
+  /** Skill description, enriched from SKILL.md frontmatter when available. */
   description: string;
   /** File blob SHA. */
   sha: string;
@@ -439,6 +441,7 @@ export async function searchSkills(
   // Apply the limit to the merged output so `--limit N` caps total results,
   // not just per-query results (each query runs with the same limit).
   const finalItems = visible.slice(0, limit);
+  await enrichDescriptionsForItems(finalItems, token, fetchFn);
 
   return {
     query,
@@ -503,4 +506,55 @@ async function fetchStarsForItems(
     const s = starsMap.get(item.repo);
     if (s !== undefined) item.stars = s;
   }
+}
+
+async function enrichDescriptionsForItems(
+  items: SkillSearchItem[],
+  token: string | undefined,
+  fetchFn: typeof fetch,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'allagents-cli',
+  };
+  if (token) headers.Authorization = `token ${token}`;
+
+  const descriptionMap = new Map<string, string>();
+  const uniqueSkills = [...new Set(items.map((item) => `${item.repo}#${item.sha}`))];
+
+  await Promise.allSettled(
+    uniqueSkills.map(async (key) => {
+      const [repo, sha] = key.split('#');
+      if (!repo || !sha) return;
+
+      try {
+        const res = await fetchFn(`https://api.github.com/repos/${repo}/git/blobs/${sha}`, { headers });
+        if (!res.ok) return;
+
+        const body = await res.json() as { content?: string; encoding?: string };
+        const content = decodeGitBlob(body.content, body.encoding);
+        if (!content) return;
+
+        const metadata = parseSkillMetadata(content);
+        if (!metadata?.description) return;
+
+        descriptionMap.set(key, metadata.description);
+      } catch {
+        // Ignore metadata fetch failures and keep the repo description fallback.
+      }
+    }),
+  );
+
+  for (const item of items) {
+    const description = descriptionMap.get(`${item.repo}#${item.sha}`);
+    if (description) item.description = description;
+  }
+}
+
+function decodeGitBlob(content: string | undefined, encoding: string | undefined): string | undefined {
+  if (!content) return undefined;
+  if (!encoding || encoding === 'utf-8') return content;
+  if (encoding !== 'base64') return undefined;
+  return Buffer.from(content.replace(/\s+/g, ''), 'base64').toString('utf8');
 }
