@@ -1365,9 +1365,13 @@ const addCmd = command({
 // skill search (GitHub Code Search)
 // =============================================================================
 
+export function formatSkillSearchSummary(count: number, query: string, truncated: boolean): string {
+  return `Showing ${count} skill${count !== 1 ? 's' : ''} matching "${query}"${truncated ? ' (truncated)' : ''}`;
+}
+
 /** Print results in gh-compatible tabular format: repo, skillName, description, stars. */
 function printSearchResults(items: SkillSearchItem[], query: string, truncated: boolean): void {
-  console.log(`\nShowing ${items.length} result${items.length !== 1 ? 's' : ''} for "${query}"${truncated ? ' (truncated)' : ''}\n`);
+  console.log(`\n${formatSkillSearchSummary(items.length, query, truncated)}\n`);
   for (const item of items) {
     const repoCol = item.repo.padEnd(30);
     const nameCol = qualifiedName(item).padEnd(24);
@@ -1522,9 +1526,9 @@ const searchCmd = command({
       }
 
       // Interactive mode: filter-as-you-type select with install support
-      const { autocomplete, isCancel } = await import('@clack/prompts');
+      const { autocomplete, isCancel, log } = await import('@clack/prompts');
 
-      printSearchResults(result.items, query, result.truncated);
+      log.success(formatSkillSearchSummary(result.items.length, query, result.truncated));
 
       const options = result.items.map((item) => ({
         label: `${qualifiedName(item)}  ${chalk.dim(item.repo)}`,
@@ -1534,7 +1538,7 @@ const searchCmd = command({
       options.push({ label: 'Cancel', value: '__cancel__', hint: '' });
 
       const selected = await autocomplete({
-        message: `Select a skill to install (type to filter ${result.items.length} results)`,
+        message: 'Select a skill to install',
         options,
         placeholder: 'Type to filter...',
       });
