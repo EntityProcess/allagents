@@ -339,9 +339,7 @@ const mcpRemoveCmd = command({
 
 const mcpProxyCmd = command({
   name: 'proxy',
-  aliases: ['proxy-stdio'],
-  description:
-    'Expose a remote HTTP MCP server locally over stdio (proxy-stdio is kept as a compatibility alias)',
+  description: 'Expose a remote HTTP MCP server locally over stdio',
   args: {
     serverUrl: positional({ type: string, displayName: 'serverUrl' }),
     header: multioption({

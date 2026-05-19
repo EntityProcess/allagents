@@ -26,11 +26,10 @@ describe('mcp proxy command help', () => {
     expect(result.stdout).not.toContain('- proxy-stdio -');
   });
 
-  test('keeps proxy-stdio as a compatibility alias that prints canonical help', () => {
-    const result = runCli(['mcp', 'proxy-stdio', '--help']);
+  test('rejects proxy-stdio after the rename', () => {
+    const result = runCli(['mcp', 'proxy-stdio']);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('allagents mcp proxy');
-    expect(result.stdout).toContain('proxy-stdio is kept as a compatibility alias');
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Not a valid subcommand name');
   });
 });
