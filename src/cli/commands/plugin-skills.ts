@@ -648,11 +648,6 @@ async function installSkillDirect(opts: {
   return applySkillAllowlist({ skill, pluginName, isUser, workspacePath });
 }
 
-function resolveFetchedSourcePath(source: string, cachePath: string): string {
-  const parsed = isGitHubUrl(source) ? parseGitHubUrl(source) : null;
-  return parsed?.subpath ? join(cachePath, parsed.subpath) : cachePath;
-}
-
 function extractPrimaryPluginName(source: string): string {
   const parsed = isGitHubUrl(source) ? parseGitHubUrl(source) : null;
   if (parsed?.subpath) {
