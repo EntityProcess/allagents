@@ -1369,6 +1369,30 @@ export function formatSkillSearchSummary(count: number, query: string, truncated
   return `Showing ${count} skill${count !== 1 ? 's' : ''} matching "${query}"${truncated ? ' (truncated)' : ''}`;
 }
 
+export function formatSkillSearchHint(item: Pick<SkillSearchItem, 'stars' | 'description'>): string {
+  return [
+    item.stars > 0 ? `★ ${item.stars}` : '',
+    item.description ?? '',
+  ].filter(Boolean).join('  ');
+}
+
+export function collectSelectedSkillSearchRepos(
+  items: Pick<SkillSearchItem, 'path' | 'repo'>[],
+  selectedPaths: string[],
+): string[] {
+  const selectedSet = new Set(selectedPaths);
+  const repos: string[] = [];
+  const seenRepos = new Set<string>();
+
+  for (const item of items) {
+    if (!selectedSet.has(item.path) || seenRepos.has(item.repo)) continue;
+    seenRepos.add(item.repo);
+    repos.push(item.repo);
+  }
+
+  return repos;
+}
+
 /** Print results in gh-compatible tabular format: repo, skillName, description, stars. */
 function printSearchResults(items: SkillSearchItem[], query: string, truncated: boolean): void {
   console.log(`\n${formatSkillSearchSummary(items.length, query, truncated)}\n`);
@@ -1389,16 +1413,26 @@ function printSearchResults(items: SkillSearchItem[], query: string, truncated: 
  * Interactive install flow for a selected plugin from search results.
  * Returns true if plugin was installed.
  */
-async function installFromSearch(repo: string): Promise<boolean> {
+async function installFromSearch(repos: string[]): Promise<boolean> {
   const p = await import('@clack/prompts');
 
   const workspacePath = process.cwd();
-  const isInstalledProject = hasProjectConfig(workspacePath) ? await hasPlugin(repo, workspacePath) : false;
-  const isInstalledUser = await hasUserPlugin(repo);
+  const installableRepos: string[] = [];
 
-  if (isInstalledProject || isInstalledUser) {
-    const scopeLabel = isInstalledUser ? 'user' : 'project';
-    p.log.info(`Plugin ${chalk.bold(repo)} is already installed (${scopeLabel} scope).`);
+  for (const repo of repos) {
+    const isInstalledProject = hasProjectConfig(workspacePath) ? await hasPlugin(repo, workspacePath) : false;
+    const isInstalledUser = await hasUserPlugin(repo);
+
+    if (isInstalledProject || isInstalledUser) {
+      const scopeLabel = isInstalledUser ? 'user' : 'project';
+      p.log.info(`Plugin ${chalk.bold(repo)} is already installed (${scopeLabel} scope).`);
+      continue;
+    }
+
+    installableRepos.push(repo);
+  }
+
+  if (installableRepos.length === 0) {
     return false;
   }
 
@@ -1413,34 +1447,55 @@ async function installFromSearch(repo: string): Promise<boolean> {
   if (p.isCancel(scopeChoice)) return false;
 
   const s = p.spinner();
-  s.start('Installing plugin...');
+  s.start(`Installing ${installableRepos.length === 1 ? 'plugin' : 'plugins'}...`);
 
   try {
-    if (scopeChoice === 'project') {
-      const result = await addPlugin(repo, workspacePath);
+    const installedRepos: string[] = [];
+    const failedRepos: Array<{ repo: string; error: string }> = [];
+
+    for (const repo of installableRepos) {
+      const result = scopeChoice === 'project'
+        ? await addPlugin(repo, workspacePath)
+        : await addUserPlugin(repo);
+
       if (!result.success) {
-        s.stop('Installation failed');
-        p.log.error(result.error ?? 'Unknown error');
-        return false;
+        failedRepos.push({ repo, error: result.error ?? 'Unknown error' });
+        continue;
       }
-      s.message('Syncing...');
-      const syncResult = await syncWorkspace(workspacePath);
-      s.stop('Installed and synced');
-      const lines = formatVerboseSyncLines(syncResult);
-      if (lines.length > 0) p.note(lines.join('\n'), `Installed: ${repo}`);
-    } else {
-      const result = await addUserPlugin(repo);
-      if (!result.success) {
-        s.stop('Installation failed');
-        p.log.error(result.error ?? 'Unknown error');
-        return false;
-      }
-      s.message('Syncing...');
-      const syncResult = await syncUserWorkspace();
-      s.stop('Installed and synced');
-      const lines = formatVerboseSyncLines(syncResult);
-      if (lines.length > 0) p.note(lines.join('\n'), `Installed: ${repo}`);
+
+      installedRepos.push(repo);
     }
+
+    if (installedRepos.length === 0) {
+      s.stop('Installation failed');
+      for (const { repo, error } of failedRepos) {
+        p.log.error(`${chalk.bold(repo)}: ${error}`);
+      }
+      return false;
+    }
+
+    s.message('Syncing...');
+    const syncResult = scopeChoice === 'project'
+      ? await syncWorkspace(workspacePath)
+      : await syncUserWorkspace();
+
+    s.stop(installedRepos.length === 1 ? 'Installed and synced' : 'Installed plugins and synced');
+
+    for (const { repo, error } of failedRepos) {
+      p.log.error(`${chalk.bold(repo)}: ${error}`);
+    }
+
+    const lines = formatVerboseSyncLines(syncResult);
+    const noteLines = installedRepos.length > 1 ? [...installedRepos, '', ...lines] : lines;
+    if (noteLines.length > 0) {
+      p.note(
+        noteLines.join('\n'),
+        installedRepos.length === 1
+          ? `Installed: ${installedRepos[0]}`
+          : `Installed: ${installedRepos.length} plugins`,
+      );
+    }
+
     return true;
   } catch (err) {
     s.stop('Installation failed');
@@ -1525,29 +1580,34 @@ const searchCmd = command({
         return;
       }
 
-      // Interactive mode: filter-as-you-type select with install support
-      const { autocomplete, isCancel, log } = await import('@clack/prompts');
+      // Interactive mode: filter-as-you-type multiselect with install support
+      const { autocompleteMultiselect, isCancel, log } = await import('@clack/prompts');
 
       log.success(formatSkillSearchSummary(result.items.length, query, result.truncated));
 
       const options = result.items.map((item) => ({
         label: `${qualifiedName(item)}  ${chalk.dim(item.repo)}`,
-        value: item.repo,
-        hint: `${item.stars > 0 ? `★${item.stars}  ` : ''}${item.description ?? ''}`,
+        value: item.path,
+        hint: formatSkillSearchHint(item),
       }));
-      options.push({ label: 'Cancel', value: '__cancel__', hint: '' });
 
-      const selected = await autocomplete({
-        message: 'Select a skill to install',
+      const selected = await autocompleteMultiselect({
+        message: 'Select skills to install',
         options,
         placeholder: 'Type to filter...',
+        required: false,
       });
 
-      if (isCancel(selected) || selected === '__cancel__') {
+      if (isCancel(selected)) {
         return;
       }
 
-      await installFromSearch(selected as string);
+      const reposToInstall = collectSelectedSkillSearchRepos(result.items, selected as string[]);
+      if (reposToInstall.length === 0) {
+        return;
+      }
+
+      await installFromSearch(reposToInstall);
     } catch (error) {
       if (error instanceof SkillSearchError) {
         const exitCode = error.kind === 'validation' ? 2 : 1;
