@@ -17,17 +17,15 @@ const CLONE_TIMEOUT_MS = (() => {
 function createGit(baseDir?: string) {
   return simpleGit(baseDir, {
     timeout: { block: CLONE_TIMEOUT_MS },
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_LFS_SKIP_SMUDGE: '1',
-    },
     config: [
       'filter.lfs.required=false',
       'filter.lfs.smudge=',
       'filter.lfs.clean=',
       'filter.lfs.process=',
     ],
+  }).env({
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_LFS_SKIP_SMUDGE: '1',
   });
 }
 
