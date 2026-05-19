@@ -11,6 +11,7 @@ import { parseFileSource } from '../utils/plugin-path.js';
 import { createSymlink } from '../utils/symlink.js';
 import { adjustLinksInContent } from '../utils/link-adjuster.js';
 import { parseSkillMetadata } from '../validators/skill.js';
+import { discoverNestedSkillEntries } from './skills.js';
 
 /**
  * Agent instruction files that receive WORKSPACE-RULES injection
@@ -278,19 +279,12 @@ export async function copySkills(
       .filter((e) => !isExcluded(pluginPath, join(skillsDir, e.name), options.exclude))
       .map((e) => ({ name: e.name, sourcePath: join(skillsDir, e.name), isRootLevel: false }));
   } else {
-    // Flat layout: plugin/<skill-name>/SKILL.md
-    const entries = await readdir(pluginPath, { withFileTypes: true });
-    const flatSkills: { name: string; sourcePath: string; isRootLevel: boolean }[] = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const skillMdPath = join(pluginPath, entry.name, 'SKILL.md');
-      if (existsSync(skillMdPath)) {
-        flatSkills.push({ name: entry.name, sourcePath: join(pluginPath, entry.name), isRootLevel: false });
-      }
-    }
+    const nestedSkills = (await discoverNestedSkillEntries(pluginPath))
+      .filter((entry) => !isExcluded(pluginPath, entry.skillPath, options.exclude))
+      .map((entry) => ({ name: entry.name, sourcePath: entry.skillPath, isRootLevel: false }));
 
-    if (flatSkills.length > 0) {
-      skillSources = flatSkills;
+    if (nestedSkills.length > 0) {
+      skillSources = nestedSkills;
     } else {
       // Root-level single-skill layout: plugin/SKILL.md
       const rootSkillMd = join(pluginPath, 'SKILL.md');
@@ -427,19 +421,12 @@ export async function collectPluginSkills(
       .filter((e) => e.isDirectory())
       .map((e) => ({ name: e.name, path: join(skillsDir, e.name) }));
   } else {
-    // Flat layout: plugin/<skill-name>/SKILL.md
-    const entries = await readdir(pluginPath, { withFileTypes: true });
-    const flatDirs: { name: string; path: string }[] = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const skillMdPath = join(pluginPath, entry.name, 'SKILL.md');
-      if (existsSync(skillMdPath)) {
-        flatDirs.push({ name: entry.name, path: join(pluginPath, entry.name) });
-      }
-    }
+    const nestedDirs = await discoverNestedSkillEntries(pluginPath).then((entries) =>
+      entries.map((entry) => ({ name: entry.name, path: entry.skillPath }))
+    );
 
-    if (flatDirs.length > 0) {
-      candidateDirs = flatDirs;
+    if (nestedDirs.length > 0) {
+      candidateDirs = nestedDirs;
     } else {
       // Root-level single-skill layout: plugin/SKILL.md
       const rootSkillMd = join(pluginPath, 'SKILL.md');

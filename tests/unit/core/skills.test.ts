@@ -137,6 +137,26 @@ describe('getAllSkillsFromPlugins', () => {
     expect(skills[0]!.name).toBe('sub-skill');
   });
 
+  it('discovers nested skills from a promoted container path', async () => {
+    const containerPlugin = join(tmpDir, 'container-plugin');
+    await mkdir(join(containerPlugin, 'research', 'llm-wiki'), { recursive: true });
+    await mkdir(join(containerPlugin, 'productivity', 'nano-pdf'), { recursive: true });
+    await writeFile(join(containerPlugin, 'research', 'llm-wiki', 'SKILL.md'), '# llm-wiki');
+    await writeFile(join(containerPlugin, 'productivity', 'nano-pdf', 'SKILL.md'), '# nano-pdf');
+
+    const config = {
+      repositories: [],
+      plugins: [{ source: containerPlugin, skills: ['llm-wiki', 'nano-pdf'] }],
+      clients: ['claude'],
+      version: 2,
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    expect(skills.map((s) => s.name).sort()).toEqual(['llm-wiki', 'nano-pdf']);
+    expect(skills.every((s) => s.disabled === false)).toBe(true);
+  });
+
   it('skips GitHub URL entries whose subpath no longer exists in cache', async () => {
     const originalHome = process.env.HOME;
     process.env.HOME = tmpDir;

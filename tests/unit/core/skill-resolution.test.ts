@@ -95,6 +95,30 @@ description: Real Skill
     expect(skills).toHaveLength(1);
     expect(skills[0]?.folderName).toBe('real-skill');
   });
+
+  it('should collect nested skills from a promoted container path', async () => {
+    const pluginDir = join(testDir, 'container-plugin');
+    await mkdir(join(pluginDir, 'research', 'llm-wiki'), { recursive: true });
+    await mkdir(join(pluginDir, 'productivity', 'nano-pdf'), { recursive: true });
+    await writeFile(
+      join(pluginDir, 'research', 'llm-wiki', 'SKILL.md'),
+      `---
+name: llm-wiki
+description: wiki
+---`,
+    );
+    await writeFile(
+      join(pluginDir, 'productivity', 'nano-pdf', 'SKILL.md'),
+      `---
+name: nano-pdf
+description: pdf
+---`,
+    );
+
+    const skills = await collectPluginSkills(pluginDir, 'test-source');
+
+    expect(skills.map((s) => s.folderName).sort()).toEqual(['llm-wiki', 'nano-pdf']);
+  });
 });
 
 describe('skill name resolution in sync', () => {

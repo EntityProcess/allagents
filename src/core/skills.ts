@@ -31,6 +31,11 @@ export interface SkillInfo {
   pluginSkillsMode: 'allowlist' | 'blocklist' | 'none';
 }
 
+export interface DiscoveredSkillEntry {
+  name: string;
+  skillPath: string;
+}
+
 /**
  * Result of resolving a plugin source
  */
@@ -75,6 +80,25 @@ async function resolvePluginPath(
   // Local path
   const resolved = resolve(workspacePath, pluginSource);
   return existsSync(resolved) ? { path: resolved } : null;
+}
+
+export async function discoverNestedSkillEntries(pluginPath: string): Promise<DiscoveredSkillEntry[]> {
+  const entries = await readdir(pluginPath, { withFileTypes: true });
+  const discovered: DiscoveredSkillEntry[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const skillPath = join(pluginPath, entry.name);
+    if (existsSync(join(skillPath, 'SKILL.md'))) {
+      discovered.push({ name: entry.name, skillPath });
+      continue;
+    }
+
+    discovered.push(...await discoverNestedSkillEntries(skillPath));
+  }
+
+  return discovered;
 }
 
 /**
@@ -126,19 +150,9 @@ export async function getAllSkillsFromPlugins(
         .filter((e) => e.isDirectory())
         .map((e) => ({ name: e.name, skillPath: join(skillsDir, e.name) }));
     } else {
-      // Flat layout: plugin/<skill-name>/SKILL.md
-      const entries = await readdir(pluginPath, { withFileTypes: true });
-      const flatSkills: { name: string; skillPath: string }[] = [];
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const skillMdPath = join(pluginPath, entry.name, 'SKILL.md');
-        if (existsSync(skillMdPath)) {
-          flatSkills.push({ name: entry.name, skillPath: join(pluginPath, entry.name) });
-        }
-      }
-
-      if (flatSkills.length > 0) {
-        skillEntries = flatSkills;
+      const nestedSkills = await discoverNestedSkillEntries(pluginPath);
+      if (nestedSkills.length > 0) {
+        skillEntries = nestedSkills;
       } else {
         // Root-level single-skill layout: plugin/SKILL.md
         const rootSkillMd = join(pluginPath, 'SKILL.md');
@@ -223,16 +237,8 @@ export async function discoverSkillNames(pluginPath: string): Promise<string[]> 
     return entries.filter((e) => e.isDirectory()).map((e) => e.name);
   }
 
-  // Flat layout: subdirs with SKILL.md
-  const entries = await readdir(pluginPath, { withFileTypes: true });
-  const flatSkills: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (existsSync(join(pluginPath, entry.name, 'SKILL.md'))) {
-      flatSkills.push(entry.name);
-    }
-  }
-  if (flatSkills.length > 0) return flatSkills;
+  const nestedSkills = await discoverNestedSkillEntries(pluginPath);
+  if (nestedSkills.length > 0) return nestedSkills.map((entry) => entry.name);
 
   // Root-level SKILL.md
   const rootSkillMd = join(pluginPath, 'SKILL.md');
