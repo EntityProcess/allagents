@@ -1,12 +1,10 @@
 import * as p from '@clack/prompts';
-import { addPlugin, removePlugin, addDisabledSkill, removeDisabledSkill, addEnabledSkill, removeEnabledSkill, setPluginSkillsMode } from '../../../core/workspace-modify.js';
+import { addPlugin, removePlugin, removeDisabledSkill, addEnabledSkill, setPluginSkillsMode } from '../../../core/workspace-modify.js';
 import {
   addUserPlugin,
   removeUserPlugin,
-  addUserDisabledSkill,
   removeUserDisabledSkill,
   addUserEnabledSkill,
-  removeUserEnabledSkill,
   setUserPluginSkillsMode,
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
@@ -32,6 +30,7 @@ import { getAllSkillsFromPlugins, discoverSkillNames } from '../../../core/skill
 import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
+import { removeInstalledSkill } from '../../skill-removal.js';
 
 const { select, text, confirm, multiselect, autocomplete } = p;
 
@@ -565,20 +564,11 @@ export async function runBrowsePluginSkills(
 
     // Disable newly unchecked skills
     for (const skill of toDisable) {
-      const skillKey = `${skill.pluginName}:${skill.name}`;
-      if (skill.pluginSkillsMode === 'allowlist') {
-        if (scope === 'user') {
-          await removeUserEnabledSkill(skillKey);
-        } else if (context.workspacePath) {
-          await removeEnabledSkill(skillKey, context.workspacePath);
-        }
-      } else {
-        if (scope === 'user') {
-          await addUserDisabledSkill(skillKey);
-        } else if (context.workspacePath) {
-          await addDisabledSkill(skillKey, context.workspacePath);
-        }
-      }
+      await removeInstalledSkill({
+        targetSkill: skill,
+        isUser: scope === 'user',
+        workspacePath,
+      });
     }
 
     // Enable newly checked skills
