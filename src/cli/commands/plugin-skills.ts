@@ -5,9 +5,7 @@ import chalk from 'chalk';
 import { command, positional, option, flag, string, optional, restPositionals } from 'cmd-ts';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import {
-  addDisabledSkill,
   removeDisabledSkill,
-  removeEnabledSkill,
   addEnabledSkill,
   addPlugin,
   hasPlugin,
@@ -16,9 +14,7 @@ import {
   upsertGitHubPluginSourceAllowlist,
 } from '../../core/workspace-modify.js';
 import {
-  addUserDisabledSkill,
   removeUserDisabledSkill,
-  removeUserEnabledSkill,
   addUserEnabledSkill,
   isUserConfigPath,
   addUserPlugin,
@@ -55,6 +51,7 @@ import {
 } from '../../core/marketplace.js';
 import { parseMarketplaceManifest, resolvePluginSourcePath } from '../../utils/marketplace-manifest-parser.js';
 import { formatSyncHeader, formatSyncSummary, formatVerboseSyncLines } from '../format-sync.js';
+import { removeInstalledSkill } from '../skill-removal.js';
 import type { SyncResult } from '../../core/sync.js';
 
 /**
@@ -336,10 +333,10 @@ const removeCmd = command({
       const workspacePath = isUser ? getHomeDir() : process.cwd();
 
       // Find the skill
-      const matches = await findSkillByName(skill, workspacePath);
+      const allSkills = await getAllSkillsFromPlugins(workspacePath);
+      const matches = allSkills.filter((candidate) => candidate.name === skill);
 
       if (matches.length === 0) {
-        const allSkills = await getAllSkillsFromPlugins(workspacePath);
         const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
         const error = `Skill '${skill}' not found in any installed plugin.\n\nAvailable skills: ${skillNames || 'none'}`;
         if (isJsonMode()) {
@@ -391,12 +388,12 @@ const removeCmd = command({
         return;
       }
 
-      const skillKey = `${targetSkill.pluginName}:${skill}`;
-
-      const result = targetSkill.pluginSkillsMode === 'allowlist'
-        ? isUser ? await removeUserEnabledSkill(skillKey) : await removeEnabledSkill(skillKey, workspacePath)
-        : isUser ? await addUserDisabledSkill(skillKey) : await addDisabledSkill(skillKey, workspacePath);
-
+      const result = await removeInstalledSkill({
+        targetSkill,
+        isUser,
+        workspacePath,
+        allSkills,
+      });
       if (!result.success) {
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'skill remove', error: result.error ?? 'Unknown error' });
@@ -407,7 +404,13 @@ const removeCmd = command({
       }
 
       if (!isJsonMode()) {
-        console.log(`\u2713 Disabled skill: ${skill} (${targetSkill.pluginName})`);
+        if (result.action === 'removed-plugin') {
+          console.log(`\u2713 Removed plugin: ${targetSkill.pluginSource}`);
+        } else if (result.action === 'removed-skill') {
+          console.log(`\u2713 Removed skill: ${skill} (${targetSkill.pluginName})`);
+        } else {
+          console.log(`\u2713 Disabled skill: ${skill} (${targetSkill.pluginName})`);
+        }
       }
 
       const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
