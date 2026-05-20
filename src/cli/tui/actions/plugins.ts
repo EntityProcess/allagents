@@ -564,13 +564,11 @@ export async function runBrowsePluginSkills(
 
     // Disable newly unchecked skills
     for (const skill of toDisable) {
-      if (effectivePath) {
-        await removeInstalledSkill({
-          targetSkill: skill,
-          isUser: scope === 'user',
-          workspacePath: effectivePath,
-        });
-      }
+      await removeInstalledSkill({
+        targetSkill: skill,
+        isUser: scope === 'user',
+        workspacePath,
+      });
     }
 
     // Enable newly checked skills
