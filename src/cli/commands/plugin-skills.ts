@@ -113,7 +113,7 @@ async function recordSourceProvenance(opts: {
   });
 }
 
-function resolveFetchedSourcePath(source: string, cachePath: string): string {
+export function resolveFetchedSourcePath(source: string, cachePath: string): string {
   if (!isGitHubUrl(source)) return cachePath;
   const parsed = parseGitHubUrl(source);
   return parsed?.subpath ? join(cachePath, parsed.subpath) : cachePath;
@@ -458,13 +458,24 @@ type InstallSkillResult =
  *
  * In both cases, set the plugin to allowlist mode with only the requested skill.
  */
-async function installSkillFromSource(opts: {
+type InstallSkillFromSourceDeps = {
+  fetchPlugin?: typeof fetchPlugin;
+  parseMarketplaceManifest?: typeof parseMarketplaceManifest;
+  installSkillViaMarketplace?: typeof installSkillViaMarketplace;
+  installSkillDirect?: typeof installSkillDirect;
+};
+
+export async function installSkillFromSource(opts: {
   skill: string;
   from: string;
   isUser: boolean;
   workspacePath: string;
-}): Promise<InstallSkillResult> {
+}, deps: InstallSkillFromSourceDeps = {}): Promise<InstallSkillResult> {
   const { skill, from, isUser, workspacePath } = opts;
+  const fetchPluginFn = deps.fetchPlugin ?? fetchPlugin;
+  const parseMarketplaceManifestFn = deps.parseMarketplaceManifest ?? parseMarketplaceManifest;
+  const installSkillViaMarketplaceFn = deps.installSkillViaMarketplace ?? installSkillViaMarketplace;
+  const installSkillDirectFn = deps.installSkillDirect ?? installSkillDirect;
 
   if (!isJsonMode()) {
     console.log(`Installing skill '${skill}' from ${from}...`);
@@ -472,7 +483,7 @@ async function installSkillFromSource(opts: {
 
   // Fetch the source to a local cache so we can inspect it
   const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
-  const fetchResult = await fetchPlugin(from, {
+  const fetchResult = await fetchPluginFn(from, {
     ...(parsed?.branch && { branch: parsed.branch }),
   });
   if (!fetchResult.success) {
@@ -482,14 +493,14 @@ async function installSkillFromSource(opts: {
   const sourcePath = resolveFetchedSourcePath(from, fetchResult.cachePath);
 
   // Check if the source is a marketplace
-  const manifestResult = await parseMarketplaceManifest(sourcePath);
+  const manifestResult = await parseMarketplaceManifestFn(sourcePath);
 
   if (manifestResult.success) {
-    return installSkillViaMarketplace({ skill, from, isUser, workspacePath });
+    return installSkillViaMarketplaceFn({ skill, from, isUser, workspacePath });
   }
 
   // Not a marketplace — install as a direct plugin
-  return installSkillDirect({ skill, from, isUser, workspacePath, cachePath: sourcePath });
+  return installSkillDirectFn({ skill, from, isUser, workspacePath, sourcePath });
 }
 
 /**
@@ -593,10 +604,9 @@ async function installSkillDirect(opts: {
   from: string;
   isUser: boolean;
   workspacePath: string;
-  cachePath: string;
+  sourcePath: string;
 }): Promise<InstallSkillResult> {
-  const { skill, from, isUser, workspacePath, cachePath } = opts;
-  const sourcePath = resolveFetchedSourcePath(from, cachePath);
+  const { skill, from, isUser, workspacePath, sourcePath } = opts;
 
   // Verify the skill exists in the cached plugin before installing
   const availableSkills = await discoverSkillNames(sourcePath);

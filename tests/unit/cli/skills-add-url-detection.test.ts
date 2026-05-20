@@ -2,7 +2,11 @@ import { describe, it, expect } from 'bun:test';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveSkillFromUrl, resolveSkillNameFromRepo } from '../../../src/cli/commands/plugin-skills.js';
+import {
+  resolveFetchedSourcePath,
+  resolveSkillFromUrl,
+  resolveSkillNameFromRepo,
+} from '../../../src/cli/commands/plugin-skills.js';
 import type { FetchResult } from '../../../src/core/plugin.js';
 
 describe('resolveSkillFromUrl', () => {
@@ -97,5 +101,20 @@ describe('resolveSkillNameFromRepo', () => {
       fakeFetch({ success: false, action: 'skipped', cachePath: '', error: 'network error' }),
     );
     expect(result).toBe('fallback-name');
+  });
+});
+
+describe('resolveFetchedSourcePath', () => {
+  it('appends the GitHub subpath to the fetched repo root once', () => {
+    expect(
+      resolveFetchedSourcePath(
+        'https://github.com/NousResearch/hermes-agent/tree/main/skills/research/llm-wiki',
+        '/tmp/hermes-agent-cache',
+      ),
+    ).toBe('/tmp/hermes-agent-cache/skills/research/llm-wiki');
+  });
+
+  it('leaves non-GitHub sources unchanged', () => {
+    expect(resolveFetchedSourcePath('/tmp/local-skill', '/tmp/local-skill')).toBe('/tmp/local-skill');
   });
 });
