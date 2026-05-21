@@ -14,6 +14,14 @@ const CLONE_TIMEOUT_MS = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLONE_TIMEOUT_MS;
 })();
 
+export function createGitEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_LFS_SKIP_SMUDGE: '1',
+  };
+}
+
 function createGit(baseDir?: string) {
   return simpleGit(baseDir, {
     timeout: { block: CLONE_TIMEOUT_MS },
@@ -23,10 +31,7 @@ function createGit(baseDir?: string) {
       'filter.lfs.clean=',
       'filter.lfs.process=',
     ],
-  }).env({
-    GIT_TERMINAL_PROMPT: '0',
-    GIT_LFS_SKIP_SMUDGE: '1',
-  });
+  }).env(createGitEnv());
 }
 
 /**

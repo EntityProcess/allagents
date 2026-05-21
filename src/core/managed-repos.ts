@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import type { Repository, ManagedMode } from '../models/workspace-config.js';
 import { getHomeDir } from '../constants.js';
+import { createGitEnv } from './git.js';
 
 const CLONE_TIMEOUT_MS = 120_000; // 2 minutes for full clone
 
@@ -80,7 +81,7 @@ export function buildCloneUrl(source: string, repo: string): string {
  */
 async function cloneRepo(url: string, dest: string, branch?: string): Promise<void> {
   await mkdir(dirname(dest), { recursive: true });
-  const git = simpleGit({ timeout: { block: CLONE_TIMEOUT_MS } });
+  const git = simpleGit({ timeout: { block: CLONE_TIMEOUT_MS } }).env(createGitEnv());
   const cloneOptions = branch ? ['--branch', branch] : [];
   await git.clone(url, dest, cloneOptions);
 }
@@ -90,7 +91,7 @@ async function cloneRepo(url: string, dest: string, branch?: string): Promise<vo
  * Returns a skip reason if pull is unsafe, or undefined on success.
  */
 async function pullRepo(repoPath: string, branch?: string): Promise<string | undefined> {
-  const git = simpleGit(repoPath, { timeout: { block: CLONE_TIMEOUT_MS } });
+  const git = simpleGit(repoPath, { timeout: { block: CLONE_TIMEOUT_MS } }).env(createGitEnv());
 
   // Check for uncommitted changes
   const status = await git.status();
