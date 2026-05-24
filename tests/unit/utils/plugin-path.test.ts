@@ -243,7 +243,26 @@ describe('parsePluginSource', () => {
     expect(result.type).toBe('github');
     expect(result.owner).toBe('owner');
     expect(result.repo).toBe('repo');
+    expect(result.branch).toBeUndefined();
     expect(result.original).toBe('https://github.com/owner/repo');
+  });
+
+  it('should preserve branch from /blob/ URLs so the cache lookup is branch-qualified', () => {
+    const result = parsePluginSource(
+      'https://github.com/owner/repo/blob/main/skills/research/llm-wiki',
+    );
+    expect(result.type).toBe('github');
+    expect(result.owner).toBe('owner');
+    expect(result.repo).toBe('repo');
+    expect(result.branch).toBe('main');
+  });
+
+  it('should preserve branch from owner/repo@ref shorthand', () => {
+    const result = parsePluginSource('owner/repo@v1.2.0');
+    expect(result.type).toBe('github');
+    expect(result.owner).toBe('owner');
+    expect(result.repo).toBe('repo');
+    expect(result.branch).toBe('v1.2.0');
   });
 
   it('should parse local absolute paths', () => {

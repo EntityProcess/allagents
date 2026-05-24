@@ -48,6 +48,7 @@ export interface ParsedPluginSource {
   normalized: string;
   owner?: string;
   repo?: string;
+  branch?: string;
 }
 
 /**
@@ -282,6 +283,7 @@ export function parsePluginSource(
       normalized: source,
       ...(parsed?.owner && { owner: parsed.owner }),
       ...(parsed?.repo && { repo: parsed.repo }),
+      ...(parsed?.branch && { branch: parsed.branch }),
     };
   }
 
