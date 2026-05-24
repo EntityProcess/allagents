@@ -142,4 +142,37 @@ describe('workspace status - both scopes', () => {
 
     await rm(separateHome, { recursive: true, force: true });
   });
+
+  it('should mark GitHub plugin as cached when cache is branch-qualified', async () => {
+    // Regression: `skills add <github-blob-url>` clones into `<owner>-<repo>@<branch>`,
+    // but `workspace status` looked up `<owner>-<repo>` and reported "not cached".
+    const homeDir = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
+    process.env.HOME = homeDir;
+
+    const branchedCache = join(
+      homeDir,
+      '.allagents',
+      'plugins',
+      'marketplaces',
+      'NousResearch-hermes-agent@main',
+    );
+    await mkdir(branchedCache, { recursive: true });
+
+    await writeProjectConfig({
+      repositories: [],
+      plugins: [
+        'https://github.com/NousResearch/hermes-agent/blob/main/skills/research/llm-wiki',
+      ],
+      clients: ['claude'],
+    });
+
+    const result = await getWorkspaceStatus(testDir);
+    expect(result.success).toBe(true);
+    expect(result.plugins.length).toBe(1);
+    expect(result.plugins[0]?.type).toBe('github');
+    expect(result.plugins[0]?.available).toBe(true);
+    expect(result.plugins[0]?.path).toBe(branchedCache);
+
+    await rm(homeDir, { recursive: true, force: true });
+  });
 });

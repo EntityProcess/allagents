@@ -102,7 +102,7 @@ function getPluginStatus(parsed: ParsedPluginSource): PluginStatus {
     // Check if cached
     const cachePath =
       parsed.owner && parsed.repo
-        ? getPluginCachePath(parsed.owner, parsed.repo)
+        ? getPluginCachePath(parsed.owner, parsed.repo, parsed.branch)
         : '';
     const available = cachePath ? existsSync(cachePath) : false;
 
