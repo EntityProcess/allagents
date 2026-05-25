@@ -87,17 +87,27 @@ describe('discoverSkillsWithMetadata', () => {
     expect(result[0]?.description).toBe('Root layout skill');
   });
 
-  it('returns empty description when no SKILL.md exists anywhere for a discovered skill', async () => {
-    // discoverSkillNames finds the dir via flat layout check, but SKILL.md is missing
-    // resolveSkillMdPath falls back to pluginPath/SKILL.md which also doesn't exist
-    // the catch block should yield description = ''
+  it('omits directories that lack a SKILL.md', async () => {
+    // A directory under skills/ with no SKILL.md is not a skill; recursive
+    // discovery walks past it instead of listing it as an empty entry.
     await mkdir(join(tmpDir, 'skills/eta'), { recursive: true });
-    // Intentionally no SKILL.md written
+
+    const result = await discoverSkillsWithMetadata(tmpDir);
+    expect(result).toEqual([]);
+  });
+
+  it('discovers nested skills below skills/<category>/', async () => {
+    await mkdir(join(tmpDir, 'skills/research/llm-wiki'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'skills/research/llm-wiki/SKILL.md'),
+      '---\nname: llm-wiki\ndescription: Wiki of LLMs\n---\n',
+    );
 
     const result = await discoverSkillsWithMetadata(tmpDir);
     expect(result).toHaveLength(1);
-    expect(result[0]?.name).toBe('eta');
-    expect(result[0]?.description).toBe('');
+    expect(result[0]?.name).toBe('llm-wiki');
+    expect(result[0]?.subpath).toBe('research/llm-wiki');
+    expect(result[0]?.description).toBe('Wiki of LLMs');
   });
 
   it('returns pluginName: undefined when not provided', async () => {

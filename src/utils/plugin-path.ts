@@ -1,13 +1,13 @@
 import { existsSync } from 'node:fs';
-import { join, resolve, isAbsolute } from 'node:path';
-import {
-  repoExists,
-  cloneToTemp,
-  cleanupTempDir,
-  gitHubUrl,
-  GitCloneError,
-} from '../core/git.js';
+import { isAbsolute, join, resolve } from 'node:path';
 import { getHomeDir } from '../constants.js';
+import {
+  GitCloneError,
+  cleanupTempDir,
+  cloneToTemp,
+  gitHubUrl,
+  repoExists,
+} from '../core/git.js';
 
 /**
  * Plugin source types
@@ -36,7 +36,9 @@ export function stripGitRef(spec: string): string {
   if (atIdx === -1) return spec;
   const cleanRepo = repoSeg.slice(0, atIdx);
   const rest = parts.slice(2);
-  return rest.length === 0 ? `${ownerSeg}/${cleanRepo}` : `${ownerSeg}/${cleanRepo}/${rest.join('/')}`;
+  return rest.length === 0
+    ? `${ownerSeg}/${cleanRepo}`
+    : `${ownerSeg}/${cleanRepo}/${rest.join('/')}`;
 }
 
 /**
@@ -148,7 +150,8 @@ export function parseGitHubUrl(
       // Split @ref off the repo segment, if present.
       const atIdx = rawRepo.indexOf('@');
       const repo = atIdx === -1 ? rawRepo : rawRepo.slice(0, atIdx);
-      const branch = atIdx === -1 ? undefined : rawRepo.slice(atIdx + 1) || undefined;
+      const branch =
+        atIdx === -1 ? undefined : rawRepo.slice(atIdx + 1) || undefined;
       if (!validOwnerRepo.test(repo)) return null;
 
       if (parts.length > 2) {
@@ -295,6 +298,37 @@ export function parsePluginSource(
 }
 
 /**
+ * Render a plugin source as a short, human-readable label.
+ *
+ * Used for display only — the original source string is preserved in
+ * workspace.yaml. Default branches (`main`/`master`) are elided from the
+ * label; any other branch is retained as `OWNER/REPO@<branch>`.
+ *
+ * @param source - Plugin source string (any of the GitHub forms, local path,
+ *                 or `plugin@marketplace` shorthand)
+ * @returns Short display label suitable for CLI status/list output
+ */
+export function formatPluginSource(source: string): string {
+  if (!source) return source;
+  const trimmed = source.trim();
+  if (!trimmed) return source;
+
+  // Leave plugin@marketplace specs (no slash before the @) untouched.
+  if (!trimmed.includes('/') && trimmed.includes('@')) return trimmed;
+  if (!isGitHubUrl(trimmed)) return trimmed;
+
+  const parsed = parseGitHubUrl(trimmed);
+  if (!parsed) return trimmed;
+
+  const { owner, repo, branch, subpath } = parsed;
+  const isDefaultBranch = !branch || branch === 'main' || branch === 'master';
+  const base = isDefaultBranch
+    ? `${owner}/${repo}`
+    : `${owner}/${repo}@${branch}`;
+  return subpath ? `${base}/${subpath}` : base;
+}
+
+/**
  * Sanitize a branch name for use in filesystem paths
  * Replaces slashes and other problematic characters with underscores
  * @param branch - Branch name to sanitize
@@ -312,12 +346,18 @@ function sanitizeBranchForPath(branch: string): string {
  * @param branch - Optional branch name (if specified, creates branch-specific cache)
  * @returns Cache directory path
  */
-export function getPluginCachePath(owner: string, repo: string, branch?: string): string {
+export function getPluginCachePath(
+  owner: string,
+  repo: string,
+  branch?: string,
+): string {
   const basePath = `${owner}-${repo}`;
 
   // If branch is specified, create a branch-specific cache path
   // This allows concurrent use of different branches from the same repo
-  const cacheName = branch ? `${basePath}@${sanitizeBranchForPath(branch)}` : basePath;
+  const cacheName = branch
+    ? `${basePath}@${sanitizeBranchForPath(branch)}`
+    : basePath;
 
   return resolve(
     getHomeDir(),
@@ -440,7 +480,8 @@ export async function verifyGitHubUrlExists(
   if (!parsed) {
     return {
       exists: false,
-      error: 'Invalid GitHub URL format. Expected: https://github.com/owner/repo',
+      error:
+        'Invalid GitHub URL format. Expected: https://github.com/owner/repo',
     };
   }
 

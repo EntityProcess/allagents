@@ -2,57 +2,91 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import chalk from 'chalk';
-import { command, positional, option, flag, string, optional, restPositionals } from 'cmd-ts';
-import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import {
-  removeDisabledSkill,
-  addEnabledSkill,
-  addPlugin,
-  hasPlugin,
-  resolveGitHubIdentity,
-  setPluginSkillsMode,
-  upsertGitHubPluginSourceAllowlist,
-} from '../../core/workspace-modify.js';
+  command,
+  flag,
+  option,
+  optional,
+  positional,
+  restPositionals,
+  string,
+} from 'cmd-ts';
 import {
-  removeUserDisabledSkill,
-  addUserEnabledSkill,
-  isUserConfigPath,
-  addUserPlugin,
-  hasUserPlugin,
-  setUserPluginSkillsMode,
-  upsertUserGitHubPluginSourceAllowlist,
-} from '../../core/user-workspace.js';
-import { getAllSkillsFromPlugins, findSkillByName, discoverSkillNames } from '../../core/skills.js';
-import { isJsonMode, jsonOutput } from '../json-output.js';
-import { buildDescription, conciseSubcommands } from '../help.js';
-import {
-  skillsListMeta,
-  skillsRemoveMeta,
-  skillsAddMeta,
-  skillsSearchMeta,
-} from '../metadata/plugin-skills.js';
-import {
-  searchSkills,
-  SkillSearchError,
-  qualifiedName,
-  type SkillSearchOptions,
-  type SkillSearchItem,
-} from '../../core/skill-search.js';
-import { getHomeDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../constants.js';
-import { isGitHubUrl, parseGitHubUrl, stripGitRef } from '../../utils/plugin-path.js';
-import { fetchPlugin, getPluginName, seedFetchCache } from '../../core/plugin.js';
-import { upsertSyncStateSource } from '../../core/sync-state.js';
-import { parseSkillMetadata } from '../../validators/skill.js';
+  CONFIG_DIR,
+  WORKSPACE_CONFIG_FILE,
+  getHomeDir,
+} from '../../constants.js';
 import {
   addMarketplace,
   findMarketplace,
   listMarketplacePlugins,
   updateMarketplace,
 } from '../../core/marketplace.js';
-import { parseMarketplaceManifest, resolvePluginSourcePath } from '../../utils/marketplace-manifest-parser.js';
-import { formatSyncHeader, formatSyncSummary, formatVerboseSyncLines } from '../format-sync.js';
-import { removeInstalledSkill } from '../skill-removal.js';
+import {
+  fetchPlugin,
+  getPluginName,
+  seedFetchCache,
+} from '../../core/plugin.js';
+import {
+  SkillSearchError,
+  type SkillSearchItem,
+  type SkillSearchOptions,
+  qualifiedName,
+  searchSkills,
+} from '../../core/skill-search.js';
+import {
+  type DiscoveredSkillEntry,
+  discoverSkillEntries,
+  discoverSkillNames,
+  findSkillByName,
+  getAllSkillsFromPlugins,
+} from '../../core/skills.js';
+import { upsertSyncStateSource } from '../../core/sync-state.js';
+import { syncUserWorkspace, syncWorkspace } from '../../core/sync.js';
 import type { SyncResult } from '../../core/sync.js';
+import {
+  addUserEnabledSkill,
+  addUserPlugin,
+  hasUserPlugin,
+  isUserConfigPath,
+  removeUserDisabledSkill,
+  setUserPluginSkillsMode,
+  upsertUserGitHubPluginSourceAllowlist,
+} from '../../core/user-workspace.js';
+import {
+  addEnabledSkill,
+  addPlugin,
+  hasPlugin,
+  removeDisabledSkill,
+  resolveGitHubIdentity,
+  setPluginSkillsMode,
+  upsertGitHubPluginSourceAllowlist,
+} from '../../core/workspace-modify.js';
+import {
+  parseMarketplaceManifest,
+  resolvePluginSourcePath,
+} from '../../utils/marketplace-manifest-parser.js';
+import {
+  formatPluginSource,
+  isGitHubUrl,
+  parseGitHubUrl,
+  stripGitRef,
+} from '../../utils/plugin-path.js';
+import { parseSkillMetadata } from '../../validators/skill.js';
+import {
+  formatSyncHeader,
+  formatSyncSummary,
+  formatVerboseSyncLines,
+} from '../format-sync.js';
+import { buildDescription, conciseSubcommands } from '../help.js';
+import { isJsonMode, jsonOutput } from '../json-output.js';
+import {
+  skillsAddMeta,
+  skillsListMeta,
+  skillsRemoveMeta,
+  skillsSearchMeta,
+} from '../metadata/plugin-skills.js';
+import { removeInstalledSkill } from '../skill-removal.js';
 
 /**
  * Check if a directory has a project-level .allagents config
@@ -110,7 +144,10 @@ async function recordSourceProvenance(opts: {
   });
 }
 
-export function resolveFetchedSourcePath(source: string, cachePath: string): string {
+export function resolveFetchedSourcePath(
+  source: string,
+  cachePath: string,
+): string {
   if (!isGitHubUrl(source)) return cachePath;
   const parsed = parseGitHubUrl(source);
   return parsed?.subpath ? join(cachePath, parsed.subpath) : cachePath;
@@ -143,7 +180,11 @@ function extractInlineRef(spec: string): string | undefined {
  */
 export function resolveSkillFromUrl(
   skill: string,
-): { skill: string; from: string; parsed: ReturnType<typeof parseGitHubUrl> } | null {
+): {
+  skill: string;
+  from: string;
+  parsed: ReturnType<typeof parseGitHubUrl>;
+} | null {
   if (!isGitHubUrl(skill)) return null;
 
   const parsed = parseGitHubUrl(skill);
@@ -175,7 +216,10 @@ export async function resolveSkillNameFromRepo(
   if (!fetchResult.success) return fallbackName;
 
   try {
-    const skillMd = await readFile(join(fetchResult.cachePath, 'SKILL.md'), 'utf-8');
+    const skillMd = await readFile(
+      join(fetchResult.cachePath, 'SKILL.md'),
+      'utf-8',
+    );
     const metadata = parseSkillMetadata(skillMd);
     return metadata?.name ?? fallbackName;
   } catch {
@@ -187,18 +231,41 @@ export async function resolveSkillNameFromRepo(
  * Group skills by plugin for display
  */
 function groupSkillsByPlugin(
-  skills: Array<{ name: string; pluginName: string; pluginSource: string; disabled: boolean }>,
-): Map<string, { source: string; skills: Array<{ name: string; disabled: boolean }> }> {
-  const grouped = new Map<string, { source: string; skills: Array<{ name: string; disabled: boolean }> }>();
+  skills: Array<{
+    name: string;
+    pluginName: string;
+    pluginSource: string;
+    disabled: boolean;
+    skillSubpath?: string;
+  }>,
+): Map<
+  string,
+  {
+    source: string;
+    skills: Array<{ name: string; subpath: string; disabled: boolean }>;
+  }
+> {
+  const grouped = new Map<
+    string,
+    {
+      source: string;
+      skills: Array<{ name: string; subpath: string; disabled: boolean }>;
+    }
+  >();
 
   for (const skill of skills) {
+    const entry = {
+      name: skill.name,
+      subpath: skill.skillSubpath ?? skill.name,
+      disabled: skill.disabled,
+    };
     const existing = grouped.get(skill.pluginName);
     if (existing) {
-      existing.skills.push({ name: skill.name, disabled: skill.disabled });
+      existing.skills.push(entry);
     } else {
       grouped.set(skill.pluginName, {
         source: skill.pluginSource,
-        skills: [{ name: skill.name, disabled: skill.disabled }],
+        skills: [entry],
       });
     }
   }
@@ -230,17 +297,24 @@ const listCmd = command({
       const showUser = scope !== 'project';
       const showProject = scope === 'project' || (!scope && inProjectDir);
 
-      const userSkills = showUser ? await getAllSkillsFromPlugins(getHomeDir()) : [];
-      const projectSkills = showProject ? await getAllSkillsFromPlugins(cwd) : [];
+      const userSkills = showUser
+        ? await getAllSkillsFromPlugins(getHomeDir())
+        : [];
+      const projectSkills = showProject
+        ? await getAllSkillsFromPlugins(cwd)
+        : [];
 
       // For dedup: if same plugin:skill exists in both, only show in user
-      const userKeys = new Set(userSkills.map((s) => `${s.pluginName}:${s.name}`));
+      const userKeys = new Set(
+        userSkills.map((s) => `${s.pluginName}:${s.name}`),
+      );
       const dedupedProjectSkills = projectSkills.filter(
         (s) => !userKeys.has(`${s.pluginName}:${s.name}`),
       );
 
       if (isJsonMode()) {
-        const effectiveScope = scope === 'user' ? 'user' : scope === 'project' ? 'project' : 'all';
+        const effectiveScope =
+          scope === 'user' ? 'user' : scope === 'project' ? 'project' : 'all';
         const allSkills = [...userSkills, ...dedupedProjectSkills];
         jsonOutput({
           success: true,
@@ -268,11 +342,15 @@ const listCmd = command({
         console.log(`\n${chalk.whiteBright('User Skills:')}`);
         const grouped = groupSkillsByPlugin(userSkills);
         for (const [pluginName, data] of grouped) {
-          console.log(`\n${chalk.hex("#89b4fa")(pluginName)} (${data.source}):`);
+          console.log(
+            `\n${chalk.hex('#89b4fa')(pluginName)} (${formatPluginSource(data.source)}):`,
+          );
           for (const skill of data.skills) {
             const icon = skill.disabled ? '\u2717' : '\u2713';
             const status = skill.disabled ? ' (disabled)' : '';
-            console.log(`  ${icon} ${skill.name}${status}`);
+            const displayName =
+              skill.subpath !== skill.name ? skill.subpath : skill.name;
+            console.log(`  ${icon} ${displayName}${status}`);
           }
         }
       }
@@ -282,11 +360,15 @@ const listCmd = command({
         console.log(`\n${chalk.whiteBright('Project Skills:')}`);
         const grouped = groupSkillsByPlugin(dedupedProjectSkills);
         for (const [pluginName, data] of grouped) {
-          console.log(`\n${chalk.hex("#89b4fa")(pluginName)} (${data.source}):`);
+          console.log(
+            `\n${chalk.hex('#89b4fa')(pluginName)} (${formatPluginSource(data.source)}):`,
+          );
           for (const skill of data.skills) {
             const icon = skill.disabled ? '\u2717' : '\u2713';
             const status = skill.disabled ? ' (disabled)' : '';
-            console.log(`  ${icon} ${skill.name}${status}`);
+            const displayName =
+              skill.subpath !== skill.name ? skill.subpath : skill.name;
+            console.log(`  ${icon} ${displayName}${status}`);
           }
         }
       }
@@ -294,7 +376,11 @@ const listCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'skill list', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'skill list',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -329,7 +415,8 @@ const removeCmd = command({
   },
   handler: async ({ skill, scope, plugin }) => {
     try {
-      const isUser = scope === 'user' || (!scope && resolveScope(process.cwd()) === 'user');
+      const isUser =
+        scope === 'user' || (!scope && resolveScope(process.cwd()) === 'user');
       const workspacePath = isUser ? getHomeDir() : process.cwd();
 
       // Find the skill
@@ -337,7 +424,9 @@ const removeCmd = command({
       const matches = allSkills.filter((candidate) => candidate.name === skill);
 
       if (matches.length === 0) {
-        const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
+        const skillNames = [...new Set(allSkills.map((s) => s.name))].join(
+          ', ',
+        );
         const error = `Skill '${skill}' not found in any installed plugin.\n\nAvailable skills: ${skillNames || 'none'}`;
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'skill remove', error });
@@ -355,7 +444,9 @@ const removeCmd = command({
       }
       if (matches.length > 1) {
         if (!plugin) {
-          const pluginList = matches.map((m) => `  - ${m.pluginName} (${m.pluginSource})`).join('\n');
+          const pluginList = matches
+            .map((m) => `  - ${m.pluginName} (${m.pluginSource})`)
+            .join('\n');
           const error = `'${skill}' exists in multiple plugins:\n${pluginList}\n\nUse --plugin to specify: allagents skill remove ${skill} --plugin <name>`;
           if (isJsonMode()) {
             jsonOutput({ success: false, command: 'skill remove', error });
@@ -396,7 +487,11 @@ const removeCmd = command({
       });
       if (!result.success) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'skill remove', error: result.error ?? 'Unknown error' });
+          jsonOutput({
+            success: false,
+            command: 'skill remove',
+            error: result.error ?? 'Unknown error',
+          });
           process.exit(1);
         }
         console.error(`Error: ${result.error}`);
@@ -407,13 +502,19 @@ const removeCmd = command({
         if (result.action === 'removed-plugin') {
           console.log(`\u2713 Removed plugin: ${targetSkill.pluginSource}`);
         } else if (result.action === 'removed-skill') {
-          console.log(`\u2713 Removed skill: ${skill} (${targetSkill.pluginName})`);
+          console.log(
+            `\u2713 Removed skill: ${skill} (${targetSkill.pluginName})`,
+          );
         } else {
-          console.log(`\u2713 Disabled skill: ${skill} (${targetSkill.pluginName})`);
+          console.log(
+            `\u2713 Disabled skill: ${skill} (${targetSkill.pluginName})`,
+          );
         }
       }
 
-      const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+      const syncResult = isUser
+        ? await syncUserWorkspace()
+        : await syncWorkspace(workspacePath);
 
       if (isJsonMode()) {
         jsonOutput({
@@ -434,7 +535,11 @@ const removeCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'skill remove', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'skill remove',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -450,7 +555,11 @@ const removeCmd = command({
 // =============================================================================
 
 type InstallSkillResult =
-  | { success: true; pluginName: string; syncResult: { copied: number; failed: number } }
+  | {
+      success: true;
+      pluginName: string;
+      syncResult: { copied: number; failed: number };
+    }
   | { success: false; error: string };
 
 /**
@@ -468,16 +577,21 @@ type InstallSkillFromSourceDeps = {
   installSkillDirect?: typeof installSkillDirect;
 };
 
-export async function installSkillFromSource(opts: {
-  skill: string;
-  from: string;
-  isUser: boolean;
-  workspacePath: string;
-}, deps: InstallSkillFromSourceDeps = {}): Promise<InstallSkillResult> {
+export async function installSkillFromSource(
+  opts: {
+    skill: string;
+    from: string;
+    isUser: boolean;
+    workspacePath: string;
+  },
+  deps: InstallSkillFromSourceDeps = {},
+): Promise<InstallSkillResult> {
   const { skill, from, isUser, workspacePath } = opts;
   const fetchPluginFn = deps.fetchPlugin ?? fetchPlugin;
-  const parseMarketplaceManifestFn = deps.parseMarketplaceManifest ?? parseMarketplaceManifest;
-  const installSkillViaMarketplaceFn = deps.installSkillViaMarketplace ?? installSkillViaMarketplace;
+  const parseMarketplaceManifestFn =
+    deps.parseMarketplaceManifest ?? parseMarketplaceManifest;
+  const installSkillViaMarketplaceFn =
+    deps.installSkillViaMarketplace ?? installSkillViaMarketplace;
   const installSkillDirectFn = deps.installSkillDirect ?? installSkillDirect;
 
   if (!isJsonMode()) {
@@ -490,7 +604,10 @@ export async function installSkillFromSource(opts: {
     ...(parsed?.branch && { branch: parsed.branch }),
   });
   if (!fetchResult.success) {
-    return { success: false, error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}` };
+    return {
+      success: false,
+      error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}`,
+    };
   }
 
   const sourcePath = resolveFetchedSourcePath(from, fetchResult.cachePath);
@@ -503,7 +620,13 @@ export async function installSkillFromSource(opts: {
   }
 
   // Not a marketplace — install as a direct plugin
-  return installSkillDirectFn({ skill, from, isUser, workspacePath, sourcePath });
+  return installSkillDirectFn({
+    skill,
+    from,
+    isUser,
+    workspacePath,
+    sourcePath,
+  });
 }
 
 /**
@@ -530,7 +653,10 @@ async function installSkillViaMarketplace(opts: {
 
   if (existingAnyScope) {
     marketplaceName = existingAnyScope.name;
-    await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
+    await updateMarketplace(
+      marketplaceName,
+      isUser ? undefined : workspacePath,
+    );
   } else {
     // Register at the target scope
     const scopeOptions = isUser
@@ -551,13 +677,22 @@ async function installSkillViaMarketplace(opts: {
   }
 
   if (!marketplaceName) {
-    return { success: false, error: `Failed to register marketplace from '${from}'` };
+    return {
+      success: false,
+      error: `Failed to register marketplace from '${from}'`,
+    };
   }
 
   // List plugins in the marketplace and scan each for the requested skill
-  const mktPlugins = await listMarketplacePlugins(marketplaceName, isUser ? undefined : workspacePath);
+  const mktPlugins = await listMarketplacePlugins(
+    marketplaceName,
+    isUser ? undefined : workspacePath,
+  );
   if (mktPlugins.plugins.length === 0) {
-    return { success: false, error: `No plugins found in marketplace '${marketplaceName}'.` };
+    return {
+      success: false,
+      error: `No plugins found in marketplace '${marketplaceName}'.`,
+    };
   }
 
   let targetPluginName: string | null = null;
@@ -590,13 +725,90 @@ async function installSkillViaMarketplace(opts: {
 
   if (!installResult.success) {
     // Plugin may already be installed — that's fine, we just need to add the skill
-    if (!installResult.error?.includes('already exists') && !installResult.error?.includes('duplicates existing')) {
-      return { success: false, error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}` };
+    if (
+      !installResult.error?.includes('already exists') &&
+      !installResult.error?.includes('duplicates existing')
+    ) {
+      return {
+        success: false,
+        error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}`,
+      };
     }
   }
 
   // Set allowlist or add skill to existing allowlist
-  return applySkillAllowlist({ skill, pluginName: targetPluginName, isUser, workspacePath });
+  return applySkillAllowlist({
+    skill,
+    pluginName: targetPluginName,
+    isUser,
+    workspacePath,
+  });
+}
+
+/**
+ * Decide whether the positional argument to `skill add` is a plugin source
+ * (npx-skills shape) or a skill name (legacy shape).
+ *
+ * The positional is interpreted as a source only when it looks like a GitHub
+ * spec AND the user supplied an explicit selector (--skill, --list, --all).
+ * Without a selector we fall through to the legacy resolveSkillFromUrl path,
+ * which preserves the deep-URL form `skill add <url-with-subpath>`.
+ */
+export function classifySkillAddPositional(
+  positional: string | undefined,
+  skillFlag: string | undefined,
+  list: boolean,
+  all: boolean,
+):
+  | { shape: 'none' }
+  | { shape: 'skill-name' }
+  | { shape: 'source'; skills: string[] } {
+  if (!positional) return { shape: 'none' };
+  const skills = skillFlag
+    ? skillFlag
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  const hasSelector = skills.length > 0 || list || all;
+  if (isGitHubUrl(positional) && hasSelector) {
+    return { shape: 'source', skills };
+  }
+  return { shape: 'skill-name' };
+}
+
+/**
+ * Resolve a user-supplied skill spec (bare leaf name or `parent/leaf`) against
+ * the available entries in a plugin. Returns the canonical identifier to
+ * persist in the allowlist — bare leaf name when unambiguous, qualified
+ * subpath when the leaf is shared by multiple nested skills.
+ */
+function resolveSkillSpec(
+  spec: string,
+  available: DiscoveredSkillEntry[],
+): { canonical: string; matched: DiscoveredSkillEntry } | { error: string } {
+  const exact = available.find((e) => e.subpath === spec);
+  if (exact) {
+    const canonical = exact.subpath === exact.name ? exact.name : exact.subpath;
+    return { canonical, matched: exact };
+  }
+
+  const nameMatches = available.filter((e) => e.name === spec);
+  if (nameMatches.length === 1) {
+    const m = nameMatches[0] as DiscoveredSkillEntry;
+    return { canonical: m.name, matched: m };
+  }
+  if (nameMatches.length > 1) {
+    const paths = nameMatches.map((m) => m.subpath).join(', ');
+    return {
+      error: `Multiple skills named '${spec}': ${paths}. Use the qualified form (e.g., --skill ${nameMatches[0]?.subpath}) to choose one.`,
+    };
+  }
+
+  const available_names = available.map((e) => e.subpath).join(', ');
+  return {
+    error: `Skill '${spec}' not found.\n\nAvailable skills: ${available_names || 'none'}`,
+  };
 }
 
 /**
@@ -612,22 +824,32 @@ async function installSkillDirect(opts: {
   const { skill, from, isUser, workspacePath, sourcePath } = opts;
 
   // Verify the skill exists in the cached plugin before installing
-  const availableSkills = await discoverSkillNames(sourcePath);
-  if (!availableSkills.includes(skill)) {
+  const availableEntries = await discoverSkillEntries(sourcePath);
+  const resolved = resolveSkillSpec(skill, availableEntries);
+  if ('error' in resolved) {
     return {
       success: false,
-      error: `Skill '${skill}' not found in plugin '${from}'.\n\nAvailable skills: ${availableSkills.join(', ') || 'none'}\n\nTip: run \`allagents skill list\` to see all installed skills.`,
+      error: `${resolved.error}\n\nTip: run \`allagents skill add --list --from ${from}\` to see all available skills.`,
     };
   }
+  const canonicalSkill = resolved.canonical;
 
   if (isGitHubUrl(from)) {
-    const existingEnabledSkills = await getEnabledSkillsForGitHubSource(from, workspacePath);
+    const existingEnabledSkills = await getEnabledSkillsForGitHubSource(
+      from,
+      workspacePath,
+    );
     const desiredSkills = [...existingEnabledSkills];
-    if (!desiredSkills.includes(skill)) desiredSkills.push(skill);
+    if (!desiredSkills.includes(canonicalSkill))
+      desiredSkills.push(canonicalSkill);
 
     const updateResult = isUser
       ? await upsertUserGitHubPluginSourceAllowlist(from, desiredSkills)
-      : await upsertGitHubPluginSourceAllowlist(from, desiredSkills, workspacePath);
+      : await upsertGitHubPluginSourceAllowlist(
+          from,
+          desiredSkills,
+          workspacePath,
+        );
 
     if (!updateResult.success) {
       return {
@@ -637,8 +859,10 @@ async function installSkillDirect(opts: {
     }
 
     return finishSkillEnable({
-      skill,
-      pluginName: extractPrimaryPluginName(updateResult.normalizedPlugin ?? from),
+      skill: canonicalSkill,
+      pluginName: extractPrimaryPluginName(
+        updateResult.normalizedPlugin ?? from,
+      ),
       isUser,
       workspacePath,
     });
@@ -649,8 +873,14 @@ async function installSkillDirect(opts: {
     : await addPlugin(from, workspacePath);
 
   if (!installResult.success) {
-    if (!installResult.error?.includes('already exists') && !installResult.error?.includes('duplicates existing')) {
-      return { success: false, error: `Failed to install plugin '${from}': ${installResult.error ?? 'Unknown error'}` };
+    if (
+      !installResult.error?.includes('already exists') &&
+      !installResult.error?.includes('duplicates existing')
+    ) {
+      return {
+        success: false,
+        error: `Failed to install plugin '${from}': ${installResult.error ?? 'Unknown error'}`,
+      };
     }
     if (!isJsonMode()) {
       console.log('Plugin already installed.');
@@ -658,7 +888,12 @@ async function installSkillDirect(opts: {
   }
 
   const pluginName = getPluginName(sourcePath);
-  return applySkillAllowlist({ skill, pluginName, isUser, workspacePath });
+  return applySkillAllowlist({
+    skill: canonicalSkill,
+    pluginName,
+    isUser,
+    workspacePath,
+  });
 }
 
 function extractPrimaryPluginName(source: string): string {
@@ -718,17 +953,28 @@ async function applySkillAllowlist(opts: {
     if (!addResult.success) {
       // Already in allowlist = already enabled
       if (!addResult.error?.includes('already enabled')) {
-        return { success: false, error: `Failed to enable skill: ${addResult.error ?? 'Unknown error'}` };
+        return {
+          success: false,
+          error: `Failed to enable skill: ${addResult.error ?? 'Unknown error'}`,
+        };
       }
     }
   } else {
     // No allowlist yet — create one with just this skill
     const setModeResult = isUser
       ? await setUserPluginSkillsMode(pluginName, 'allowlist', [skill])
-      : await setPluginSkillsMode(pluginName, 'allowlist', [skill], workspacePath);
+      : await setPluginSkillsMode(
+          pluginName,
+          'allowlist',
+          [skill],
+          workspacePath,
+        );
 
     if (!setModeResult.success) {
-      return { success: false, error: `Failed to configure skill allowlist: ${setModeResult.error ?? 'Unknown error'}` };
+      return {
+        success: false,
+        error: `Failed to configure skill allowlist: ${setModeResult.error ?? 'Unknown error'}`,
+      };
     }
   }
 
@@ -747,7 +993,9 @@ async function finishSkillEnable(opts: {
     console.log(`\u2713 Enabled skill: ${skill} (${pluginName})`);
   }
 
-  const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+  const syncResult = isUser
+    ? await syncUserWorkspace()
+    : await syncWorkspace(workspacePath);
   if (!syncResult.success) {
     return { success: false, error: 'Sync failed' };
   }
@@ -768,22 +1016,10 @@ async function finishSkillEnable(opts: {
 
 interface DiscoveredSkill {
   name: string;
+  /** Path-qualified identifier when the skill is nested below `skills/`. */
+  subpath: string;
   description: string;
   pluginName?: string;
-}
-
-/**
- * Resolve the SKILL.md path for a skill name in a plugin directory.
- * Handles standard (skills/<name>/), flat (<name>/), and root layouts.
- */
-function resolveSkillMdPath(pluginPath: string, skillName: string): string {
-  const standardPath = join(pluginPath, 'skills', skillName, 'SKILL.md');
-  if (existsSync(standardPath)) return standardPath;
-
-  const flatPath = join(pluginPath, skillName, 'SKILL.md');
-  if (existsSync(flatPath)) return flatPath;
-
-  return join(pluginPath, 'SKILL.md');
 }
 
 /**
@@ -793,11 +1029,11 @@ export async function discoverSkillsWithMetadata(
   pluginPath: string,
   pluginName?: string,
 ): Promise<DiscoveredSkill[]> {
-  const names = await discoverSkillNames(pluginPath);
+  const entries = await discoverSkillEntries(pluginPath);
   const results: DiscoveredSkill[] = [];
 
-  for (const name of names) {
-    const skillMdPath = resolveSkillMdPath(pluginPath, name);
+  for (const entry of entries) {
+    const skillMdPath = join(entry.skillPath, 'SKILL.md');
     let description = '';
     try {
       const content = await readFile(skillMdPath, 'utf-8');
@@ -806,7 +1042,12 @@ export async function discoverSkillsWithMetadata(
     } catch {
       // Leave description empty
     }
-    results.push({ name, description, ...(pluginName && { pluginName }) });
+    results.push({
+      name: entry.name,
+      subpath: entry.subpath,
+      description,
+      ...(pluginName && { pluginName }),
+    });
   }
 
   return results;
@@ -816,7 +1057,9 @@ export async function discoverSkillsWithMetadata(
  * Discover all skills available at a --from source. Handles both direct plugins
  * and marketplaces (in which case skills from all marketplace plugins are returned).
  */
-async function discoverSkillsFromSource(from: string): Promise<
+async function discoverSkillsFromSource(
+  from: string,
+): Promise<
   | { success: true; skills: DiscoveredSkill[]; isMarketplace: boolean }
   | { success: false; error: string }
 > {
@@ -825,7 +1068,10 @@ async function discoverSkillsFromSource(from: string): Promise<
     ...(parsed?.branch && { branch: parsed.branch }),
   });
   if (!fetchResult.success) {
-    return { success: false, error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}` };
+    return {
+      success: false,
+      error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}`,
+    };
   }
 
   const sourcePath = resolveFetchedSourcePath(from, fetchResult.cachePath);
@@ -856,7 +1102,11 @@ async function installAllSkillsFromSource(opts: {
   isUser: boolean;
   workspacePath: string;
 }): Promise<
-  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: SyncResult }
+  | {
+      success: true;
+      installed: Array<{ pluginName: string; skills: string[] }>;
+      syncResult: SyncResult;
+    }
   | { success: false; error: string }
 > {
   const { from, isUser, workspacePath } = opts;
@@ -870,14 +1120,22 @@ async function installAllSkillsFromSource(opts: {
     ...(parsed?.branch && { branch: parsed.branch }),
   });
   if (!fetchResult.success) {
-    return { success: false, error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}` };
+    return {
+      success: false,
+      error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}`,
+    };
   }
 
   const sourcePath = resolveFetchedSourcePath(from, fetchResult.cachePath);
   const manifestResult = await parseMarketplaceManifest(sourcePath);
 
   if (manifestResult.success) {
-    return installAllViaMarketplace({ from, isUser, workspacePath, cachedPath: fetchResult.cachePath });
+    return installAllViaMarketplace({
+      from,
+      isUser,
+      workspacePath,
+      cachedPath: fetchResult.cachePath,
+    });
   }
 
   // Direct plugin install — enable every discovered skill
@@ -887,7 +1145,10 @@ async function installAllSkillsFromSource(opts: {
   }
 
   if (isGitHubUrl(from)) {
-    const existingEnabledSkills = await getEnabledSkillsForGitHubSource(from, workspacePath);
+    const existingEnabledSkills = await getEnabledSkillsForGitHubSource(
+      from,
+      workspacePath,
+    );
     const desiredSkills = [...existingEnabledSkills];
     for (const skillName of skillNames) {
       if (!desiredSkills.includes(skillName)) desiredSkills.push(skillName);
@@ -895,7 +1156,11 @@ async function installAllSkillsFromSource(opts: {
 
     const updateResult = isUser
       ? await upsertUserGitHubPluginSourceAllowlist(from, desiredSkills)
-      : await upsertGitHubPluginSourceAllowlist(from, desiredSkills, workspacePath);
+      : await upsertGitHubPluginSourceAllowlist(
+          from,
+          desiredSkills,
+          workspacePath,
+        );
 
     if (!updateResult.success) {
       return {
@@ -904,13 +1169,19 @@ async function installAllSkillsFromSource(opts: {
       };
     }
 
-    const pluginName = extractPrimaryPluginName(updateResult.normalizedPlugin ?? from);
+    const pluginName = extractPrimaryPluginName(
+      updateResult.normalizedPlugin ?? from,
+    );
 
     if (!isJsonMode()) {
-      console.log(`✓ Enabled ${skillNames.length} skill(s) from ${pluginName}: ${skillNames.join(', ')}`);
+      console.log(
+        `✓ Enabled ${skillNames.length} skill(s) from ${pluginName}: ${skillNames.join(', ')}`,
+      );
     }
 
-    const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+    const syncResult = isUser
+      ? await syncUserWorkspace()
+      : await syncWorkspace(workspacePath);
     if (!syncResult.success) {
       return { success: false, error: 'Sync failed' };
     }
@@ -922,10 +1193,18 @@ async function installAllSkillsFromSource(opts: {
     };
   }
 
-  const installResult = isUser ? await addUserPlugin(from) : await addPlugin(from, workspacePath);
+  const installResult = isUser
+    ? await addUserPlugin(from)
+    : await addPlugin(from, workspacePath);
   if (!installResult.success) {
-    if (!installResult.error?.includes('already exists') && !installResult.error?.includes('duplicates existing')) {
-      return { success: false, error: `Failed to install plugin '${from}': ${installResult.error ?? 'Unknown error'}` };
+    if (
+      !installResult.error?.includes('already exists') &&
+      !installResult.error?.includes('duplicates existing')
+    ) {
+      return {
+        success: false,
+        error: `Failed to install plugin '${from}': ${installResult.error ?? 'Unknown error'}`,
+      };
     }
     if (!isJsonMode()) {
       console.log('Plugin already installed.');
@@ -936,17 +1215,29 @@ async function installAllSkillsFromSource(opts: {
 
   const setModeResult = isUser
     ? await setUserPluginSkillsMode(pluginName, 'allowlist', skillNames)
-    : await setPluginSkillsMode(pluginName, 'allowlist', skillNames, workspacePath);
+    : await setPluginSkillsMode(
+        pluginName,
+        'allowlist',
+        skillNames,
+        workspacePath,
+      );
 
   if (!setModeResult.success) {
-    return { success: false, error: `Failed to configure skill allowlist: ${setModeResult.error ?? 'Unknown error'}` };
+    return {
+      success: false,
+      error: `Failed to configure skill allowlist: ${setModeResult.error ?? 'Unknown error'}`,
+    };
   }
 
   if (!isJsonMode()) {
-    console.log(`✓ Enabled ${skillNames.length} skill(s) from ${pluginName}: ${skillNames.join(', ')}`);
+    console.log(
+      `✓ Enabled ${skillNames.length} skill(s) from ${pluginName}: ${skillNames.join(', ')}`,
+    );
   }
 
-  const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+  const syncResult = isUser
+    ? await syncUserWorkspace()
+    : await syncWorkspace(workspacePath);
   if (!syncResult.success) {
     return { success: false, error: 'Sync failed' };
   }
@@ -967,7 +1258,11 @@ async function installAllViaMarketplace(opts: {
   workspacePath: string;
   cachedPath?: string;
 }): Promise<
-  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: SyncResult }
+  | {
+      success: true;
+      installed: Array<{ pluginName: string; skills: string[] }>;
+      syncResult: SyncResult;
+    }
   | { success: false; error: string }
 > {
   const { from, isUser, workspacePath, cachedPath } = opts;
@@ -983,7 +1278,10 @@ async function installAllViaMarketplace(opts: {
 
   if (existingAnyScope) {
     marketplaceName = existingAnyScope.name;
-    await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
+    await updateMarketplace(
+      marketplaceName,
+      isUser ? undefined : workspacePath,
+    );
   } else {
     // Seed the fetch cache so any fetchPlugin calls for individual plugins
     // within the marketplace reuse the already-fetched content.
@@ -1007,12 +1305,21 @@ async function installAllViaMarketplace(opts: {
   }
 
   if (!marketplaceName) {
-    return { success: false, error: `Failed to register marketplace from '${from}'` };
+    return {
+      success: false,
+      error: `Failed to register marketplace from '${from}'`,
+    };
   }
 
-  const mktPlugins = await listMarketplacePlugins(marketplaceName, isUser ? undefined : workspacePath);
+  const mktPlugins = await listMarketplacePlugins(
+    marketplaceName,
+    isUser ? undefined : workspacePath,
+  );
   if (mktPlugins.plugins.length === 0) {
-    return { success: false, error: `No plugins found in marketplace '${marketplaceName}'.` };
+    return {
+      success: false,
+      error: `No plugins found in marketplace '${marketplaceName}'.`,
+    };
   }
 
   const installed: Array<{ pluginName: string; skills: string[] }> = [];
@@ -1030,32 +1337,53 @@ async function installAllViaMarketplace(opts: {
       : await addPlugin(pluginSpec, workspacePath);
 
     if (!installResult.success) {
-      if (!installResult.error?.includes('already exists') && !installResult.error?.includes('duplicates existing')) {
-        return { success: false, error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}` };
+      if (
+        !installResult.error?.includes('already exists') &&
+        !installResult.error?.includes('duplicates existing')
+      ) {
+        return {
+          success: false,
+          error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}`,
+        };
       }
     }
 
     const setModeResult = isUser
       ? await setUserPluginSkillsMode(mktPlugin.name, 'allowlist', skillNames)
-      : await setPluginSkillsMode(mktPlugin.name, 'allowlist', skillNames, workspacePath);
+      : await setPluginSkillsMode(
+          mktPlugin.name,
+          'allowlist',
+          skillNames,
+          workspacePath,
+        );
 
     if (!setModeResult.success) {
-      return { success: false, error: `Failed to configure skill allowlist for '${mktPlugin.name}': ${setModeResult.error ?? 'Unknown error'}` };
+      return {
+        success: false,
+        error: `Failed to configure skill allowlist for '${mktPlugin.name}': ${setModeResult.error ?? 'Unknown error'}`,
+      };
     }
 
     installed.push({ pluginName: mktPlugin.name, skills: skillNames });
   }
 
   if (installed.length === 0) {
-    return { success: false, error: `No skills found across plugins in marketplace '${marketplaceName}'.` };
+    return {
+      success: false,
+      error: `No skills found across plugins in marketplace '${marketplaceName}'.`,
+    };
   }
 
   if (!isJsonMode()) {
     const total = installed.reduce((sum, i) => sum + i.skills.length, 0);
-    console.log(`✓ Enabled ${total} skill(s) across ${installed.length} plugin(s)`);
+    console.log(
+      `✓ Enabled ${total} skill(s) across ${installed.length} plugin(s)`,
+    );
   }
 
-  const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+  const syncResult = isUser
+    ? await syncUserWorkspace()
+    : await syncWorkspace(workspacePath);
   if (!syncResult.success) {
     return { success: false, error: 'Sync failed' };
   }
@@ -1075,7 +1403,10 @@ const addCmd = command({
   name: 'add',
   description: buildDescription(skillsAddMeta),
   args: {
-    skill: positional({ type: optional(string), displayName: 'skill' }),
+    skill: positional({
+      type: optional(string),
+      displayName: 'skill-or-source',
+    }),
     scope: option({
       type: optional(string),
       long: 'scope',
@@ -1092,12 +1423,20 @@ const addCmd = command({
       type: optional(string),
       long: 'from',
       short: 'f',
-      description: 'Plugin source to install if the skill is not already available',
+      description:
+        'Plugin source to install if the skill is not already available',
+    }),
+    skillFlag: option({
+      type: optional(string),
+      long: 'skill',
+      description:
+        'Comma-separated skill names to install when the positional argument is a plugin source (e.g., owner/repo --skill foo,bar)',
     }),
     pin: option({
       type: optional(string),
       long: 'pin',
-      description: 'Pin the plugin to a specific Git ref (tag, branch, or SHA). Mutually exclusive with inline @ref in --from.',
+      description:
+        'Pin the plugin to a specific Git ref (tag, branch, or SHA). Mutually exclusive with inline @ref in --from.',
     }),
     list: flag({
       long: 'list',
@@ -1109,8 +1448,53 @@ const addCmd = command({
       description: 'Install every skill from --from',
     }),
   },
-  handler: async ({ skill: skillArg, scope, plugin, from: fromArg, pin, list, all }) => {
+  handler: async ({
+    skill: skillArg,
+    scope,
+    plugin,
+    from: fromArg,
+    skillFlag,
+    pin,
+    list,
+    all,
+  }) => {
     try {
+      // npx-skills shape: positional is the source, --skill/--list/--all picks
+      // what to install. Triggered only when the positional looks like a GitHub
+      // source AND a selector is provided, so the legacy deep-URL form
+      // (positional with implicit subpath selector) keeps working.
+      const classified = classifySkillAddPositional(
+        skillArg,
+        skillFlag,
+        list,
+        all,
+      );
+      let skillsFromFlag: string[] = [];
+      if (classified.shape === 'source') {
+        if (fromArg) {
+          const error =
+            'Cannot use --from when the positional argument is already a plugin source.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'skill add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+        fromArg = skillArg;
+        skillArg = undefined;
+        skillsFromFlag = classified.skills;
+      } else if (skillFlag) {
+        const error =
+          '--skill requires the positional argument to be a plugin source (e.g., `skill add owner/repo --skill foo`). To install a known skill, pass the skill name as the positional.';
+        if (isJsonMode()) {
+          jsonOutput({ success: false, command: 'skill add', error });
+          process.exit(1);
+        }
+        console.error(`Error: ${error}`);
+        process.exit(1);
+      }
+
       // Resolve --pin together with inline @ref. Three legal states:
       //   • --pin only  → splice into fromArg
       //   • inline @ref → leave fromArg alone, remember pinnedRef
@@ -1120,7 +1504,8 @@ const addCmd = command({
       if (pin || fromArg) {
         const inlineRef = fromArg ? extractInlineRef(fromArg) : undefined;
         if (pin && inlineRef) {
-          const error = 'Cannot combine inline @version in --from with --pin. Use one or the other.';
+          const error =
+            'Cannot combine inline @version in --from with --pin. Use one or the other.';
           if (isJsonMode()) {
             jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
@@ -1149,7 +1534,8 @@ const addCmd = command({
       // --list: dry-run discovery, no workspace changes
       if (list) {
         if (skillArg) {
-          const error = 'Cannot combine a skill argument with --list. Use --list alone to discover available skills.';
+          const error =
+            'Cannot combine a skill argument with --list. Use --list alone to discover available skills.';
           if (isJsonMode()) {
             jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
@@ -1179,7 +1565,11 @@ const addCmd = command({
         const discovered = await discoverSkillsFromSource(fromArg);
         if (!discovered.success) {
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'skill add', error: discovered.error });
+            jsonOutput({
+              success: false,
+              command: 'skill add',
+              error: discovered.error,
+            });
             process.exit(1);
           }
           console.error(`Error: ${discovered.error}`);
@@ -1195,6 +1585,7 @@ const addCmd = command({
               isMarketplace: discovered.isMarketplace,
               skills: discovered.skills.map((s) => ({
                 name: s.name,
+                ...(s.subpath !== s.name && { path: s.subpath }),
                 description: s.description,
                 ...(s.pluginName && { plugin: s.pluginName }),
               })),
@@ -1210,7 +1601,10 @@ const addCmd = command({
 
         console.log(`\nAvailable skills in ${fromArg}:\n`);
         for (const s of discovered.skills) {
-          const label = s.pluginName ? `${s.name} ${chalk.gray(`(${s.pluginName})`)}` : s.name;
+          const displayName = s.subpath !== s.name ? s.subpath : s.name;
+          const label = s.pluginName
+            ? `${displayName} ${chalk.gray(`(${s.pluginName})`)}`
+            : displayName;
           console.log(`  ${chalk.hex('#89b4fa')(label)}`);
           if (s.description) console.log(`    ${s.description}`);
           console.log();
@@ -1230,7 +1624,8 @@ const addCmd = command({
           process.exit(1);
         }
         if (skillArg) {
-          const error = 'Cannot combine a skill argument with --all. Use --all alone to install every skill.';
+          const error =
+            'Cannot combine a skill argument with --all. Use --all alone to install every skill.';
           if (isJsonMode()) {
             jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
@@ -1250,7 +1645,11 @@ const addCmd = command({
 
         if (!installResult.success) {
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'skill add', error: installResult.error });
+            jsonOutput({
+              success: false,
+              command: 'skill add',
+              error: installResult.error,
+            });
             process.exit(1);
           }
           console.error(`Error: ${installResult.error}`);
@@ -1295,9 +1694,92 @@ const addCmd = command({
         return;
       }
 
+      // --skill <names>: install one-or-more named skills from the positional source.
+      if (skillsFromFlag.length > 0) {
+        if (!fromArg) {
+          // Defensive: positional detection above already guarantees fromArg
+          // when skillsFromFlag is non-empty.
+          const error = '--skill requires a plugin source positional argument.';
+          if (isJsonMode()) {
+            jsonOutput({ success: false, command: 'skill add', error });
+            process.exit(1);
+          }
+          console.error(`Error: ${error}`);
+          process.exit(1);
+        }
+
+        const isUserSel = scope === 'user';
+        const workspacePathSel = isUserSel ? getHomeDir() : process.cwd();
+
+        const succeeded: Array<{
+          skill: string;
+          plugin: string;
+          copied: number;
+          failed: number;
+        }> = [];
+        const failures: Array<{ skill: string; error: string }> = [];
+
+        for (const skill of skillsFromFlag) {
+          const result = await installSkillFromSource({
+            skill,
+            from: fromArg,
+            isUser: isUserSel,
+            workspacePath: workspacePathSel,
+          });
+          if (result.success) {
+            succeeded.push({
+              skill,
+              plugin: result.pluginName,
+              copied: result.syncResult.copied,
+              failed: result.syncResult.failed,
+            });
+          } else {
+            failures.push({ skill, error: result.error });
+          }
+        }
+
+        if (succeeded.length > 0) {
+          await recordSourceProvenance({
+            from: fromArg,
+            pinnedRef,
+            workspacePath: workspacePathSel,
+            isUser: isUserSel,
+          });
+        }
+
+        const allFailed = succeeded.length === 0;
+        if (isJsonMode()) {
+          jsonOutput({
+            success: !allFailed,
+            command: 'skill add',
+            data: {
+              source: fromArg,
+              installed: succeeded,
+              failed: failures,
+              ...(pinnedRef && { pinnedRef }),
+            },
+            ...(allFailed && {
+              error: failures.map((f) => `${f.skill}: ${f.error}`).join('; '),
+            }),
+          });
+          if (allFailed) process.exit(1);
+          return;
+        }
+
+        for (const f of failures) {
+          console.error(`Error installing '${f.skill}': ${f.error}`);
+        }
+        if (pinnedRef && succeeded.length > 0) {
+          console.log(`Pinned to ${pinnedRef}.`);
+        }
+        if (allFailed) process.exit(1);
+        return;
+      }
+
       // Without --list or --all, skill argument is required.
       if (!skillArg) {
-        const error = 'A skill name is required. Use --list to discover available skills or --all to install everything.';
+        const error =
+          'A skill name is required. Use --list to discover available skills or --all to install everything.';
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'skill add', error });
           process.exit(1);
@@ -1326,7 +1808,11 @@ const addCmd = command({
 
         // For URLs without subpath, try to read skill name from SKILL.md frontmatter
         if (urlResolved.parsed && !urlResolved.parsed.subpath) {
-          skill = await resolveSkillNameFromRepo(skill, urlResolved.parsed, urlResolved.skill);
+          skill = await resolveSkillNameFromRepo(
+            skill,
+            urlResolved.parsed,
+            urlResolved.skill,
+          );
         } else {
           skill = urlResolved.skill;
         }
@@ -1334,7 +1820,9 @@ const addCmd = command({
 
       // When --from is used (installing a new plugin), default to project scope
       const hasFromSource = Boolean(from);
-      const isUser = scope === 'user' || (!scope && !hasFromSource && resolveScope(process.cwd()) === 'user');
+      const isUser =
+        scope === 'user' ||
+        (!scope && !hasFromSource && resolveScope(process.cwd()) === 'user');
       const workspacePath = isUser ? getHomeDir() : process.cwd();
 
       // Find the skill
@@ -1352,7 +1840,11 @@ const addCmd = command({
 
           if (!installFromResult.success) {
             if (isJsonMode()) {
-              jsonOutput({ success: false, command: 'skill add', error: installFromResult.error });
+              jsonOutput({
+                success: false,
+                command: 'skill add',
+                error: installFromResult.error,
+              });
               process.exit(1);
             }
             console.error(`Error: ${installFromResult.error}`);
@@ -1388,7 +1880,9 @@ const addCmd = command({
         }
 
         const allSkills = await getAllSkillsFromPlugins(workspacePath);
-        const skillNames = [...new Set(allSkills.map((s) => s.name))].join(', ');
+        const skillNames = [...new Set(allSkills.map((s) => s.name))].join(
+          ', ',
+        );
         const error = `Skill '${skill}' not found in any installed plugin.\n\nAvailable skills: ${skillNames || 'none'}`;
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'skill add', error });
@@ -1406,7 +1900,9 @@ const addCmd = command({
       }
       if (matches.length > 1) {
         if (!plugin) {
-          const pluginList = matches.map((m) => `  - ${m.pluginName} (${m.pluginSource})`).join('\n');
+          const pluginList = matches
+            .map((m) => `  - ${m.pluginName} (${m.pluginSource})`)
+            .join('\n');
           const error = `'${skill}' exists in multiple plugins:\n${pluginList}\n\nUse --plugin to specify: allagents skill add ${skill} --plugin <name>`;
           if (isJsonMode()) {
             jsonOutput({ success: false, command: 'skill add', error });
@@ -1441,13 +1937,22 @@ const addCmd = command({
 
       const skillKey = `${targetSkill.pluginName}:${skill}`;
 
-      const result = targetSkill.pluginSkillsMode === 'blocklist'
-        ? isUser ? await removeUserDisabledSkill(skillKey) : await removeDisabledSkill(skillKey, workspacePath)
-        : isUser ? await addUserEnabledSkill(skillKey) : await addEnabledSkill(skillKey, workspacePath);
+      const result =
+        targetSkill.pluginSkillsMode === 'blocklist'
+          ? isUser
+            ? await removeUserDisabledSkill(skillKey)
+            : await removeDisabledSkill(skillKey, workspacePath)
+          : isUser
+            ? await addUserEnabledSkill(skillKey)
+            : await addEnabledSkill(skillKey, workspacePath);
 
       if (!result.success) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'skill add', error: result.error ?? 'Unknown error' });
+          jsonOutput({
+            success: false,
+            command: 'skill add',
+            error: result.error ?? 'Unknown error',
+          });
           process.exit(1);
         }
         console.error(`Error: ${result.error}`);
@@ -1455,10 +1960,14 @@ const addCmd = command({
       }
 
       if (!isJsonMode()) {
-        console.log(`\u2713 Enabled skill: ${skill} (${targetSkill.pluginName})`);
+        console.log(
+          `\u2713 Enabled skill: ${skill} (${targetSkill.pluginName})`,
+        );
       }
 
-      const syncResult = isUser ? await syncUserWorkspace() : await syncWorkspace(workspacePath);
+      const syncResult = isUser
+        ? await syncUserWorkspace()
+        : await syncWorkspace(workspacePath);
 
       if (isJsonMode()) {
         jsonOutput({
@@ -1479,7 +1988,11 @@ const addCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'skill add', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'skill add',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -1494,15 +2007,20 @@ const addCmd = command({
 // skill search (GitHub Code Search)
 // =============================================================================
 
-export function formatSkillSearchSummary(count: number, query: string, truncated: boolean): string {
+export function formatSkillSearchSummary(
+  count: number,
+  query: string,
+  truncated: boolean,
+): string {
   return `Showing ${count} skill${count !== 1 ? 's' : ''} matching "${query}"${truncated ? ' (truncated)' : ''}`;
 }
 
-export function formatSkillSearchHint(item: Pick<SkillSearchItem, 'stars' | 'description'>): string {
-  return [
-    item.stars > 0 ? `★ ${item.stars}` : '',
-    item.description ?? '',
-  ].filter(Boolean).join('  ');
+export function formatSkillSearchHint(
+  item: Pick<SkillSearchItem, 'stars' | 'description'>,
+): string {
+  return [item.stars > 0 ? `★ ${item.stars}` : '', item.description ?? '']
+    .filter(Boolean)
+    .join('  ');
 }
 
 export function collectSelectedSkillSearchRepos(
@@ -1523,17 +2041,29 @@ export function collectSelectedSkillSearchRepos(
 }
 
 /** Print results in gh-compatible tabular format: repo, skillName, description, stars. */
-function printSearchResults(items: SkillSearchItem[], query: string, truncated: boolean): void {
-  console.log(`\n${formatSkillSearchSummary(items.length, query, truncated)}\n`);
+function printSearchResults(
+  items: SkillSearchItem[],
+  query: string,
+  truncated: boolean,
+): void {
+  console.log(
+    `\n${formatSkillSearchSummary(items.length, query, truncated)}\n`,
+  );
   for (const item of items) {
     const repoCol = item.repo.padEnd(30);
     const nameCol = qualifiedName(item).padEnd(24);
     const stars = item.stars > 0 ? chalk.yellow(`★ ${item.stars}`) : '';
     const desc = item.description
-      ? chalk.dim(item.description.length > 60 ? `${item.description.slice(0, 57)}...` : item.description)
+      ? chalk.dim(
+          item.description.length > 60
+            ? `${item.description.slice(0, 57)}...`
+            : item.description,
+        )
       : '';
     const starsAndDesc = [stars, desc].filter(Boolean).join('  ');
-    console.log(`  ${chalk.cyan(repoCol)}  ${chalk.bold(nameCol)}  ${starsAndDesc}`);
+    console.log(
+      `  ${chalk.cyan(repoCol)}  ${chalk.bold(nameCol)}  ${starsAndDesc}`,
+    );
   }
   console.log('');
 }
@@ -1549,12 +2079,16 @@ async function installFromSearch(repos: string[]): Promise<boolean> {
   const installableRepos: string[] = [];
 
   for (const repo of repos) {
-    const isInstalledProject = hasProjectConfig(workspacePath) ? await hasPlugin(repo, workspacePath) : false;
+    const isInstalledProject = hasProjectConfig(workspacePath)
+      ? await hasPlugin(repo, workspacePath)
+      : false;
     const isInstalledUser = await hasUserPlugin(repo);
 
     if (isInstalledProject || isInstalledUser) {
       const scopeLabel = isInstalledUser ? 'user' : 'project';
-      p.log.info(`Plugin ${chalk.bold(repo)} is already installed (${scopeLabel} scope).`);
+      p.log.info(
+        `Plugin ${chalk.bold(repo)} is already installed (${scopeLabel} scope).`,
+      );
       continue;
     }
 
@@ -1576,16 +2110,19 @@ async function installFromSearch(repos: string[]): Promise<boolean> {
   if (p.isCancel(scopeChoice)) return false;
 
   const s = p.spinner();
-  s.start(`Installing ${installableRepos.length === 1 ? 'plugin' : 'plugins'}...`);
+  s.start(
+    `Installing ${installableRepos.length === 1 ? 'plugin' : 'plugins'}...`,
+  );
 
   try {
     const installedRepos: string[] = [];
     const failedRepos: Array<{ repo: string; error: string }> = [];
 
     for (const repo of installableRepos) {
-      const result = scopeChoice === 'project'
-        ? await addPlugin(repo, workspacePath)
-        : await addUserPlugin(repo);
+      const result =
+        scopeChoice === 'project'
+          ? await addPlugin(repo, workspacePath)
+          : await addUserPlugin(repo);
 
       if (!result.success) {
         failedRepos.push({ repo, error: result.error ?? 'Unknown error' });
@@ -1604,18 +2141,24 @@ async function installFromSearch(repos: string[]): Promise<boolean> {
     }
 
     s.message('Syncing...');
-    const syncResult = scopeChoice === 'project'
-      ? await syncWorkspace(workspacePath)
-      : await syncUserWorkspace();
+    const syncResult =
+      scopeChoice === 'project'
+        ? await syncWorkspace(workspacePath)
+        : await syncUserWorkspace();
 
-    s.stop(installedRepos.length === 1 ? 'Installed and synced' : 'Installed plugins and synced');
+    s.stop(
+      installedRepos.length === 1
+        ? 'Installed and synced'
+        : 'Installed plugins and synced',
+    );
 
     for (const { repo, error } of failedRepos) {
       p.log.error(`${chalk.bold(repo)}: ${error}`);
     }
 
     const lines = formatVerboseSyncLines(syncResult);
-    const noteLines = installedRepos.length > 1 ? [...installedRepos, '', ...lines] : lines;
+    const noteLines =
+      installedRepos.length > 1 ? [...installedRepos, '', ...lines] : lines;
     if (noteLines.length > 0) {
       p.note(
         noteLines.join('\n'),
@@ -1711,9 +2254,17 @@ const searchCmd = command({
       }
 
       // Interactive mode: filter-as-you-type multiselect with install support
-      const { autocompleteMultiselect, isCancel, log } = await import('@clack/prompts');
+      const { autocompleteMultiselect, isCancel, log } = await import(
+        '@clack/prompts'
+      );
 
-      log.success(formatSkillSearchSummary(result.items.length, searchQuery, result.truncated));
+      log.success(
+        formatSkillSearchSummary(
+          result.items.length,
+          searchQuery,
+          result.truncated,
+        ),
+      );
 
       const options = result.items.map((item) => ({
         label: `${qualifiedName(item)}  ${chalk.dim(item.repo)}`,
@@ -1732,7 +2283,10 @@ const searchCmd = command({
         return;
       }
 
-      const reposToInstall = collectSelectedSkillSearchRepos(result.items, selected as string[]);
+      const reposToInstall = collectSelectedSkillSearchRepos(
+        result.items,
+        selected as string[],
+      );
       if (reposToInstall.length === 0) {
         return;
       }
@@ -1742,7 +2296,11 @@ const searchCmd = command({
       if (error instanceof SkillSearchError) {
         const exitCode = error.kind === 'validation' ? 2 : 1;
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'skill search', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'skill search',
+            error: error.message,
+          });
           process.exit(exitCode);
         }
         console.error(`Error: ${error.message}`);
@@ -1750,7 +2308,11 @@ const searchCmd = command({
       }
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'skill search', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'skill search',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);

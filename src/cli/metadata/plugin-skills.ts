@@ -11,7 +11,12 @@ export const skillsListMeta: AgentCommandMeta = {
   ],
   expectedOutput: 'Lists skills grouped by plugin with enabled/disabled status',
   options: [
-    { flag: '--scope', short: '-s', type: 'string', description: 'Scope: "project" (default) or "user"' },
+    {
+      flag: '--scope',
+      short: '-s',
+      type: 'string',
+      description: 'Scope: "project" (default) or "user"',
+    },
   ],
   outputSchema: {
     skills: [{ name: 'string', plugin: 'string', disabled: 'boolean' }],
@@ -30,11 +35,26 @@ export const skillsRemoveMeta: AgentCommandMeta = {
   ],
   expectedOutput: 'Confirms skill was disabled and runs sync',
   positionals: [
-    { name: 'skill', type: 'string', required: true, description: 'Skill name to disable' },
+    {
+      name: 'skill',
+      type: 'string',
+      required: true,
+      description: 'Skill name to disable',
+    },
   ],
   options: [
-    { flag: '--scope', short: '-s', type: 'string', description: 'Scope: "project" (default) or "user"' },
-    { flag: '--plugin', short: '-p', type: 'string', description: 'Plugin name (required if skill exists in multiple plugins)' },
+    {
+      flag: '--scope',
+      short: '-s',
+      type: 'string',
+      description: 'Scope: "project" (default) or "user"',
+    },
+    {
+      flag: '--plugin',
+      short: '-p',
+      type: 'string',
+      description: 'Plugin name (required if skill exists in multiple plugins)',
+    },
   ],
   outputSchema: {
     skill: 'string',
@@ -45,7 +65,8 @@ export const skillsRemoveMeta: AgentCommandMeta = {
 
 export const skillsSearchMeta: AgentCommandMeta = {
   command: 'skill search',
-  description: 'Search GitHub for skills by querying SKILL.md files via the Code Search API. Results are ranked by relevance, with skill-name matches first. In TTY mode, shows a filter-as-you-type multi-select picker and offers to install the selected skills.',
+  description:
+    'Search GitHub for skills by querying SKILL.md files via the Code Search API. Results are ranked by relevance, with skill-name matches first. In TTY mode, shows a filter-as-you-type multi-select picker and offers to install the selected skills.',
   whenToUse:
     'To discover available skills from public GitHub repositories without leaving the CLI. Bridges "I want a skill that does X" → install.',
   examples: [
@@ -56,18 +77,46 @@ export const skillsSearchMeta: AgentCommandMeta = {
     'allagents skill search docs --page 2 --limit 10',
     'allagents --json skill search docs --limit 5',
   ],
-  expectedOutput: 'Skills ranked by relevance: repo, skill name, stars, description. In TTY mode, followed by a searchable multi-select install prompt.',
+  expectedOutput:
+    'Skills ranked by relevance: repo, skill name, stars, description. In TTY mode, followed by a searchable multi-select install prompt.',
   positionals: [
-    { name: 'query', type: 'string', required: true, description: 'Search query (≥2 characters).' },
+    {
+      name: 'query',
+      type: 'string',
+      required: true,
+      description: 'Search query (≥2 characters).',
+    },
   ],
   options: [
-    { flag: '--owner', type: 'string', description: 'Scope to a single GitHub owner (org or user).' },
-    { flag: '--page', type: 'string', description: 'Result page (1-indexed, default 1).' },
-    { flag: '--limit', type: 'string', description: 'Results per page (1–100, default 15).' },
+    {
+      flag: '--owner',
+      type: 'string',
+      description: 'Scope to a single GitHub owner (org or user).',
+    },
+    {
+      flag: '--page',
+      type: 'string',
+      description: 'Result page (1-indexed, default 1).',
+    },
+    {
+      flag: '--limit',
+      type: 'string',
+      description: 'Results per page (1–100, default 15).',
+    },
   ],
   outputSchema: {
     query: 'string',
-    items: [{ name: 'string', namespace: 'string', repo: 'string', path: 'string', description: 'string', sha: 'string', stars: 'number' }],
+    items: [
+      {
+        name: 'string',
+        namespace: 'string',
+        repo: 'string',
+        path: 'string',
+        description: 'string',
+        sha: 'string',
+        stars: 'number',
+      },
+    ],
     total: 'number',
     truncated: 'boolean',
   },
@@ -75,11 +124,16 @@ export const skillsSearchMeta: AgentCommandMeta = {
 
 export const skillsAddMeta: AgentCommandMeta = {
   command: 'skill add',
-  description: 'Add a skill from a plugin, or re-enable a previously disabled skill',
+  description:
+    'Add a skill from a plugin, or re-enable a previously disabled skill',
   whenToUse:
     'To add a skill from a GitHub repo or marketplace plugin, or to re-enable a skill that was previously disabled',
   examples: [
     'allagents skill add reddit --from ReScienceLab/opc-skills',
+    'allagents skill add NousResearch/hermes-agent --skill llm-wiki',
+    'allagents skill add NousResearch/hermes-agent --skill llm-wiki,dogfood',
+    'allagents skill add NousResearch/hermes-agent --list',
+    'allagents skill add NousResearch/hermes-agent --all',
     'allagents skill add https://github.com/owner/repo/tree/main/skills/my-skill',
     'allagents skill add brainstorming',
     'allagents skill add brainstorming --plugin superpowers',
@@ -89,14 +143,20 @@ export const skillsAddMeta: AgentCommandMeta = {
   expectedOutput: 'Confirms skill was enabled and runs sync',
   positionals: [
     {
-      name: 'skill',
+      name: 'skill-or-source',
       type: 'string',
       required: false,
-      description: 'Skill name to add, or a GitHub URL pointing to a skill. Omit with --list or --all.',
+      description:
+        'Either a skill name (paired with --from) or a plugin source (owner/repo, gh:..., or a GitHub URL — paired with --skill, --list, or --all).',
     },
   ],
   options: [
-    { flag: '--scope', short: '-s', type: 'string', description: 'Scope: "project" (default) or "user"' },
+    {
+      flag: '--scope',
+      short: '-s',
+      type: 'string',
+      description: 'Scope: "project" (default) or "user"',
+    },
     {
       flag: '--plugin',
       short: '-p',
@@ -108,18 +168,24 @@ export const skillsAddMeta: AgentCommandMeta = {
       short: '-f',
       type: 'string',
       description:
-        'Plugin source (GitHub URL, owner/repo, or plugin@marketplace) to install if the skill is not already available',
+        'Plugin source (GitHub URL, owner/repo, or plugin@marketplace) to install the skill from. Omit when the positional is already a source.',
+    },
+    {
+      flag: '--skill',
+      type: 'string',
+      description:
+        'Comma-separated skill names to install when the positional is a plugin source (e.g., `skill add owner/repo --skill foo,bar`).',
     },
     {
       flag: '--list',
       short: '-l',
       type: 'boolean',
-      description: 'List skills at the --from source without installing',
+      description: 'List skills available at the source without installing',
     },
     {
       flag: '--all',
       type: 'boolean',
-      description: 'Install every skill from the --from source',
+      description: 'Install every skill from the source',
     },
   ],
   outputSchema: {

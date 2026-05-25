@@ -1,15 +1,27 @@
-import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, basename, dirname, relative } from 'node:path';
+import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative } from 'node:path';
 import micromatch from 'micromatch';
-import { resolveGlobPatterns, isGlobPattern } from '../utils/glob-patterns.js';
-import { CLIENT_MAPPINGS, isUniversalClient } from '../models/client-mapping.js';
+import {
+  type SkillsIndexRef,
+  type WorkspaceRepository,
+  generateWorkspaceRules,
+} from '../constants.js';
+import {
+  CLIENT_MAPPINGS,
+  isUniversalClient,
+} from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
-import type { ClientType, WorkspaceFile, SyncMode, PluginSkillsConfig } from '../models/workspace-config.js';
-import { generateWorkspaceRules, type WorkspaceRepository, type SkillsIndexRef } from '../constants.js';
+import type {
+  ClientType,
+  PluginSkillsConfig,
+  SyncMode,
+  WorkspaceFile,
+} from '../models/workspace-config.js';
+import { isGlobPattern, resolveGlobPatterns } from '../utils/glob-patterns.js';
+import { adjustLinksInContent } from '../utils/link-adjuster.js';
 import { parseFileSource } from '../utils/plugin-path.js';
 import { createSymlink } from '../utils/symlink.js';
-import { adjustLinksInContent } from '../utils/link-adjuster.js';
 import { parseSkillMetadata } from '../validators/skill.js';
 import { discoverNestedSkillEntries } from './skills.js';
 
@@ -85,7 +97,11 @@ export interface CopyOptions {
 /**
  * Check if a file path (relative to plugin root) matches any exclude pattern.
  */
-function isExcluded(pluginPath: string, filePath: string, exclude?: string[]): boolean {
+function isExcluded(
+  pluginPath: string,
+  filePath: string,
+  exclude?: string[],
+): boolean {
   if (!exclude || exclude.length === 0) return false;
   const relativePath = relative(pluginPath, filePath).replaceAll('\\', '/');
   return micromatch.isMatch(relativePath, exclude);
@@ -112,7 +128,12 @@ async function copyDirectoryWithExclusions(
     }
 
     if (entry.isDirectory()) {
-      await copyDirectoryWithExclusions(sourcePath, destPath, pluginPath, exclude);
+      await copyDirectoryWithExclusions(
+        sourcePath,
+        destPath,
+        pluginPath,
+        exclude,
+      );
     } else {
       await cp(sourcePath, destPath);
     }
@@ -168,8 +189,14 @@ export interface WorkspaceCopyOptions extends CopyOptions {
 /**
  * Get the client mapping, using override if provided, otherwise falling back to CLIENT_MAPPINGS
  */
-function getMapping(client: ClientType, options?: { clientMappings?: Record<string, ClientMapping> }): ClientMapping {
-  return (options?.clientMappings as Record<ClientType, ClientMapping>)?.[client] ?? CLIENT_MAPPINGS[client];
+function getMapping(
+  client: ClientType,
+  options?: { clientMappings?: Record<string, ClientMapping> },
+): ClientMapping {
+  return (
+    (options?.clientMappings as Record<ClientType, ClientMapping>)?.[client] ??
+    CLIENT_MAPPINGS[client]
+  );
 }
 
 /**
@@ -211,7 +238,9 @@ export async function copyCommands(
 
   // Process files in parallel for better performance
   const copyPromises = mdFiles
-    .filter((file) => !isExcluded(pluginPath, join(sourceDir, file), options.exclude))
+    .filter(
+      (file) => !isExcluded(pluginPath, join(sourceDir, file), options.exclude),
+    )
     .map(async (file): Promise<CopyResult> => {
       const sourcePath = join(sourceDir, file);
       const destPath = join(destDir, file);
@@ -258,7 +287,12 @@ export async function copySkills(
   client: ClientType,
   options: SkillCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false, skillNameMap, syncMode = 'copy', canonicalSkillsPath } = options;
+  const {
+    dryRun = false,
+    skillNameMap,
+    syncMode = 'copy',
+    canonicalSkillsPath,
+  } = options;
   const mapping = getMapping(client, options);
   const results: CopyResult[] = [];
 
@@ -267,21 +301,40 @@ export async function copySkills(
     return results;
   }
 
-  // Discover skill sources across all layouts
+  // Discover skill sources across all layouts. Skills can be nested below
+  // `skills/<category>/`; the subpath relative to the scan root is preserved
+  // so the allowlist can target nested skills with `category/skill` form.
   const skillsDir = join(pluginPath, 'skills');
-  let skillSources: { name: string; sourcePath: string; isRootLevel: boolean }[];
+  let skillSources: {
+    name: string;
+    subpath: string;
+    sourcePath: string;
+    isRootLevel: boolean;
+  }[];
 
   if (existsSync(skillsDir)) {
-    // Standard layout: plugin/skills/<skill-name>/
-    const entries = await readdir(skillsDir, { withFileTypes: true });
+    const entries = await discoverNestedSkillEntries(skillsDir);
     skillSources = entries
-      .filter((e) => e.isDirectory())
-      .filter((e) => !isExcluded(pluginPath, join(skillsDir, e.name), options.exclude))
-      .map((e) => ({ name: e.name, sourcePath: join(skillsDir, e.name), isRootLevel: false }));
+      .filter(
+        (entry) => !isExcluded(pluginPath, entry.skillPath, options.exclude),
+      )
+      .map((entry) => ({
+        name: entry.name,
+        subpath: entry.subpath,
+        sourcePath: entry.skillPath,
+        isRootLevel: false,
+      }));
   } else {
     const nestedSkills = (await discoverNestedSkillEntries(pluginPath))
-      .filter((entry) => !isExcluded(pluginPath, entry.skillPath, options.exclude))
-      .map((entry) => ({ name: entry.name, sourcePath: entry.skillPath, isRootLevel: false }));
+      .filter(
+        (entry) => !isExcluded(pluginPath, entry.skillPath, options.exclude),
+      )
+      .map((entry) => ({
+        name: entry.name,
+        subpath: entry.subpath,
+        sourcePath: entry.skillPath,
+        isRootLevel: false,
+      }));
 
     if (nestedSkills.length > 0) {
       skillSources = nestedSkills;
@@ -292,16 +345,27 @@ export async function copySkills(
         const content = await readFile(rootSkillMd, 'utf-8');
         const metadata = parseSkillMetadata(content);
         const skillName = metadata?.name ?? basename(pluginPath);
-        skillSources = [{ name: skillName, sourcePath: pluginPath, isRootLevel: true }];
+        skillSources = [
+          {
+            name: skillName,
+            subpath: skillName,
+            sourcePath: pluginPath,
+            isRootLevel: true,
+          },
+        ];
       } else {
         return results;
       }
     }
   }
 
-  // When skillNameMap is provided, only copy skills that are in the map
+  // When skillNameMap is provided, only copy skills that are in the map.
+  // Match by either bare leaf name or qualified subpath so the map can carry
+  // either form.
   if (skillNameMap) {
-    skillSources = skillSources.filter((s) => skillNameMap.has(s.name));
+    skillSources = skillSources.filter(
+      (s) => skillNameMap.has(s.name) || skillNameMap.has(s.subpath),
+    );
   }
 
   if (skillSources.length === 0) {
@@ -314,7 +378,8 @@ export async function copySkills(
   }
 
   // Determine if we should use symlinks for this client
-  const useSymlinks = syncMode === 'symlink' && !isUniversalClient(client) && canonicalSkillsPath;
+  const useSymlinks =
+    syncMode === 'symlink' && !isUniversalClient(client) && canonicalSkillsPath;
 
   // Process skill directories in parallel for better performance
   const copyPromises = skillSources.map(async (skill): Promise<CopyResult> => {
@@ -332,8 +397,15 @@ export async function copySkills(
 
     // If using symlinks, create symlink from client path to canonical location
     if (useSymlinks) {
-      const canonicalSkillPath = join(workspacePath, canonicalSkillsPath, resolvedName);
-      const symlinkCreated = await createSymlink(canonicalSkillPath, skillDestPath);
+      const canonicalSkillPath = join(
+        workspacePath,
+        canonicalSkillsPath,
+        resolvedName,
+      );
+      const symlinkCreated = await createSymlink(
+        canonicalSkillPath,
+        skillDestPath,
+      );
 
       if (symlinkCreated) {
         return {
@@ -349,9 +421,17 @@ export async function copySkills(
       if (skill.isRootLevel) {
         // Root-level: copy only the SKILL.md into a new skill directory
         await mkdir(skillDestPath, { recursive: true });
-        await cp(join(skill.sourcePath, 'SKILL.md'), join(skillDestPath, 'SKILL.md'));
+        await cp(
+          join(skill.sourcePath, 'SKILL.md'),
+          join(skillDestPath, 'SKILL.md'),
+        );
       } else if (options.exclude && options.exclude.length > 0) {
-        await copyDirectoryWithExclusions(skill.sourcePath, skillDestPath, pluginPath, options.exclude);
+        await copyDirectoryWithExclusions(
+          skill.sourcePath,
+          skillDestPath,
+          pluginPath,
+          options.exclude,
+        );
       } else {
         await cp(skill.sourcePath, skillDestPath, { recursive: true });
       }
@@ -409,20 +489,28 @@ export async function collectPluginSkills(
   const skillsDir = join(pluginPath, 'skills');
 
   // v1 fallback: only apply enabledSkills to plugins that actually have entries in the set
-  const hasEnabledEntries = !pluginSkillsConfig && enabledSkills && pluginName &&
+  const hasEnabledEntries =
+    !pluginSkillsConfig &&
+    enabledSkills &&
+    pluginName &&
     [...enabledSkills].some((s) => s.startsWith(`${pluginName}:`));
 
-  let candidateDirs: { name: string; path: string }[];
+  let candidateDirs: { name: string; subpath: string; path: string }[];
 
   if (existsSync(skillsDir)) {
-    // Standard layout: plugin/skills/<skill-name>/
-    const entries = await readdir(skillsDir, { withFileTypes: true });
-    candidateDirs = entries
-      .filter((e) => e.isDirectory())
-      .map((e) => ({ name: e.name, path: join(skillsDir, e.name) }));
+    const entries = await discoverNestedSkillEntries(skillsDir);
+    candidateDirs = entries.map((entry) => ({
+      name: entry.name,
+      subpath: entry.subpath,
+      path: entry.skillPath,
+    }));
   } else {
-    const nestedDirs = await discoverNestedSkillEntries(pluginPath).then((entries) =>
-      entries.map((entry) => ({ name: entry.name, path: entry.skillPath }))
+    const nestedDirs = (await discoverNestedSkillEntries(pluginPath)).map(
+      (entry) => ({
+        name: entry.name,
+        subpath: entry.subpath,
+        path: entry.skillPath,
+      }),
     );
 
     if (nestedDirs.length > 0) {
@@ -434,29 +522,48 @@ export async function collectPluginSkills(
         const content = await readFile(rootSkillMd, 'utf-8');
         const metadata = parseSkillMetadata(content);
         const skillName = metadata?.name ?? basename(pluginPath);
-        candidateDirs = [{ name: skillName, path: pluginPath }];
+        candidateDirs = [
+          { name: skillName, subpath: skillName, path: pluginPath },
+        ];
       } else {
         candidateDirs = [];
       }
     }
   }
 
+  const matchesAllowlist = (
+    entry: { name: string; subpath: string },
+    allowlist: string[],
+  ): boolean =>
+    allowlist.includes(entry.name) || allowlist.includes(entry.subpath);
+
   let filteredDirs: typeof candidateDirs;
   if (pluginSkillsConfig !== undefined) {
-    // Inline config takes priority (v2+)
+    // Inline config takes priority (v2+). Match by either bare leaf name or
+    // qualified subpath so nested skills can be targeted unambiguously.
     if (Array.isArray(pluginSkillsConfig)) {
-      // allowlist: keep only skills in the array
-      filteredDirs = candidateDirs.filter((e) => pluginSkillsConfig.includes(e.name));
+      filteredDirs = candidateDirs.filter((e) =>
+        matchesAllowlist(e, pluginSkillsConfig),
+      );
     } else {
-      // blocklist: exclude skills in the exclude array
-      filteredDirs = candidateDirs.filter((e) => !pluginSkillsConfig.exclude.includes(e.name));
+      filteredDirs = candidateDirs.filter(
+        (e) => !matchesAllowlist(e, pluginSkillsConfig.exclude),
+      );
     }
   } else if (pluginName) {
     // v1 fallback: use disabledSkills/enabledSkills
     if (hasEnabledEntries) {
-      filteredDirs = candidateDirs.filter((e) => enabledSkills?.has(`${pluginName}:${e.name}`));
+      filteredDirs = candidateDirs.filter(
+        (e) =>
+          enabledSkills?.has(`${pluginName}:${e.name}`) ||
+          enabledSkills?.has(`${pluginName}:${e.subpath}`),
+      );
     } else if (disabledSkills) {
-      filteredDirs = candidateDirs.filter((e) => !disabledSkills.has(`${pluginName}:${e.name}`));
+      filteredDirs = candidateDirs.filter(
+        (e) =>
+          !disabledSkills.has(`${pluginName}:${e.name}`) &&
+          !disabledSkills.has(`${pluginName}:${e.subpath}`),
+      );
     } else {
       filteredDirs = candidateDirs;
     }
@@ -512,7 +619,12 @@ export async function copyHooks(
 
   try {
     if (options.exclude && options.exclude.length > 0) {
-      await copyDirectoryWithExclusions(sourceDir, destDir, pluginPath, options.exclude);
+      await copyDirectoryWithExclusions(
+        sourceDir,
+        destDir,
+        pluginPath,
+        options.exclude,
+      );
     } else {
       await cp(sourceDir, destDir, { recursive: true });
     }
@@ -568,7 +680,9 @@ export async function copyAgents(
 
   // Process files in parallel for better performance
   const copyPromises = mdFiles
-    .filter((file) => !isExcluded(pluginPath, join(sourceDir, file), options.exclude))
+    .filter(
+      (file) => !isExcluded(pluginPath, join(sourceDir, file), options.exclude),
+    )
     .map(async (file): Promise<CopyResult> => {
       const sourcePath = join(sourceDir, file);
       const destPath = join(destDir, file);
@@ -605,7 +719,6 @@ export interface GitHubCopyOptions extends CopyOptions {
   skillNameMap?: Map<string, string>;
 }
 
-
 /**
  * Recursively process a directory, copying files and adjusting links in markdown.
  * Single-pass approach: read source → transform if markdown → write to dest.
@@ -631,10 +744,22 @@ async function copyAndAdjustDirectory(
     }
 
     if (entry.isDirectory()) {
-      await copyAndAdjustDirectory(sourcePath, destPath, sourceBase, pluginPath, skillsPath, skillNameMap, exclude);
+      await copyAndAdjustDirectory(
+        sourcePath,
+        destPath,
+        sourceBase,
+        pluginPath,
+        skillsPath,
+        skillNameMap,
+        exclude,
+      );
     } else {
-      const relativePath = relative(sourceBase, sourcePath).replaceAll('\\', '/');
-      const isMarkdown = entry.name.endsWith('.md') || entry.name.endsWith('.markdown');
+      const relativePath = relative(sourceBase, sourcePath).replaceAll(
+        '\\',
+        '/',
+      );
+      const isMarkdown =
+        entry.name.endsWith('.md') || entry.name.endsWith('.markdown');
 
       if (isMarkdown) {
         // Read, transform, write in one pass
@@ -692,7 +817,15 @@ export async function copyGitHubContent(
   try {
     // Single-pass: copy files and adjust markdown links in one traversal
     if (mapping.skillsPath || (options.exclude && options.exclude.length > 0)) {
-      await copyAndAdjustDirectory(sourceDir, destDir, sourceDir, pluginPath, mapping.skillsPath ?? '', skillNameMap, options.exclude);
+      await copyAndAdjustDirectory(
+        sourceDir,
+        destDir,
+        sourceDir,
+        pluginPath,
+        mapping.skillsPath ?? '',
+        skillNameMap,
+        options.exclude,
+      );
     } else {
       // No skills path and no excludes - just copy without adjustment
       await cp(sourceDir, destDir, { recursive: true });
@@ -747,28 +880,41 @@ export async function copyPluginToWorkspace(
   client: ClientType,
   options: PluginCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { skillNameMap, syncMode, canonicalSkillsPath, ...baseOptions } = options;
+  const { skillNameMap, syncMode, canonicalSkillsPath, ...baseOptions } =
+    options;
 
   // Phase 1: Copy root-level artifacts in parallel
-  const [commandResults, skillResults, hookResults, agentResults] = await Promise.all([
-    copyCommands(pluginPath, workspacePath, client, baseOptions),
-    copySkills(pluginPath, workspacePath, client, {
-      ...baseOptions,
-      ...(skillNameMap && { skillNameMap }),
-      ...(syncMode && { syncMode }),
-      ...(canonicalSkillsPath && { canonicalSkillsPath }),
-    }),
-    copyHooks(pluginPath, workspacePath, client, baseOptions),
-    copyAgents(pluginPath, workspacePath, client, baseOptions),
-  ]);
+  const [commandResults, skillResults, hookResults, agentResults] =
+    await Promise.all([
+      copyCommands(pluginPath, workspacePath, client, baseOptions),
+      copySkills(pluginPath, workspacePath, client, {
+        ...baseOptions,
+        ...(skillNameMap && { skillNameMap }),
+        ...(syncMode && { syncMode }),
+        ...(canonicalSkillsPath && { canonicalSkillsPath }),
+      }),
+      copyHooks(pluginPath, workspacePath, client, baseOptions),
+      copyAgents(pluginPath, workspacePath, client, baseOptions),
+    ]);
 
   // Phase 2: Copy .github/ content — overrides root-level on name conflicts
-  const githubResults = await copyGitHubContent(pluginPath, workspacePath, client, {
-    ...baseOptions,
-    ...(skillNameMap && { skillNameMap }),
-  });
+  const githubResults = await copyGitHubContent(
+    pluginPath,
+    workspacePath,
+    client,
+    {
+      ...baseOptions,
+      ...(skillNameMap && { skillNameMap }),
+    },
+  );
 
-  return [...commandResults, ...skillResults, ...hookResults, ...agentResults, ...githubResults];
+  return [
+    ...commandResults,
+    ...skillResults,
+    ...hookResults,
+    ...agentResults,
+    ...githubResults,
+  ];
 }
 
 /**
@@ -795,12 +941,21 @@ function isExplicitGitHubSource(source: string): boolean {
 
   // For shorthand format (owner/repo/path), require at least 3 segments
   // This ensures paths like "config/settings.json" are treated as local
-  if (!source.startsWith('.') && !source.startsWith('/') && source.includes('/')) {
+  if (
+    !source.startsWith('.') &&
+    !source.startsWith('/') &&
+    source.includes('/')
+  ) {
     const parts = source.split('/');
     // Need owner, repo, AND at least one path segment for file sources
     if (parts.length >= 3) {
       const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
-      if (parts[0] && parts[1] && validOwnerRepo.test(parts[0]) && validOwnerRepo.test(parts[1])) {
+      if (
+        parts[0] &&
+        parts[1] &&
+        validOwnerRepo.test(parts[0]) &&
+        validOwnerRepo.test(parts[1])
+      ) {
         return true;
       }
     }
@@ -853,7 +1008,12 @@ function resolveFileSourcePath(
   const parsed = parseFileSource(source);
 
   // GitHub source - need to resolve from cache
-  if (parsed.type === 'github' && parsed.owner && parsed.repo && parsed.filePath) {
+  if (
+    parsed.type === 'github' &&
+    parsed.owner &&
+    parsed.repo &&
+    parsed.filePath
+  ) {
     const cacheKey = `${parsed.owner}/${parsed.repo}`;
     const cachePath = githubCache?.get(cacheKey);
 
@@ -900,7 +1060,12 @@ export async function copyWorkspaceFiles(
   files: WorkspaceFile[],
   options: WorkspaceCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { dryRun = false, githubCache, repositories = [], skillsIndexRefs = [] } = options;
+  const {
+    dryRun = false,
+    githubCache,
+    repositories = [],
+    skillsIndexRefs = [],
+  } = options;
   const results: CopyResult[] = [];
 
   // Separate string patterns from object entries
@@ -931,7 +1096,9 @@ export async function copyWorkspaceFiles(
         });
         continue;
       }
-      objectEntries.push(file.source ? { source: file.source, dest } : { dest });
+      objectEntries.push(
+        file.source ? { source: file.source, dest } : { dest },
+      );
     }
   }
 
@@ -950,14 +1117,20 @@ export async function copyWorkspaceFiles(
         }
       }
     } else {
-      const resolvedFiles = await resolveGlobPatterns(sourcePath, stringPatterns);
+      const resolvedFiles = await resolveGlobPatterns(
+        sourcePath,
+        stringPatterns,
+      );
       for (const resolved of resolvedFiles) {
         const destPath = join(workspacePath, resolved.relativePath);
 
         if (!existsSync(resolved.sourcePath)) {
           // Only report error for literal (non-glob) patterns
           const wasLiteral = stringPatterns.some(
-            (p) => !isGlobPattern(p) && !p.startsWith('!') && p === resolved.relativePath,
+            (p) =>
+              !isGlobPattern(p) &&
+              !p.startsWith('!') &&
+              p === resolved.relativePath,
           );
           if (wasLiteral) {
             results.push({
@@ -971,9 +1144,15 @@ export async function copyWorkspaceFiles(
         }
 
         if (dryRun) {
-          results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
+          results.push({
+            source: resolved.sourcePath,
+            destination: destPath,
+            action: 'copied',
+          });
           // Track agent files even in dry-run for accurate reporting
-          if ((AGENT_FILES as readonly string[]).includes(resolved.relativePath)) {
+          if (
+            (AGENT_FILES as readonly string[]).includes(resolved.relativePath)
+          ) {
             copiedAgentFiles.push(resolved.relativePath);
           }
           continue;
@@ -983,10 +1162,16 @@ export async function copyWorkspaceFiles(
           await mkdir(dirname(destPath), { recursive: true });
           const content = await readFile(resolved.sourcePath, 'utf-8');
           await writeFile(destPath, content, 'utf-8');
-          results.push({ source: resolved.sourcePath, destination: destPath, action: 'copied' });
+          results.push({
+            source: resolved.sourcePath,
+            destination: destPath,
+            action: 'copied',
+          });
 
           // Track if this is an agent file
-          if ((AGENT_FILES as readonly string[]).includes(resolved.relativePath)) {
+          if (
+            (AGENT_FILES as readonly string[]).includes(resolved.relativePath)
+          ) {
             copiedAgentFiles.push(resolved.relativePath);
           }
         } catch (error) {
@@ -1008,7 +1193,11 @@ export async function copyWorkspaceFiles(
 
     if (entry.source) {
       // Has explicit source - resolve it (can be local or GitHub)
-      const resolved = resolveFileSourcePath(entry.source, sourcePath, githubCache);
+      const resolved = resolveFileSourcePath(
+        entry.source,
+        sourcePath,
+        githubCache,
+      );
       if (!resolved) {
         results.push({
           source: entry.source,
@@ -1053,7 +1242,11 @@ export async function copyWorkspaceFiles(
     }
 
     if (dryRun) {
-      results.push({ source: srcPath, destination: destPath, action: 'copied' });
+      results.push({
+        source: srcPath,
+        destination: destPath,
+        action: 'copied',
+      });
       // Track agent files even in dry-run for accurate reporting
       if ((AGENT_FILES as readonly string[]).includes(entry.dest)) {
         copiedAgentFiles.push(entry.dest);
@@ -1065,7 +1258,11 @@ export async function copyWorkspaceFiles(
       await mkdir(dirname(destPath), { recursive: true });
       const content = await readFile(srcPath, 'utf-8');
       await writeFile(destPath, content, 'utf-8');
-      results.push({ source: srcPath, destination: destPath, action: 'copied' });
+      results.push({
+        source: srcPath,
+        destination: destPath,
+        action: 'copied',
+      });
 
       // Track if this is an agent file
       if ((AGENT_FILES as readonly string[]).includes(entry.dest)) {
@@ -1093,7 +1290,10 @@ export async function copyWorkspaceFiles(
           source: 'WORKSPACE-RULES',
           destination: targetPath,
           action: 'failed',
-          error: error instanceof Error ? error.message : 'Failed to inject WORKSPACE-RULES',
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Failed to inject WORKSPACE-RULES',
         });
       }
     }
