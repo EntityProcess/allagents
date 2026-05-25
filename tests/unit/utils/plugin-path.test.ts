@@ -35,6 +35,7 @@ const {
   getPluginCachePath,
   validatePluginSource,
   verifyGitHubUrlExists,
+  formatPluginSource,
 } = await import('../../../src/utils/plugin-path.js');
 
 describe('isGitHubUrl', () => {
@@ -323,6 +324,56 @@ describe('validatePluginSource', () => {
     const result = validatePluginSource('gh:invalid');
     expect(result.valid).toBe(false);
     expect(result.error).toContain('Invalid GitHub URL');
+  });
+});
+
+describe('formatPluginSource', () => {
+  it('shortens a bare GitHub HTTPS URL to owner/repo', () => {
+    expect(formatPluginSource('https://github.com/anthropics/claude-plugins-official')).toBe(
+      'anthropics/claude-plugins-official',
+    );
+  });
+
+  it('strips /blob/main and /tree/main while preserving subpath', () => {
+    expect(formatPluginSource('https://github.com/NousResearch/hermes-agent/blob/main/skills/research/llm-wiki')).toBe(
+      'NousResearch/hermes-agent/skills/research/llm-wiki',
+    );
+    expect(formatPluginSource('https://github.com/owner/repo/tree/master/plugins/foo')).toBe(
+      'owner/repo/plugins/foo',
+    );
+  });
+
+  it('keeps non-default branches with @<branch>/subpath', () => {
+    expect(formatPluginSource('https://github.com/owner/repo/blob/develop/skills/foo')).toBe(
+      'owner/repo@develop/skills/foo',
+    );
+  });
+
+  it('shortens gh: prefix to owner/repo', () => {
+    expect(formatPluginSource('gh:anthropics/claude-plugins-official')).toBe(
+      'anthropics/claude-plugins-official',
+    );
+  });
+
+  it('passes owner/repo shorthand through unchanged', () => {
+    expect(formatPluginSource('NousResearch/hermes-agent')).toBe('NousResearch/hermes-agent');
+  });
+
+  it('preserves @ref on shorthand sources', () => {
+    expect(formatPluginSource('owner/repo@v1.2.0/sub')).toBe('owner/repo@v1.2.0/sub');
+  });
+
+  it('leaves plugin@marketplace specs untouched', () => {
+    expect(formatPluginSource('superpowers@official')).toBe('superpowers@official');
+  });
+
+  it('leaves local paths untouched', () => {
+    expect(formatPluginSource('./local-plugin')).toBe('./local-plugin');
+    expect(formatPluginSource('/abs/path/to/plugin')).toBe('/abs/path/to/plugin');
+  });
+
+  it('passes empty input through', () => {
+    expect(formatPluginSource('')).toBe('');
   });
 });
 

@@ -59,7 +59,9 @@ description: Skill B
     expect(skills).toHaveLength(0);
   });
 
-  it('should include skill directories without SKILL.md', async () => {
+  it('should skip skill directories without SKILL.md', async () => {
+    // Recursive discovery walks past dirs that lack a SKILL.md, so a stray
+    // empty folder under skills/ is no longer reported as a skill.
     const pluginDir = join(testDir, 'plugin-with-stale');
     await mkdir(join(pluginDir, 'skills', 'valid-skill'), { recursive: true });
     await mkdir(join(pluginDir, 'skills', 'no-skillmd'), { recursive: true });
@@ -73,9 +75,20 @@ description: Valid Skill
 
     const skills = await collectPluginSkills(pluginDir, 'test-source');
 
-    expect(skills).toHaveLength(2);
-    const names = skills.map((s) => s.folderName).sort();
-    expect(names).toEqual(['no-skillmd', 'valid-skill']);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]?.folderName).toBe('valid-skill');
+  });
+
+  it('should discover nested skills under skills/<category>/<skill>/', async () => {
+    const pluginDir = join(testDir, 'plugin-nested');
+    await mkdir(join(pluginDir, 'skills', 'research', 'llm-wiki'), { recursive: true });
+    await mkdir(join(pluginDir, 'skills', 'dogfood'), { recursive: true });
+    await writeFile(join(pluginDir, 'skills', 'research', 'llm-wiki', 'SKILL.md'), '# llm-wiki');
+    await writeFile(join(pluginDir, 'skills', 'dogfood', 'SKILL.md'), '# dogfood');
+
+    const skills = await collectPluginSkills(pluginDir, 'test-source');
+
+    expect(skills.map((s) => s.folderName).sort()).toEqual(['dogfood', 'llm-wiki']);
   });
 
   it('should ignore files in skills directory (only dirs)', async () => {

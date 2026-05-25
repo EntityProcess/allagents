@@ -1,20 +1,56 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { command, positional, option, flag, string, optional } from 'cmd-ts';
-import { initWorkspace } from '../../core/workspace.js';
-import { syncWorkspace, syncUserWorkspace, mergeSyncResults } from '../../core/sync.js';
-import type { SyncResult } from '../../core/sync.js';
-import { getWorkspaceStatus } from '../../core/status.js';
+import { command, flag, option, optional, positional, string } from 'cmd-ts';
 import { pruneOrphanedPlugins } from '../../core/prune.js';
-import { getUserWorkspaceConfig, ensureUserWorkspace } from '../../core/user-workspace.js';
-import { addRepository, removeRepository, listRepositories, detectRemote, updateAgentFiles } from '../../core/workspace-repo.js';
-import { isJsonMode, jsonOutput } from '../json-output.js';
+import { getWorkspaceStatus } from '../../core/status.js';
+import {
+  mergeSyncResults,
+  syncUserWorkspace,
+  syncWorkspace,
+} from '../../core/sync.js';
+import type { SyncResult } from '../../core/sync.js';
+import {
+  ensureUserWorkspace,
+  getUserWorkspaceConfig,
+} from '../../core/user-workspace.js';
+import {
+  addRepository,
+  detectRemote,
+  listRepositories,
+  removeRepository,
+  updateAgentFiles,
+} from '../../core/workspace-repo.js';
+import { initWorkspace } from '../../core/workspace.js';
+import {
+  type ClientEntry,
+  ClientEntrySchema,
+  ClientTypeSchema,
+  InstallModeSchema,
+} from '../../models/workspace-config.js';
+import { formatPluginSource } from '../../utils/plugin-path.js';
+import {
+  buildSyncData,
+  formatManagedRepoResults,
+  formatMcpResult,
+  formatNativeResult,
+  formatPluginArtifacts,
+  formatPluginHeader,
+  formatSyncHeader,
+  formatSyncSummary,
+} from '../format-sync.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
-import { initMeta, syncMeta, statusMeta, pruneMeta } from '../metadata/workspace.js';
-import { ClientTypeSchema, InstallModeSchema, ClientEntrySchema, type ClientEntry } from '../../models/workspace-config.js';
-import { repoAddMeta, repoRemoveMeta, repoListMeta } from '../metadata/workspace-repo.js';
-import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatSyncSummary, formatSyncHeader, formatPluginHeader, formatManagedRepoResults } from '../format-sync.js';
-
+import { isJsonMode, jsonOutput } from '../json-output.js';
+import {
+  repoAddMeta,
+  repoListMeta,
+  repoRemoveMeta,
+} from '../metadata/workspace-repo.js';
+import {
+  initMeta,
+  pruneMeta,
+  statusMeta,
+  syncMeta,
+} from '../metadata/workspace.js';
 
 // =============================================================================
 // workspace init
@@ -27,7 +63,10 @@ import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifac
 export function parseClientEntries(input: string): ClientEntry[] {
   const entries: ClientEntry[] = [];
 
-  for (const part of input.split(',').map((s) => s.trim()).filter(Boolean)) {
+  for (const part of input
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)) {
     const result = ClientEntrySchema.safeParse(part);
     if (!result.success) {
       // Provide user-friendly error messages
@@ -59,9 +98,23 @@ const initCmd = command({
   description: buildDescription(initMeta),
   args: {
     path: positional({ type: optional(string), displayName: 'path' }),
-    from: option({ type: optional(string), long: 'from', description: 'Copy workspace.yaml from existing template/workspace' }),
-    client: option({ type: optional(string), long: 'client', short: 'c', description: 'Comma-separated clients with optional :mode (e.g., claude:native,copilot,cursor)' }),
-    force: flag({ long: 'force', short: 'f', description: 'Overwrite existing workspace.yaml' }),
+    from: option({
+      type: optional(string),
+      long: 'from',
+      description: 'Copy workspace.yaml from existing template/workspace',
+    }),
+    client: option({
+      type: optional(string),
+      long: 'client',
+      short: 'c',
+      description:
+        'Comma-separated clients with optional :mode (e.g., claude:native,copilot,cursor)',
+    }),
+    force: flag({
+      long: 'force',
+      short: 'f',
+      description: 'Overwrite existing workspace.yaml',
+    }),
   },
   handler: async ({ path, from, client, force }) => {
     try {
@@ -75,7 +128,11 @@ const initCmd = command({
         const prompted = await promptForClients();
         if (prompted === null) {
           if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'workspace init', error: 'Cancelled' });
+            jsonOutput({
+              success: false,
+              command: 'workspace init',
+              error: 'Cancelled',
+            });
           }
           return;
         }
@@ -89,7 +146,9 @@ const initCmd = command({
       });
 
       if (isJsonMode()) {
-        const syncData = result.syncResult ? buildSyncData(result.syncResult) : null;
+        const syncData = result.syncResult
+          ? buildSyncData(result.syncResult)
+          : null;
         jsonOutput({
           success: true,
           command: 'workspace init',
@@ -120,7 +179,11 @@ const initCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace init', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'workspace init',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -140,11 +203,30 @@ const syncCmd = command({
   aliases: ['sync'],
   description: buildDescription(syncMeta),
   args: {
-    offline: flag({ long: 'offline', description: 'Use cached plugins without fetching latest from remote' }),
-    dryRun: flag({ long: 'dry-run', short: 'n', description: 'Simulate sync without making changes' }),
-    force: flag({ long: 'force', short: 'f', description: 'Overwrite existing MCP server entries that differ from plugin config' }),
-    verbose: flag({ long: 'verbose', short: 'v', description: 'Show informational sync messages' }),
-    noManaged: flag({ long: 'no-managed', description: 'Skip managed repository clone/pull operations' }),
+    offline: flag({
+      long: 'offline',
+      description: 'Use cached plugins without fetching latest from remote',
+    }),
+    dryRun: flag({
+      long: 'dry-run',
+      short: 'n',
+      description: 'Simulate sync without making changes',
+    }),
+    force: flag({
+      long: 'force',
+      short: 'f',
+      description:
+        'Overwrite existing MCP server entries that differ from plugin config',
+    }),
+    verbose: flag({
+      long: 'verbose',
+      short: 'v',
+      description: 'Show informational sync messages',
+    }),
+    noManaged: flag({
+      long: 'no-managed',
+      description: 'Skip managed repository clone/pull operations',
+    }),
   },
   handler: async ({ offline, dryRun, force, verbose, noManaged }) => {
     try {
@@ -153,16 +235,26 @@ const syncCmd = command({
       }
 
       const userConfigExists = !!(await getUserWorkspaceConfig());
-      const projectConfigPath = join(process.cwd(), '.allagents', 'workspace.yaml');
+      const projectConfigPath = join(
+        process.cwd(),
+        '.allagents',
+        'workspace.yaml',
+      );
       const projectConfigExists = existsSync(projectConfigPath);
 
       // If neither config exists, auto-create user config and show guidance
       if (!userConfigExists && !projectConfigExists) {
         await ensureUserWorkspace();
         if (isJsonMode()) {
-          jsonOutput({ success: true, command: 'workspace sync', data: { message: 'No plugins configured' } });
+          jsonOutput({
+            success: true,
+            command: 'workspace sync',
+            data: { message: 'No plugins configured' },
+          });
         } else {
-          console.log('No plugins configured. Run `allagents plugin install <plugin>` to get started.');
+          console.log(
+            'No plugins configured. Run `allagents plugin install <plugin>` to get started.',
+          );
         }
         return;
       }
@@ -186,7 +278,9 @@ const syncCmd = command({
           dryRun,
           skipManaged: noManaged,
         });
-        combined = combined ? mergeSyncResults(combined, projectResult) : projectResult;
+        combined = combined
+          ? mergeSyncResults(combined, projectResult)
+          : projectResult;
       }
 
       // At this point, at least one config existed so combined is set
@@ -221,7 +315,9 @@ const syncCmd = command({
 
       // Print managed repo results
       if (result.managedRepoResults && result.managedRepoResults.length > 0) {
-        for (const line of formatManagedRepoResults(result.managedRepoResults)) {
+        for (const line of formatManagedRepoResults(
+          result.managedRepoResults,
+        )) {
           console.log(line);
         }
         console.log('');
@@ -245,14 +341,22 @@ const syncCmd = command({
           console.log(line);
         }
 
-        const generated = pluginResult.copyResults.filter((r) => r.action === 'generated').length;
-        const failed = pluginResult.copyResults.filter((r) => r.action === 'failed').length;
+        const generated = pluginResult.copyResults.filter(
+          (r) => r.action === 'generated',
+        ).length;
+        const failed = pluginResult.copyResults.filter(
+          (r) => r.action === 'failed',
+        ).length;
 
         if (generated > 0) console.log(`  Generated: ${generated} files`);
         if (failed > 0) {
           console.log(`  Failed: ${failed} files`);
-          for (const failedResult of pluginResult.copyResults.filter((r) => r.action === 'failed')) {
-            console.log(`    - ${failedResult.destination}: ${failedResult.error}`);
+          for (const failedResult of pluginResult.copyResults.filter(
+            (r) => r.action === 'failed',
+          )) {
+            console.log(
+              `    - ${failedResult.destination}: ${failedResult.error}`,
+            );
           }
         }
       }
@@ -311,14 +415,21 @@ const syncCmd = command({
       if (process.env.ALLAGENTS_DEBUG?.includes('timing') && result.timing) {
         console.error('');
         const totalMs = result.timing.totalMs;
-        console.error(`[debug] Sync timing (total: ${formatTimingMs(totalMs)})`);
+        console.error(
+          `[debug] Sync timing (total: ${formatTimingMs(totalMs)})`,
+        );
         console.error(`[debug] ${'─'.repeat(56)}`);
         for (const step of result.timing.steps) {
-          const pct = totalMs > 0 ? ((step.durationMs / totalMs) * 100).toFixed(1) : '0.0';
+          const pct =
+            totalMs > 0
+              ? ((step.durationMs / totalMs) * 100).toFixed(1)
+              : '0.0';
           const detail = step.detail ? ` [${step.detail}]` : '';
           const label = step.label.padEnd(40);
           const duration = formatTimingMs(step.durationMs).padStart(8);
-          console.error(`[debug]   ${label} ${duration}  ${pct.padStart(5)}%${detail}`);
+          console.error(
+            `[debug]   ${label} ${duration}  ${pct.padStart(5)}%${detail}`,
+          );
         }
         console.error(`[debug] ${'─'.repeat(56)}`);
       }
@@ -329,7 +440,11 @@ const syncCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace sync', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'workspace sync',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -349,6 +464,24 @@ function formatTimingMs(ms: number): string {
 // workspace status
 // =============================================================================
 
+function formatPluginStatusLine(plugin: {
+  source: string;
+  type: 'local' | 'github' | 'marketplace';
+  available: boolean;
+}): string {
+  const status = plugin.available ? '✓' : '✗';
+  let typeLabel: string | undefined;
+  if (plugin.type === 'marketplace') {
+    typeLabel = plugin.available ? undefined : 'not synced';
+  } else if (plugin.type === 'github') {
+    typeLabel = plugin.available ? 'cached' : 'not cached';
+  } else {
+    typeLabel = 'local';
+  }
+  const suffix = typeLabel ? ` (${typeLabel})` : '';
+  return `${status} ${formatPluginSource(plugin.source)}${suffix}`;
+}
+
 const statusCmd = command({
   name: 'status',
   description: buildDescription(statusMeta),
@@ -359,7 +492,11 @@ const statusCmd = command({
 
       if (!result.success) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace status', error: result.error ?? 'Unknown error' });
+          jsonOutput({
+            success: false,
+            command: 'workspace status',
+            error: result.error ?? 'Unknown error',
+          });
           process.exit(1);
         }
         console.error(`Error: ${result.error}`);
@@ -370,7 +507,11 @@ const statusCmd = command({
         jsonOutput({
           success: true,
           command: 'workspace status',
-          data: { plugins: result.plugins, userPlugins: result.userPlugins ?? [], clients: result.clients },
+          data: {
+            plugins: result.plugins,
+            userPlugins: result.userPlugins ?? [],
+            clients: result.clients,
+          },
         });
         return;
       }
@@ -381,17 +522,7 @@ const statusCmd = command({
         console.log('  No plugins configured');
       } else {
         for (const plugin of result.plugins) {
-          const status = plugin.available ? '\u2713' : '\u2717';
-          let typeLabel: string | undefined;
-          if (plugin.type === 'marketplace') {
-            typeLabel = plugin.available ? undefined : 'not synced';
-          } else if (plugin.type === 'github') {
-            typeLabel = plugin.available ? 'cached' : 'not cached';
-          } else {
-            typeLabel = 'local';
-          }
-          const suffix = typeLabel ? ` (${typeLabel})` : '';
-          console.log(`  ${status} ${plugin.source}${suffix}`);
+          console.log(`  ${formatPluginStatusLine(plugin)}`);
         }
       }
 
@@ -402,17 +533,7 @@ const statusCmd = command({
           console.log('  No user plugins configured');
         } else {
           for (const plugin of result.userPlugins) {
-            const status = plugin.available ? '\u2713' : '\u2717';
-            let typeLabel: string | undefined;
-            if (plugin.type === 'marketplace') {
-              typeLabel = plugin.available ? undefined : 'not synced';
-            } else if (plugin.type === 'github') {
-              typeLabel = plugin.available ? 'cached' : 'not cached';
-            } else {
-              typeLabel = 'local';
-            }
-            const suffix = typeLabel ? ` (${typeLabel})` : '';
-            console.log(`  ${status} ${plugin.source}${suffix}`);
+            console.log(`  ${formatPluginStatusLine(plugin)}`);
           }
         }
       }
@@ -427,7 +548,11 @@ const statusCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace status', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'workspace status',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -459,7 +584,8 @@ const pruneCmd = command({
         return;
       }
 
-      const totalRemoved = result.project.removed.length + result.user.removed.length;
+      const totalRemoved =
+        result.project.removed.length + result.user.removed.length;
 
       if (totalRemoved === 0) {
         console.log('No orphaned plugins found.');
@@ -467,7 +593,9 @@ const pruneCmd = command({
       }
 
       if (result.project.removed.length > 0) {
-        console.log(`Project plugins pruned (${result.project.removed.length}):`);
+        console.log(
+          `Project plugins pruned (${result.project.removed.length}):`,
+        );
         for (const p of result.project.removed) {
           console.log(`  - ${p}`);
         }
@@ -484,7 +612,11 @@ const pruneCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace prune', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'workspace prune',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -504,7 +636,12 @@ const repoAddCmd = command({
   description: buildDescription(repoAddMeta),
   args: {
     path: positional({ type: string, displayName: 'path' }),
-    description: option({ type: optional(string), long: 'description', short: 'd', description: 'Repository description' }),
+    description: option({
+      type: optional(string),
+      long: 'description',
+      short: 'd',
+      description: 'Repository description',
+    }),
   },
   handler: async ({ path: repoPath, description }) => {
     try {
@@ -520,7 +657,11 @@ const repoAddCmd = command({
 
       if (!result.success) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace repo add', error: result.error ?? 'Unknown error' });
+          jsonOutput({
+            success: false,
+            command: 'workspace repo add',
+            error: result.error ?? 'Unknown error',
+          });
           process.exit(1);
         }
         console.error(`Error: ${result.error}`);
@@ -550,7 +691,11 @@ const repoAddCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace repo add', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'workspace repo add',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -577,7 +722,11 @@ const repoRemoveCmd = command({
 
       if (!result.success) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace repo remove', error: result.error ?? 'Unknown error' });
+          jsonOutput({
+            success: false,
+            command: 'workspace repo remove',
+            error: result.error ?? 'Unknown error',
+          });
           process.exit(1);
         }
         console.error(`Error: ${result.error}`);
@@ -588,7 +737,11 @@ const repoRemoveCmd = command({
       await updateAgentFiles();
 
       if (isJsonMode()) {
-        jsonOutput({ success: true, command: 'workspace repo remove', data: { path: repoPath } });
+        jsonOutput({
+          success: true,
+          command: 'workspace repo remove',
+          data: { path: repoPath },
+        });
         return;
       }
 
@@ -596,7 +749,11 @@ const repoRemoveCmd = command({
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace repo remove', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'workspace repo remove',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -638,15 +795,21 @@ const repoListCmd = command({
       console.log('Repositories:\n');
       for (const repo of repos) {
         console.log(`  ${repo.path}`);
-        if (repo.source && repo.repo) console.log(`    Source: ${repo.source} (${repo.repo})`);
-        if (repo.description) console.log(`    Description: ${repo.description}`);
+        if (repo.source && repo.repo)
+          console.log(`    Source: ${repo.source} (${repo.repo})`);
+        if (repo.description)
+          console.log(`    Description: ${repo.description}`);
         console.log();
       }
       console.log(`Total: ${repos.length} repository(ies)`);
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
-          jsonOutput({ success: false, command: 'workspace repo list', error: error.message });
+          jsonOutput({
+            success: false,
+            command: 'workspace repo list',
+            error: error.message,
+          });
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
@@ -679,7 +842,8 @@ export { syncCmd, initCmd };
 
 export const workspaceCmd = conciseSubcommands({
   name: 'workspace',
-  description: 'Manage AI agent workspaces - initialize, sync, and configure plugins',
+  description:
+    'Manage AI agent workspaces - initialize, sync, and configure plugins',
   cmds: {
     init: initCmd,
     sync: syncCmd,

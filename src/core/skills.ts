@@ -1,13 +1,20 @@
 import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
-import { join, basename, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
-import { getPluginSource, type WorkspaceConfig, type PluginSkillsConfig } from '../models/workspace-config.js';
-import { fetchPlugin, getPluginName } from './plugin.js';
+import {
+  type PluginSkillsConfig,
+  type WorkspaceConfig,
+  getPluginSource,
+} from '../models/workspace-config.js';
 import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
-import { isPluginSpec, resolvePluginSpecWithAutoRegister } from './marketplace.js';
 import { parseSkillMetadata } from '../validators/skill.js';
+import {
+  isPluginSpec,
+  resolvePluginSpecWithAutoRegister,
+} from './marketplace.js';
+import { fetchPlugin, getPluginName } from './plugin.js';
 
 /**
  * Information about a skill from an installed plugin
@@ -29,10 +36,20 @@ export interface SkillInfo {
    * 'none' = no inline skills field (all skills enabled by default).
    */
   pluginSkillsMode: 'allowlist' | 'blocklist' | 'none';
+  /**
+   * Path from the scan root (a plugin's `skills/` dir, or the plugin root when
+   * there is no `skills/`) to this skill's directory. For depth-1 skills this
+   * is the same as `name`; for nested skills it includes parent segments
+   * (e.g. `research/llm-wiki`). Used for disambiguation when multiple skills
+   * share a leaf name.
+   */
+  skillSubpath: string;
 }
 
 export interface DiscoveredSkillEntry {
   name: string;
+  /** Path from the scan root to the skill directory (POSIX-style separators). */
+  subpath: string;
   skillPath: string;
 }
 
@@ -82,20 +99,30 @@ async function resolvePluginPath(
   return existsSync(resolved) ? { path: resolved } : null;
 }
 
-export async function discoverNestedSkillEntries(pluginPath: string): Promise<DiscoveredSkillEntry[]> {
-  const entries = await readdir(pluginPath, { withFileTypes: true });
+export async function discoverNestedSkillEntries(
+  scanRoot: string,
+): Promise<DiscoveredSkillEntry[]> {
+  return walkForSkillMd(scanRoot, scanRoot);
+}
+
+async function walkForSkillMd(
+  scanRoot: string,
+  currentDir: string,
+): Promise<DiscoveredSkillEntry[]> {
+  const entries = await readdir(currentDir, { withFileTypes: true });
   const discovered: DiscoveredSkillEntry[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
-    const skillPath = join(pluginPath, entry.name);
+    const skillPath = join(currentDir, entry.name);
     if (existsSync(join(skillPath, 'SKILL.md'))) {
-      discovered.push({ name: entry.name, skillPath });
+      const subpath = relative(scanRoot, skillPath).split(/[\\/]/).join('/');
+      discovered.push({ name: entry.name, subpath, skillPath });
       continue;
     }
 
-    discovered.push(...await discoverNestedSkillEntries(skillPath));
+    discovered.push(...(await walkForSkillMd(scanRoot, skillPath)));
   }
 
   return discovered;
@@ -120,8 +147,11 @@ export async function getAllSkillsFromPlugins(
 
   // v1 fallback: use top-level disabledSkills/enabledSkills only for configs that haven't migrated
   const isV1Fallback = config.version === undefined || config.version < 2;
-  const disabledSkills = isV1Fallback ? new Set(config.disabledSkills ?? []) : new Set<string>();
-  const enabledSkills = isV1Fallback && config.enabledSkills ? new Set(config.enabledSkills) : null;
+  const disabledSkills = isV1Fallback
+    ? new Set(config.disabledSkills ?? [])
+    : new Set<string>();
+  const enabledSkills =
+    isV1Fallback && config.enabledSkills ? new Set(config.enabledSkills) : null;
 
   const skills: SkillInfo[] = [];
 
@@ -139,16 +169,15 @@ export async function getAllSkillsFromPlugins(
       typeof pluginEntry === 'string' ? undefined : pluginEntry.skills;
 
     // v1 fallback: only apply enabledSkills to plugins with entries in the set
-    const hasEnabledEntries = !pluginSkillsConfig && enabledSkills &&
+    const hasEnabledEntries =
+      !pluginSkillsConfig &&
+      enabledSkills &&
       [...enabledSkills].some((s) => s.startsWith(`${pluginName}`));
 
-    let skillEntries: { name: string; skillPath: string }[];
+    let skillEntries: DiscoveredSkillEntry[];
     if (existsSync(skillsDir)) {
-      // Standard layout: plugin/skills/<skill-name>/
-      const entries = await readdir(skillsDir, { withFileTypes: true });
-      skillEntries = entries
-        .filter((e) => e.isDirectory())
-        .map((e) => ({ name: e.name, skillPath: join(skillsDir, e.name) }));
+      // Standard layout: plugin/skills/<skill-name>/, possibly nested deeper.
+      skillEntries = await discoverNestedSkillEntries(skillsDir);
     } else {
       const nestedSkills = await discoverNestedSkillEntries(pluginPath);
       if (nestedSkills.length > 0) {
@@ -160,7 +189,9 @@ export async function getAllSkillsFromPlugins(
           const skillContent = await readFile(rootSkillMd, 'utf-8');
           const metadata = parseSkillMetadata(skillContent);
           const skillName = metadata?.name ?? basename(pluginPath);
-          skillEntries = [{ name: skillName, skillPath: pluginPath }];
+          skillEntries = [
+            { name: skillName, subpath: skillName, skillPath: pluginPath },
+          ];
         } else {
           skillEntries = [];
         }
@@ -168,28 +199,35 @@ export async function getAllSkillsFromPlugins(
     }
 
     const pluginSkillsMode: SkillInfo['pluginSkillsMode'] =
-      pluginSkillsConfig === undefined ? 'none'
-      : Array.isArray(pluginSkillsConfig) ? 'allowlist'
-      : 'blocklist';
+      pluginSkillsConfig === undefined
+        ? 'none'
+        : Array.isArray(pluginSkillsConfig)
+          ? 'allowlist'
+          : 'blocklist';
 
-    for (const { name, skillPath } of skillEntries) {
+    for (const { name, subpath, skillPath } of skillEntries) {
       const skillKey = `${pluginName}:${name}`;
+      const qualifiedKey = `${pluginName}:${subpath}`;
       let isDisabled: boolean;
 
       if (pluginSkillsConfig !== undefined) {
-        // Inline skills config takes priority (v2+)
+        // Inline skills config takes priority (v2+). Allow either bare leaf
+        // name (`llm-wiki`) or qualified subpath (`research/llm-wiki`) so
+        // users can disambiguate when multiple skills share a leaf name.
         if (Array.isArray(pluginSkillsConfig)) {
-          // allowlist: disabled if NOT in array
-          isDisabled = !pluginSkillsConfig.includes(name);
+          isDisabled =
+            !pluginSkillsConfig.includes(name) &&
+            !pluginSkillsConfig.includes(subpath);
         } else {
-          // blocklist: disabled if IS in exclude array
-          isDisabled = pluginSkillsConfig.exclude.includes(name);
+          isDisabled =
+            pluginSkillsConfig.exclude.includes(name) ||
+            pluginSkillsConfig.exclude.includes(subpath);
         }
       } else if (isV1Fallback) {
         // v1 fallback: top-level disabledSkills/enabledSkills
         isDisabled = hasEnabledEntries
-          ? !enabledSkills?.has(skillKey)
-          : disabledSkills.has(skillKey);
+          ? !(enabledSkills?.has(skillKey) || enabledSkills?.has(qualifiedKey))
+          : disabledSkills.has(skillKey) || disabledSkills.has(qualifiedKey);
       } else {
         isDisabled = false;
       }
@@ -201,6 +239,7 @@ export async function getAllSkillsFromPlugins(
         path: skillPath,
         disabled: isDisabled,
         pluginSkillsMode,
+        skillSubpath: subpath,
       });
     }
   }
@@ -228,29 +267,41 @@ export async function findSkillByName(
  * @param pluginPath - Path to plugin directory
  * @returns Array of skill names
  */
-export async function discoverSkillNames(pluginPath: string): Promise<string[]> {
+export async function discoverSkillNames(
+  pluginPath: string,
+): Promise<string[]> {
+  return (await discoverSkillEntries(pluginPath)).map((entry) => entry.name);
+}
+
+/**
+ * Discover skill entries (name + subpath) from a plugin directory without
+ * workspace config. Mirrors `discoverSkillNames` but exposes the qualified
+ * path for disambiguation when nested skills share a leaf name.
+ */
+export async function discoverSkillEntries(
+  pluginPath: string,
+): Promise<DiscoveredSkillEntry[]> {
   if (!existsSync(pluginPath)) return [];
 
   const skillsDir = join(pluginPath, 'skills');
   if (existsSync(skillsDir)) {
-    const entries = await readdir(skillsDir, { withFileTypes: true });
-    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    return discoverNestedSkillEntries(skillsDir);
   }
 
   const nestedSkills = await discoverNestedSkillEntries(pluginPath);
-  if (nestedSkills.length > 0) return nestedSkills.map((entry) => entry.name);
+  if (nestedSkills.length > 0) return nestedSkills;
 
-  // Root-level SKILL.md
   const rootSkillMd = join(pluginPath, 'SKILL.md');
   if (existsSync(rootSkillMd)) {
+    let name = basename(pluginPath);
     try {
       const content = await readFile(rootSkillMd, 'utf-8');
-      const { parseSkillMetadata } = await import('../validators/skill.js');
       const metadata = parseSkillMetadata(content);
-      return [metadata?.name ?? basename(pluginPath)];
+      if (metadata?.name) name = metadata.name;
     } catch {
-      return [basename(pluginPath)];
+      // Fall through to basename
     }
+    return [{ name, subpath: name, skillPath: pluginPath }];
   }
 
   return [];

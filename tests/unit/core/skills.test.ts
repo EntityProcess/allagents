@@ -157,6 +157,68 @@ describe('getAllSkillsFromPlugins', () => {
     expect(skills.every((s) => s.disabled === false)).toBe(true);
   });
 
+  it('discovers nested skills under skills/<category>/<skill>/', async () => {
+    const hermesPlugin = join(tmpDir, 'hermes-style-plugin');
+    await mkdir(join(hermesPlugin, 'skills/research/llm-wiki'), { recursive: true });
+    await mkdir(join(hermesPlugin, 'skills/dogfood'), { recursive: true });
+    await writeFile(join(hermesPlugin, 'skills/research/llm-wiki/SKILL.md'), '# llm-wiki');
+    await writeFile(join(hermesPlugin, 'skills/dogfood/SKILL.md'), '# dogfood');
+
+    const config = {
+      repositories: [],
+      plugins: [hermesPlugin],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    const names = skills.map((s) => s.name).sort();
+    expect(names).toEqual(['dogfood', 'llm-wiki']);
+    const llmWiki = skills.find((s) => s.name === 'llm-wiki');
+    expect(llmWiki?.skillSubpath).toBe('research/llm-wiki');
+    const dogfood = skills.find((s) => s.name === 'dogfood');
+    expect(dogfood?.skillSubpath).toBe('dogfood');
+  });
+
+  it('respects allowlist that uses a qualified subpath for a nested skill', async () => {
+    const hermesPlugin = join(tmpDir, 'hermes-style-plugin-2');
+    await mkdir(join(hermesPlugin, 'skills/research/llm-wiki'), { recursive: true });
+    await mkdir(join(hermesPlugin, 'skills/games/llm-wiki'), { recursive: true });
+    await writeFile(join(hermesPlugin, 'skills/research/llm-wiki/SKILL.md'), '# research');
+    await writeFile(join(hermesPlugin, 'skills/games/llm-wiki/SKILL.md'), '# games');
+
+    const config = {
+      repositories: [],
+      plugins: [{ source: hermesPlugin, skills: ['research/llm-wiki'] }],
+      clients: ['claude'],
+      version: 2,
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    const research = skills.find((s) => s.skillSubpath === 'research/llm-wiki');
+    const games = skills.find((s) => s.skillSubpath === 'games/llm-wiki');
+    expect(research?.disabled).toBe(false);
+    expect(games?.disabled).toBe(true);
+  });
+
+  it('omits directories under skills/ that lack a SKILL.md', async () => {
+    const plugin = join(tmpDir, 'fluff-plugin');
+    await mkdir(join(plugin, 'skills/empty-category'), { recursive: true });
+    await mkdir(join(plugin, 'skills/real-skill'), { recursive: true });
+    await writeFile(join(plugin, 'skills/real-skill/SKILL.md'), '# real');
+
+    const config = {
+      repositories: [],
+      plugins: [plugin],
+      clients: ['claude'],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
+
+    const skills = await getAllSkillsFromPlugins(tmpDir);
+    expect(skills.map((s) => s.name)).toEqual(['real-skill']);
+  });
+
   it('skips GitHub URL entries whose subpath no longer exists in cache', async () => {
     const originalHome = process.env.HOME;
     process.env.HOME = tmpDir;
