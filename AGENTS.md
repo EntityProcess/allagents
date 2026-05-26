@@ -41,6 +41,7 @@ bun install
 - Use subagents aggressively to keep the main context window clean.
 - Subagents are useful for research, file exploration, tests, and code review.
 - For complex problems, parallelize independent investigation and validation work where possible.
+- Run a final code review after implementation is complete and before the final green E2E when the task is substantial.
 
 ### Simplicity
 - Every change should be as simple as possible. Reuse existing code before introducing new abstractions.
@@ -77,6 +78,7 @@ cd ../allagents.worktrees/<type>-<short-description>
 - Push the branch and open a PR once the change is validated.
 - When referencing an issue, include `Closes #<issue-number>` in the PR body.
 - Before merging, ensure CI passes, the branch is up to date enough to merge cleanly, and any required review has happened.
+- Include the exact E2E steps in the PR description so a reviewer can reproduce what was validated.
 
 ### Merge Policy
 - Always use squash merge when merging PRs to `main`.
@@ -92,6 +94,13 @@ gh pr merge <PR_NUMBER> --squash --delete-branch --admin
 git checkout main
 git pull origin main
 git checkout -b fix/<short-description>
+```
+
+### Worktree Cleanup
+- The default worktree location is `../allagents.worktrees/` (already ignored by git).
+- When done, remove the worktree explicitly:
+```bash
+git worktree remove ../allagents.worktrees/<name>
 ```
 
 ## Tech Stack & Tools
@@ -114,6 +123,8 @@ git checkout -b fix/<short-description>
 - Avoid redundant tests that exercise the same branch with cosmetic input changes.
 - Test behavior rather than implementation details.
 - Keep tests fast enough to stay practical in CI.
+- Avoid mocks that drift from the real interface and create false confidence.
+- Prefer testing actual outcomes over asserting that internal helpers were called with specific arguments.
 
 ### Manual E2E Testing
 - Run a red E2E before implementation to confirm current behavior.
@@ -126,6 +137,14 @@ bun run build
 ```
 - Create a temporary workspace in `/tmp/`, configure it to exercise the change, run the built CLI, and verify the filesystem result matches expectations.
 - Include the E2E steps in the PR description so a reviewer can reproduce them.
+- Document the exact commands you ran and what behavior you verified.
+
+### Development Workflow Summary
+1. Red E2E — build the CLI, test current behavior, confirm the problem
+2. Implement — write code and unit or integration tests
+3. Code review — review the implementation for correctness, DRY, and coverage
+4. Green E2E — rebuild and confirm the fix works end to end
+5. Push — commit, push, and let CI validate the branch
 
 ### Code Review
 - Run a final review after implementation and before finalizing the PR when the task is substantial.
@@ -146,10 +165,16 @@ bun run build
 ### CLI Output Paths
 - Sync results are surfaced from multiple entry points, including workspace sync, plugin install/uninstall/update, and TUI sync actions.
 - Shared formatting should live in the common sync formatting module rather than being duplicated at call sites.
+- The key call sites are:
+  - `update` / `workspace sync` in `src/cli/commands/workspace.ts`
+  - `plugin install|uninstall|update` in `src/cli/commands/plugin.ts`
+  - TUI sync actions in `src/cli/tui/actions/sync.ts`
+- Shared formatting lives in `src/cli/format-sync.ts`.
 
 ### VS Code / Copilot Alias
 - `vscode` is a display alias for `copilot` for artifact counts only.
 - MCP output should continue using the raw client name because VS Code and Copilot have separate MCP support.
+- Internally, `vscode` and `copilot` remain distinct client types with separate path mappings.
 
 ## Publishing
 - Never run `npm publish` directly.
