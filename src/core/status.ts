@@ -5,6 +5,7 @@ import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
 import { getPluginSource, getClientTypes } from '../models/workspace-config.js';
 import {
   parsePluginSource,
+  parseGitHubUrl,
   getPluginCachePath,
   type ParsedPluginSource,
 } from '../utils/plugin-path.js';
@@ -20,10 +21,37 @@ import { getUserWorkspaceConfig, isUserConfigPath } from './user-workspace.js';
 export interface PluginStatus {
   source: string;
   type: 'local' | 'github' | 'marketplace';
+  /**
+   * 'skill' when the resolved path looks like a single-skill source (root
+   * SKILL.md, no skills/ subdir — matches the auto-wrap layout from #232/#249).
+   * 'plugin' otherwise, including when the path can't be inspected (not cached,
+   * not synced, missing locally).
+   */
+  kind: 'skill' | 'plugin';
   available: boolean;
   path: string;
   owner?: string;
   repo?: string;
+}
+
+/**
+ * Classify a resolved cache/local path as a standalone skill or a plugin
+ * bundle. A "skill" has a SKILL.md at its root and no skills/ subdir; anything
+ * else (including paths that don't exist) is treated as a plugin.
+ */
+function classifyKind(path: string): 'skill' | 'plugin' {
+  if (!path) return 'plugin';
+  try {
+    if (
+      existsSync(join(path, 'SKILL.md')) &&
+      !existsSync(join(path, 'skills'))
+    ) {
+      return 'skill';
+    }
+  } catch {
+    // ignore — default to plugin
+  }
+  return 'plugin';
 }
 
 /**
@@ -106,9 +134,21 @@ function getPluginStatus(parsed: ParsedPluginSource): PluginStatus {
         : '';
     const available = cachePath ? existsSync(cachePath) : false;
 
+    // For GitHub plugins with a subpath, classify the resolved subdir rather
+    // than the repo root — that's what users actually consume. ParsedPluginSource
+    // drops the subpath, so re-parse the original URL to recover it.
+    const subpath = parseGitHubUrl(parsed.original)?.subpath;
+    const classifyPath =
+      available && cachePath
+        ? subpath
+          ? join(cachePath, subpath)
+          : cachePath
+        : '';
+
     return {
       source: parsed.original,
       type: 'github',
+      kind: classifyKind(classifyPath),
       available,
       path: cachePath,
       ...(parsed.owner && { owner: parsed.owner }),
@@ -122,6 +162,7 @@ function getPluginStatus(parsed: ParsedPluginSource): PluginStatus {
   return {
     source: parsed.original,
     type: 'local',
+    kind: classifyKind(available ? parsed.normalized : ''),
     available,
     path: parsed.normalized,
   };
@@ -156,6 +197,7 @@ async function getMarketplacePluginStatus(spec: string): Promise<PluginStatus> {
   return {
     source: spec,
     type: 'marketplace',
+    kind: classifyKind(resolved.success ? (resolved.path ?? '') : ''),
     available: resolved.success,
     path: resolved.path ?? '',
   };
