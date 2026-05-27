@@ -2090,7 +2090,7 @@ export async function syncWorkspace(
     if (wsSourceResult.success) {
       validatedWorkspaceSource = wsSourceResult;
     } else {
-      // Non-blocking: warn but continue syncing plugins
+      // Non-blocking: warn but continue updating plugins
       workspaceSourceWarnings.push(`Workspace source: ${wsSourceResult.error}`);
     }
     sw.stop('workspace-source-validation');
