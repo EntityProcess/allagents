@@ -323,7 +323,7 @@ export async function initWorkspace(
 
     // Auto-sync plugins
     // Pass sourceDir so relative paths in workspace.source resolve correctly
-    console.log('\nSyncing plugins...');
+    console.log('\nUpdating plugins...');
     const syncResult = await syncWorkspace(absoluteTarget, {
       ...(sourceDir && { workspaceSourceBase: sourceDir }),
     });
