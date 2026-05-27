@@ -303,7 +303,7 @@ export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise
           options.push({
             label: plugin.source,
             value: key,
-            hint: `${plugin.type} · project`,
+            hint: `${plugin.kind} · ${plugin.type} · project`,
           });
         }
         for (const plugin of status.userPlugins ?? []) {
@@ -311,7 +311,7 @@ export async function runPlugins(context: TuiContext, cache?: TuiCache): Promise
           options.push({
             label: plugin.source,
             value: key,
-            hint: `${plugin.type} · user`,
+            hint: `${plugin.kind} · ${plugin.type} · user`,
           });
         }
       }

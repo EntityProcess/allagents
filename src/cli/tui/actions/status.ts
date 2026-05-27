@@ -47,7 +47,7 @@ export async function runStatus(context: TuiContext, cache?: TuiCache): Promise<
       lines.push('Project plugins:');
       for (const plugin of status.plugins) {
         const icon = plugin.available ? '\u2713' : '\u2717';
-        lines.push(`  ${icon} ${plugin.source} (${plugin.type})`);
+        lines.push(`  ${icon} ${plugin.source} (${plugin.kind}, ${plugin.type})`);
       }
     }
 
@@ -56,7 +56,7 @@ export async function runStatus(context: TuiContext, cache?: TuiCache): Promise<
       lines.push('User plugins:');
       for (const plugin of userPlugins) {
         const icon = plugin.available ? '\u2713' : '\u2717';
-        lines.push(`  ${icon} ${plugin.source} (${plugin.type})`);
+        lines.push(`  ${icon} ${plugin.source} (${plugin.kind}, ${plugin.type})`);
       }
     }
 
