@@ -1102,6 +1102,118 @@ async function discoverSkillsFromSource(
 }
 
 /**
+ * Skill-first interactive install for `skill add owner/repo` (source-auto).
+ *
+ * When connected to a TTY, discovers skills from the source and shows an
+ * interactive multiselect with all skills pre-selected — the user can deselect
+ * any they don't want before confirming. Falls back to install-all in non-TTY
+ * or JSON mode, and for marketplace sources (which have a more complex picker
+ * model that isn't worth duplicating here).
+ */
+async function selectAndInstallSkillsFromSource(opts: {
+  from: string;
+  isUser: boolean;
+  workspacePath: string;
+}): Promise<
+  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: SyncResult }
+  | { success: false; error: string }
+  | { success: 'cancelled' }
+> {
+  const { from, isUser, workspacePath } = opts;
+  const isTTY = process.stdout.isTTY && process.stdin.isTTY;
+
+  // Non-interactive path: install everything silently
+  if (!isTTY || isJsonMode()) {
+    return installAllSkillsFromSource(opts);
+  }
+
+  // Discover available skills (fetches the repo)
+  const discovered = await discoverSkillsFromSource(from);
+  if (!discovered.success) return { success: false, error: discovered.error };
+  if (discovered.skills.length === 0) {
+    return { success: false, error: `No skills found in '${from}'.` };
+  }
+
+  // Marketplace repos or single-skill repos: skip the picker
+  if (discovered.isMarketplace || discovered.skills.length === 1) {
+    return installAllSkillsFromSource(opts);
+  }
+
+  // Multiple skills on a direct repo: show a multiselect with all pre-selected
+  const p = await import('@clack/prompts');
+  const allNames = discovered.skills.map((s) => s.name);
+  const options = discovered.skills.map((s) => ({
+    label: s.name,
+    value: s.name,
+    ...(s.description ? { hint: s.description } : {}),
+  }));
+
+  const selected = await p.autocompleteMultiselect({
+    message: `Select skills to install from ${chalk.bold(from)}`,
+    options,
+    initialValues: allNames,
+    placeholder: 'Type to filter  ·  Space to toggle  ·  Enter to confirm',
+    required: false,
+  });
+
+  if (p.isCancel(selected) || (selected as string[]).length === 0) {
+    return { success: 'cancelled' };
+  }
+
+  const selectedNames = selected as string[];
+
+  // All skills selected: use the efficient bulk path
+  if (selectedNames.length === allNames.length) {
+    return installAllSkillsFromSource(opts);
+  }
+
+  // Subset selected: configure allowlist with just those names, then sync once
+  const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
+  const fetchResult = await fetchPlugin(from, {
+    ...(parsed?.branch && { branch: parsed.branch }),
+  });
+  if (!fetchResult.success) {
+    return {
+      success: false,
+      error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}`,
+    };
+  }
+
+  const existingEnabled = await getEnabledSkillsForGitHubSource(from, workspacePath);
+  const desiredSkills = [...existingEnabled];
+  for (const name of selectedNames) {
+    if (!desiredSkills.includes(name)) desiredSkills.push(name);
+  }
+
+  const updateResult = isUser
+    ? await upsertUserGitHubPluginSourceAllowlist(from, desiredSkills)
+    : await upsertGitHubPluginSourceAllowlist(from, desiredSkills, workspacePath);
+
+  if (!updateResult.success) {
+    return {
+      success: false,
+      error: `Failed to configure skill allowlist: ${updateResult.error ?? 'Unknown error'}`,
+    };
+  }
+
+  const pluginName = extractPrimaryPluginName(updateResult.normalizedPlugin ?? from);
+  console.log(
+    `✓ Enabled ${selectedNames.length} skill(s) from ${pluginName}: ${selectedNames.join(', ')}`,
+  );
+
+  const syncResult = isUser
+    ? await syncUserWorkspace()
+    : await syncWorkspace(workspacePath);
+  if (!syncResult.success) return { success: false, error: 'Sync failed' };
+
+  return {
+    success: true,
+    installed: [{ pluginName, skills: desiredSkills }],
+    syncResult,
+  };
+}
+
+/**
  * Install all skills from a --from source. Mirrors installSkillFromSource but
  * enables every discovered skill rather than a single named one.
  */
@@ -1649,11 +1761,22 @@ const addCmd = command({
         const isUserAll = scope === 'user';
         const workspacePathAll = isUserAll ? getHomeDir() : process.cwd();
 
-        const installResult = await installAllSkillsFromSource({
-          from: fromArg,
-          isUser: isUserAll,
-          workspacePath: workspacePathAll,
-        });
+        // source-auto: interactive picker on TTY; --all: direct bulk install
+        const installResult = autoAll
+          ? await selectAndInstallSkillsFromSource({
+              from: fromArg,
+              isUser: isUserAll,
+              workspacePath: workspacePathAll,
+            })
+          : await installAllSkillsFromSource({
+              from: fromArg,
+              isUser: isUserAll,
+              workspacePath: workspacePathAll,
+            });
+
+        if (installResult.success === 'cancelled') {
+          return;
+        }
 
         if (!installResult.success) {
           if (isJsonMode()) {
