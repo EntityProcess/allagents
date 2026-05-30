@@ -7,6 +7,7 @@ description: Complete reference for AllAgents CLI commands.
 
 ```bash
 allagents update [--offline] [--dry-run] [--client <client>] [--scope <scope>]
+allagents status
 ```
 
 ### update
@@ -31,11 +32,37 @@ Sync state is tracked in `.allagents/sync-state.json`.
 
 When `vscode` is in the `clients` list, sync also generates a `.code-workspace` file with repository paths resolved to absolute paths. See the [Workspaces guide](/docs/guides/workspaces/#vscode-workspace-generation) for details.
 
+### status
+
+Show the sync status of all configured plugins and skills.
+
+```bash
+allagents status
+```
+
+Lists every configured entry with its availability, type, and configured clients. Each entry includes a `Type` label of either `plugin` or `skill`:
+
+- **plugin** — standard plugin repository (has a `skills/` directory or no `SKILL.md` at the root)
+- **skill** — standalone skill repository (root-level `SKILL.md`, no `skills/` subdirectory)
+
+With `--json`, each entry in the `plugins` array includes a `kind` field (`"plugin"` or `"skill"`):
+
+```json
+{
+  "plugins": [
+    { "source": "owner/repo", "type": "github", "kind": "skill", "available": true }
+  ],
+  "clients": ["claude"]
+}
+```
+
+`allagents workspace status` is accepted as a backwards-compatible alias.
+
 ## Workspace Commands
 
 ```bash
 allagents workspace init <path> [--from <source>]
-allagents workspace status
+allagents workspace status  # alias for `allagents status`
 allagents workspace plugin install <plugin@marketplace> [--scope <scope>]
 allagents workspace plugin remove <plugin> [--scope <scope>]
 ```
@@ -107,6 +134,25 @@ allagents plugin marketplace update [name]
 allagents skill list [--scope <scope>]
 allagents skill remove <skill> [--plugin <plugin>] [--scope <scope>]
 allagents skill add <skill> [--from <source>] [--plugin <plugin>] [--scope <scope>]
+```
+
+### plugin list
+
+List all installed plugins and skills.
+
+```bash
+allagents plugin list
+allagents plugin list [marketplace]  # filter by marketplace name
+```
+
+Each entry shows a `Type` label of either `plugin` or `skill` (see [`status`](#status) for the classification rule). With `--json`, each entry includes a `kind` field:
+
+```json
+{
+  "plugins": [
+    { "spec": "owner/repo", "scope": "user", "kind": "skill", "fileClients": ["claude"] }
+  ]
+}
 ```
 
 ### plugin install

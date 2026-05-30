@@ -776,6 +776,8 @@ const pluginListCmd = command({
       // Build a source→kind map so each listed entry can be labelled
       // 'skill' (root SKILL.md, no skills/ subdir) or 'plugin' (everything
       // else, including not-yet-resolved sources).
+      // getWorkspaceStatus resolves marketplace specs with { offline: true },
+      // so this is filesystem-only and adds ~2ms per plugin — no network I/O.
       const kindBySource = new Map<string, 'skill' | 'plugin'>();
       try {
         const status = await getWorkspaceStatus(process.cwd());
