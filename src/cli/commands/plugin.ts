@@ -883,7 +883,7 @@ const pluginListCmd = command({
       const skillCount = plugins.filter((p) => p.kind === 'skill').length;
       const pluginCount = plugins.length - skillCount;
 
-      console.log('Installed:\n');
+      console.log('Installed plugins:\n');
       for (const p of plugins) {
         console.log(`  ❯ ${p.spec}`);
         console.log(`    Type: ${p.kind}`);
