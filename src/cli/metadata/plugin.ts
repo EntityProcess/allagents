@@ -102,15 +102,15 @@ export const marketplaceBrowseMeta: AgentCommandMeta = {
 
 export const pluginListMeta: AgentCommandMeta = {
   command: 'plugin list',
-  description: 'List installed plugins',
-  whenToUse: 'To see which plugins are currently installed in your workspace',
+  description: 'List installed plugins and standalone skills',
+  whenToUse: 'To see which plugins and skills are currently installed in your workspace',
   examples: [
     'allagents plugin list',
   ],
   expectedOutput:
-    'Lists installed plugins with their marketplace and scope. If none installed, suggests using marketplace browse.',
+    'Lists installed items with type (plugin or skill), marketplace, and scope. If none installed, suggests using marketplace browse.',
   outputSchema: {
-    plugins: [{ name: 'string', marketplace: 'string', scope: 'string' }],
+    plugins: [{ name: 'string', marketplace: 'string', scope: 'string', kind: 'string' }],
     total: 'number',
   },
 };

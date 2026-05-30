@@ -2,7 +2,7 @@
 
 import { run } from 'cmd-ts';
 import { conciseSubcommands } from './help.js';
-import { workspaceCmd, syncCmd, initCmd } from './commands/workspace.js';
+import { workspaceCmd, syncCmd, initCmd, statusCmd } from './commands/workspace.js';
 import { pluginCmd } from './commands/plugin.js';
 import { mcpCmd } from './commands/mcp.js';
 import { selfCmd } from './commands/self.js';
@@ -31,6 +31,7 @@ const app = conciseSubcommands({
   cmds: {
     init: initCmd,
     update: syncCmd,
+    status: statusCmd,
     workspace: workspaceCmd,
     plugin: pluginCmd,
     mcp: mcpCmd,

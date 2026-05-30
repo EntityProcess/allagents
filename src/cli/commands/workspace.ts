@@ -467,19 +467,19 @@ function formatTimingMs(ms: number): string {
 function formatPluginStatusLine(plugin: {
   source: string;
   type: 'local' | 'github' | 'marketplace';
+  kind: 'skill' | 'plugin';
   available: boolean;
 }): string {
   const status = plugin.available ? '✓' : '✗';
-  let typeLabel: string | undefined;
+  const labels: string[] = [plugin.kind];
   if (plugin.type === 'marketplace') {
-    typeLabel = plugin.available ? undefined : 'not synced';
+    if (!plugin.available) labels.push('not synced');
   } else if (plugin.type === 'github') {
-    typeLabel = plugin.available ? 'cached' : 'not cached';
+    labels.push(plugin.available ? 'cached' : 'not cached');
   } else {
-    typeLabel = 'local';
+    labels.push('local');
   }
-  const suffix = typeLabel ? ` (${typeLabel})` : '';
-  return `${status} ${formatPluginSource(plugin.source)}${suffix}`;
+  return `${status} ${formatPluginSource(plugin.source)} (${labels.join(', ')})`;
 }
 
 const statusCmd = command({
@@ -838,7 +838,7 @@ const repoCmd = conciseSubcommands({
 // workspace subcommands group
 // =============================================================================
 
-export { syncCmd, initCmd };
+export { syncCmd, initCmd, statusCmd };
 
 export const workspaceCmd = conciseSubcommands({
   name: 'workspace',

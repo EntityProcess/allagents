@@ -34,6 +34,7 @@ import {
 } from '../../core/user-workspace.js';
 import { updatePlugin, type InstalledPluginUpdateResult } from '../../core/plugin.js';
 import { getAllSkillsFromPlugins } from '../../core/skills.js';
+import { getWorkspaceStatus } from '../../core/status.js';
 import { parseMarketplaceManifest } from '../../utils/marketplace-manifest-parser.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
@@ -772,6 +773,23 @@ const pluginListCmd = command({
       const projectPlugins = await getInstalledProjectPlugins(process.cwd());
       const allInstalled = [...userPlugins, ...projectPlugins];
 
+      // Build a source→kind map so each listed entry can be labelled
+      // 'skill' (root SKILL.md, no skills/ subdir) or 'plugin' (everything
+      // else, including not-yet-resolved sources).
+      const kindBySource = new Map<string, 'skill' | 'plugin'>();
+      try {
+        const status = await getWorkspaceStatus(process.cwd());
+        for (const p of [
+          ...status.plugins,
+          ...(status.userPlugins ?? []),
+        ]) {
+          kindBySource.set(p.source, p.kind);
+        }
+      } catch {
+        // Best-effort: if status lookup fails, fall back to labelling
+        // everything as 'plugin' below.
+      }
+
       // Load native plugins from sync state
       const userSyncState = await loadSyncState(getAllagentsDir());
       const projectSyncState = cwdIsHome ? null : await loadSyncState(process.cwd());
@@ -782,6 +800,7 @@ const pluginListCmd = command({
         name: string;
         marketplace: string;
         scope: 'user' | 'project';
+        kind: 'skill' | 'plugin';
         fileClients: string[];
         nativeClients: string[];
       }
@@ -794,6 +813,7 @@ const pluginListCmd = command({
           name: p.name,
           marketplace: p.marketplace,
           scope: p.scope,
+          kind: kindBySource.get(p.spec) ?? 'plugin',
           fileClients: pluginClients.get(`${p.spec}:${p.scope}`) ?? [],
           nativeClients: [],
         });
@@ -821,6 +841,7 @@ const pluginListCmd = command({
                 name: parsed?.plugin ?? spec,
                 marketplace: parsed?.marketplaceName ?? '',
                 scope,
+                kind: kindBySource.get(spec) ?? 'plugin',
                 fileClients: [],
                 nativeClients: [client],
               });
@@ -840,6 +861,7 @@ const pluginListCmd = command({
               name: p.name,
               marketplace: p.marketplace,
               scope: p.scope,
+              kind: p.kind,
               ...(p.fileClients.length > 0 && { clients: p.fileClients }),
               ...(p.nativeClients.length > 0 && { nativeClients: p.nativeClients }),
             })),
@@ -858,9 +880,13 @@ const pluginListCmd = command({
         return;
       }
 
-      console.log('Installed plugins:\n');
+      const skillCount = plugins.filter((p) => p.kind === 'skill').length;
+      const pluginCount = plugins.length - skillCount;
+
+      console.log('Installed:\n');
       for (const p of plugins) {
         console.log(`  ❯ ${p.spec}`);
+        console.log(`    Type: ${p.kind}`);
         console.log(`    Scope: ${p.scope}`);
 
         const hasClients = p.fileClients.length > 0 || p.nativeClients.length > 0;
@@ -874,7 +900,10 @@ const pluginListCmd = command({
         console.log('');
       }
 
-      console.log(`Total: ${plugins.length} installed`);
+      const summaryParts: string[] = [];
+      if (pluginCount > 0) summaryParts.push(`${pluginCount} plugin${pluginCount === 1 ? '' : 's'}`);
+      if (skillCount > 0) summaryParts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
+      console.log(`Total: ${summaryParts.join(', ')}`);
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {

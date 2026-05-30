@@ -73,16 +73,17 @@ export const pruneMeta: AgentCommandMeta = {
 };
 
 export const statusMeta: AgentCommandMeta = {
-  command: 'workspace status',
+  command: 'status',
   description: 'Show sync status of plugins',
-  whenToUse: 'To check which plugins are configured and whether they are available locally',
+  whenToUse: 'To check which plugins and skills are configured and whether they are available locally',
   examples: [
+    'allagents status',
     'allagents workspace status',
   ],
   expectedOutput:
-    'Lists all configured plugins with availability status and configured clients. Exit 0 on success, exit 1 if workspace is not initialized.',
+    'Lists all configured plugins/skills with availability status and configured clients. Exit 0 on success, exit 1 if workspace is not initialized.',
   outputSchema: {
-    plugins: [{ source: 'string', type: 'string', available: 'boolean' }],
+    plugins: [{ source: 'string', type: 'string', kind: 'string', available: 'boolean' }],
     clients: ['string'],
   },
 };

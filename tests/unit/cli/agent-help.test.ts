@@ -90,8 +90,8 @@ describe('agent command metadata', () => {
       'skill list',
       'skill remove',
       'skill search',
+      'status',
       'update',
-      'workspace status',
     ]);
   });
 
@@ -131,8 +131,8 @@ describe('agent command metadata', () => {
     expect(installCmd.positionals![0].required).toBe(true);
   });
 
-  test('workspace status has no positionals or options', () => {
-    const statusCmd = allCommands.find((c) => c.command === 'workspace status')!;
+  test('status has no positionals or options', () => {
+    const statusCmd = allCommands.find((c) => c.command === 'status')!;
     expect(statusCmd.positionals).toBeUndefined();
     expect(statusCmd.options).toBeUndefined();
   });
