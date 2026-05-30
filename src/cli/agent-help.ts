@@ -72,14 +72,24 @@ function formatForAgent(meta: AgentCommandMeta) {
   return result;
 }
 
+/** Maps deprecated command paths to their current canonical equivalents. */
+const commandAliases: Record<string, string> = {
+  'workspace status': 'status',
+};
+
+function resolveAlias(commandPath: string): string {
+  return commandAliases[commandPath] ?? commandPath;
+}
+
 /**
  * Look up a meta by the runtime command path (e.g. "skills list").
+ * Resolves deprecated aliases (e.g. "workspace status" -> "status").
  * Used by index.ts to validate `--json=<fields>` against the per-command
  * allowlist before dispatching.
  */
 export function findMetaByCommand(commandPath: string): AgentCommandMeta | undefined {
   if (!commandPath) return undefined;
-  return allCommands.find((c) => c.command === commandPath);
+  return allCommands.find((c) => c.command === resolveAlias(commandPath));
 }
 
 export function printAgentHelp(args: string[], version: string): void {
@@ -98,16 +108,17 @@ export function printAgentHelp(args: string[], version: string): void {
     };
     console.log(JSON.stringify(tree, null, 2));
   } else {
+    const resolved = resolveAlias(commandPath);
     // Find exact matching command
-    const match = allCommands.find(c => c.command === commandPath);
+    const match = allCommands.find(c => c.command === resolved);
     if (match) {
       console.log(JSON.stringify(formatForAgent(match), null, 2));
     } else {
       // Try prefix match for subcommand groups
-      const matches = allCommands.filter(c => c.command.startsWith(`${commandPath} `));
+      const matches = allCommands.filter(c => c.command.startsWith(`${resolved} `));
       if (matches.length > 0) {
         const group = {
-          name: commandPath,
+          name: resolved,
           commands: matches.map(formatForAgent),
         };
         console.log(JSON.stringify(group, null, 2));
