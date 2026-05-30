@@ -747,12 +747,16 @@ async function installSkillViaMarketplace(opts: {
 
 /**
  * Decide whether the positional argument to `skill add` is a plugin source
- * (npx-skills shape) or a skill name (legacy shape).
+ * (npx-skills shape), an auto-install source, or a skill name (legacy shape).
  *
- * The positional is interpreted as a source only when it looks like a GitHub
- * spec AND the user supplied an explicit selector (--skill, --list, --all).
- * Without a selector we fall through to the legacy resolveSkillFromUrl path,
- * which preserves the deep-URL form `skill add <url-with-subpath>`.
+ * shape: 'source'      — GitHub spec + explicit selector (--skill/--list/--all)
+ * shape: 'source-auto' — GitHub spec, no selector, no subpath: treat the repo
+ *                        as a collection of skills and install all of them. This
+ *                        mirrors `npx skills add owner/repo` where the repo is
+ *                        just a transport for its skills, not a named entity.
+ * shape: 'skill-name'  — everything else, including deep-URL forms with a
+ *                        subpath (e.g. owner/repo/skills/foo) which are handled
+ *                        by the legacy resolveSkillFromUrl path.
  */
 export function classifySkillAddPositional(
   positional: string | undefined,
@@ -762,7 +766,8 @@ export function classifySkillAddPositional(
 ):
   | { shape: 'none' }
   | { shape: 'skill-name' }
-  | { shape: 'source'; skills: string[] } {
+  | { shape: 'source'; skills: string[] }
+  | { shape: 'source-auto' } {
   if (!positional) return { shape: 'none' };
   const skills = skillFlag
     ? skillFlag
@@ -771,8 +776,11 @@ export function classifySkillAddPositional(
         .filter(Boolean)
     : [];
   const hasSelector = skills.length > 0 || list || all;
-  if (isGitHubUrl(positional) && hasSelector) {
-    return { shape: 'source', skills };
+  if (isGitHubUrl(positional)) {
+    if (hasSelector) return { shape: 'source', skills };
+    // No subpath → the repo is a standalone skill or skill bundle; auto-install all.
+    // Subpath → legacy deep-URL form handled by resolveSkillFromUrl.
+    if (!parseGitHubUrl(positional)?.subpath) return { shape: 'source-auto' };
   }
   return { shape: 'skill-name' };
 }
@@ -1459,10 +1467,7 @@ const addCmd = command({
     all,
   }) => {
     try {
-      // npx-skills shape: positional is the source, --skill/--list/--all picks
-      // what to install. Triggered only when the positional looks like a GitHub
-      // source AND a selector is provided, so the legacy deep-URL form
-      // (positional with implicit subpath selector) keeps working.
+      // Classify the positional argument so we know which code path to take.
       const classified = classifySkillAddPositional(
         skillArg,
         skillFlag,
@@ -1470,7 +1475,10 @@ const addCmd = command({
         all,
       );
       let skillsFromFlag: string[] = [];
-      if (classified.shape === 'source') {
+      // source-auto: bare owner/repo (no subpath, no selector) — install all skills
+      // from the repo as if --all were passed. Mirrors `npx skills add owner/repo`.
+      let autoAll = false;
+      if (classified.shape === 'source' || classified.shape === 'source-auto') {
         if (fromArg) {
           const error =
             'Cannot use --from when the positional argument is already a plugin source.';
@@ -1483,7 +1491,11 @@ const addCmd = command({
         }
         fromArg = skillArg;
         skillArg = undefined;
-        skillsFromFlag = classified.skills;
+        if (classified.shape === 'source') {
+          skillsFromFlag = classified.skills;
+        } else {
+          autoAll = true;
+        }
       } else if (skillFlag) {
         const error =
           '--skill requires the positional argument to be a plugin source (e.g., `skill add owner/repo --skill foo`). To install a known skill, pass the skill name as the positional.';
@@ -1612,8 +1624,8 @@ const addCmd = command({
         return;
       }
 
-      // --all: bulk install
-      if (all) {
+      // --all or auto-install (bare owner/repo with no selector): bulk install
+      if (all || autoAll) {
         if (!fromArg) {
           const error = '--all requires --from to specify a plugin source.';
           if (isJsonMode()) {

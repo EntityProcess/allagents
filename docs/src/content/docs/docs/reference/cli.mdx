@@ -195,30 +195,58 @@ After disabling, the skill is added to `disabledSkills` in workspace.yaml and sy
 
 ### skill add
 
-Add a skill from a plugin, or re-enable a previously disabled skill. The `<skill>` argument can be a skill name or a GitHub URL pointing to a skill.
+Add skills from a GitHub repo, re-enable a previously disabled skill, or add a skill from a specific plugin. The positional argument is interpreted by context:
 
 | Flag | Description |
 |------|-------------|
 | `-f, --from <source>` | Plugin source (GitHub URL, `owner/repo`, or `plugin@marketplace`) to install if the skill is not already available |
+| `--skill <names>` | Comma-separated skill names to install when the positional is a plugin source |
+| `--all` | Install every skill from the source |
+| `--list` | List available skills at the source without installing |
 | `-p, --plugin <plugin>` | Plugin name (required if skill exists in multiple plugins) |
 | `-s, --scope <scope>` | Scope: `project` (default) or `user` |
 
-#### Adding a skill from a new plugin
+#### Skill-first: install all skills from a repo
 
-Use `--from` to specify the plugin source when the skill isn't already installed:
+Pass `owner/repo` directly with no flags — all skills in that repo are installed automatically. This mirrors how `npx skills add` treats a package as a transport for its skills, not a named entity:
 
 ```bash
-# Add a specific skill from a GitHub repo
-allagents skill add reddit --from ReScienceLab/opc-skills
-
-# Or pass a GitHub URL directly — the skill name is extracted from the URL path
-allagents skill add https://github.com/owner/repo/tree/main/skills/my-skill
+# Install all skills from a repo (standalone skill or multi-skill bundle)
+allagents skill add ReScienceLab/opc-skills
+allagents skill add https://github.com/owner/repo
+allagents skill add gh:owner/repo
 ```
 
-**Source formats for `--from`:**
-- GitHub shorthand: `owner/repo`
-- GitHub URL: `https://github.com/owner/repo`
-- Marketplace: `plugin@marketplace`
+This works for:
+- **Standalone skill repos** — a single `SKILL.md` at the root (no `skills/` subdirectory)
+- **Multi-skill bundles** — repos with a `skills/` directory containing multiple skill files
+
+Use `--list` first to preview what's available before installing:
+
+```bash
+allagents skill add ReScienceLab/opc-skills --list
+```
+
+#### Installing a specific named skill
+
+To install only one skill from a multi-skill repo:
+
+```bash
+allagents skill add reddit --from ReScienceLab/opc-skills
+allagents skill add ReScienceLab/opc-skills --skill reddit
+```
+
+To install multiple by name:
+
+```bash
+allagents skill add ReScienceLab/opc-skills --skill reddit,terraform
+```
+
+To install a skill from a specific file URL:
+
+```bash
+allagents skill add https://github.com/owner/repo/tree/main/skills/my-skill
+```
 
 #### Re-enabling a disabled skill
 
