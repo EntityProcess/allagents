@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { extractAgentHelpFlag } from '../../../src/cli/agent-help.js';
+import { extractAgentHelpFlag, findMetaByCommand } from '../../../src/cli/agent-help.js';
 import { initMeta, syncMeta, statusMeta } from '../../../src/cli/metadata/workspace.js';
 import {
   marketplaceListMeta,
@@ -135,5 +135,27 @@ describe('agent command metadata', () => {
     const statusCmd = allCommands.find((c) => c.command === 'status')!;
     expect(statusCmd.positionals).toBeUndefined();
     expect(statusCmd.options).toBeUndefined();
+  });
+});
+
+describe('findMetaByCommand', () => {
+  test('resolves canonical "status" path', () => {
+    const meta = findMetaByCommand('status');
+    expect(meta).toBeDefined();
+    expect(meta!.command).toBe('status');
+  });
+
+  test('resolves deprecated "workspace status" alias to status meta', () => {
+    const meta = findMetaByCommand('workspace status');
+    expect(meta).toBeDefined();
+    expect(meta!.command).toBe('status');
+  });
+
+  test('returns undefined for unknown command', () => {
+    expect(findMetaByCommand('workspace frobnicate')).toBeUndefined();
+  });
+
+  test('returns undefined for empty string', () => {
+    expect(findMetaByCommand('')).toBeUndefined();
   });
 });
