@@ -1105,10 +1105,12 @@ async function discoverSkillsFromSource(
  * Skill-first interactive install for `skill add owner/repo` (source-auto).
  *
  * When connected to a TTY, discovers skills from the source and shows an
- * interactive multiselect with all skills pre-selected — the user can deselect
- * any they don't want before confirming. Falls back to install-all in non-TTY
- * or JSON mode, and for marketplace sources (which have a more complex picker
- * model that isn't worth duplicating here).
+ * interactive picker with all skills pre-selected — the user can deselect any
+ * they don't want before confirming. Falls back to install-all in non-TTY or
+ * JSON mode.
+ *
+ * Direct repos (non-marketplace): autocompleteMultiselect — flat list.
+ * Marketplace repos: groupMultiselect — skills grouped by plugin.
  */
 async function selectAndInstallSkillsFromSource(opts: {
   from: string;
@@ -1134,13 +1136,155 @@ async function selectAndInstallSkillsFromSource(opts: {
     return { success: false, error: `No skills found in '${from}'.` };
   }
 
-  // Marketplace repos or single-skill repos: skip the picker
-  if (discovered.isMarketplace || discovered.skills.length === 1) {
+  // Single-skill repos: skip the picker
+  if (discovered.skills.length === 1) {
     return installAllSkillsFromSource(opts);
   }
 
-  // Multiple skills on a direct repo: show a multiselect with all pre-selected
   const p = await import('@clack/prompts');
+
+  // Marketplace repos: show a grouped multiselect picker by plugin
+  if (discovered.isMarketplace) {
+    const allSkillNames = discovered.skills.map((s) => s.name);
+
+    // Group skills by pluginName
+    const groups: Record<string, Array<{ label: string; value: string; hint?: string }>> = {};
+    for (const skill of discovered.skills) {
+      const group = skill.pluginName ?? 'Other';
+      if (!groups[group]) groups[group] = [];
+      groups[group].push({
+        label: skill.name,
+        value: skill.name,
+        ...(skill.description ? { hint: skill.description } : {}),
+      });
+    }
+
+    const selected = await p.groupMultiselect({
+      message: `Select skills to install from ${chalk.bold(from)}`,
+      options: groups,
+      initialValues: allSkillNames,
+      required: false,
+    });
+
+    if (p.isCancel(selected) || (selected as string[]).length === 0) {
+      return { success: 'cancelled' };
+    }
+
+    const selectedNames = selected as string[];
+
+    // All selected → use the efficient bulk path
+    if (selectedNames.length === allSkillNames.length) {
+      return installAllSkillsFromSource(opts);
+    }
+
+    // Subset selected → install per-plugin, filtered to selected skills
+    const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
+    const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
+
+    let marketplaceName: string | undefined;
+    const existingAnyScope = await findMarketplace(
+      parsed?.repo ?? from,
+      sourceLocation,
+      isUser ? undefined : workspacePath,
+    );
+
+    if (existingAnyScope) {
+      marketplaceName = existingAnyScope.name;
+      await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
+    } else {
+      const scopeOptions = isUser
+        ? undefined
+        : { scope: 'project' as const, workspacePath };
+
+      const mktResult = await addMarketplace(
+        from,
+        parsed?.branch ? `${parsed.repo}-${parsed.branch}` : undefined,
+        parsed?.branch ?? undefined,
+        undefined,
+        scopeOptions,
+      );
+
+      if (mktResult.success) {
+        marketplaceName = mktResult.marketplace?.name;
+      }
+    }
+
+    if (!marketplaceName) {
+      return { success: false, error: `Failed to register marketplace from '${from}'` };
+    }
+
+    const mktPlugins = await listMarketplacePlugins(
+      marketplaceName,
+      isUser ? undefined : workspacePath,
+    );
+    if (mktPlugins.plugins.length === 0) {
+      return { success: false, error: `No plugins found in marketplace '${marketplaceName}'.` };
+    }
+
+    const installed: Array<{ pluginName: string; skills: string[] }> = [];
+
+    for (const mktPlugin of mktPlugins.plugins) {
+      const allPluginSkillNames = mktPlugin.skills
+        ? mktPlugin.skills.map((s) => s.split('/').pop() ?? '').filter(Boolean)
+        : await discoverSkillNames(mktPlugin.path);
+
+      const pluginSelectedSkills = allPluginSkillNames.filter((n) => selectedNames.includes(n));
+      if (pluginSelectedSkills.length === 0) continue;
+
+      const pluginSpec = `${mktPlugin.name}@${marketplaceName}`;
+      const installResult = isUser
+        ? await addUserPlugin(pluginSpec)
+        : await addPlugin(pluginSpec, workspacePath);
+
+      if (!installResult.success) {
+        if (
+          !installResult.error?.includes('already exists') &&
+          !installResult.error?.includes('duplicates existing')
+        ) {
+          return {
+            success: false,
+            error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}`,
+          };
+        }
+      }
+
+      const setModeResult = isUser
+        ? await setUserPluginSkillsMode(mktPlugin.name, 'allowlist', pluginSelectedSkills)
+        : await setPluginSkillsMode(
+            mktPlugin.name,
+            'allowlist',
+            pluginSelectedSkills,
+            workspacePath,
+          );
+
+      if (!setModeResult.success) {
+        return {
+          success: false,
+          error: `Failed to configure skill allowlist for '${mktPlugin.name}': ${setModeResult.error ?? 'Unknown error'}`,
+        };
+      }
+
+      installed.push({ pluginName: mktPlugin.name, skills: pluginSelectedSkills });
+    }
+
+    if (installed.length === 0) {
+      return { success: false, error: 'No matching skills found in marketplace plugins.' };
+    }
+
+    if (!isJsonMode()) {
+      const total = installed.reduce((sum, i) => sum + i.skills.length, 0);
+      console.log(`✓ Enabled ${total} skill(s) across ${installed.length} plugin(s)`);
+    }
+
+    const syncResult = isUser
+      ? await syncUserWorkspace()
+      : await syncWorkspace(workspacePath);
+    if (!syncResult.success) return { success: false, error: 'Sync failed' };
+
+    return { success: true, installed, syncResult };
+  }
+
+  // Multiple skills on a direct repo: show a multiselect with all pre-selected
   const allNames = discovered.skills.map((s) => s.name);
   const options = discovered.skills.map((s) => ({
     label: s.name,
