@@ -40,13 +40,19 @@ allagents update
 
 ## Add Individual Skills
 
-Install a specific skill from a GitHub repo without adding the full plugin:
+Pass `owner/repo` directly to install all skills from that repo — no flags required:
+
+```bash
+allagents skill add ReScienceLab/opc-skills
+```
+
+To install only a specific skill from a multi-skill repo:
 
 ```bash
 allagents skill add reddit --from ReScienceLab/opc-skills
 ```
 
-Or pass a GitHub URL directly:
+Or point at a specific skill file with a full URL:
 
 ```bash
 allagents skill add https://github.com/owner/repo/tree/main/skills/my-skill

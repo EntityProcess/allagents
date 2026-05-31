@@ -129,6 +129,7 @@ export const skillsAddMeta: AgentCommandMeta = {
   whenToUse:
     'To add a skill from a GitHub repo or marketplace plugin, or to re-enable a skill that was previously disabled',
   examples: [
+    'allagents skill add ReScienceLab/opc-skills',
     'allagents skill add reddit --from ReScienceLab/opc-skills',
     'allagents skill add NousResearch/hermes-agent --skill llm-wiki',
     'allagents skill add NousResearch/hermes-agent --skill llm-wiki,dogfood',
@@ -147,7 +148,10 @@ export const skillsAddMeta: AgentCommandMeta = {
       type: 'string',
       required: false,
       description:
-        'Either a skill name (paired with --from) or a plugin source (owner/repo, gh:..., or a GitHub URL — paired with --skill, --list, or --all).',
+        'A skill name (re-enable an installed skill, or pair with --from to install from a source); ' +
+        'a plugin source without subpath (owner/repo, gh:owner/repo, or https://github.com/owner/repo — ' +
+        'installs all skills from that repo without needing any flags); ' +
+        'or a deep GitHub URL with a subpath pointing to a specific skill file.',
     },
   ],
   options: [

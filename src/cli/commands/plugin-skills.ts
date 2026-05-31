@@ -747,12 +747,16 @@ async function installSkillViaMarketplace(opts: {
 
 /**
  * Decide whether the positional argument to `skill add` is a plugin source
- * (npx-skills shape) or a skill name (legacy shape).
+ * (npx-skills shape), an auto-install source, or a skill name (legacy shape).
  *
- * The positional is interpreted as a source only when it looks like a GitHub
- * spec AND the user supplied an explicit selector (--skill, --list, --all).
- * Without a selector we fall through to the legacy resolveSkillFromUrl path,
- * which preserves the deep-URL form `skill add <url-with-subpath>`.
+ * shape: 'source'      — GitHub spec + explicit selector (--skill/--list/--all)
+ * shape: 'source-auto' — GitHub spec, no selector, no subpath: treat the repo
+ *                        as a collection of skills and install all of them. This
+ *                        mirrors `npx skills add owner/repo` where the repo is
+ *                        just a transport for its skills, not a named entity.
+ * shape: 'skill-name'  — everything else, including deep-URL forms with a
+ *                        subpath (e.g. owner/repo/skills/foo) which are handled
+ *                        by the legacy resolveSkillFromUrl path.
  */
 export function classifySkillAddPositional(
   positional: string | undefined,
@@ -762,7 +766,8 @@ export function classifySkillAddPositional(
 ):
   | { shape: 'none' }
   | { shape: 'skill-name' }
-  | { shape: 'source'; skills: string[] } {
+  | { shape: 'source'; skills: string[] }
+  | { shape: 'source-auto' } {
   if (!positional) return { shape: 'none' };
   const skills = skillFlag
     ? skillFlag
@@ -771,8 +776,11 @@ export function classifySkillAddPositional(
         .filter(Boolean)
     : [];
   const hasSelector = skills.length > 0 || list || all;
-  if (isGitHubUrl(positional) && hasSelector) {
-    return { shape: 'source', skills };
+  if (isGitHubUrl(positional)) {
+    if (hasSelector) return { shape: 'source', skills };
+    // No subpath → the repo is a standalone skill or skill bundle; auto-install all.
+    // Subpath → legacy deep-URL form handled by resolveSkillFromUrl.
+    if (!parseGitHubUrl(positional)?.subpath) return { shape: 'source-auto' };
   }
   return { shape: 'skill-name' };
 }
@@ -1091,6 +1099,118 @@ async function discoverSkillsFromSource(
 
   const skills = await discoverSkillsWithMetadata(sourcePath);
   return { success: true, skills, isMarketplace: false };
+}
+
+/**
+ * Skill-first interactive install for `skill add owner/repo` (source-auto).
+ *
+ * When connected to a TTY, discovers skills from the source and shows an
+ * interactive multiselect with all skills pre-selected — the user can deselect
+ * any they don't want before confirming. Falls back to install-all in non-TTY
+ * or JSON mode, and for marketplace sources (which have a more complex picker
+ * model that isn't worth duplicating here).
+ */
+async function selectAndInstallSkillsFromSource(opts: {
+  from: string;
+  isUser: boolean;
+  workspacePath: string;
+}): Promise<
+  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: SyncResult }
+  | { success: false; error: string }
+  | { success: 'cancelled' }
+> {
+  const { from, isUser, workspacePath } = opts;
+  const isTTY = process.stdout.isTTY && process.stdin.isTTY;
+
+  // Non-interactive path: install everything silently
+  if (!isTTY || isJsonMode()) {
+    return installAllSkillsFromSource(opts);
+  }
+
+  // Discover available skills (fetches the repo)
+  const discovered = await discoverSkillsFromSource(from);
+  if (!discovered.success) return { success: false, error: discovered.error };
+  if (discovered.skills.length === 0) {
+    return { success: false, error: `No skills found in '${from}'.` };
+  }
+
+  // Marketplace repos or single-skill repos: skip the picker
+  if (discovered.isMarketplace || discovered.skills.length === 1) {
+    return installAllSkillsFromSource(opts);
+  }
+
+  // Multiple skills on a direct repo: show a multiselect with all pre-selected
+  const p = await import('@clack/prompts');
+  const allNames = discovered.skills.map((s) => s.name);
+  const options = discovered.skills.map((s) => ({
+    label: s.name,
+    value: s.name,
+    ...(s.description ? { hint: s.description } : {}),
+  }));
+
+  const selected = await p.autocompleteMultiselect({
+    message: `Select skills to install from ${chalk.bold(from)}`,
+    options,
+    initialValues: allNames,
+    placeholder: 'Type to filter  ·  Space to toggle  ·  Enter to confirm',
+    required: false,
+  });
+
+  if (p.isCancel(selected) || (selected as string[]).length === 0) {
+    return { success: 'cancelled' };
+  }
+
+  const selectedNames = selected as string[];
+
+  // All skills selected: use the efficient bulk path
+  if (selectedNames.length === allNames.length) {
+    return installAllSkillsFromSource(opts);
+  }
+
+  // Subset selected: configure allowlist with just those names, then sync once
+  const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
+  const fetchResult = await fetchPlugin(from, {
+    ...(parsed?.branch && { branch: parsed.branch }),
+  });
+  if (!fetchResult.success) {
+    return {
+      success: false,
+      error: `Failed to fetch '${from}': ${fetchResult.error ?? 'Unknown error'}`,
+    };
+  }
+
+  const existingEnabled = await getEnabledSkillsForGitHubSource(from, workspacePath);
+  const desiredSkills = [...existingEnabled];
+  for (const name of selectedNames) {
+    if (!desiredSkills.includes(name)) desiredSkills.push(name);
+  }
+
+  const updateResult = isUser
+    ? await upsertUserGitHubPluginSourceAllowlist(from, desiredSkills)
+    : await upsertGitHubPluginSourceAllowlist(from, desiredSkills, workspacePath);
+
+  if (!updateResult.success) {
+    return {
+      success: false,
+      error: `Failed to configure skill allowlist: ${updateResult.error ?? 'Unknown error'}`,
+    };
+  }
+
+  const pluginName = extractPrimaryPluginName(updateResult.normalizedPlugin ?? from);
+  console.log(
+    `✓ Enabled ${selectedNames.length} skill(s) from ${pluginName}: ${selectedNames.join(', ')}`,
+  );
+
+  const syncResult = isUser
+    ? await syncUserWorkspace()
+    : await syncWorkspace(workspacePath);
+  if (!syncResult.success) return { success: false, error: 'Sync failed' };
+
+  return {
+    success: true,
+    installed: [{ pluginName, skills: desiredSkills }],
+    syncResult,
+  };
 }
 
 /**
@@ -1459,10 +1579,7 @@ const addCmd = command({
     all,
   }) => {
     try {
-      // npx-skills shape: positional is the source, --skill/--list/--all picks
-      // what to install. Triggered only when the positional looks like a GitHub
-      // source AND a selector is provided, so the legacy deep-URL form
-      // (positional with implicit subpath selector) keeps working.
+      // Classify the positional argument so we know which code path to take.
       const classified = classifySkillAddPositional(
         skillArg,
         skillFlag,
@@ -1470,7 +1587,10 @@ const addCmd = command({
         all,
       );
       let skillsFromFlag: string[] = [];
-      if (classified.shape === 'source') {
+      // source-auto: bare owner/repo (no subpath, no selector) — install all skills
+      // from the repo as if --all were passed. Mirrors `npx skills add owner/repo`.
+      let autoAll = false;
+      if (classified.shape === 'source' || classified.shape === 'source-auto') {
         if (fromArg) {
           const error =
             'Cannot use --from when the positional argument is already a plugin source.';
@@ -1483,7 +1603,11 @@ const addCmd = command({
         }
         fromArg = skillArg;
         skillArg = undefined;
-        skillsFromFlag = classified.skills;
+        if (classified.shape === 'source') {
+          skillsFromFlag = classified.skills;
+        } else {
+          autoAll = true;
+        }
       } else if (skillFlag) {
         const error =
           '--skill requires the positional argument to be a plugin source (e.g., `skill add owner/repo --skill foo`). To install a known skill, pass the skill name as the positional.';
@@ -1612,8 +1736,8 @@ const addCmd = command({
         return;
       }
 
-      // --all: bulk install
-      if (all) {
+      // --all or auto-install (bare owner/repo with no selector): bulk install
+      if (all || autoAll) {
         if (!fromArg) {
           const error = '--all requires --from to specify a plugin source.';
           if (isJsonMode()) {
@@ -1637,11 +1761,22 @@ const addCmd = command({
         const isUserAll = scope === 'user';
         const workspacePathAll = isUserAll ? getHomeDir() : process.cwd();
 
-        const installResult = await installAllSkillsFromSource({
-          from: fromArg,
-          isUser: isUserAll,
-          workspacePath: workspacePathAll,
-        });
+        // source-auto: interactive picker on TTY; --all: direct bulk install
+        const installResult = autoAll
+          ? await selectAndInstallSkillsFromSource({
+              from: fromArg,
+              isUser: isUserAll,
+              workspacePath: workspacePathAll,
+            })
+          : await installAllSkillsFromSource({
+              from: fromArg,
+              isUser: isUserAll,
+              workspacePath: workspacePathAll,
+            });
+
+        if (installResult.success === 'cancelled') {
+          return;
+        }
 
         if (!installResult.success) {
           if (isJsonMode()) {
