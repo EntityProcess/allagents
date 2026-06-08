@@ -25,6 +25,11 @@ bun install
 ```
 - If you discover you are not on a fresh worktree from the latest `origin/main`, stop and fix that first before changing code.
 
+### NTM & Beads Coordination
+- Use NTM sessions/workers for multi-agent orchestration. The stable NTM project root is `/home/entity/ntm_Dev/allagents`; use task labels/workers from that project for coordinated work.
+- Track durable task state with Beads using `br`. Keep Bead statuses current, run `br sync --flush-only` before commits that change Beads state, and commit only intentional `.beads` JSONL/config files.
+- Do not commit Beads runtime files such as local DB/WAL files, locks, sync state, or history backups.
+
 ### Planning
 - Use plan mode for any non-trivial task (5+ steps or architectural decisions).
 - If something goes sideways, STOP and re-plan immediately instead of pushing through a broken approach.
