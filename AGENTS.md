@@ -26,10 +26,9 @@ bun install
 - If you discover you are not on a fresh worktree from the latest `origin/main`, stop and fix that first before changing code.
 
 ### NTM & Beads Coordination
-- Use NTM sessions/workers for multi-agent orchestration. The stable NTM project root is `/home/entity/ntm_Dev/allagents`; use task labels/workers from that project instead of creating Composio AO or agent-orchestrator configs.
+- Use NTM sessions/workers for multi-agent orchestration. The stable NTM project root is `/home/entity/ntm_Dev/allagents`; use task labels/workers from that project for coordinated work.
 - Track durable task state with Beads using `br`. Keep Bead statuses current, run `br sync --flush-only` before commits that change Beads state, and commit only intentional `.beads` JSONL/config files.
 - Do not commit Beads runtime files such as local DB/WAL files, locks, sync state, or history backups.
-- Do not add `agent-orchestrator.yaml`, Composio AO config, or generated AO artifacts for this repo. If they appear in branch work, remove them in favor of NTM/Beads coordination.
 
 ### Planning
 - Use plan mode for any non-trivial task (5+ steps or architectural decisions).
