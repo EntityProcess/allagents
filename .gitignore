@@ -41,6 +41,9 @@ temp/
 .worktrees/
 allagents.worktrees/
 
+# Beads external workspace (never initialized inside this source repo)
+.beads/
+
 # Ralph runtime files (not config)
 .ralph/.call_count
 .ralph/.circuit_breaker_history
