@@ -178,10 +178,9 @@ bun run build
 
 ## Publishing
 - Never run `npm publish` directly.
-- Use the guarded two-step workflow:
-  - `bun run publish:next`
-  - `bun run promote:latest`
-- `prepublishOnly` exists to prevent untested direct publishes to `latest`.
+- Use the GitHub Actions `Publish` workflow for release tagging and npm publishing.
+- For recovery, dispatch `Publish` with `channel=existing` and the release tag/ref.
+- `prepublishOnly` exists to prevent untested direct publishes outside the workflow.
 
 ## Interactive Testing
 
