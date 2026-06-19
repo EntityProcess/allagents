@@ -41,7 +41,7 @@ temp/
 .worktrees/
 allagents.worktrees/
 
-# Beads external workspace (never initialized inside this source repo)
+# Beads local Dolt database and runtime files
 .beads/
 
 # Ralph runtime files (not config)
