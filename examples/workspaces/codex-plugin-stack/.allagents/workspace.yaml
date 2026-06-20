@@ -1,0 +1,37 @@
+version: 2
+
+# Example: Project-scoped Codex plugin stack
+#
+# This workspace demonstrates installing a Codex-focused agent workflow stack
+# from a single declarative workspace file. AllAgents syncs these plugins into
+# project-scoped Codex files, so users do not need to run separate global
+# Codex plugin install commands on each machine.
+#
+# What gets generated:
+# - .codex/skills/       Skills from workmux, agent-tui, Beads, and Compound Engineering
+# - .codex/hooks.json   Beads hooks, merged with any existing user-owned hooks
+#
+# Requirements for using every synced skill/hook:
+# - agent-tui on PATH for the agent-tui skills
+# - bd on PATH for Beads workflows/hooks
+
+repositories: []
+
+plugins:
+  # Worktree/tmux workflow skills.
+  - https://github.com/raine/workmux/
+
+  # Beads project-management skills and Codex hooks.
+  - https://github.com/gastownhall/beads/tree/main/plugins/beads
+
+  # Compound Engineering skills. This is project-scoped skill sync; it does not
+  # require `bunx @every-env/compound-plugin install compound-engineering --to codex`.
+  - https://github.com/EveryInc/compound-engineering-plugin/tree/main/plugins/compound-engineering
+
+  # Agent TUI skills. The `agent-tui` binary is still installed separately.
+  - https://github.com/pproenca/agent-tui/tree/master/skills
+
+clients:
+  - codex
+
+syncMode: copy
