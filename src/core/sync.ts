@@ -118,6 +118,10 @@ import {
 } from './native/index.js';
 import { Stopwatch } from '../utils/stopwatch.js';
 import { processManagedRepos } from './managed-repos.js';
+import {
+  runLifecycleScripts,
+  type RunLifecycleScriptsResult,
+} from './lifecycle-scripts.js';
 
 /**
  * Result of deduplicating clients by skillsPath
@@ -212,6 +216,8 @@ export interface SyncResult {
   };
   /** Results of managed repository clone/pull operations */
   managedRepoResults?: import('./managed-repos.js').ManagedRepoResult[];
+  /** Results of lifecycle hook scripts (keyed by phase name) */
+  lifecycleResults?: Record<string, RunLifecycleScriptsResult>;
 }
 
 /**
@@ -228,6 +234,10 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
   const mcpResults =
     a.mcpResults || b.mcpResults
       ? { ...a.mcpResults, ...b.mcpResults }
+      : undefined;
+  const lifecycleResults =
+    a.lifecycleResults || b.lifecycleResults
+      ? { ...a.lifecycleResults, ...b.lifecycleResults }
       : undefined;
   // Merge nativeResults when both scopes produce them
   const nativeResult =
@@ -260,6 +270,7 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     ...(purgedPaths.length > 0 && { purgedPaths }),
     ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
     ...(mcpResults && { mcpResults }),
+    ...(lifecycleResults && { lifecycleResults }),
     ...(nativeResult && { nativeResult }),
     ...(() => {
       const managedRepoResults = [
@@ -2060,7 +2071,23 @@ export async function syncWorkspace(
     );
   }
 
-  // Step 0a: Process managed repositories (clone/pull) before anything else
+  // Step 0a: Run lifecycle pre-sync hooks (before any plugin validation or filesystem mutation)
+  const lifecycleResults: Record<string, RunLifecycleScriptsResult> = {};
+  const preSyncScripts = config.lifecycleHooks?.preSync;
+  if (preSyncScripts && preSyncScripts.length > 0) {
+    const preSyncResult = await sw.measure('lifecycle-presync', () =>
+      runLifecycleScripts(preSyncScripts, workspacePath, { dryRun }),
+    );
+    lifecycleResults.preSync = preSyncResult;
+
+    if (!preSyncResult.success) {
+      return failedSyncResult(preSyncResult.error ?? 'Lifecycle pre-sync hooks failed', {
+        lifecycleResults,
+      });
+    }
+  }
+
+  // Step 0b: Process managed repositories (clone/pull) before anything else
   const managedRepoResults = await sw.measure('managed-repos', () =>
     processManagedRepos(config.repositories ?? [], workspacePath, {
       offline,
@@ -2500,6 +2527,7 @@ export async function syncWorkspace(
     ...(Object.keys(mcpResults).length > 0 && { mcpResults }),
     ...(nativeResult && { nativeResult }),
     ...(managedRepoResults.length > 0 && { managedRepoResults }),
+    ...(Object.keys(lifecycleResults).length > 0 && { lifecycleResults }),
     timing: sw.toJSON(),
   };
 }

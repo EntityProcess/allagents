@@ -419,6 +419,26 @@ export function buildSyncData(result: SyncResult) {
         ...(r.error && { error: r.error }),
       })),
     }),
+    ...(result.lifecycleResults && {
+      lifecycleHooks: Object.fromEntries(
+        Object.entries(result.lifecycleResults).map(([phase, r]) => [
+          phase,
+          {
+            success: r.success,
+            error: r.error,
+            scripts: r.results.map((s) => ({
+              name: s.name,
+              script: s.script,
+              success: s.success,
+              exitCode: s.exitCode,
+              durationMs: s.durationMs,
+              ...(s.skipped && { skipped: true }),
+              ...(s.stderr && { stderr: s.stderr }),
+            })),
+          },
+        ]),
+      ),
+    }),
   };
 }
 
