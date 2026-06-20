@@ -123,10 +123,17 @@ my-plugin/
 │       └── SKILL.md
 ├── agents/          # Agent definitions
 ├── commands/        # Slash commands (Claude, OpenCode)
-├── hooks/           # Lifecycle hooks (Claude, Factory, Copilot)
+├── hooks/           # Lifecycle hooks (Claude, Factory, Copilot, Codex)
+├── .codex-plugin/   # Codex plugin manifest and explicit hook paths
 ├── .github/         # Copilot/VSCode overrides
 └── .mcp.json        # MCP server configs
 ```
+
+For Codex project sync, AllAgents copies skills into `.codex/skills/`, merges
+plugin hooks into `.codex/hooks.json`, and preserves user-owned hooks already in
+that file. Codex plugins can declare hooks in `.codex-plugin/plugin.json` with a
+`hooks` path, path array, inline object, or inline object array; otherwise
+AllAgents falls back to `hooks/hooks.json`.
 
 ## Documentation
 

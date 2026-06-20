@@ -97,6 +97,7 @@ import { collectMcpServers, syncVscodeMcpConfig } from './vscode-mcp.js';
 import type { McpMergeResult } from './vscode-mcp.js';
 import { applyMcpProxy } from './mcp-proxy.js';
 import { syncCodexMcpServers } from './codex-mcp.js';
+import { syncCodexProjectHooks } from './codex-hooks.js';
 import {
   syncClaudeMcpConfig,
   syncClaudeMcpServersViaCli,
@@ -1615,6 +1616,9 @@ function countCopyResults(
       case 'copied':
         totalCopied++;
         break;
+      case 'generated':
+        totalGenerated++;
+        break;
       case 'failed':
         totalFailed++;
         break;
@@ -1901,6 +1905,7 @@ async function persistSyncState(
   nativeResult: NativeSyncResult | undefined,
   extra?: {
     vscodeState?: { hash: string; repos: string[] };
+    codexHooks?: SyncState['codexHooks'];
     mcpTrackedServers?: Partial<Record<string, string[]>>;
     clientMappings?: Record<ClientType, ClientMapping>;
     skillsIndex?: string[];
@@ -1939,6 +1944,7 @@ async function persistSyncState(
 
   await saveSyncState(workspacePath, {
     files: syncedFiles,
+    ...(extra?.codexHooks && { codexHooks: extra.codexHooks }),
     ...(Object.keys(nativePluginsState).length > 0 && {
       nativePlugins: nativePluginsState,
     }),
@@ -2192,10 +2198,20 @@ export async function syncWorkspace(
     ),
   );
 
+  // Step 4c: Merge Codex plugin hooks into project-scoped .codex/hooks.json.
+  // This preserves user-owned hooks and replaces only the allagents-managed
+  // subset recorded in sync state.
+  const codexHookSync = await sw.measure('codex-hooks-sync', async () =>
+    syncCodexProjectHooks(validPlugins, workspacePath, previousState?.codexHooks, {
+      dryRun,
+    }),
+  );
+  warnings.push(...codexHookSync.warnings);
+
   // Step 5: Copy workspace files if configured
   // Supports both workspace.source (default base) and file-level sources
   // Skip when workspace.source was configured but validation failed (plugins still synced above)
-  let workspaceFileResults: CopyResult[] = [];
+  const workspaceFileResults: CopyResult[] = [...codexHookSync.copyResults];
   let writtenSkillsIndexFiles: string[] = [];
   const skipWorkspaceFiles =
     !!config.workspace?.source && !validatedWorkspaceSource;
@@ -2269,7 +2285,7 @@ export async function syncWorkspace(
 
     // Step 5d: Copy workspace files with GitHub cache
     // Pass repositories and skillsIndexRefs so conditional links are embedded in WORKSPACE-RULES
-    workspaceFileResults = await copyWorkspaceFiles(
+    workspaceFileResults.push(...(await copyWorkspaceFiles(
       sourcePath,
       workspacePath,
       filesToCopy,
@@ -2279,7 +2295,7 @@ export async function syncWorkspace(
         repositories: config.repositories,
         skillsIndexRefs,
       },
-    );
+    )));
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
     // Skip when repositories is empty (no agent files should be created)
@@ -2392,6 +2408,9 @@ export async function syncWorkspace(
         nativeResult,
         {
           ...(vscodeState && { vscodeState }),
+          ...(codexHookSync.managedHooks && {
+            codexHooks: codexHookSync.managedHooks,
+          }),
           ...(Object.keys(mcpResults).length > 0 && {
             mcpTrackedServers: Object.fromEntries(
               Object.entries(mcpResults).map(([scope, r]) => [

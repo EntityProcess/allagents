@@ -18,6 +18,7 @@ export type McpScope = 'vscode' | 'codex' | 'claude' | 'copilot';
  */
 export interface SyncStateData {
   files: Partial<Record<ClientType, string[]>>;
+  codexHooks?: SyncState['codexHooks'];
   mcpServers?: Partial<Record<McpScope, string[]>>;
   nativePlugins?: Partial<Record<ClientType, string[]>>;
   vscodeWorkspaceHash?: string;
@@ -85,6 +86,7 @@ export async function saveSyncState(
     version: 1,
     lastSync: new Date().toISOString(),
     files: normalizedData.files as Record<ClientType, string[]>,
+    ...(normalizedData.codexHooks && { codexHooks: normalizedData.codexHooks }),
     ...(normalizedData.mcpServers && { mcpServers: normalizedData.mcpServers }),
     ...(normalizedData.nativePlugins && { nativePlugins: normalizedData.nativePlugins }),
     ...(normalizedData.vscodeWorkspaceHash && { vscodeWorkspaceHash: normalizedData.vscodeWorkspaceHash }),
@@ -161,6 +163,7 @@ export async function upsertSyncStateSource(
 
   await saveSyncState(workspacePath, {
     files: (existing?.files ?? {}) as Partial<Record<ClientType, string[]>>,
+    ...(existing?.codexHooks && { codexHooks: existing.codexHooks }),
     ...(existing?.mcpServers && {
       mcpServers: existing.mcpServers as Partial<Record<McpScope, string[]>>,
     }),
