@@ -2089,6 +2089,7 @@ export async function syncWorkspace(
       warnings: [
         "No clients configured in workspace.yaml — no artifacts were synced. Add clients to workspace.yaml or run 'allagents workspace init' to configure.",
       ],
+      ...(Object.keys(lifecycleResults).length > 0 && { lifecycleResults }),
     };
   }
 
