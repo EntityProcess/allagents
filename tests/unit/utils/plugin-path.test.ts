@@ -162,6 +162,18 @@ describe('parseGitHubUrl', () => {
     });
   });
 
+  it('should decode URL-encoded slashes in tree subpaths', () => {
+    const result = parseGitHubUrl(
+      'https://github.com/gastownhall/beads/tree/main/plugins%2Fbeads',
+    );
+    expect(result).toEqual({
+      owner: 'gastownhall',
+      repo: 'beads',
+      branch: 'main',
+      subpath: 'plugins/beads',
+    });
+  });
+
   it('should parse URLs with /blob/ the same as /tree/', () => {
     const result = parseGitHubUrl(
       'https://github.com/WiseTechGlobal/WTG.AI.Prompts/blob/main/scripts/allagents-setup/cargowise'

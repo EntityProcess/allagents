@@ -32,6 +32,13 @@ export const SyncStateSchema = z.object({
   version: z.literal(1),
   lastSync: z.string(), // ISO timestamp
   files: z.record(ClientTypeSchema, z.array(z.string())),
+  // Project-scoped Codex hooks managed inside .codex/hooks.json. This stores
+  // only the allagents-owned portion so sync can preserve user hooks.
+  codexHooks: z
+    .object({
+      hooks: z.record(z.string(), z.array(z.unknown())),
+    })
+    .optional(),
   // MCP servers tracked per scope (e.g., "vscode" for user-level mcp.json)
   mcpServers: z.record(z.string(), z.array(z.string())).optional(),
   // Native plugins tracked per client type (e.g., "claude" for claude plugin install)

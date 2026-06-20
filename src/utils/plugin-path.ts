@@ -174,7 +174,7 @@ export function parseGitHubUrl(
   if (treeMatch) {
     const owner = treeMatch[1];
     const repo = treeMatch[2]?.replace(/\.git$/, '');
-    const afterTree = treeMatch[3];
+    const afterTree = decodeGitHubPath(treeMatch[3]);
 
     if (owner && repo && afterTree) {
       // afterTree is everything after /tree/, e.g., "feat/my-feature/path" or "main"
@@ -241,6 +241,15 @@ export function parseGitHubUrl(
   }
 
   return null;
+}
+
+function decodeGitHubPath(path: string | undefined): string | undefined {
+  if (!path) return path;
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
 }
 
 /**
