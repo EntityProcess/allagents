@@ -9,7 +9,6 @@ AllAgents should stay predictable, scriptable, and safe for users who manage rea
 - Prefer straightforward filesystem transforms over hidden state.
 - Make sync/install/update behavior easy to reason about from CLI output alone.
 - Preserve user-owned config where ownership boundaries matter.
-- If using Beads, follow the global Beads skill. Commit only repo-owned `.beads/config.yaml.example` and `.beads/.gitignore`; keep `.beads/config.yaml`, `.beads/metadata.json`, and Beads runtime state local.
 
 ## Working Style
 
