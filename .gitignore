@@ -41,11 +41,11 @@ temp/
 .worktrees/
 allagents.worktrees/
 
-# Beads repo-owned defaults plus ignored runtime files
+# Beads local config and runtime files
 .beads/*
 !.beads/
 !.beads/.gitignore
-!.beads/config.yaml
+!.beads/config.yaml.example
 
 # Ralph runtime files (not config)
 .ralph/.call_count

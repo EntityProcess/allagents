@@ -4,7 +4,8 @@ embeddeddolt/
 proxieddb/
 dolt-access.lock
 
-# Checkout-local identity. `bd bootstrap` recreates this per checkout.
+# Checkout-local config and identity. Copy config.yaml.example when using Beads.
+config.yaml
 metadata.json
 
 # Generated local docs/export snapshots
