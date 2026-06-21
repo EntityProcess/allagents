@@ -1,0 +1,65 @@
+# Dolt database and runtime state managed by bd, not git
+dolt/
+embeddeddolt/
+proxieddb/
+dolt-access.lock
+
+# Checkout-local identity. `bd bootstrap` recreates this per checkout.
+metadata.json
+
+# Generated local docs/export snapshots
+README.md
+issues.jsonl
+events.jsonl
+
+# Runtime files
+bd.sock
+bd.sock.startlock
+sync-state.json
+last-touched
+.exclusive-lock
+daemon.*
+interactions.jsonl
+push-state.json
+*.lock
+
+# Credentials and local version tracking
+.beads-credential-key
+.local_version
+proxied_server_client_info.json
+
+# Worktree redirect and sync state
+redirect
+.sync.lock
+export-state/
+export-state.json
+
+# Ephemeral store
+ephemeral.sqlite3
+ephemeral.sqlite3-journal
+ephemeral.sqlite3-wal
+ephemeral.sqlite3-shm
+
+# Dolt server management
+dolt-server.pid
+dolt-server.log
+dolt-server.lock
+dolt-server.port
+dolt-server.activity
+dolt-pprof/
+
+# Recovery and backup data
+*.corrupt.backup/
+backup/
+
+# Per-project environment file
+.env
+
+# Legacy files
+*.db
+*.db?*
+*.db-journal
+*.db-wal
+*.db-shm
+db.sqlite
+bd.db

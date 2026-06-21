@@ -9,6 +9,8 @@ AllAgents should stay predictable, scriptable, and safe for users who manage rea
 - Prefer straightforward filesystem transforms over hidden state.
 - Make sync/install/update behavior easy to reason about from CLI output alone.
 - Preserve user-owned config where ownership boundaries matter.
+- AllAgents code lives in `EntityProcess/allagents`; Beads coordination data lives in `EntityProcess/allagents-beads`.
+- Track only repo-owned Beads defaults such as `.beads/config.yaml` and `.beads/.gitignore`; never commit `.beads/metadata.json`, embedded Dolt data, JSONL exports, locks, logs, backups, or other checkout-local runtime state.
 
 ## Working Style
 
