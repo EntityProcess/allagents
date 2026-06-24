@@ -41,8 +41,11 @@ temp/
 .worktrees/
 allagents.worktrees/
 
-# Beads local Dolt database and runtime files
-.beads/
+# Beads local config and runtime files
+.beads/*
+!.beads/
+!.beads/.gitignore
+!.beads/config.yaml.example
 
 # Ralph runtime files (not config)
 .ralph/.call_count

@@ -1,0 +1,8 @@
+# Beads Configuration File
+# Copy this file to .beads/config.yaml when using Beads in this checkout.
+# Keep .beads/config.yaml local; do not commit it.
+# This file configures default behavior for bd commands in this repository.
+# Runtime identity and database state stay checkout-local and ignored.
+
+federation.remote: "git+https://github.com/EntityProcess/allagents-beads.git"
+sync.remote: "git+https://github.com/EntityProcess/allagents-beads.git"
