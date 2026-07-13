@@ -27,6 +27,13 @@ bun run dev workspace init test-ws
 bun run dev update
 ```
 
+## Issue Tracking
+
+AllAgents uses repo-local Beads state synced through this public GitHub
+repository. After cloning, run `bd bootstrap` to download the issue database;
+do not run `bd init`, because the project identity is already tracked. Treat
+issue titles, descriptions, comments, and attachments as public data.
+
 ## Before Submitting a PR
 
 - PR explains what changed and why
