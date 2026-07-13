@@ -177,7 +177,7 @@ async function runUpdatePlugin(
   } else {
     await syncUserWorkspace();
   }
-  s.stop('Updated and synced');
+  s.stop('Updated');
   cache?.invalidate();
 
   p.note(`\u2713 ${pluginSource} (${result.action})`, 'Update');
