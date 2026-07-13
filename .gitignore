@@ -41,8 +41,11 @@ temp/
 .worktrees/
 allagents.worktrees/
 
-# Beads local Dolt database and runtime files
-.beads/
+# Beads / Dolt files
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
 
 # Ralph runtime files (not config)
 .ralph/.call_count

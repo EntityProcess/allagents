@@ -57,6 +57,10 @@ bun install
 - Temporary plans and design notes may live under `.claude/plans/` while work is in progress.
 - Once implementation is complete, delete stale plan files and update durable docs for any user-facing behavior changes.
 
+### Beads
+- Run `bd bootstrap` after cloning if the local issue database is missing; do not re-run `bd init` for this already-initialized repository.
+- Beads syncs through the public AllAgents GitHub repository. Treat all issue content as public.
+
 ## PR & Commit Titles
 - Prefer conventional commit style for branch-facing titles: `type(scope): summary`.
 - Use the repository's normal types where they fit, such as `feat`, `fix`, `docs`, `style`, `refactor`, `test`, and `chore`.
