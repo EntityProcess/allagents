@@ -106,7 +106,7 @@ git worktree remove ../allagents.worktrees/<name>
 ## Tech Stack & Tools
 - Runtime and package manager: Bun
 - Language: TypeScript
-- Tests: `bun:test` plus shell integration tests
+- Tests: `bun:test` unit and E2E tests
 - Lint/format: Biome
 
 ## Testing & Verification
@@ -114,7 +114,7 @@ git worktree remove ../allagents.worktrees/<name>
 ### Core Commands
 - Build: `bun run build`
 - Unit tests: `bun test`
-- Integration tests: `bun run test:integration`
+- E2E tests: `bun run test:e2e`
 - Typecheck: `bun run typecheck`
 - Lint: `bun run lint`
 
