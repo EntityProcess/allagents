@@ -123,9 +123,9 @@ export async function installSelectedPlugin(
       p.note(result.error ?? 'Unknown error', 'Error');
       return false;
     }
-    s.message('Syncing...');
+    s.message('Updating...');
     syncResult = await syncWorkspace(workspacePath);
-    s.stop('Installed and synced');
+    s.stop('Installed');
   } else {
     const result = await addUserPlugin(pluginRef);
     if (!result.success) {
@@ -133,9 +133,9 @@ export async function installSelectedPlugin(
       p.note(result.error ?? 'Unknown error', 'Error');
       return false;
     }
-    s.message('Syncing...');
+    s.message('Updating...');
     syncResult = await syncUserWorkspace();
-    s.stop('Installed and synced');
+    s.stop('Installed');
   }
 
   cache?.invalidate();
@@ -446,13 +446,13 @@ async function runPluginDetail(
       }
 
       // Sync
-      s.message('Syncing...');
+      s.message('Updating...');
       if (scope === 'project' && context.workspacePath) {
         await syncWorkspace(context.workspacePath);
       } else {
         await syncUserWorkspace();
       }
-      s.stop('Mode updated and synced');
+      s.stop('Updated');
       cache?.invalidate();
 
       const newMode = currentMode === 'allowlist' ? 'ON' : 'OFF';
@@ -484,9 +484,9 @@ async function runPluginDetail(
           p.note(result.error ?? 'Unknown error', 'Error');
           continue;
         }
-        s.message('Syncing...');
+        s.message('Updating...');
         await syncWorkspace(context.workspacePath);
-        s.stop('Removed and synced');
+        s.stop('Removed');
       } else {
         const result = await removeUserPlugin(pluginSource);
         if (!result.success) {
@@ -494,9 +494,9 @@ async function runPluginDetail(
           p.note(result.error ?? 'Unknown error', 'Error');
           continue;
         }
-        s.message('Syncing...');
+        s.message('Updating...');
         await syncUserWorkspace();
-        s.stop('Removed and synced');
+        s.stop('Removed');
       }
 
       cache?.invalidate();
@@ -590,13 +590,13 @@ export async function runBrowsePluginSkills(
     }
 
     // Auto-sync
-    s.message('Syncing...');
+    s.message('Updating...');
     if (scope === 'project' && context.workspacePath) {
       await syncWorkspace(context.workspacePath);
     } else if (scope === 'user') {
       await syncUserWorkspace();
     }
-    s.stop('Skills updated and synced');
+    s.stop('Updated');
     cache?.invalidate();
 
     const changes: string[] = [];
