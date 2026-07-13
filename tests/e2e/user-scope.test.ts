@@ -7,6 +7,7 @@ import { addUserPlugin, removeUserPlugin, getUserWorkspaceConfig } from '../../s
 import { addPlugin } from '../../src/core/workspace-modify.js';
 import { syncUserWorkspace, syncWorkspace } from '../../src/core/sync.js';
 import { initWorkspace } from '../../src/core/workspace.js';
+import { stubHomeDir } from '../helpers/env.js';
 
 // E2E tests require network access and gh authentication.
 // They are skipped by default; run with ALLAGENTS_E2E=1 to enable.
@@ -17,6 +18,7 @@ describe.skipIf(!e2eEnabled)('E2E: user scope vs project scope', () => {
   let tempProject: string;
   let originalHome: string;
   let originalGhConfigDir: string | undefined;
+  let restoreHomeDir: () => void;
 
   beforeEach(async () => {
     tempHome = await mkdtemp(join(tmpdir(), 'allagents-e2e-home-'));
@@ -29,11 +31,11 @@ describe.skipIf(!e2eEnabled)('E2E: user scope vs project scope', () => {
       process.env.GH_CONFIG_DIR = join(originalHome, '.config', 'gh');
     }
 
-    process.env.HOME = tempHome;
+    restoreHomeDir = stubHomeDir(tempHome);
   });
 
   afterEach(async () => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     if (originalGhConfigDir !== undefined) {
       process.env.GH_CONFIG_DIR = originalGhConfigDir;
     } else {

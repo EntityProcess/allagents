@@ -1,8 +1,16 @@
+import { homedir } from 'node:os';
+
 /**
  * Get the user's home directory (cross-platform).
+ *
+ * Delegates to Node's os.homedir() rather than reading process.env.HOME
+ * directly: on Windows, os.homedir() ignores HOME and resolves via
+ * USERPROFILE, so it isn't affected by shells (e.g. Git Bash/MSYS) that
+ * mistranslate a misconfigured HOME into a bare drive root like "C:\\"
+ * (see EntityProcess/allagents#433).
  */
 export function getHomeDir(): string {
-  return process.env.HOME || process.env.USERPROFILE || '~';
+  return homedir();
 }
 
 /**

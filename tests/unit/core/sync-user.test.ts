@@ -7,19 +7,19 @@ import { dump } from 'js-yaml';
 import { syncUserWorkspace } from '../../../src/core/sync.js';
 import { WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
+import { stubHomeDir } from '../../helpers/env.js';
 
 describe('syncUserWorkspace', () => {
   let testDir: string;
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'allagents-sync-user-test-'));
-    originalHome = process.env.HOME;
-    process.env.HOME = testDir;
+    restoreHomeDir = stubHomeDir(testDir);
   });
 
   afterEach(async () => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     await rm(testDir, { recursive: true, force: true });
   });
 

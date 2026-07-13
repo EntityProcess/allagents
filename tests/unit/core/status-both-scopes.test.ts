@@ -6,19 +6,19 @@ import { dump } from 'js-yaml';
 import { getWorkspaceStatus } from '../../../src/core/status.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
+import { stubHomeDir } from '../../helpers/env.js';
 
 describe('workspace status - both scopes', () => {
   let testDir: string;
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'allagents-status-test-'));
-    originalHome = process.env.HOME;
-    process.env.HOME = testDir;
+    restoreHomeDir = stubHomeDir(testDir);
   });
 
   afterEach(async () => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     await rm(testDir, { recursive: true, force: true });
   });
 
@@ -49,9 +49,12 @@ describe('workspace status - both scopes', () => {
   }
 
   it('should include userPlugins in status result', async () => {
-    // Use a separate HOME so user config doesn't overlap with project dir
+    // Use a separate HOME so user config doesn't overlap with project dir.
+    // Discarding the returned restore fn is intentional: the outer afterEach's
+    // restoreHomeDir() already unwinds straight back to the pre-suite original
+    // regardless of how many times HOME/USERPROFILE were reassigned in between.
     const homeDir = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
-    process.env.HOME = homeDir;
+    stubHomeDir(homeDir);
 
     const projectPlugin = await createLocalPlugin('project-plugin');
     const userPlugin = await createLocalPlugin('user-plugin');
@@ -82,7 +85,7 @@ describe('workspace status - both scopes', () => {
   it('should fall back to user plugins when no project workspace exists', async () => {
     // Use a separate HOME so user config doesn't overlap with project dir
     const homeDir = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
-    process.env.HOME = homeDir;
+    stubHomeDir(homeDir);
 
     const userPlugin = await createLocalPlugin('user-plugin');
     const allagentsDir = join(homeDir, '.allagents');
@@ -126,7 +129,7 @@ describe('workspace status - both scopes', () => {
   it('should show empty userPlugins when no user config exists', async () => {
     // Use a separate HOME dir so there's no user config
     const separateHome = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
-    process.env.HOME = separateHome;
+    stubHomeDir(separateHome);
 
     const projectPlugin = await createLocalPlugin('project-plugin');
 

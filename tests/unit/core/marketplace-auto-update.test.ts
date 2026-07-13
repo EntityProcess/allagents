@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { stubHomeDir } from '../../helpers/env.js';
 
 // Track calls
 const pullCalls: Array<{ path: string }> = [];
@@ -55,13 +56,12 @@ const {
 } = await import('../../../src/core/marketplace.js');
 
 describe('resolvePluginSpecWithAutoRegister auto-updates marketplace', () => {
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
   let testHome: string;
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     testHome = join(tmpdir(), `marketplace-auto-update-test-${Date.now()}`);
-    process.env.HOME = testHome;
+    restoreHomeDir = stubHomeDir(testHome);
     pullCalls.length = 0;
     simpleGitCalls.length = 0;
     pullShouldFail = false;
@@ -69,7 +69,7 @@ describe('resolvePluginSpecWithAutoRegister auto-updates marketplace', () => {
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     rmSync(testHome, { recursive: true, force: true });
   });
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { stubHomeDir } from '../../helpers/env.js';
 
 // Track calls for assertions
 const simpleGitCalls: Array<{ method: string; args: unknown[] }> = [];
@@ -49,14 +50,13 @@ mock.module('../../../src/core/git.js', () => ({
 const { updateMarketplace } = await import('../../../src/core/marketplace.js');
 
 describe('updateMarketplace', () => {
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
   let testHome: string;
   let marketplacePath: string;
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     testHome = join(tmpdir(), `marketplace-update-test-${Date.now()}`);
-    process.env.HOME = testHome;
+    restoreHomeDir = stubHomeDir(testHome);
 
     // Create marketplace directory
     marketplacePath = join(testHome, '.allagents', 'plugins', 'marketplaces', 'test-mp');
@@ -87,7 +87,7 @@ describe('updateMarketplace', () => {
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     rmSync(testHome, { recursive: true, force: true });
   });
 
