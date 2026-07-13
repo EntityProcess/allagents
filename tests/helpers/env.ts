@@ -1,22 +1,18 @@
 /**
  * Temporarily override the resolved home directory for a test.
  *
- * os.homedir() (what src/constants.ts#getHomeDir now delegates to) reads
- * $HOME on POSIX and %USERPROFILE% on Windows — never both — so tests that
- * only stubbed HOME silently stopped taking effect on Windows. Stubbing both
- * keeps tests platform-independent. Returns a restore function that deletes
- * (rather than stringifies `undefined` into) any var that wasn't originally set.
+ * Bun caches os.homedir() for the process, so changing HOME or USERPROFILE
+ * cannot isolate tests reliably. getHomeDir() owns this explicitly test-only
+ * override while continuing to use os.homedir() in production. The restore
+ * function supports nested stubs and deletes an override that was originally
+ * absent.
  */
 export function stubHomeDir(path: string): () => void {
-  const originalHome = process.env.HOME;
-  const originalUserProfile = process.env.USERPROFILE;
-  process.env.HOME = path;
-  process.env.USERPROFILE = path;
+  const originalTestHome = process.env.ALLAGENTS_TEST_HOME;
+  process.env.ALLAGENTS_TEST_HOME = path;
 
   return () => {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = originalUserProfile;
+    if (originalTestHome === undefined) delete process.env.ALLAGENTS_TEST_HOME;
+    else process.env.ALLAGENTS_TEST_HOME = originalTestHome;
   };
 }

@@ -11,13 +11,16 @@ import { stubHomeDir } from '../../helpers/env.js';
 describe('workspace status - both scopes', () => {
   let testDir: string;
   let restoreHomeDir: () => void;
+  let restoreScopedHomeDir: (() => void) | undefined;
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'allagents-status-test-'));
     restoreHomeDir = stubHomeDir(testDir);
+    restoreScopedHomeDir = undefined;
   });
 
   afterEach(async () => {
+    restoreScopedHomeDir?.();
     restoreHomeDir();
     await rm(testDir, { recursive: true, force: true });
   });
@@ -50,11 +53,8 @@ describe('workspace status - both scopes', () => {
 
   it('should include userPlugins in status result', async () => {
     // Use a separate HOME so user config doesn't overlap with project dir.
-    // Discarding the returned restore fn is intentional: the outer afterEach's
-    // restoreHomeDir() already unwinds straight back to the pre-suite original
-    // regardless of how many times HOME/USERPROFILE were reassigned in between.
     const homeDir = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
-    stubHomeDir(homeDir);
+    restoreScopedHomeDir = stubHomeDir(homeDir);
 
     const projectPlugin = await createLocalPlugin('project-plugin');
     const userPlugin = await createLocalPlugin('user-plugin');
@@ -85,7 +85,7 @@ describe('workspace status - both scopes', () => {
   it('should fall back to user plugins when no project workspace exists', async () => {
     // Use a separate HOME so user config doesn't overlap with project dir
     const homeDir = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
-    stubHomeDir(homeDir);
+    restoreScopedHomeDir = stubHomeDir(homeDir);
 
     const userPlugin = await createLocalPlugin('user-plugin');
     const allagentsDir = join(homeDir, '.allagents');
@@ -129,7 +129,7 @@ describe('workspace status - both scopes', () => {
   it('should show empty userPlugins when no user config exists', async () => {
     // Use a separate HOME dir so there's no user config
     const separateHome = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
-    stubHomeDir(separateHome);
+    restoreScopedHomeDir = stubHomeDir(separateHome);
 
     const projectPlugin = await createLocalPlugin('project-plugin');
 
@@ -150,7 +150,7 @@ describe('workspace status - both scopes', () => {
     // Regression: `skills add <github-blob-url>` clones into `<owner>-<repo>@<branch>`,
     // but `workspace status` looked up `<owner>-<repo>` and reported "not cached".
     const homeDir = await mkdtemp(join(tmpdir(), 'allagents-status-home-'));
-    process.env.HOME = homeDir;
+    restoreScopedHomeDir = stubHomeDir(homeDir);
 
     const branchedCache = join(
       homeDir,

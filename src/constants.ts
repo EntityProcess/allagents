@@ -10,7 +10,10 @@ import { homedir } from 'node:os';
  * (see EntityProcess/allagents#433).
  */
 export function getHomeDir(): string {
-  return homedir();
+  // Bun caches os.homedir() for the process, so tests cannot isolate user state
+  // by mutating HOME/USERPROFILE. This deliberately named override belongs to
+  // AllAgents tests; production continues to use the Windows-safe os.homedir().
+  return process.env.ALLAGENTS_TEST_HOME || homedir();
 }
 
 /**

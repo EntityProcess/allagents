@@ -6,29 +6,27 @@ import { tmpdir } from 'node:os';
 import { seedCacheFromClone } from '../../../src/core/workspace.js';
 import { getPluginCachePath } from '../../../src/utils/plugin-path.js';
 import { getMarketplacesDir } from '../../../src/core/marketplace.js';
+import { stubHomeDir } from '../../helpers/env.js';
 
 describe('seedCacheFromClone', () => {
   let tempCloneDir: string;
+  let tempHomeDir: string;
+  let restoreHomeDir: () => void;
 
   beforeEach(async () => {
     tempCloneDir = await mkdtemp(join(tmpdir(), 'allagents-clone-'));
+    tempHomeDir = await mkdtemp(join(tmpdir(), 'allagents-home-'));
+    restoreHomeDir = stubHomeDir(tempHomeDir);
     // Add a marker file to verify the clone was copied
     await writeFile(join(tempCloneDir, 'marker.txt'), 'cloned-content');
   });
 
   afterEach(async () => {
-    if (existsSync(tempCloneDir)) {
-      await rm(tempCloneDir, { recursive: true, force: true });
-    }
-    // Clean up any cache directories that were seeded
-    const pluginCachePath = getPluginCachePath('test-owner', 'test-repo', 'main');
-    if (existsSync(pluginCachePath)) {
-      await rm(pluginCachePath, { recursive: true, force: true });
-    }
-    const marketplaceCachePath = join(getMarketplacesDir(), 'test-repo');
-    if (existsSync(marketplaceCachePath)) {
-      await rm(marketplaceCachePath, { recursive: true, force: true });
-    }
+    restoreHomeDir();
+    await Promise.all([
+      rm(tempCloneDir, { recursive: true, force: true }),
+      rm(tempHomeDir, { recursive: true, force: true }),
+    ]);
   });
 
   it('should seed both plugin and marketplace caches', async () => {

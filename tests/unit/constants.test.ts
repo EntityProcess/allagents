@@ -1,5 +1,7 @@
 import { describe, expect, test, afterEach } from 'bun:test';
+import { homedir } from 'node:os';
 import { getHomeDir } from '../../src/constants.js';
+import { stubHomeDir } from '../helpers/env.js';
 
 describe('getHomeDir', () => {
   const originalHome = process.env.HOME;
@@ -10,6 +12,20 @@ describe('getHomeDir', () => {
     else process.env.HOME = originalHome;
     if (originalUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = originalUserProfile;
+  });
+
+  test('uses and restores the explicit AllAgents test home override', () => {
+    // Resolve os.homedir() first to reproduce Bun's process-level cache.
+    const realHome = homedir();
+    const restoreHomeDir = stubHomeDir('/tmp/allagents-isolated-home');
+
+    try {
+      expect(getHomeDir()).toBe('/tmp/allagents-isolated-home');
+    } finally {
+      restoreHomeDir();
+    }
+
+    expect(getHomeDir()).toBe(realHome);
   });
 
   // Windows-only: os.homedir() ignores HOME entirely on win32 (uses USERPROFILE),
