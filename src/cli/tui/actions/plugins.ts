@@ -171,7 +171,7 @@ async function runUpdatePlugin(
   }
 
   // Sync after update
-  s.message('Syncing...');
+  s.message('Updating...');
   if (scope === 'project' && context.workspacePath) {
     await syncWorkspace(context.workspacePath);
   } else {
@@ -242,7 +242,7 @@ export async function runUpdateAllPlugins(
 
   // Sync if any plugins were updated
   if (needsProjectSync || needsUserSync) {
-    s.message('Syncing...');
+    s.message('Updating...');
     if (needsProjectSync && context.workspacePath) {
       await syncWorkspace(context.workspacePath);
     }
