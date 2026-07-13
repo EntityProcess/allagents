@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { stubHomeDir } from '../../../helpers/env.js';
 
 /**
  * Integration test verifying that syncWorkspace calls addMarketplace
@@ -78,21 +79,20 @@ const { syncWorkspace } = await import('../../../../src/core/sync.js');
 const { resetUpdatedMarketplaceCache } = await import('../../../../src/core/marketplace.js');
 
 describe('native marketplace registration during syncWorkspace', () => {
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
   let testHome: string;
   let testDir: string;
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     testHome = join(tmpdir(), `native-mp-reg-test-${Date.now()}`);
     testDir = join(testHome, 'workspace');
-    process.env.HOME = testHome;
+    restoreHomeDir = stubHomeDir(testHome);
     executeCommandCalls.length = 0;
     resetUpdatedMarketplaceCache();
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     rmSync(testHome, { recursive: true, force: true });
   });
 

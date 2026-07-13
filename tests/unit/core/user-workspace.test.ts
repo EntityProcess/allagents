@@ -11,19 +11,19 @@ import {
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
 } from '../../../src/core/user-workspace.js';
+import { stubHomeDir } from '../../helpers/env.js';
 
 describe('user-workspace', () => {
   let tempHome: string;
-  let originalHome: string;
+  let restoreHomeDir: () => void;
 
   beforeEach(async () => {
     tempHome = await mkdtemp(join(tmpdir(), 'allagents-test-'));
-    originalHome = process.env.HOME || '';
-    process.env.HOME = tempHome;
+    restoreHomeDir = stubHomeDir(tempHome);
   });
 
   afterEach(async () => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     await rm(tempHome, { recursive: true, force: true });
   });
 

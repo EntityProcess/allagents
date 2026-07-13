@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { stubHomeDir } from '../../helpers/env.js';
 
 // Mock git module before importing marketplace (needed for addMarketplace tests)
 mock.module('../../../src/core/git.js', () => ({
@@ -344,14 +345,13 @@ describe('scope-aware registry loading and saving', () => {
 });
 
 describe('addMarketplace with scope', () => {
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
   let testHome: string;
   let tmpProject: string;
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     testHome = join(tmpdir(), `marketplace-scope-add-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    process.env.HOME = testHome;
+    restoreHomeDir = stubHomeDir(testHome);
     mkdirSync(join(testHome, '.allagents'), { recursive: true });
 
     tmpProject = join(tmpdir(), `marketplace-scope-project-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -359,7 +359,7 @@ describe('addMarketplace with scope', () => {
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     rmSync(testHome, { recursive: true, force: true });
     rmSync(tmpProject, { recursive: true, force: true });
   });
@@ -407,7 +407,7 @@ describe('addMarketplace with scope', () => {
 });
 
 describe('removeMarketplace with scope', () => {
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
   let testHome: string;
   let tmpProject: string;
   let userRegistryPath: string;
@@ -420,9 +420,8 @@ describe('removeMarketplace with scope', () => {
   });
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     testHome = join(tmpdir(), `marketplace-scope-remove-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    process.env.HOME = testHome;
+    restoreHomeDir = stubHomeDir(testHome);
     mkdirSync(join(testHome, '.allagents'), { recursive: true });
 
     tmpProject = join(tmpdir(), `marketplace-scope-remove-project-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -433,7 +432,7 @@ describe('removeMarketplace with scope', () => {
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     rmSync(testHome, { recursive: true, force: true });
     rmSync(tmpProject, { recursive: true, force: true });
   });
@@ -529,14 +528,13 @@ describe('removeMarketplace with scope', () => {
 });
 
 describe('runtime resolution with merged registries', () => {
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
   let testHome: string;
   let tmpProject: string;
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     testHome = join(tmpdir(), `marketplace-resolve-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    process.env.HOME = testHome;
+    restoreHomeDir = stubHomeDir(testHome);
     mkdirSync(join(testHome, '.allagents'), { recursive: true });
 
     tmpProject = join(tmpdir(), `marketplace-resolve-project-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -544,7 +542,7 @@ describe('runtime resolution with merged registries', () => {
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     rmSync(testHome, { recursive: true, force: true });
     rmSync(tmpProject, { recursive: true, force: true });
   });

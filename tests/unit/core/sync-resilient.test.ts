@@ -6,6 +6,7 @@ import { dump } from 'js-yaml';
 import { syncWorkspace, syncUserWorkspace } from '../../../src/core/sync.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
+import { stubHomeDir } from '../../helpers/env.js';
 
 describe('sync resilience - project scope', () => {
   let testDir: string;
@@ -92,16 +93,15 @@ describe('sync resilience - project scope', () => {
 
 describe('sync resilience - user scope', () => {
   let testDir: string;
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'allagents-sync-user-resilient-'));
-    originalHome = process.env.HOME;
-    process.env.HOME = testDir;
+    restoreHomeDir = stubHomeDir(testDir);
   });
 
   afterEach(async () => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     await rm(testDir, { recursive: true, force: true });
   });
 

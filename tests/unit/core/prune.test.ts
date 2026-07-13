@@ -8,19 +8,19 @@ import { saveRegistry } from '../../../src/core/marketplace.js';
 import type { MarketplaceRegistry } from '../../../src/core/marketplace.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
+import { stubHomeDir } from '../../helpers/env.js';
 
 describe('pruneOrphanedPlugins', () => {
   let testDir: string;
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'allagents-prune-test-'));
-    originalHome = process.env.HOME;
-    process.env.HOME = testDir;
+    restoreHomeDir = stubHomeDir(testDir);
   });
 
   afterEach(async () => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     await rm(testDir, { recursive: true, force: true });
   });
 

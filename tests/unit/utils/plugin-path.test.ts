@@ -2,6 +2,7 @@ import { describe, it, expect, mock, beforeEach } from 'bun:test';
 import { join, resolve, sep } from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { getHomeDir } from '../../../src/constants.js';
 
 // Mock the git module for verifyGitHubUrlExists tests
 const repoExistsMock = mock(() => Promise.resolve(true));
@@ -304,7 +305,7 @@ describe('getPluginCachePath', () => {
 
   it('should use home directory', () => {
     const result = getPluginCachePath('owner', 'repo');
-    const homeDir = resolve(process.env.HOME || process.env.USERPROFILE || '~');
+    const homeDir = resolve(getHomeDir());
     expect(result.startsWith(homeDir)).toBe(true);
   });
 });

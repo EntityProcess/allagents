@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { stubHomeDir } from '../../helpers/env.js';
 
 // Track clone calls to verify arguments
 const cloneCalls: Array<{ url: string; dest: string; ref?: string }> = [];
@@ -49,19 +50,18 @@ mock.module('simple-git', () => ({
 const { addMarketplace, loadRegistry } = await import('../../../src/core/marketplace.js');
 
 describe('addMarketplace branch support', () => {
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
   let testHome: string;
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     testHome = join(tmpdir(), `marketplace-add-branch-test-${Date.now()}`);
-    process.env.HOME = testHome;
+    restoreHomeDir = stubHomeDir(testHome);
     mkdirSync(join(testHome, '.allagents'), { recursive: true });
     cloneCalls.length = 0;
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     rmSync(testHome, { recursive: true, force: true });
   });
 

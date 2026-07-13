@@ -3,21 +3,20 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dump } from 'js-yaml';
-
-// Mock home directory
-const originalHome = process.env.HOME;
+import { stubHomeDir } from '../../helpers/env.js';
 
 describe('user-scope disabledSkills helpers', () => {
   let tmpDir: string;
+  let restoreHomeDir: () => void;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'allagents-user-test-'));
-    process.env.HOME = tmpDir;
+    restoreHomeDir = stubHomeDir(tmpDir);
     await mkdir(join(tmpDir, '.allagents'), { recursive: true });
   });
 
   afterEach(async () => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -64,15 +63,16 @@ describe('user-scope disabledSkills helpers', () => {
 
 describe('setUserPluginSkillsMode', () => {
   let tmpDir: string;
+  let restoreHomeDir: () => void;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'allagents-user-test-'));
-    process.env.HOME = tmpDir;
+    restoreHomeDir = stubHomeDir(tmpDir);
     await mkdir(join(tmpDir, '.allagents'), { recursive: true });
   });
 
   afterEach(async () => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     await rm(tmpDir, { recursive: true, force: true });
   });
 

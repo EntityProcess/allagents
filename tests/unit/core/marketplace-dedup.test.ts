@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:te
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { stubHomeDir } from '../../helpers/env.js';
 
 // Track cloneTo calls
 const cloneToCalls: Array<{ url: string; path: string; branch?: string }> = [];
@@ -51,15 +52,14 @@ const {
 } = await import('../../../src/core/marketplace.js');
 
 describe('marketplace deduplication', () => {
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
   let testHome: string;
   let consoleLogSpy: ReturnType<typeof spyOn>;
   let logMessages: string[];
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     testHome = join(tmpdir(), `marketplace-dedup-test-${Date.now()}`);
-    process.env.HOME = testHome;
+    restoreHomeDir = stubHomeDir(testHome);
     cloneToCalls.length = 0;
     resetAutoRegisterCache();
 
@@ -71,7 +71,7 @@ describe('marketplace deduplication', () => {
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     rmSync(testHome, { recursive: true, force: true });
     consoleLogSpy.mockRestore();
   });

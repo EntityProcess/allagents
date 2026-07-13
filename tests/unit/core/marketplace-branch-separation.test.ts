@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:te
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { stubHomeDir } from '../../helpers/env.js';
 
 // Track cloneTo calls
 const cloneToCalls: Array<{ url: string; path: string; branch?: string }> = [];
@@ -56,21 +57,20 @@ const {
 } = await import('../../../src/core/marketplace.js');
 
 describe('branch separation — each branch is a separate marketplace', () => {
-  let originalHome: string | undefined;
+  let restoreHomeDir: () => void;
   let testHome: string;
   let consoleLogSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     testHome = join(tmpdir(), `marketplace-branch-sep-test-${Date.now()}`);
-    process.env.HOME = testHome;
+    restoreHomeDir = stubHomeDir(testHome);
     mkdirSync(join(testHome, '.allagents'), { recursive: true });
     cloneToCalls.length = 0;
     consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    restoreHomeDir();
     rmSync(testHome, { recursive: true, force: true });
     consoleLogSpy.mockRestore();
   });
