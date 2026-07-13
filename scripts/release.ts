@@ -4,6 +4,13 @@ import { $ } from "bun";
 type BumpType = "patch" | "minor" | "major";
 type Channel = "stable" | "next" | "finalize";
 
+interface FinalizeTarget {
+  tag: string;
+  commit: string;
+  prereleaseVersion: string;
+  stableVersion: string;
+}
+
 const VALID_BUMP_TYPES = ["patch", "minor", "major"] as const;
 const PACKAGE_PATH = "package.json";
 
@@ -94,6 +101,34 @@ function normalizePrereleaseTag(tag: string): string {
   return tag.startsWith("v") ? tag : `v${tag}`;
 }
 
+async function currentBranch(): Promise<string> {
+  return (await $`git branch --show-current`.text()).trim();
+}
+
+async function commitForRef(ref: string): Promise<string> {
+  return (await $`git rev-list -n 1 ${ref}`.text()).trim();
+}
+
+async function packageJsonAtRef(ref: string): Promise<{ version: string }> {
+  const packageRef = `${ref}:${PACKAGE_PATH}`;
+  return JSON.parse(await $`git show ${packageRef}`.text()) as {
+    version: string;
+  };
+}
+
+function shortCommit(commit: string): string {
+  return commit.slice(0, 12);
+}
+
+async function isAncestor(
+  ancestor: string,
+  descendant: string,
+): Promise<boolean> {
+  const result =
+    await $`git merge-base --is-ancestor ${ancestor} ${descendant}`.nothrow();
+  return result.exitCode === 0;
+}
+
 async function resolveLatestPrereleaseTag(): Promise<string> {
   const tag = (await $`git tag --list v*-next.* --sort=-version:refname`.text())
     .split("\n")
@@ -107,7 +142,9 @@ async function resolveLatestPrereleaseTag(): Promise<string> {
   return tag;
 }
 
-async function resolveFinalizeTag(explicitTag?: string): Promise<string> {
+async function resolveFinalizeTarget(
+  explicitTag?: string,
+): Promise<FinalizeTarget> {
   const tag = explicitTag
     ? normalizePrereleaseTag(explicitTag)
     : await resolveLatestPrereleaseTag();
@@ -117,17 +154,107 @@ async function resolveFinalizeTag(explicitTag?: string): Promise<string> {
     fail(`Error: Prerelease tag '${tag}' does not exist`);
   }
 
-  const packageRef = `${tag}:${PACKAGE_PATH}`;
-  const pkgAtTag = JSON.parse(await $`git show ${packageRef}`.text()) as {
-    version: string;
-  };
-  if (!parseNextPrerelease(pkgAtTag.version)) {
+  const pkgAtTag = await packageJsonAtRef(tag);
+  const parsedVersion = parseNextPrerelease(pkgAtTag.version);
+  if (!parsedVersion) {
     fail(
       `Error: Tag '${tag}' does not point to a pre-release version (found ${pkgAtTag.version})`,
     );
   }
 
-  return tag;
+  return {
+    tag,
+    commit: await commitForRef(tag),
+    prereleaseVersion: pkgAtTag.version,
+    stableVersion: parsedVersion.baseVersion,
+  };
+}
+
+async function prepareFinalizeMain(target: FinalizeTarget): Promise<void> {
+  const branch = await currentBranch();
+  if (branch !== "main") {
+    fail(
+      `Error: Finalize must run on main so the stable version commit can be pushed (currently on '${branch}')`,
+    );
+  }
+
+  console.log("Pulling latest changes...");
+  await $`git pull --ff-only origin main`;
+
+  const head = (await $`git rev-parse HEAD`.text()).trim();
+  const releaseTag = `v${target.stableVersion}`;
+  const existingReleaseTag = (await $`git tag -l ${releaseTag}`.text()).trim();
+
+  if (existingReleaseTag && head === (await commitForRef(releaseTag))) {
+    return;
+  }
+
+  if (head !== target.commit) {
+    fail(
+      `Error: Cannot finalize ${target.tag} because main is at ${shortCommit(head)}, not ${shortCommit(target.commit)}. Create a new prerelease from current main, or finalize before additional commits land on main.`,
+    );
+  }
+}
+
+async function ensureFinalizeMainStillMatches(
+  target: FinalizeTarget,
+  currentVersion: string,
+): Promise<void> {
+  const head = (await $`git rev-parse HEAD`.text()).trim();
+  if (head !== target.commit) {
+    fail(
+      `Error: Cannot finalize ${target.tag} because main is at ${shortCommit(head)}, not ${shortCommit(target.commit)}.`,
+    );
+  }
+
+  if (currentVersion !== target.prereleaseVersion) {
+    fail(
+      `Error: Cannot finalize ${target.tag} because ${PACKAGE_PATH} on main is ${currentVersion}, but the prerelease tag contains ${target.prereleaseVersion}.`,
+    );
+  }
+}
+
+async function finishExistingFinalizeTag(
+  target: FinalizeTarget,
+  newVersion: string,
+): Promise<void> {
+  const releaseTag = `v${newVersion}`;
+  const pkgAtReleaseTag = await packageJsonAtRef(releaseTag);
+  if (pkgAtReleaseTag.version !== newVersion) {
+    fail(
+      `Error: Tag '${releaseTag}' already exists, but ${PACKAGE_PATH} contains version ${pkgAtReleaseTag.version}`,
+    );
+  }
+
+  const head = (await $`git rev-parse HEAD`.text()).trim();
+  const releaseCommit = await commitForRef(releaseTag);
+
+  if (head === releaseCommit) {
+    console.log(`Tag '${releaseTag}' already exists with version ${newVersion}`);
+    console.log(`Release tag ${releaseTag} already exists on main; continuing`);
+    return;
+  }
+
+  if (head !== target.commit) {
+    fail(
+      `Error: Tag '${releaseTag}' already exists, but main is at ${shortCommit(head)} instead of ${shortCommit(target.commit)} or ${shortCommit(releaseCommit)}.`,
+    );
+  }
+
+  if (!(await isAncestor(head, releaseCommit))) {
+    fail(
+      `Error: Tag '${releaseTag}' already exists, but it cannot be fast-forwarded from ${target.tag} on main.`,
+    );
+  }
+
+  console.log(`Tag '${releaseTag}' already exists with version ${newVersion}`);
+  console.log(`Fast-forwarding main to existing release tag ${releaseTag}...`);
+  await $`git merge --ff-only ${releaseCommit}`;
+
+  console.log("Pushing main to origin...");
+  await $`git push --no-verify origin main`;
+
+  console.log(`Release tag ${releaseTag} already exists; main now contains ${newVersion}`);
 }
 
 async function main() {
@@ -144,20 +271,18 @@ async function main() {
     process.exit(1);
   }
 
-  let resolvedFinalizeTag: string | undefined;
+  let finalizeTarget: FinalizeTarget | undefined;
   if (channel === "finalize") {
     console.log("Fetching latest tags...");
     await $`git fetch origin --tags`;
-    resolvedFinalizeTag = await resolveFinalizeTag(prereleaseTag);
-
-    console.log(`Checking out prerelease tag ${resolvedFinalizeTag}...`);
-    await $`git checkout --detach ${resolvedFinalizeTag}`;
+    finalizeTarget = await resolveFinalizeTarget(prereleaseTag);
+    await prepareFinalizeMain(finalizeTarget);
   } else {
     // Ensure we're on main branch
-    const currentBranch = (await $`git branch --show-current`.text()).trim();
-    if (currentBranch !== "main") {
+    const branch = await currentBranch();
+    if (branch !== "main") {
       console.error(
-        `Error: Must be on main branch (currently on '${currentBranch}')`,
+        `Error: Must be on main branch (currently on '${branch}')`,
       );
       process.exit(1);
     }
@@ -177,7 +302,7 @@ async function main() {
     channel === "next"
       ? bumpNextVersion(currentVersion, bumpType)
       : channel === "finalize"
-        ? finalizeVersion(currentVersion)
+        ? (finalizeTarget?.stableVersion ?? finalizeVersion(currentVersion))
         : bumpVersion(currentVersion, bumpType!);
 
   const tagName = `v${newVersion}`;
@@ -187,28 +312,22 @@ async function main() {
   const existingTag = (await $`git tag -l ${tagName}`.text()).trim();
   if (existingTag) {
     if (channel === "finalize") {
-      const packageRef = `${tagName}:${PACKAGE_PATH}`;
-      const pkgAtTag = JSON.parse(await $`git show ${packageRef}`.text()) as {
-        version: string;
-      };
-
-      if (pkgAtTag.version === newVersion) {
-        console.log(`Tag '${tagName}' already exists with version ${newVersion}`);
-        console.log(`Checking out existing release tag ${tagName}...`);
-        await $`git checkout --detach ${tagName}`;
-        console.log("");
-        console.log(`Release tag ${tagName} already exists; continuing`);
-        return;
+      if (!finalizeTarget) {
+        fail("Error: Finalize target was not resolved");
       }
-
-      console.error(
-        `Error: Tag '${tagName}' already exists, but package.json contains version ${pkgAtTag.version}`,
-      );
-      process.exit(1);
+      await finishExistingFinalizeTag(finalizeTarget, newVersion);
+      return;
     }
 
     console.error(`Error: Tag '${tagName}' already exists`);
     process.exit(1);
+  }
+
+  if (channel === "finalize") {
+    if (!finalizeTarget) {
+      fail("Error: Finalize target was not resolved");
+    }
+    await ensureFinalizeMainStillMatches(finalizeTarget, currentVersion);
   }
 
   // Update package.json
@@ -225,16 +344,12 @@ async function main() {
 
   // Push commit and tag (skip hooks — already validated before release)
   console.log("Pushing to origin...");
-  if (channel !== "finalize") {
-    await $`git push --no-verify origin main`;
-  }
+  await $`git push --no-verify origin main`;
   await $`git push --no-verify origin ${tagName}`;
 
   console.log("");
   console.log(`Release ${newVersion} completed successfully!`);
-  if (channel !== "finalize") {
-    console.log("  - Commit pushed to main");
-  }
+  console.log("  - Commit pushed to main");
   console.log(`  - Tag ${tagName} pushed to origin`);
   console.log("");
   console.log("Next steps:");
