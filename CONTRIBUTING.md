@@ -32,8 +32,25 @@ bun run dev update
 - PR explains what changed and why
 - Tests are updated when relevant
 - No unrelated refactors in the same PR
-- Pre-push hooks pass (`lint`, `typecheck`, `test` run automatically on push)
+- Run focused local checks while developing and the relevant broad checks before pushing
 - Manual E2E test: build the CLI (`bun run build`) and run against a temp workspace
+
+GitHub Actions is the authoritative broad quality gate. It runs build, typecheck,
+lint, and the full test suite as separate checks on pull requests and `main`.
+Repository maintainers should configure the `Build`, `Typecheck`, `Lint`, and
+`Test` checks as required in the `main` branch protection rules after this
+workflow lands. You can run the same checks locally when needed:
+
+```bash
+bun run build
+bun run typecheck
+bun run lint
+bun run test
+```
+
+Older clones may still have the previously generated prek pre-push hook. If a
+push still invokes prek, inspect `.git/hooks/pre-push` and remove it only when
+it is the generated prek hook; preserve any custom hook content.
 
 ## Workflow
 
