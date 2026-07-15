@@ -12,6 +12,7 @@ import type {
 import { getPluginSource } from '../models/workspace-config.js';
 import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import {
+  isFilesystemRoot,
   isGitHubUrl,
   parseGitHubUrl,
   validatePluginSource,
@@ -161,6 +162,12 @@ export async function addPlugin(
       return {
         success: false,
         error: `Plugin not found at ${plugin}`,
+      };
+    }
+    if (isFilesystemRoot(fullPath) || isFilesystemRoot(plugin)) {
+      return {
+        success: false,
+        error: `Plugin source cannot be a filesystem root directory: ${plugin}`,
       };
     }
   }

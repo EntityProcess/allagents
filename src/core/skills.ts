@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync, type Dirent } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 import { load } from 'js-yaml';
@@ -101,28 +101,50 @@ async function resolvePluginPath(
 
 export async function discoverNestedSkillEntries(
   scanRoot: string,
+  warnings: string[] = [],
 ): Promise<DiscoveredSkillEntry[]> {
-  return walkForSkillMd(scanRoot, scanRoot);
+  return walkForSkillMd(scanRoot, scanRoot, warnings);
 }
 
 async function walkForSkillMd(
   scanRoot: string,
   currentDir: string,
+  warnings: string[],
 ): Promise<DiscoveredSkillEntry[]> {
-  const entries = await readdir(currentDir, { withFileTypes: true });
+  let entries: Dirent[];
+  try {
+    entries = await readdir(currentDir, { withFileTypes: true });
+  } catch (err) {
+    const code =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as NodeJS.ErrnoException).code)
+        : undefined;
+    warnings.push(
+      `Could not read '${currentDir}'${code ? ` (${code})` : ''} while scanning for skills. If this path looks unexpected (e.g. rooted near a drive root), check ~/.allagents/workspace.yaml for a stale plugin path, or rename ~/.allagents to ~/.allagents.bak and reinstall your plugins to reset it.`,
+    );
+    return [];
+  }
   const discovered: DiscoveredSkillEntry[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
     const skillPath = join(currentDir, entry.name);
+
+    // Skip symlinks/junctions to avoid unbounded recursion through loops.
+    try {
+      if (lstatSync(skillPath).isSymbolicLink()) continue;
+    } catch {
+      continue;
+    }
+
     if (existsSync(join(skillPath, 'SKILL.md'))) {
       const subpath = relative(scanRoot, skillPath).split(/[\\/]/).join('/');
       discovered.push({ name: entry.name, subpath, skillPath });
       continue;
     }
 
-    discovered.push(...(await walkForSkillMd(scanRoot, skillPath)));
+    discovered.push(...(await walkForSkillMd(scanRoot, skillPath, warnings)));
   }
 
   return discovered;

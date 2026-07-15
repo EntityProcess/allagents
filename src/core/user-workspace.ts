@@ -10,6 +10,7 @@ import type {
 } from '../models/workspace-config.js';
 import { getPluginSource } from '../models/workspace-config.js';
 import {
+  isFilesystemRoot,
   isGitHubUrl,
   parseGitHubUrl,
   validatePluginSource,
@@ -158,6 +159,12 @@ export async function addUserPlugin(
       return {
         success: false,
         error: `Plugin not found at ${plugin}`,
+      };
+    }
+    if (isFilesystemRoot(plugin)) {
+      return {
+        success: false,
+        error: `Plugin source cannot be a filesystem root directory: ${plugin}`,
       };
     }
   }

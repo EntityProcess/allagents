@@ -37,6 +37,7 @@ const {
   validatePluginSource,
   verifyGitHubUrlExists,
   formatPluginSource,
+  isFilesystemRoot,
 } = await import('../../../src/utils/plugin-path.js');
 
 describe('isGitHubUrl', () => {
@@ -337,6 +338,25 @@ describe('validatePluginSource', () => {
     const result = validatePluginSource('gh:invalid');
     expect(result.valid).toBe(false);
     expect(result.error).toContain('Invalid GitHub URL');
+  });
+});
+
+describe('isFilesystemRoot', () => {
+  it('treats a bare path separator as a filesystem root', () => {
+    expect(isFilesystemRoot(sep)).toBe(true);
+  });
+
+  it('treats the resolved root path itself as a filesystem root', () => {
+    const root = resolve('.').split(sep)[0] + sep;
+    expect(isFilesystemRoot(root)).toBe(true);
+  });
+
+  it('does not treat a normal plugin directory as a filesystem root', () => {
+    expect(isFilesystemRoot(join(tmpdir(), 'some-plugin'))).toBe(false);
+  });
+
+  it('does not treat a relative path to a subdirectory as a filesystem root', () => {
+    expect(isFilesystemRoot('./some-plugin')).toBe(false);
   });
 });
 

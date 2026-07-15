@@ -135,6 +135,16 @@ describe('user-workspace', () => {
       expect(result.error).toContain('Plugin not found at');
       expect(result.error).toContain(nonExistentPath);
     });
+
+    test('rejects a bare path separator as a local plugin source', async () => {
+      const { sep } = await import('node:path');
+      const result = await addUserPlugin(sep);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('filesystem root');
+
+      const config = await getUserWorkspaceConfig();
+      expect(config?.plugins ?? []).toEqual([]);
+    });
   });
 
   describe('removeUserPlugin', () => {
