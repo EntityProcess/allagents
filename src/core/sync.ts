@@ -1098,10 +1098,19 @@ export function computeDeletedArtifacts(
  */
 async function collectAvailableSkillNames(
   validPlugins: ValidatedPlugin[],
+  warnings?: string[],
 ): Promise<Set<string>> {
   const names = new Set<string>();
   for (const plugin of validPlugins) {
-    const skills = await collectPluginSkills(plugin.resolved, plugin.plugin);
+    const skills = await collectPluginSkills(
+      plugin.resolved,
+      plugin.plugin,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      warnings,
+    );
     for (const skill of skills) {
       names.add(skill.folderName);
     }
@@ -1458,6 +1467,7 @@ async function collectAllSkills(
   validatedPlugins: ValidatedPlugin[],
   disabledSkills?: Set<string>,
   enabledSkills?: Set<string>,
+  warnings?: string[],
 ): Promise<CollectedSkillEntry[]> {
   const allSkills: CollectedSkillEntry[] = [];
 
@@ -1470,6 +1480,7 @@ async function collectAllSkills(
       pluginName,
       enabledSkills,
       plugin.pluginSkillsConfig,
+      warnings,
     );
 
     for (const skill of skills) {
@@ -2154,7 +2165,7 @@ export async function syncWorkspace(
       ? new Set(config.enabledSkills)
       : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
-    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet),
+    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet, warnings),
   );
 
   // Build per-plugin skill name maps (handles conflicts automatically)
@@ -2373,7 +2384,10 @@ export async function syncWorkspace(
   // Compute deleted artifacts: compare previous state vs what was just synced
   // Collect all skill names from installed plugins (including disabled) so that
   // skills that are still available but just not synced are not reported as deleted.
-  const availableSkillNames = await collectAvailableSkillNames(validPlugins);
+  const availableSkillNames = await collectAvailableSkillNames(
+    validPlugins,
+    warnings,
+  );
   const allCopyResultsForState = [
     ...pluginResults.flatMap((r) => r.copyResults),
     ...workspaceFileResults,
@@ -2428,6 +2442,7 @@ export async function syncWorkspace(
     );
   }
 
+  const uniqueWarnings = [...new Set(warnings)];
   return {
     success: !hasFailures,
     pluginResults,
@@ -2437,7 +2452,7 @@ export async function syncWorkspace(
     totalGenerated,
     purgedPaths,
     ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
-    ...(warnings.length > 0 && { warnings }),
+    ...(uniqueWarnings.length > 0 && { warnings: uniqueWarnings }),
     ...(messages.length > 0 && { messages }),
     ...(Object.keys(mcpResults).length > 0 && { mcpResults }),
     ...(nativeResult && { nativeResult }),
@@ -2577,7 +2592,7 @@ export async function syncUserWorkspace(
       ? new Set(config.enabledSkills)
       : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
-    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet),
+    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet, warnings),
   );
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
 
@@ -2751,8 +2766,10 @@ export async function syncUserWorkspace(
   );
 
   // Compute deleted artifacts: compare previous state vs what was just synced
-  const availableUserSkillNames =
-    await collectAvailableSkillNames(validPlugins);
+  const availableUserSkillNames = await collectAvailableSkillNames(
+    validPlugins,
+    warnings,
+  );
   const allCopyResultsForState = pluginResults.flatMap((r) => r.copyResults);
   const resolvedUserMappings = resolveClientMappings(
     syncClients,
@@ -2799,6 +2816,7 @@ export async function syncUserWorkspace(
     );
   }
 
+  const uniqueWarnings = [...new Set(warnings)];
   return {
     success: totalFailed === 0,
     pluginResults,
@@ -2807,7 +2825,7 @@ export async function syncUserWorkspace(
     totalSkipped,
     totalGenerated,
     ...(deletedArtifacts.length > 0 && { deletedArtifacts }),
-    ...(warnings.length > 0 && { warnings }),
+    ...(uniqueWarnings.length > 0 && { warnings: uniqueWarnings }),
     ...(messages.length > 0 && { messages }),
     ...(Object.keys(mcpResults).length > 0 && { mcpResults }),
     ...(nativeResult && { nativeResult }),

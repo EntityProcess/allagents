@@ -224,6 +224,12 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
       }
     }
 
+    if (result.warnings && result.warnings.length > 0) {
+      console.log('\nWarnings:');
+      for (const warning of result.warnings) {
+        console.log(`  ⚠ ${warning}`);
+      }
+    }
   }
 
   return { ok: result.success && result.totalFailed === 0, syncData };

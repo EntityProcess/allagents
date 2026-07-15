@@ -1,9 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { describe, it, expect, beforeEach, afterEach, test } from 'bun:test';
+import { mkdtemp, rm, mkdir, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dump } from 'js-yaml';
-import { getAllSkillsFromPlugins, type SkillInfo } from '../../../src/core/skills.js';
+import {
+  getAllSkillsFromPlugins,
+  discoverNestedSkillEntries,
+  type SkillInfo,
+} from '../../../src/core/skills.js';
 import { getPluginCachePath } from '../../../src/utils/plugin-path.js';
 
 describe('getAllSkillsFromPlugins', () => {
@@ -239,4 +243,66 @@ describe('getAllSkillsFromPlugins', () => {
       process.env.HOME = originalHome;
     }
   });
+});
+
+describe('discoverNestedSkillEntries error handling', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'allagents-skills-walk-test-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('records a warning instead of throwing when the scan root cannot be read', async () => {
+    // A file (not a directory) makes readdir() throw ENOTDIR, exercising the
+    // same catch path a real EPERM/EACCES on a restricted directory would.
+    const notADir = join(tmpDir, 'not-a-directory');
+    await writeFile(notADir, 'not a directory');
+
+    const warnings: string[] = [];
+    const entries = await discoverNestedSkillEntries(notADir, warnings);
+
+    expect(entries).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(notADir);
+    expect(warnings[0]).toContain('workspace.yaml');
+  });
+
+  it('still discovers sibling skills when one plugin path cannot be read', async () => {
+    const goodPlugin = join(tmpDir, 'good-plugin');
+    await mkdir(join(goodPlugin, 'skills', 'good-skill'), { recursive: true });
+    await writeFile(join(goodPlugin, 'skills', 'good-skill', 'SKILL.md'), '# good');
+
+    const badPlugin = join(tmpDir, 'bad-plugin-is-a-file');
+    await writeFile(badPlugin, 'not a directory');
+
+    const warnings: string[] = [];
+    const goodEntries = await discoverNestedSkillEntries(
+      join(goodPlugin, 'skills'),
+      warnings,
+    );
+    const badEntries = await discoverNestedSkillEntries(badPlugin, warnings);
+
+    expect(goodEntries.map((e) => e.name)).toEqual(['good-skill']);
+    expect(badEntries).toEqual([]);
+    expect(warnings).toHaveLength(1);
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'skips symlinked directories instead of following loops',
+    async () => {
+      const pluginDir = join(tmpDir, 'symlink-plugin');
+      await mkdir(join(pluginDir, 'real-skill'), { recursive: true });
+      await writeFile(join(pluginDir, 'real-skill', 'SKILL.md'), '# real');
+
+      // A symlink back to the plugin root would recurse forever if followed.
+      await symlink(pluginDir, join(pluginDir, 'loop'), 'dir');
+
+      const entries = await discoverNestedSkillEntries(pluginDir);
+      expect(entries.map((e) => e.name)).toEqual(['real-skill']);
+    },
+  );
 });

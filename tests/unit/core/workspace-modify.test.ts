@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dump, load } from 'js-yaml';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
@@ -249,5 +249,32 @@ describe('addPlugin with --force flag', () => {
 
     const updated = load(readFileSync(configPath, 'utf-8')) as any;
     expect(updated.plugins.length).toBe(1);
+  });
+});
+
+describe('addPlugin rejects filesystem-root local paths', () => {
+  let testDir = join(tmpdir(), `allagents-root-reject-test-${Date.now()}`);
+
+  beforeEach(() => {
+    testDir = join(tmpdir(), `allagents-root-reject-test-${Date.now()}`);
+    mkdirSync(join(testDir, '.allagents'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test('rejects a bare path separator as a local plugin source', async () => {
+    const configPath = join(testDir, '.allagents', 'workspace.yaml');
+    const initialConfig = { repositories: [], plugins: [], clients: ['universal'] };
+    writeFileSync(configPath, dump(initialConfig, { lineWidth: -1 }));
+
+    const result = await addPlugin(sep, testDir, false);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('filesystem root');
+
+    const updated = load(readFileSync(configPath, 'utf-8')) as any;
+    expect(updated.plugins).toEqual([]);
   });
 });

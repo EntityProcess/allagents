@@ -89,6 +89,33 @@ describe('sync resilience - project scope', () => {
     expect(result.warnings).toBeDefined();
     expect(result.warnings!.length).toBe(2);
   });
+
+  it('should sync the good plugin and warn (not throw) when another plugin path cannot be scanned for skills', async () => {
+    // A plugin whose *source* resolves to a real file (not a directory) passes
+    // plugin validation (existsSync) but can't be readdir'd during skill
+    // collection — this is what used to crash the whole sync with an uncaught
+    // EPERM/ENOTDIR (see #433-style bad-path bugs).
+    const goodPlugin = await createLocalPlugin('good-plugin', 'good-skill');
+    const badPluginPath = join(testDir, 'bad-plugin-is-a-file');
+    await writeFile(badPluginPath, 'not a directory');
+
+    await writeProjectConfig({
+      repositories: [],
+      plugins: [goodPlugin, badPluginPath],
+      clients: ['claude'],
+    });
+
+    const result = await syncWorkspace(testDir);
+
+    expect(result.totalCopied).toBeGreaterThan(0);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some((w) => w.includes(badPluginPath))).toBe(true);
+    // The same bad path is scanned twice internally (once to collect enabled
+    // skills, once to collect all skill names for deleted-artifact detection)
+    // — warnings should be deduplicated rather than shown twice.
+    const matching = result.warnings!.filter((w) => w.includes(badPluginPath));
+    expect(matching).toHaveLength(1);
+  });
 });
 
 describe('sync resilience - user scope', () => {

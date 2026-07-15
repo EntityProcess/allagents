@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, parse, resolve } from 'node:path';
 import { getHomeDir } from '../constants.js';
 import {
   GitCloneError,
@@ -403,6 +403,17 @@ export function validatePluginSource(source: string): {
   }
 
   return { valid: true };
+}
+
+/**
+ * Check whether a path resolves to the root of a filesystem (e.g. `C:\` on
+ * Windows or `/` on POSIX). A local-path plugin source can never legitimately
+ * be a filesystem root — every real plugin is a specific, self-contained
+ * directory.
+ */
+export function isFilesystemRoot(candidatePath: string): boolean {
+  const resolved = resolve(candidatePath);
+  return resolved === parse(resolved).root;
 }
 
 /**

@@ -485,8 +485,10 @@ export async function collectPluginSkills(
   pluginName?: string,
   enabledSkills?: Set<string>,
   pluginSkillsConfig?: PluginSkillsConfig,
+  warnings?: string[],
 ): Promise<CollectedSkill[]> {
   const skillsDir = join(pluginPath, 'skills');
+  const skillWalkWarnings: string[] = [];
 
   // v1 fallback: only apply enabledSkills to plugins that actually have entries in the set
   const hasEnabledEntries =
@@ -498,20 +500,23 @@ export async function collectPluginSkills(
   let candidateDirs: { name: string; subpath: string; path: string }[];
 
   if (existsSync(skillsDir)) {
-    const entries = await discoverNestedSkillEntries(skillsDir);
+    const entries = await discoverNestedSkillEntries(
+      skillsDir,
+      skillWalkWarnings,
+    );
     candidateDirs = entries.map((entry) => ({
       name: entry.name,
       subpath: entry.subpath,
       path: entry.skillPath,
     }));
   } else {
-    const nestedDirs = (await discoverNestedSkillEntries(pluginPath)).map(
-      (entry) => ({
-        name: entry.name,
-        subpath: entry.subpath,
-        path: entry.skillPath,
-      }),
-    );
+    const nestedDirs = (
+      await discoverNestedSkillEntries(pluginPath, skillWalkWarnings)
+    ).map((entry) => ({
+      name: entry.name,
+      subpath: entry.subpath,
+      path: entry.skillPath,
+    }));
 
     if (nestedDirs.length > 0) {
       candidateDirs = nestedDirs;
@@ -569,6 +574,12 @@ export async function collectPluginSkills(
     }
   } else {
     filteredDirs = candidateDirs;
+  }
+
+  if (warnings && skillWalkWarnings.length > 0) {
+    warnings.push(
+      ...skillWalkWarnings.map((w) => `Plugin '${pluginSource}': ${w}`),
+    );
   }
 
   return filteredDirs.map((entry) => ({
