@@ -276,4 +276,122 @@ describe('syncUserWorkspace', () => {
     expect(stateContent.files.copilot).toContain('.copilot/skills/my-skill/');
     expect(stateContent.files.codex).toContain('.codex/skills/my-skill/');
   });
+
+  it('keeps repository hooks project-scoped during user Copilot sync', async () => {
+    const pluginDir = join(testDir, 'plugins', 'copilot-hooks');
+    await mkdir(join(pluginDir, 'hooks'), { recursive: true });
+    await mkdir(join(pluginDir, '.github', 'hooks', 'scripts'), {
+      recursive: true,
+    });
+    await mkdir(join(pluginDir, '.github', 'prompts'), { recursive: true });
+    await writeFile(
+      join(pluginDir, 'hooks', 'global.json'),
+      '{"hooks":{}}',
+    );
+    await writeFile(
+      join(pluginDir, '.github', 'hooks', 'repository.json'),
+      '{"hooks":{}}',
+    );
+    await writeFile(
+      join(pluginDir, '.github', 'hooks', 'scripts', 'repository.mjs'),
+      'console.log("repository hook")',
+    );
+    await writeFile(
+      join(pluginDir, '.github', 'prompts', 'review.prompt.md'),
+      '# Review',
+    );
+
+    await writeUserConfig({
+      repositories: [],
+      plugins: [pluginDir],
+      clients: ['copilot'],
+      syncMode: 'copy',
+    });
+
+    // Simulate an upgrade from a version that promoted .github/hooks into
+    // the user-global Copilot directory. Ownership was not tracked, so the
+    // next sync must leave the files in place and warn instead of deleting
+    // potentially user-owned hooks.
+    const globalHooksDir = join(testDir, '.copilot', 'hooks');
+    await mkdir(join(globalHooksDir, 'scripts'), { recursive: true });
+    await writeFile(
+      join(globalHooksDir, 'repository.json'),
+      '{"hooks":{}}',
+    );
+    await writeFile(
+      join(globalHooksDir, 'scripts', 'repository.mjs'),
+      'console.log("repository hook")',
+    );
+    await writeFile(
+      join(globalHooksDir, 'user-owned.json'),
+      '{"hooks":{"UserPromptSubmit":[]}}',
+    );
+    await writeFile(
+      join(testDir, '.allagents', 'sync-state.json'),
+      JSON.stringify({
+        version: 1,
+        lastSync: new Date().toISOString(),
+        files: { copilot: [] },
+      }),
+    );
+
+    const result = await syncUserWorkspace();
+
+    expect(result.success).toBe(true);
+    expect(existsSync(join(globalHooksDir, 'global.json'))).toBe(true);
+    expect(existsSync(join(globalHooksDir, 'repository.json'))).toBe(true);
+    expect(
+      existsSync(join(globalHooksDir, 'scripts', 'repository.mjs')),
+    ).toBe(true);
+    expect(existsSync(join(globalHooksDir, 'user-owned.json'))).toBe(true);
+    expect(
+      existsSync(
+        join(testDir, '.copilot', 'prompts', 'review.prompt.md'),
+      ),
+    ).toBe(true);
+    expect(result.warnings).toContain(
+      "Copilot user hook '.copilot/hooks/repository.json' shares a path with a repository .github/hooks artifact. Repository hooks are no longer synced at user scope; review this file manually if an older AllAgents version installed it. A root hooks/ artifact may still manage the same path.",
+    );
+    expect(result.warnings).toContain(
+      "Copilot user hook '.copilot/hooks/scripts/repository.mjs' shares a path with a repository .github/hooks artifact. Repository hooks are no longer synced at user scope; review this file manually if an older AllAgents version installed it. A root hooks/ artifact may still manage the same path.",
+    );
+  });
+
+  it('reports a legacy path accurately when a root hook overwrites it', async () => {
+    const pluginDir = join(testDir, 'plugins', 'copilot-hooks');
+    await mkdir(join(pluginDir, 'hooks'), { recursive: true });
+    await mkdir(join(pluginDir, '.github', 'hooks'), { recursive: true });
+    await writeFile(
+      join(pluginDir, 'hooks', 'repository.json'),
+      '{"hooks":{"global":true}}',
+    );
+    await writeFile(
+      join(pluginDir, '.github', 'hooks', 'repository.json'),
+      '{"hooks":{"source":true}}',
+    );
+    await writeUserConfig({
+      repositories: [],
+      plugins: [pluginDir],
+      clients: ['copilot'],
+      syncMode: 'copy',
+    });
+
+    const legacyHookPath = join(
+      testDir,
+      '.copilot',
+      'hooks',
+      'repository.json',
+    );
+    await mkdir(join(testDir, '.copilot', 'hooks'), { recursive: true });
+    await writeFile(legacyHookPath, '{"hooks":{"userModified":true}}');
+
+    const result = await syncUserWorkspace();
+
+    expect(await readFile(legacyHookPath, 'utf-8')).toBe(
+      '{"hooks":{"global":true}}',
+    );
+    expect(result.warnings).toContain(
+      "Copilot user hook '.copilot/hooks/repository.json' shares a path with a repository .github/hooks artifact. Repository hooks are no longer synced at user scope; review this file manually if an older AllAgents version installed it. A root hooks/ artifact may still manage the same path.",
+    );
+  });
 });

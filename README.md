@@ -125,7 +125,7 @@ my-plugin/
 ├── commands/        # Slash commands (Claude, OpenCode)
 ├── hooks/           # Lifecycle hooks (Claude, Factory, Copilot, Codex)
 ├── .codex-plugin/   # Codex plugin manifest and explicit hook paths
-├── .github/         # Copilot/VSCode overrides
+├── .github/         # Copilot/VSCode project overrides
 └── .mcp.json        # MCP server configs
 ```
 
@@ -134,6 +134,12 @@ plugin hooks into `.codex/hooks.json`, and preserves user-owned hooks already in
 that file. Codex plugins can declare hooks in `.codex-plugin/plugin.json` with a
 `hooks` path, path array, inline object, or inline object array; otherwise
 AllAgents falls back to `hooks/hooks.json`.
+
+For Copilot, root `hooks/` can sync to either project or user hook directories.
+Repository hooks under `.github/hooks/` remain project-scoped and are never
+promoted into the user-global `~/.copilot/hooks/` directory. Potential copies
+from older versions are left untouched and reported for manual review because
+their ownership was not tracked.
 
 ## Documentation
 
