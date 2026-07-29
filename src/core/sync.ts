@@ -39,6 +39,7 @@ import {
   copyWorkspaceFiles,
   collectPluginSkills,
   type CopyResult,
+  findRelocatedGitHubHooks,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
 import {
@@ -2579,6 +2580,29 @@ export async function syncUserWorkspace(
     await sw.measure('selective-purge', () =>
       selectivePurgeWorkspace(homeDir, previousState, syncClients),
     );
+
+    const relocatedHooks = await sw.measure(
+      'legacy-copilot-hook-scan',
+      () =>
+        findRelocatedGitHubHooks(
+          validPlugins
+            .filter((plugin) => plugin.clients.includes('copilot'))
+            .map((plugin) => ({
+              pluginPath: plugin.resolved,
+              ...(plugin.exclude && { exclude: plugin.exclude }),
+            })),
+          homeDir,
+          'copilot',
+          { clientMappings: USER_CLIENT_MAPPINGS },
+        ),
+    );
+
+    for (const filePath of relocatedHooks.found) {
+      const displayPath = relative(homeDir, filePath).replace(/\\/g, '/');
+      warnings.push(
+        `Copilot user hook '${displayPath}' shares a path with a repository .github/hooks artifact. Repository hooks are no longer synced at user scope; review this file manually if an older AllAgents version installed it. A root hooks/ artifact may still manage the same path.`,
+      );
+    }
   }
 
   // Two-pass skill name resolution (excluding disabled/non-enabled skills)

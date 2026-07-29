@@ -1,5 +1,12 @@
-import { existsSync } from 'node:fs';
-import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { existsSync, type Dirent } from 'node:fs';
+import {
+  access,
+  cp,
+  mkdir,
+  readFile,
+  readdir,
+  writeFile,
+} from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import micromatch from 'micromatch';
 import {
@@ -730,6 +737,107 @@ export interface GitHubCopyOptions extends CopyOptions {
   skillNameMap?: Map<string, string>;
 }
 
+function relocatesGitHubContent(mapping: ClientMapping): boolean {
+  return mapping.githubPath !== '.github/';
+}
+
+function githubContentExcludes(
+  mapping: ClientMapping,
+  exclude?: string[],
+): string[] | undefined {
+  if (!relocatesGitHubContent(mapping)) return exclude;
+
+  // .github/hooks is repository-owned. Root hooks/ remains the portable
+  // plugin artifact that can be installed into a client's user hook path.
+  return [...(exclude ?? []), '.github/hooks'];
+}
+
+export interface RelocatedGitHubHooksSource {
+  pluginPath: string;
+  exclude?: string[];
+}
+
+export interface RelocatedGitHubHooksResult {
+  found: string[];
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  );
+}
+
+/**
+ * Find files that older versions may have mirrored from repository
+ * .github/hooks into a relocated user directory. Historical sync state did not
+ * record ownership of these files, so callers must leave them in place and
+ * report them for manual review.
+ */
+export async function findRelocatedGitHubHooks(
+  sources: RelocatedGitHubHooksSource[],
+  workspacePath: string,
+  client: ClientType,
+  options: Pick<CopyOptions, 'dryRun' | 'clientMappings'> = {},
+): Promise<RelocatedGitHubHooksResult> {
+  const emptyResult: RelocatedGitHubHooksResult = { found: [] };
+  const mapping = getMapping(client, options);
+  if (
+    options.dryRun ||
+    !mapping.githubPath ||
+    !relocatesGitHubContent(mapping)
+  ) {
+    return emptyResult;
+  }
+
+  const destDir = join(workspacePath, mapping.githubPath, 'hooks');
+  const candidates = new Set<string>();
+  await Promise.all(
+    sources.map(async ({ pluginPath, exclude }) => {
+      const sourceRoot = join(pluginPath, '.github', 'hooks');
+
+      async function collect(sourceDir: string): Promise<void> {
+        let entries: Dirent[];
+        try {
+          entries = await readdir(sourceDir, { withFileTypes: true });
+        } catch (error) {
+          if (isNotFoundError(error)) return;
+          throw error;
+        }
+
+        await Promise.all(
+          entries.map(async (entry) => {
+            const sourcePath = join(sourceDir, entry.name);
+            if (isExcluded(pluginPath, sourcePath, exclude)) return;
+            if (entry.isDirectory()) return collect(sourcePath);
+
+            const relativePath = relative(sourceRoot, sourcePath);
+            candidates.add(relativePath);
+          }),
+        );
+      }
+
+      await collect(sourceRoot);
+    }),
+  );
+
+  const found = await Promise.all(
+    [...candidates].sort().map(async (relativePath) => {
+      const destPath = join(destDir, relativePath);
+      try {
+        await access(destPath);
+        return destPath;
+      } catch (error) {
+        return isNotFoundError(error) ? undefined : destPath;
+      }
+    }),
+  );
+
+  return { found: found.filter((path) => path !== undefined) };
+}
+
 /**
  * Recursively process a directory, copying files and adjusting links in markdown.
  * Single-pass approach: read source → transform if markdown → write to dest.
@@ -819,6 +927,7 @@ export async function copyGitHubContent(
   }
 
   const destDir = join(workspacePath, mapping.githubPath);
+  const effectiveExclude = githubContentExcludes(mapping, options.exclude);
 
   if (dryRun) {
     results.push({ source: sourceDir, destination: destDir, action: 'copied' });
@@ -827,7 +936,10 @@ export async function copyGitHubContent(
 
   try {
     // Single-pass: copy files and adjust markdown links in one traversal
-    if (mapping.skillsPath || (options.exclude && options.exclude.length > 0)) {
+    if (
+      mapping.skillsPath ||
+      (effectiveExclude && effectiveExclude.length > 0)
+    ) {
       await copyAndAdjustDirectory(
         sourceDir,
         destDir,
@@ -835,7 +947,7 @@ export async function copyGitHubContent(
         pluginPath,
         mapping.skillsPath ?? '',
         skillNameMap,
-        options.exclude,
+        effectiveExclude,
       );
     } else {
       // No skills path and no excludes - just copy without adjustment

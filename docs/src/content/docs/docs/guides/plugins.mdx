@@ -13,7 +13,7 @@ my-plugin/
 ├── agents/          # Agent definitions (Claude, Copilot, Factory)
 ├── hooks/           # Hook definitions (Claude, Copilot, Factory)
 ├── commands/        # Commands (Claude, OpenCode)
-├── .github/         # GitHub overrides (Copilot, VSCode)
+├── .github/         # Project-scoped GitHub overrides (Copilot, VSCode)
 │   ├── copilot-instructions.md
 │   ├── instructions/    # Pattern-based instructions
 │   ├── prompts/         # Prompt files
@@ -21,6 +21,13 @@ my-plugin/
 │   └── hooks/           # GitHub hook overrides
 └── AGENTS.md
 ```
+
+:::note
+At user scope, root `hooks/` entries sync to the client's user hook directory.
+Repository hooks under `.github/hooks/` stay project-scoped and are not copied
+to `~/.copilot/hooks/`. Potential copies from older versions are left untouched
+and reported for manual review because their ownership was not tracked.
+:::
 
 ## Duplicate Skill Handling
 
