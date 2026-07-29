@@ -19,6 +19,7 @@ import {
   isUniversalClient,
 } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
+import type { MarketplaceFileArtifacts } from '../models/marketplace-manifest.js';
 import type {
   ClientType,
   PluginSkillsConfig,
@@ -971,6 +972,11 @@ export async function copyGitHubContent(
  */
 export interface PluginCopyOptions extends CopyOptions {
   /**
+   * File artifacts explicitly exposed by a non-strict marketplace entry.
+   * Undefined preserves conventional plugin-directory discovery.
+   */
+  fileArtifacts?: MarketplaceFileArtifacts;
+  /**
    * Map of skill folder name to resolved name for this specific plugin.
    * When provided, skills will be copied using the resolved name instead of folder name.
    */
@@ -1003,33 +1009,45 @@ export async function copyPluginToWorkspace(
   client: ClientType,
   options: PluginCopyOptions = {},
 ): Promise<CopyResult[]> {
-  const { skillNameMap, syncMode, canonicalSkillsPath, ...baseOptions } =
-    options;
+  const {
+    skillNameMap,
+    syncMode,
+    canonicalSkillsPath,
+    fileArtifacts,
+    ...baseOptions
+  } = options;
+  const shouldCopy = (artifact: keyof MarketplaceFileArtifacts): boolean =>
+    fileArtifacts?.[artifact] ?? true;
 
   // Phase 1: Copy root-level artifacts in parallel
   const [commandResults, skillResults, hookResults, agentResults] =
     await Promise.all([
-      copyCommands(pluginPath, workspacePath, client, baseOptions),
-      copySkills(pluginPath, workspacePath, client, {
-        ...baseOptions,
-        ...(skillNameMap && { skillNameMap }),
-        ...(syncMode && { syncMode }),
-        ...(canonicalSkillsPath && { canonicalSkillsPath }),
-      }),
-      copyHooks(pluginPath, workspacePath, client, baseOptions),
-      copyAgents(pluginPath, workspacePath, client, baseOptions),
+      shouldCopy('commands')
+        ? copyCommands(pluginPath, workspacePath, client, baseOptions)
+        : [],
+      shouldCopy('skills')
+        ? copySkills(pluginPath, workspacePath, client, {
+            ...baseOptions,
+            ...(skillNameMap && { skillNameMap }),
+            ...(syncMode && { syncMode }),
+            ...(canonicalSkillsPath && { canonicalSkillsPath }),
+          })
+        : [],
+      shouldCopy('hooks')
+        ? copyHooks(pluginPath, workspacePath, client, baseOptions)
+        : [],
+      shouldCopy('agents')
+        ? copyAgents(pluginPath, workspacePath, client, baseOptions)
+        : [],
     ]);
 
   // Phase 2: Copy .github/ content — overrides root-level on name conflicts
-  const githubResults = await copyGitHubContent(
-    pluginPath,
-    workspacePath,
-    client,
-    {
-      ...baseOptions,
-      ...(skillNameMap && { skillNameMap }),
-    },
-  );
+  const githubResults = shouldCopy('github')
+    ? await copyGitHubContent(pluginPath, workspacePath, client, {
+        ...baseOptions,
+        ...(skillNameMap && { skillNameMap }),
+      })
+    : [];
 
   return [
     ...commandResults,

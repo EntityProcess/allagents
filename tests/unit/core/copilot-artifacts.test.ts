@@ -65,6 +65,37 @@ describe('copilot agents and hooks sync', () => {
   });
 
   describe('github override precedence', () => {
+    it('copies only declared artifacts for a non-strict marketplace entry', async () => {
+      await mkdir(join(pluginDir, 'skills', 'public-skill'), { recursive: true });
+      await writeFile(
+        join(pluginDir, 'skills', 'public-skill', 'SKILL.md'),
+        '---\nname: public-skill\n---\n',
+      );
+      await mkdir(join(pluginDir, 'hooks'), { recursive: true });
+      await writeFile(join(pluginDir, 'hooks', 'portable.json'), '{"hooks":[]}');
+      await mkdir(join(pluginDir, '.github', 'hooks'), { recursive: true });
+      await writeFile(
+        join(pluginDir, '.github', 'hooks', 'repository.json'),
+        '{"hooks":[]}',
+      );
+
+      await copyPluginToWorkspace(pluginDir, workspaceDir, 'copilot', {
+        fileArtifacts: {
+          agents: false,
+          commands: false,
+          github: false,
+          hooks: false,
+          mcpServers: false,
+          skills: true,
+        },
+      });
+
+      expect(
+        existsSync(join(workspaceDir, '.github', 'skills', 'public-skill', 'SKILL.md')),
+      ).toBe(true);
+      expect(existsSync(join(workspaceDir, '.github', 'hooks'))).toBe(false);
+    });
+
     it('.github/agents/ overrides root agents/ on name conflict', async () => {
       // Root agent
       await mkdir(join(pluginDir, 'agents'), { recursive: true });

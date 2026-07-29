@@ -120,6 +120,7 @@ export function collectMcpServers(
   const warnings: string[] = [];
 
   for (const plugin of validatedPlugins) {
+    if (plugin.fileArtifacts?.mcpServers === false) continue;
     const mcpServers = readPluginMcpConfig(plugin.resolved);
     if (!mcpServers) continue;
 

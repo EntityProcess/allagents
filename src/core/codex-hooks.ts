@@ -362,7 +362,10 @@ function writeProjectHooks(hooksPath: string, hooksFile: CodexHooksFile): void {
 }
 
 function pluginTargetsCodex(plugin: ValidatedPlugin): boolean {
-  return plugin.clients.includes('codex' as ClientType);
+  return (
+    plugin.clients.includes('codex' as ClientType) &&
+    plugin.fileArtifacts?.hooks !== false
+  );
 }
 
 export function syncCodexProjectHooks(

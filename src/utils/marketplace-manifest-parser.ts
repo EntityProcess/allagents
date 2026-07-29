@@ -1,17 +1,22 @@
-import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
-  MarketplaceManifestSchema,
-  MarketplaceManifestLenientSchema,
-  MarketplacePluginEntrySchema,
-  PluginSourceRefSchema,
+  type MarketplaceFileArtifacts,
   type MarketplaceManifest,
+  MarketplaceManifestLenientSchema,
+  MarketplaceManifestSchema,
   type MarketplacePluginEntry,
+  MarketplacePluginEntrySchema,
   type PluginSourceRef,
+  PluginSourceRefSchema,
+  getMarketplaceFileArtifacts,
 } from '../models/marketplace-manifest.js';
 
-const MANIFEST_PATH = '.claude-plugin/marketplace.json';
+const MANIFEST_PATHS = [
+  '.github/plugin/marketplace.json',
+  '.claude-plugin/marketplace.json',
+] as const;
 
 export type ParseResult =
   | { success: true; data: MarketplaceManifest; warnings: string[] }
@@ -19,7 +24,7 @@ export type ParseResult =
 
 /**
  * Parse and validate a marketplace.json from a marketplace directory.
- * Looks for .claude-plugin/marketplace.json within the given path.
+ * Prefers GitHub Copilot's marketplace location and falls back to Claude's.
  *
  * Uses a two-tier approach:
  * 1. Try strict validation first — if it passes, return with no warnings
@@ -29,12 +34,14 @@ export type ParseResult =
 export async function parseMarketplaceManifest(
   marketplacePath: string,
 ): Promise<ParseResult> {
-  const manifestPath = join(marketplacePath, MANIFEST_PATH);
+  const manifestPath = MANIFEST_PATHS
+    .map((path) => join(marketplacePath, path))
+    .find((path) => existsSync(path));
 
-  if (!existsSync(manifestPath)) {
+  if (!manifestPath) {
     return {
       success: false,
-      error: `Marketplace manifest not found: ${manifestPath}`,
+      error: `Marketplace manifest not found (checked ${MANIFEST_PATHS.join(', ')})`,
     };
   }
 
@@ -66,6 +73,34 @@ export async function parseMarketplaceManifest(
 
   // Tier 2: lenient parsing
   return parseLeniently(json);
+}
+
+/**
+ * Read a plugin repository's own marketplace manifest and return the file
+ * artifact boundary for the entry whose source is the repository root.
+ *
+ * A preferred name disambiguates repositories that expose multiple root
+ * entries. When there is only one root entry, it is safe to use for direct
+ * repository sources whose directory name differs from the plugin name.
+ */
+export async function getEmbeddedMarketplaceFileArtifacts(
+  pluginPath: string,
+  preferredName?: string,
+): Promise<MarketplaceFileArtifacts | undefined> {
+  const manifestResult = await parseMarketplaceManifest(pluginPath);
+  if (!manifestResult.success) return undefined;
+
+  const pluginRoot = resolve(pluginPath);
+  const rootEntries = manifestResult.data.plugins.filter(
+    (entry) =>
+      typeof entry.source === 'string' &&
+      resolve(pluginPath, entry.source) === pluginRoot,
+  );
+  const entry =
+    rootEntries.find((candidate) => candidate.name === preferredName) ??
+    (rootEntries.length === 1 ? rootEntries[0] : undefined);
+
+  return entry ? getMarketplaceFileArtifacts(entry) : undefined;
 }
 
 /**
@@ -169,8 +204,28 @@ function extractPluginEntry(
     ...(typeof obj.version === 'string' && { version: obj.version }),
     ...(typeof obj.category === 'string' && { category: obj.category }),
     ...(typeof obj.homepage === 'string' && { homepage: obj.homepage }),
-    ...(Array.isArray(obj.skills) && obj.skills.every((s: unknown) => typeof s === 'string') && { skills: obj.skills as string[] }),
+    ...(isComponentPath(obj.skills) && { skills: obj.skills }),
+    ...(isComponentPath(obj.commands) && { commands: obj.commands }),
+    ...(isComponentPath(obj.agents) && { agents: obj.agents }),
+    ...((typeof obj.hooks === 'string' || isRecord(obj.hooks)) && {
+      hooks: obj.hooks,
+    }),
+    ...((typeof obj.mcpServers === 'string' || isRecord(obj.mcpServers)) && {
+      mcpServers: obj.mcpServers,
+    }),
+    ...(typeof obj.strict === 'boolean' && { strict: obj.strict }),
   };
+}
+
+function isComponentPath(value: unknown): value is string | string[] {
+  return (
+    typeof value === 'string' ||
+    (Array.isArray(value) && value.every((item) => typeof item === 'string'))
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

@@ -29,6 +29,32 @@ to `~/.copilot/hooks/`. Potential copies from older versions are left untouched
 and reported for manual review because their ownership was not tracked.
 :::
 
+## Marketplace Component Boundaries
+
+AllAgents recognizes marketplace manifests at both
+`.claude-plugin/marketplace.json` and `.github/plugin/marketplace.json`. The
+GitHub Copilot location takes precedence when a repository contains both.
+
+A marketplace entry with `strict: false` defines the complete set of plugin
+components. For example, this entry syncs the repository's top-level skills
+without treating its top-level hooks or `.github/` development configuration as
+plugin artifacts:
+
+```json
+{
+  "name": "skills-only",
+  "source": "./",
+  "strict": false,
+  "skills": ["./skills/"]
+}
+```
+
+Without `strict: false`, AllAgents retains conventional plugin-directory
+discovery for compatibility. Top-level `hooks/` remains the portable hook
+location; `.github/` represents repository-scoped GitHub content. Component
+kind filtering currently uses AllAgents' conventional root directories, so
+custom marketplace component paths are not yet remapped.
+
 ## Duplicate Skill Handling
 
 When multiple plugins define skills with the same folder name, AllAgents automatically resolves naming conflicts:

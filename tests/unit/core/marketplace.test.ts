@@ -203,6 +203,77 @@ describe('getMarketplacePluginsFromManifest', () => {
     expect(result!.plugin).toBe('external');
   });
 
+  it('should expose only declared artifacts for a strict-false skills-only plugin', async () => {
+    mkdirSync(join(testDir, 'skills', 'skill-a'), { recursive: true });
+    mkdirSync(join(testDir, '.github', 'hooks'), { recursive: true });
+    writeFileSync(
+      join(testDir, 'skills', 'skill-a', 'SKILL.md'),
+      '---\nname: skill-a\n---\n',
+    );
+    writeFileSync(
+      join(testDir, '.github', 'hooks', 'post-edit.json'),
+      '{}',
+    );
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'test',
+        description: 'Test',
+        plugins: [
+          {
+            name: 'skills-only',
+            description: 'Skills only',
+            source: './',
+            strict: false,
+            skills: ['./skills/'],
+          },
+        ],
+      }),
+    );
+
+    const result = await resolvePluginSpec('skills-only@test-marketplace', {
+      marketplacePathOverride: testDir,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.path).toBe(testDir);
+    expect(result!.fileArtifacts).toEqual({
+      agents: false,
+      commands: false,
+      github: false,
+      hooks: false,
+      mcpServers: false,
+      skills: true,
+    });
+  });
+
+  it('should keep the plugin root when strict mode can merge other components', async () => {
+    mkdirSync(join(testDir, 'skills', 'skill-a'), { recursive: true });
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'test',
+        description: 'Test',
+        plugins: [
+          {
+            name: 'full-plugin',
+            description: 'Full plugin',
+            source: './',
+            skills: ['./skills/'],
+          },
+        ],
+      }),
+    );
+
+    const result = await resolvePluginSpec('full-plugin@test-marketplace', {
+      marketplacePathOverride: testDir,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.path).toBe(testDir);
+    expect(result!.fileArtifacts).toBeUndefined();
+  });
+
   it('should return null for URL source plugins when fetch fails', async () => {
     const manifest = {
       name: 'test',
@@ -279,6 +350,66 @@ describe('getMarketplacePluginsFromManifest', () => {
     expect(result!.plugin).toBe('ediprod');
     // Verify the github source was normalized to a full URL
     expect(fetchedUrl).toBe('https://github.com/WiseTechGlobal/mcp-ediprod');
+  });
+
+  it('should honor an external plugin repository embedded marketplace boundary', async () => {
+    const cachedPluginDir = join(testDir, 'cached-ediprod');
+    mkdirSync(join(cachedPluginDir, '.github', 'plugin'), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(cachedPluginDir, '.github', 'plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'ediprod-plugins',
+        description: 'ediProd plugins',
+        plugins: [
+          {
+            name: 'ediprod',
+            description: 'ediProd skills',
+            source: './',
+            strict: false,
+            skills: ['./skills/'],
+          },
+        ],
+      }),
+    );
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'wtg-ai-prompts',
+        description: 'WTG plugins',
+        plugins: [
+          {
+            name: 'ediprod',
+            description: 'ediProd',
+            source: {
+              source: 'github',
+              repo: 'WiseTechGlobal/mcp-ediprod',
+            },
+          },
+        ],
+      }),
+    );
+
+    const result = await resolvePluginSpec('ediprod@test-marketplace', {
+      marketplacePathOverride: testDir,
+      fetchFn: async () => ({
+        success: true,
+        action: 'cloned' as const,
+        cachePath: cachedPluginDir,
+      }),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.path).toBe(cachedPluginDir);
+    expect(result!.fileArtifacts).toEqual({
+      agents: false,
+      commands: false,
+      github: false,
+      hooks: false,
+      mcpServers: false,
+      skills: true,
+    });
   });
 
   it('should handle GitHub source plugins in plugin listing', async () => {

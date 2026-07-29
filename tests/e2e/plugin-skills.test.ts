@@ -253,4 +253,95 @@ description: Blog watcher
       }
     }
   });
+
+  it('honors skills-only Copilot marketplace entries without copying repository config', async () => {
+    const originalTestHome = process.env.ALLAGENTS_TEST_HOME;
+    const fakeHome = join(tmpDir, 'home');
+    const marketplaceDir = join(tmpDir, 'ediprod-marketplace');
+
+    process.env.ALLAGENTS_TEST_HOME = fakeHome;
+    try {
+      await mkdir(join(marketplaceDir, '.github', 'plugin'), {
+        recursive: true,
+      });
+      await mkdir(join(marketplaceDir, '.github', 'hooks'), {
+        recursive: true,
+      });
+      await mkdir(join(marketplaceDir, 'hooks'), { recursive: true });
+      await mkdir(join(marketplaceDir, 'skills', 'ediprod'), {
+        recursive: true,
+      });
+      await writeFile(
+        join(marketplaceDir, '.github', 'plugin', 'marketplace.json'),
+        JSON.stringify({
+          name: 'ediprod-plugins',
+          description: 'ediProd plugins',
+          plugins: [
+            {
+              name: 'ediprod',
+              description: 'ediProd skills',
+              source: './',
+              strict: false,
+              skills: ['./skills/'],
+            },
+          ],
+        }),
+      );
+      await writeFile(
+        join(marketplaceDir, 'skills', 'ediprod', 'SKILL.md'),
+        '---\nname: ediprod\ndescription: ediProd\n---\n',
+      );
+      await writeFile(
+        join(marketplaceDir, 'hooks', 'portable.json'),
+        '{"hooks":{}}',
+      );
+      await writeFile(
+        join(marketplaceDir, '.github', 'hooks', 'repository.json'),
+        '{"hooks":{}}',
+      );
+      await writeFile(
+        join(marketplaceDir, '.mcp.json'),
+        JSON.stringify({
+          mcpServers: {
+            undeclared: {
+              type: 'http',
+              url: 'https://undeclared.test',
+            },
+          },
+        }),
+      );
+
+      const config: WorkspaceConfig = {
+        repositories: [],
+        // Direct repository sources should honor their embedded marketplace
+        // boundary instead of treating repository configuration as plugin data.
+        plugins: [marketplaceDir],
+        clients: ['copilot'],
+        syncMode: 'copy',
+        version: 2,
+      };
+      await writeFile(
+        join(tmpDir, '.allagents/workspace.yaml'),
+        dump(config),
+        'utf-8',
+      );
+
+      const result = await syncWorkspace(tmpDir);
+
+      expect(result.success).toBe(true);
+      expect(
+        existsSync(join(tmpDir, '.github', 'skills', 'ediprod', 'SKILL.md')),
+      ).toBe(true);
+      expect(existsSync(join(tmpDir, '.github', 'hooks'))).toBe(false);
+      expect(existsSync(join(tmpDir, '.copilot', 'mcp-config.json'))).toBe(
+        false,
+      );
+    } finally {
+      if (originalTestHome === undefined) {
+        delete process.env.ALLAGENTS_TEST_HOME;
+      } else {
+        process.env.ALLAGENTS_TEST_HOME = originalTestHome;
+      }
+    }
+  });
 });

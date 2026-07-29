@@ -56,6 +56,8 @@ import {
   resolveClientMappings,
 } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
+import type { MarketplaceFileArtifacts } from '../models/marketplace-manifest.js';
+import { getEmbeddedMarketplaceFileArtifacts } from '../utils/marketplace-manifest-parser.js';
 import {
   resolveSkillNames,
   getSkillKey,
@@ -337,6 +339,8 @@ export interface ValidatedPlugin {
   registeredAs?: string;
   /** GitHub marketplace source (owner/repo) for native CLI registration */
   marketplaceSource?: string;
+  /** File artifacts declared by a non-strict marketplace entry. */
+  fileArtifacts?: MarketplaceFileArtifacts;
   /** Glob patterns of files to exclude when syncing (from workspace.yaml) */
   exclude?: string[];
   /** Inline skill selection config from plugin entry (v2+) */
@@ -1103,6 +1107,7 @@ async function collectAvailableSkillNames(
 ): Promise<Set<string>> {
   const names = new Set<string>();
   for (const plugin of validPlugins) {
+    if (plugin.fileArtifacts && !plugin.fileArtifacts.skills) continue;
     const skills = await collectPluginSkills(
       plugin.resolved,
       plugin.plugin,
@@ -1157,6 +1162,9 @@ async function validatePlugin(
       ...(resolved.marketplaceSource && {
         marketplaceSource: resolved.marketplaceSource,
       }),
+      ...(resolved.fileArtifacts && {
+        fileArtifacts: resolved.fileArtifacts,
+      }),
     };
   }
 
@@ -1183,12 +1191,17 @@ async function validatePlugin(
     const resolvedPath = parsed?.subpath
       ? join(fetchResult.cachePath, parsed.subpath)
       : fetchResult.cachePath;
+    const fileArtifacts = await getEmbeddedMarketplaceFileArtifacts(
+      resolvedPath,
+      parsed?.repo,
+    );
     return {
       plugin: pluginSource,
       resolved: resolvedPath,
       success: true,
       clients: [],
       nativeClients: [],
+      ...(fileArtifacts && { fileArtifacts }),
     };
   }
 
@@ -1204,12 +1217,17 @@ async function validatePlugin(
       error: `Plugin not found at ${resolvedPath}`,
     };
   }
+  const fileArtifacts = await getEmbeddedMarketplaceFileArtifacts(
+    resolvedPath,
+    getPluginName(resolvedPath),
+  );
   return {
     plugin: pluginSource,
     resolved: resolvedPath,
     success: true,
     clients: [],
     nativeClients: [],
+    ...(fileArtifacts && { fileArtifacts }),
   };
 }
 
@@ -1387,6 +1405,9 @@ async function copyValidatedPlugin(
             clientMappings: mappings,
             syncMode: 'copy',
             ...(exclude && { exclude }),
+            ...(validatedPlugin.fileArtifacts && {
+              fileArtifacts: validatedPlugin.fileArtifacts,
+            }),
           },
         );
         copyResults.push(...results);
@@ -1403,6 +1424,9 @@ async function copyValidatedPlugin(
             syncMode: 'symlink',
             canonicalSkillsPath: CANONICAL_SKILLS_PATH,
             ...(exclude && { exclude }),
+            ...(validatedPlugin.fileArtifacts && {
+              fileArtifacts: validatedPlugin.fileArtifacts,
+            }),
           },
         );
         copyResults.push(...results);
@@ -1426,6 +1450,9 @@ async function copyValidatedPlugin(
           clientMappings: mappings,
           syncMode: 'copy',
           ...(exclude && { exclude }),
+          ...(validatedPlugin.fileArtifacts && {
+            fileArtifacts: validatedPlugin.fileArtifacts,
+          }),
         },
       );
       copyResults.push(...results);
@@ -1473,6 +1500,7 @@ async function collectAllSkills(
   const allSkills: CollectedSkillEntry[] = [];
 
   for (const plugin of validatedPlugins) {
+    if (plugin.fileArtifacts && !plugin.fileArtifacts.skills) continue;
     const pluginName = plugin.pluginName ?? getPluginName(plugin.resolved);
     const skills = await collectPluginSkills(
       plugin.resolved,
@@ -2586,7 +2614,11 @@ export async function syncUserWorkspace(
       () =>
         findRelocatedGitHubHooks(
           validPlugins
-            .filter((plugin) => plugin.clients.includes('copilot'))
+            .filter(
+              (plugin) =>
+                plugin.clients.includes('copilot') &&
+                plugin.fileArtifacts?.github !== false,
+            )
             .map((plugin) => ({
               pluginPath: plugin.resolved,
               ...(plugin.exclude && { exclude: plugin.exclude }),
