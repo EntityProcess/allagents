@@ -41,12 +41,6 @@ temp/
 .worktrees/
 allagents.worktrees/
 
-# Beads / Dolt files
-.dolt/
-*.db
-.beads-credential-key
-.beads/proxieddb/
-
 # Ralph runtime files (not config)
 .ralph/.call_count
 .ralph/.circuit_breaker_history
