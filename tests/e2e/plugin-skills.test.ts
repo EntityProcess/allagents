@@ -190,14 +190,14 @@ description: Test skill
   });
 
   it('promoted GitHub skill sources stay coherent for listing and sync', async () => {
-    const originalHome = process.env.HOME;
+    const originalTestHome = process.env.ALLAGENTS_TEST_HOME;
     const fakeHome = join(tmpDir, 'home');
     const cacheDir = join(
       fakeHome,
       '.allagents/plugins/marketplaces/NousResearch-hermes-agent@main/skills/research',
     );
 
-    process.env.HOME = fakeHome;
+    process.env.ALLAGENTS_TEST_HOME = fakeHome;
     resetFetchCache();
 
     try {
@@ -246,7 +246,11 @@ description: Blog watcher
       expect(existsSync(join(tmpDir, '.claude/skills/blogwatcher'))).toBe(true);
     } finally {
       resetFetchCache();
-      process.env.HOME = originalHome;
+      if (originalTestHome === undefined) {
+        delete process.env.ALLAGENTS_TEST_HOME;
+      } else {
+        process.env.ALLAGENTS_TEST_HOME = originalTestHome;
+      }
     }
   });
 });
