@@ -4,6 +4,11 @@ import { basename, dirname, join, resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import { getHomeDir } from '../constants.js';
 import {
+  type MarketplaceFileArtifacts,
+  getMarketplaceFileArtifacts,
+} from '../models/marketplace-manifest.js';
+import {
+  getEmbeddedMarketplaceFileArtifacts,
   parseMarketplaceManifest,
   resolvePluginSourcePath,
 } from '../utils/marketplace-manifest-parser.js';
@@ -749,6 +754,13 @@ export interface MarketplacePluginInfo {
   skills?: string[];
 }
 
+function normalizeComponentPaths(
+  paths: string | string[] | undefined,
+): string[] | undefined {
+  if (paths === undefined) return undefined;
+  return Array.isArray(paths) ? paths : [paths];
+}
+
 /**
  * Result of listing marketplace plugins, including any warnings
  * from lenient manifest parsing.
@@ -787,7 +799,8 @@ export async function getMarketplacePluginsFromManifest(
     };
     if (plugin.category) info.category = plugin.category;
     if (plugin.homepage) info.homepage = plugin.homepage;
-    if (plugin.skills) info.skills = plugin.skills;
+    const skills = normalizeComponentPaths(plugin.skills);
+    if (skills) info.skills = skills;
     return info;
   });
 
@@ -916,7 +929,12 @@ export async function resolvePluginSpec(
     fetchFn?: (url: string) => Promise<FetchResult>;
     workspacePath?: string;
   } = {},
-): Promise<{ path: string; marketplace: string; plugin: string } | null> {
+): Promise<{
+  path: string;
+  marketplace: string;
+  plugin: string;
+  fileArtifacts?: MarketplaceFileArtifacts;
+} | null> {
   const parsed = parsePluginSpec(spec);
   if (!parsed) {
     return null;
@@ -943,6 +961,7 @@ export async function resolvePluginSpec(
       (p) => p.name === parsed.plugin,
     );
     if (pluginEntry) {
+      const declaredFileArtifacts = getMarketplaceFileArtifacts(pluginEntry);
       if (typeof pluginEntry.source === 'string') {
         // Local path source - resolve relative to marketplace
         const resolvedPath = resolve(marketplacePath, pluginEntry.source);
@@ -951,6 +970,9 @@ export async function resolvePluginSpec(
             path: resolvedPath,
             marketplace: marketplaceName,
             plugin: parsed.plugin,
+            ...(declaredFileArtifacts && {
+              fileArtifacts: declaredFileArtifacts,
+            }),
           };
         }
       } else {
@@ -963,10 +985,17 @@ export async function resolvePluginSpec(
               parsedUrl.repo,
             );
             if (existsSync(cachePath)) {
+              const fileArtifacts =
+                declaredFileArtifacts ??
+                (await getEmbeddedMarketplaceFileArtifacts(
+                  cachePath,
+                  parsed.plugin,
+                ));
               return {
                 path: cachePath,
                 marketplace: marketplaceName,
                 plugin: parsed.plugin,
+                ...(fileArtifacts && { fileArtifacts }),
               };
             }
           }
@@ -976,10 +1005,17 @@ export async function resolvePluginSpec(
         const fetchFn = options.fetchFn ?? fetchPlugin;
         const fetchResult = await fetchFn(pluginEntry.source.url);
         if (fetchResult.success && fetchResult.cachePath) {
+          const fileArtifacts =
+            declaredFileArtifacts ??
+            (await getEmbeddedMarketplaceFileArtifacts(
+              fetchResult.cachePath,
+              parsed.plugin,
+            ));
           return {
             path: fetchResult.cachePath,
             marketplace: marketplaceName,
             plugin: parsed.plugin,
+            ...(fileArtifacts && { fileArtifacts }),
           };
         }
       }
@@ -1011,6 +1047,8 @@ export interface ResolvePluginSpecResult {
   registeredAs?: string;
   /** GitHub marketplace source (owner/repo) for native CLI registration */
   marketplaceSource?: string;
+  /** File artifacts declared by a non-strict marketplace entry. */
+  fileArtifacts?: MarketplaceFileArtifacts;
   error?: string;
 }
 
@@ -1171,6 +1209,7 @@ export async function resolvePluginSpecWithAutoRegister(
     pluginName: resolved.plugin,
     ...(shouldReturnRegisteredAs && { registeredAs: marketplace.name }),
     ...(marketplaceSource && { marketplaceSource }),
+    ...(resolved.fileArtifacts && { fileArtifacts: resolved.fileArtifacts }),
   };
 }
 

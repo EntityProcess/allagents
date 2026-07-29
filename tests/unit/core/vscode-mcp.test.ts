@@ -125,6 +125,31 @@ describe('collectMcpServers', () => {
     expect(warnings[0]).toContain('plugin-b');
     expect(warnings[0]).toContain('dup');
   });
+
+  test('skips MCP servers omitted by a non-strict marketplace entry', () => {
+    writeFileSync(
+      join(tempDir1, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          undeclared: { type: 'http', url: 'https://undeclared.test' },
+        },
+      }),
+    );
+    const plugin = makePlugin(tempDir1);
+    plugin.fileArtifacts = {
+      agents: false,
+      commands: false,
+      github: false,
+      hooks: false,
+      mcpServers: false,
+      skills: true,
+    };
+
+    const { servers, warnings } = collectMcpServers([plugin]);
+
+    expect(servers.size).toBe(0);
+    expect(warnings).toEqual([]);
+  });
 });
 
 describe('syncVscodeMcpConfig', () => {

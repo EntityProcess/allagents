@@ -32,6 +32,12 @@ export const PluginSourceRefSchema = z.union([z.string(), UrlSourceSchema, GitHu
 
 export type PluginSourceRef = z.infer<typeof PluginSourceRefSchema>;
 
+/** A plugin component may be declared as one path or several paths. */
+export const ComponentPathSchema = z.union([
+  z.string(),
+  z.array(z.string()),
+]);
+
 /**
  * Author/owner contact info
  */
@@ -67,11 +73,45 @@ export const MarketplacePluginEntrySchema = z.object({
   homepage: z.string().optional(),
   strict: z.boolean().optional(),
   tags: z.array(z.string()).optional(),
-  skills: z.array(z.string()).optional(),
+  skills: ComponentPathSchema.optional(),
+  commands: ComponentPathSchema.optional(),
+  agents: ComponentPathSchema.optional(),
+  hooks: z.union([z.string(), z.record(z.unknown())]).optional(),
+  mcpServers: z.union([z.string(), z.record(z.unknown())]).optional(),
   lspServers: z.record(LspServerSchema).optional(),
 });
 
 export type MarketplacePluginEntry = z.infer<typeof MarketplacePluginEntrySchema>;
+
+/** File artifact kinds AllAgents can copy from a plugin source. */
+export interface MarketplaceFileArtifacts {
+  commands: boolean;
+  skills: boolean;
+  hooks: boolean;
+  agents: boolean;
+  mcpServers: boolean;
+  github: boolean;
+}
+
+/**
+ * In non-strict mode the marketplace entry is the complete component
+ * definition. Omitted components must not be inferred from repository files.
+ */
+export function getMarketplaceFileArtifacts(
+  entry: MarketplacePluginEntry,
+): MarketplaceFileArtifacts | undefined {
+  if (entry.strict !== false) return undefined;
+
+  return {
+    commands: entry.commands !== undefined,
+    skills: entry.skills !== undefined,
+    hooks: entry.hooks !== undefined,
+    agents: entry.agents !== undefined,
+    mcpServers: entry.mcpServers !== undefined,
+    // .github is repository configuration, not a marketplace component kind.
+    github: false,
+  };
+}
 
 /**
  * Top-level marketplace.json schema

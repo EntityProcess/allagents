@@ -220,6 +220,34 @@ describe('syncCodexProjectHooks', () => {
     expect(result.warnings.some((warning) => warning.includes('not updating'))).toBe(true);
     expect(await readFile(hooksPath, 'utf-8')).toBe(originalContent);
   });
+
+  it('does not import hooks omitted by a non-strict marketplace entry', async () => {
+    await writeFile(
+      join(pluginB, 'hooks', 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            { hooks: [{ type: 'command', command: 'echo undeclared' }] },
+          ],
+        },
+      }),
+      'utf-8',
+    );
+    const plugin = validatedCodexPlugin(pluginB, './plugin-b');
+    plugin.fileArtifacts = {
+      agents: false,
+      commands: false,
+      github: false,
+      hooks: false,
+      mcpServers: false,
+      skills: true,
+    };
+
+    const result = syncCodexProjectHooks([plugin], workspaceDir, undefined);
+
+    expect(result.managedHooks).toBeUndefined();
+    expect(existsSync(join(workspaceDir, '.codex', 'hooks.json'))).toBe(false);
+  });
 });
 
 describe('syncWorkspace Codex hooks', () => {

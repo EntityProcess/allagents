@@ -41,6 +41,63 @@ describe('parseMarketplaceManifest', () => {
     }
   });
 
+  it('should fall back to the GitHub Copilot marketplace location', async () => {
+    rmSync(join(testDir, '.claude-plugin'), { recursive: true, force: true });
+    mkdirSync(join(testDir, '.github', 'plugin'), { recursive: true });
+    writeFileSync(
+      join(testDir, '.github', 'plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'copilot-marketplace',
+        description: 'Copilot marketplace',
+        plugins: [
+          {
+            name: 'skills-only',
+            description: 'Skills only',
+            source: './',
+            strict: false,
+            skills: './skills/',
+          },
+        ],
+      }),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.name).toBe('copilot-marketplace');
+      expect(result.data.plugins[0].strict).toBe(false);
+      expect(result.data.plugins[0].skills).toBe('./skills/');
+    }
+  });
+
+  it('should prefer the GitHub Copilot marketplace location', async () => {
+    writeFileSync(
+      join(testDir, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'claude-marketplace',
+        description: 'Claude marketplace',
+        plugins: [],
+      }),
+    );
+    mkdirSync(join(testDir, '.github', 'plugin'), { recursive: true });
+    writeFileSync(
+      join(testDir, '.github', 'plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'copilot-marketplace',
+        description: 'Copilot marketplace',
+        plugins: [],
+      }),
+    );
+
+    const result = await parseMarketplaceManifest(testDir);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.name).toBe('copilot-marketplace');
+    }
+  });
+
   it('should return error when marketplace.json does not exist', async () => {
     rmSync(join(testDir, '.claude-plugin'), { recursive: true, force: true });
     const result = await parseMarketplaceManifest(testDir);
