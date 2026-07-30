@@ -3,11 +3,13 @@ import { mkdtemp, rm, mkdir, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dump } from 'js-yaml';
+import { stubHomeDir } from '../../helpers/env.js';
 import {
   getAllSkillsFromPlugins,
   discoverNestedSkillEntries,
   type SkillInfo,
 } from '../../../src/core/skills.js';
+import { resetFetchCache } from '../../../src/core/plugin.js';
 import { getPluginCachePath } from '../../../src/utils/plugin-path.js';
 
 describe('getAllSkillsFromPlugins', () => {
@@ -224,23 +226,33 @@ describe('getAllSkillsFromPlugins', () => {
   });
 
   it('skips GitHub URL entries whose subpath no longer exists in cache', async () => {
-    const originalHome = process.env.HOME;
-    process.env.HOME = tmpDir;
+    const restoreHomeDir = stubHomeDir(tmpDir);
+    resetFetchCache();
     try {
       const cachePath = getPluginCachePath('owner', 'repo', 'main');
-      await mkdir(cachePath, { recursive: true });
+      const siblingPath = join(cachePath, 'available');
+      await mkdir(siblingPath, { recursive: true });
+      await writeFile(join(siblingPath, 'SKILL.md'), '# Cached sibling');
+
+      const missingSource = 'https://github.com/owner/repo/tree/main/missing/path';
+      const siblingSource = 'https://github.com/owner/repo/tree/main/available';
 
       const config = {
         repositories: [],
-        plugins: ['https://github.com/owner/repo/tree/main/missing/path'],
+        plugins: [missingSource, siblingSource],
         clients: ['claude'],
       };
       await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config));
 
       const skills = await getAllSkillsFromPlugins(tmpDir);
-      expect(skills).toEqual([]);
+      expect(
+        skills.map(({ name, pluginSource, path }) => ({ name, pluginSource, path })),
+      ).toEqual([
+        { name: 'available', pluginSource: siblingSource, path: siblingPath },
+      ]);
     } finally {
-      process.env.HOME = originalHome;
+      restoreHomeDir();
+      resetFetchCache();
     }
   });
 });
