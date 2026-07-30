@@ -102,6 +102,30 @@ syncMode: copy
     expect(hooks.hooks.SessionStart?.[0]?.env?.COPILOT_PLUGIN_ROOT).toBe(pluginDir);
   });
 
+  it('syncs a direct manifest-less plugin that has no hook declaration', async () => {
+    await mkdir(join(testDir, 'direct-plugin', 'skills', 'direct-skill'), {
+      recursive: true,
+    });
+    await writeFile(
+      join(testDir, 'direct-plugin', 'skills', 'direct-skill', 'SKILL.md'),
+      '---\nname: direct-skill\ndescription: Direct plugin skill\n---\n# Direct skill\n',
+    );
+    await writeWorkspace(['direct-plugin']);
+
+    const result = await syncWorkspace(testDir);
+
+    expect(result.success).toBe(true);
+    expect(
+      existsSync(join(testDir, '.github', 'skills', 'direct-skill', 'SKILL.md')),
+    ).toBe(true);
+    expect(existsSync(join(testDir, '.github', 'hooks', 'allagents.json'))).toBe(
+      false,
+    );
+    expect(
+      (result.warnings ?? []).some((warning) => warning.startsWith('Copilot hooks:')),
+    ).toBe(false);
+  });
+
   it('merges multiple plugins and reconciles only the AllAgents-owned hook file', async () => {
     const pluginA = await writePlugin('plugin-a', 'SessionStart');
     const pluginB = await writePlugin('plugin-b', 'PostToolUse');
@@ -145,9 +169,16 @@ syncMode: copy
     expect(existsSync(join(testDir, '.github', 'hooks', 'user.json'))).toBe(true);
   });
 
-  it('rejects an entire plugin declaration when any event is not an array', async () => {
+  it('skips an entire hook declaration when any event is not an array', async () => {
     const invalidPlugin = await writePlugin('invalid-plugin', 'SessionStart');
     const validPlugin = await writePlugin('valid-plugin', 'PostToolUse');
+    await mkdir(join(invalidPlugin, 'skills', 'invalid-plugin-skill'), {
+      recursive: true,
+    });
+    await writeFile(
+      join(invalidPlugin, 'skills', 'invalid-plugin-skill', 'SKILL.md'),
+      '---\nname: invalid-plugin-skill\ndescription: Still syncs\n---\n# Skill\n',
+    );
     await writeFile(
       join(invalidPlugin, 'hooks.json'),
       JSON.stringify({
@@ -179,6 +210,11 @@ syncMode: copy
     expect(hooks.hooks.SessionStart).toBeUndefined();
     expect(hooks.hooks.PostToolUse).toHaveLength(1);
     expect(hooks.hooks.PostToolUse?.[0]?.env.COPILOT_PLUGIN_ROOT).toBe(validPlugin);
+    expect(
+      existsSync(
+        join(testDir, '.github', 'skills', 'invalid-plugin-skill', 'SKILL.md'),
+      ),
+    ).toBe(true);
   });
 
   it('does not overwrite an existing unowned allagents hook file', async () => {
