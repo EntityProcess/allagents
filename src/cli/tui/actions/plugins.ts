@@ -38,17 +38,18 @@ const { select, text, confirm, multiselect, autocomplete } = p;
  * Create dependencies for updatePlugin.
  * Tracks which marketplaces have been updated to avoid redundant fetches.
  */
-function createUpdateDeps() {
+function createUpdateDeps(workspacePath?: string) {
   const updatedMarketplaces = new Set<string>();
   return {
     parsePluginSpec,
-    getMarketplace: (name: string, sourceLocation?: string) => findMarketplace(name, sourceLocation),
+    getMarketplace: (name: string, sourceLocation?: string) =>
+      findMarketplace(name, sourceLocation, workspacePath),
     parseMarketplaceManifest,
     updateMarketplace: async (name: string) => {
       if (updatedMarketplaces.has(name)) {
         return [{ name, success: true }];
       }
-      const result = await updateMarketplace(name);
+      const result = await updateMarketplace(name, workspacePath);
       if (result[0]?.success) {
         updatedMarketplaces.add(name);
       }
@@ -156,7 +157,8 @@ async function runUpdatePlugin(
   const s = p.spinner();
   s.start('Updating plugin...');
 
-  const result = await updatePlugin(pluginSource, createUpdateDeps());
+  const workspacePath = scope === 'project' ? context.workspacePath ?? undefined : undefined;
+  const result = await updatePlugin(pluginSource, createUpdateDeps(workspacePath));
 
   if (!result.success) {
     s.stop('Update failed');
@@ -205,8 +207,9 @@ export async function runUpdateAllPlugins(
 
   const userPlugins = await getInstalledUserPlugins();
   for (const plugin of userPlugins) {
-    // Avoid duplicates
-    if (!pluginsToUpdate.some((existing) => existing.spec === plugin.spec)) {
+    if (!pluginsToUpdate.some((existing) =>
+      existing.spec === plugin.spec && existing.scope === 'user'
+    )) {
       pluginsToUpdate.push({ spec: plugin.spec, scope: 'user' });
     }
   }
@@ -218,14 +221,15 @@ export async function runUpdateAllPlugins(
 
   s.message(`Updating ${pluginsToUpdate.length} plugin(s)...`);
 
-  const deps = createUpdateDeps();
+  const projectDeps = createUpdateDeps(context.workspacePath ?? undefined);
+  const userDeps = createUpdateDeps();
 
   const results: Array<{ plugin: string; action: string; error?: string }> = [];
   let needsProjectSync = false;
   let needsUserSync = false;
 
   for (const { spec, scope } of pluginsToUpdate) {
-    const result = await updatePlugin(spec, deps);
+    const result = await updatePlugin(spec, scope === 'project' ? projectDeps : userDeps);
     const entry: { plugin: string; action: string; error?: string } = {
       plugin: spec,
       action: result.action,
