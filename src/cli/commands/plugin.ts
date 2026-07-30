@@ -1307,22 +1307,26 @@ const pluginUpdateCmd = command({
       const updateProject = scope === 'project' || (!scope && !updateAll) || updateAll;
 
       // Collect installed plugins based on scope
-      const pluginsToUpdate: string[] = [];
+      const pluginsToUpdate: Array<{ spec: string; scope: 'project' | 'user' }> = [];
+      const addPluginToUpdate = (spec: string, pluginScope: 'project' | 'user') => {
+        if (!pluginsToUpdate.some((entry) =>
+          entry.spec === spec && entry.scope === pluginScope
+        )) {
+          pluginsToUpdate.push({ spec, scope: pluginScope });
+        }
+      };
 
       if (updateProject && !isUserConfigPath(process.cwd())) {
         const projectPlugins = await getInstalledProjectPlugins(process.cwd());
         for (const p of projectPlugins) {
-          pluginsToUpdate.push(p.spec);
+          addPluginToUpdate(p.spec, 'project');
         }
       }
 
       if (updateUser) {
         const userPlugins = await getInstalledUserPlugins();
         for (const p of userPlugins) {
-          // Avoid duplicates if same plugin is in both scopes
-          if (!pluginsToUpdate.includes(p.spec)) {
-            pluginsToUpdate.push(p.spec);
-          }
+          addPluginToUpdate(p.spec, 'user');
         }
       }
 
@@ -1339,9 +1343,7 @@ const pluginUpdateCmd = command({
           const config = load(content) as { plugins?: PluginEntry[] };
           for (const entry of config.plugins ?? []) {
             const p = getPluginSource(entry);
-            if (!pluginsToUpdate.includes(p)) {
-              pluginsToUpdate.push(p);
-            }
+            addPluginToUpdate(p, 'project');
           }
         }
       }
@@ -1351,20 +1353,18 @@ const pluginUpdateCmd = command({
         if (userConfig) {
           for (const entry of userConfig.plugins ?? []) {
             const p = getPluginSource(entry);
-            if (!pluginsToUpdate.includes(p)) {
-              pluginsToUpdate.push(p);
-            }
+            addPluginToUpdate(p, 'user');
           }
         }
       }
 
       // Filter to specific plugin if provided
       const toUpdate = plugin
-        ? pluginsToUpdate.filter((p) => {
+        ? pluginsToUpdate.filter(({ spec }) => {
             // Match by full spec or just plugin name
-            if (p === plugin) return true;
-            const parsed = parsePluginSpec(p);
-            return parsed?.plugin === plugin || p.endsWith(`/${plugin}`);
+            if (spec === plugin) return true;
+            const parsed = parsePluginSpec(spec);
+            return parsed?.plugin === plugin || spec.endsWith(`/${plugin}`);
           })
         : pluginsToUpdate;
 
@@ -1398,28 +1398,39 @@ const pluginUpdateCmd = command({
 
       // Update each plugin
       const results: InstalledPluginUpdateResult[] = [];
-      const updatedMarketplaces = new Set<string>();
+      const updatedMarketplaces = {
+        project: new Set<string>(),
+        user: new Set<string>(),
+      };
+      const createUpdateDeps = (pluginScope: 'project' | 'user') => {
+        const workspacePath = pluginScope === 'project' ? process.cwd() : undefined;
+        const updatedForScope = updatedMarketplaces[pluginScope];
 
-      // Dependencies for updatePlugin (avoid circular imports)
-      const deps = {
-        parsePluginSpec,
-        getMarketplace: (name: string, sourceLocation?: string) => findMarketplace(name, sourceLocation),
-        parseMarketplaceManifest,
-        updateMarketplace: async (name: string) => {
-          // Skip if already updated in this run
-          if (updatedMarketplaces.has(name)) {
-            return [{ name, success: true }];
-          }
-          const result = await updateMarketplace(name);
-          if (result[0]?.success) {
-            updatedMarketplaces.add(name);
-          }
-          return result;
-        },
+        return {
+          parsePluginSpec,
+          getMarketplace: (name: string, sourceLocation?: string) =>
+            findMarketplace(name, sourceLocation, workspacePath),
+          parseMarketplaceManifest,
+          updateMarketplace: async (name: string) => {
+            // Skip if already updated in this scope during this run
+            if (updatedForScope.has(name)) {
+              return [{ name, success: true }];
+            }
+            const result = await updateMarketplace(name, workspacePath);
+            if (result[0]?.success) {
+              updatedForScope.add(name);
+            }
+            return result;
+          },
+        };
+      };
+      const depsByScope = {
+        project: createUpdateDeps('project'),
+        user: createUpdateDeps('user'),
       };
 
-      for (const pluginSpec of toUpdate) {
-        const result = await updatePlugin(pluginSpec, deps);
+      for (const { spec: pluginSpec, scope: pluginScope } of toUpdate) {
+        const result = await updatePlugin(pluginSpec, depsByScope[pluginScope]);
         results.push(result);
 
         if (!isJsonMode()) {
