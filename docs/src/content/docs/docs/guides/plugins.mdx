@@ -12,6 +12,7 @@ my-plugin/
 ├── skills/          # Cross-client skills
 ├── agents/          # Agent definitions (Claude, Copilot, Factory)
 ├── hooks/           # Hook definitions (Claude, Copilot, Factory)
+├── hooks.json       # Copilot plugin hook declaration (optional)
 ├── commands/        # Commands (Claude, OpenCode)
 ├── .github/         # Project-scoped GitHub overrides (Copilot, VSCode)
 │   ├── copilot-instructions.md
@@ -23,6 +24,14 @@ my-plugin/
 ```
 
 :::note
+At project scope, Copilot plugin declarations from `hooks.json` or
+`hooks/hooks.json` are combined in the AllAgents-owned
+`.github/hooks/allagents.json` file. Each entry receives its plugin-specific
+`COPILOT_PLUGIN_ROOT`, so declarations continue to resolve files from the
+plugin package. The generated file is tracked independently from other
+repository hook files. Package metadata under `.github/plugin/` is not copied
+into the project overlay.
+
 At user scope, root `hooks/` entries sync to the client's user hook directory.
 Repository hooks under `.github/hooks/` stay project-scoped and are not copied
 to `~/.copilot/hooks/`. Potential copies from older versions are left untouched

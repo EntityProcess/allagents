@@ -105,7 +105,7 @@ export interface CopyOptions {
 /**
  * Check if a file path (relative to plugin root) matches any exclude pattern.
  */
-function isExcluded(
+export function isExcluded(
   pluginPath: string,
   filePath: string,
   exclude?: string[],
@@ -629,6 +629,16 @@ export async function copyHooks(
 
   const destDir = join(workspacePath, mapping.hooksPath);
 
+  // hooks/hooks.json is a plugin declaration, not a repository hook payload.
+  // Project Copilot sync materializes it separately with COPILOT_PLUGIN_ROOT
+  // bound to the plugin installation path; copying it verbatim would register
+  // the same hooks twice and leave the plugin-root variable unresolved.
+  const effectiveExclude =
+    mapping.hooksPath === '.github/hooks/' &&
+    existsSync(join(sourceDir, 'hooks.json'))
+      ? [...(options.exclude ?? []), 'hooks/hooks.json']
+      : options.exclude;
+
   if (dryRun) {
     results.push({ source: sourceDir, destination: destDir, action: 'copied' });
     return results;
@@ -637,12 +647,12 @@ export async function copyHooks(
   await mkdir(destDir, { recursive: true });
 
   try {
-    if (options.exclude && options.exclude.length > 0) {
+    if (effectiveExclude && effectiveExclude.length > 0) {
       await copyDirectoryWithExclusions(
         sourceDir,
         destDir,
         pluginPath,
-        options.exclude,
+        effectiveExclude,
       );
     } else {
       await cp(sourceDir, destDir, { recursive: true });
@@ -746,11 +756,21 @@ function githubContentExcludes(
   mapping: ClientMapping,
   exclude?: string[],
 ): string[] | undefined {
-  if (!relocatesGitHubContent(mapping)) return exclude;
+  const effectiveExclude = [...(exclude ?? [])];
+
+  // Copilot plugin package metadata is used to discover a native plugin, but
+  // it has no runtime role after file-mode content is overlaid into a project.
+  if (!relocatesGitHubContent(mapping)) {
+    effectiveExclude.push('.github/plugin');
+  }
 
   // .github/hooks is repository-owned. Root hooks/ remains the portable
   // plugin artifact that can be installed into a client's user hook path.
-  return [...(exclude ?? []), '.github/hooks'];
+  if (relocatesGitHubContent(mapping)) {
+    effectiveExclude.push('.github/hooks');
+  }
+
+  return effectiveExclude.length > 0 ? effectiveExclude : undefined;
 }
 
 export interface RelocatedGitHubHooksSource {

@@ -102,6 +102,10 @@ import { applyMcpProxy } from './mcp-proxy.js';
 import { syncCodexMcpServers } from './codex-mcp.js';
 import { syncCodexProjectHooks } from './codex-hooks.js';
 import {
+  COPILOT_MANAGED_HOOKS_RELATIVE_PATH,
+  syncCopilotProjectHooks,
+} from './copilot-hooks.js';
+import {
   syncClaudeMcpConfig,
   syncClaudeMcpServersViaCli,
 } from './claude-mcp.js';
@@ -2248,10 +2252,27 @@ export async function syncWorkspace(
   );
   warnings.push(...codexHookSync.warnings);
 
+  // Step 4d: Materialize Copilot plugin hook declarations as a repository hook
+  // file. Copilot discovers project hooks only from .github/hooks/*.json;
+  // copying a plugin's hook scripts there does not activate its root hooks.json.
+  const copilotHookSync = await sw.measure('copilot-hooks-sync', () =>
+    syncCopilotProjectHooks(validPlugins, workspacePath, {
+      dryRun,
+      previouslyManaged: getPreviouslySyncedFiles(
+        previousState,
+        'copilot',
+      ).includes(COPILOT_MANAGED_HOOKS_RELATIVE_PATH),
+    }),
+  );
+  warnings.push(...copilotHookSync.warnings);
+
   // Step 5: Copy workspace files if configured
   // Supports both workspace.source (default base) and file-level sources
   // Skip when workspace.source was configured but validation failed (plugins still synced above)
-  const workspaceFileResults: CopyResult[] = [...codexHookSync.copyResults];
+  const workspaceFileResults: CopyResult[] = [
+    ...codexHookSync.copyResults,
+    ...copilotHookSync.copyResults,
+  ];
   let writtenSkillsIndexFiles: string[] = [];
   const skipWorkspaceFiles =
     !!config.workspace?.source && !validatedWorkspaceSource;
