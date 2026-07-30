@@ -5,8 +5,12 @@ import { join } from 'node:path';
 import { load, dump } from 'js-yaml';
 import { removeInstalledSkill } from '../../../src/cli/skill-removal.js';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
-import type { SkillInfo } from '../../../src/core/skills.js';
+import {
+  getAllSkillsFromPlugins,
+  type SkillInfo,
+} from '../../../src/core/skills.js';
 import { resetFetchCache } from '../../../src/core/plugin.js';
+import { stubHomeDir } from '../../helpers/env.js';
 
 describe('removeInstalledSkill', () => {
   let tmpDir: string;
@@ -164,8 +168,8 @@ describe('removeInstalledSkill', () => {
   });
 
   it('removes a single-skill GitHub source instead of leaving an empty allowlist', async () => {
-    const originalHome = process.env.HOME;
     const fakeHome = join(tmpDir, 'home');
+    const restoreHomeDir = stubHomeDir(fakeHome);
     const pluginDir = join(
       fakeHome,
       '.allagents/plugins/marketplaces/NousResearch-hermes-agent@main/skills/research/llm-wiki',
@@ -185,10 +189,16 @@ describe('removeInstalledSkill', () => {
     };
     await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config), 'utf-8');
 
-    process.env.HOME = fakeHome;
     resetFetchCache();
 
     try {
+      const discoveredSkills = await getAllSkillsFromPlugins(tmpDir);
+      expect(
+        discoveredSkills.map(({ name, pluginSource, path }) => ({ name, pluginSource, path })),
+      ).toEqual([
+        { name: 'llm-wiki', pluginSource: source, path: pluginDir },
+      ]);
+
       const result = await removeInstalledSkill({
         targetSkill: {
           name: 'llm-wiki',
@@ -206,7 +216,7 @@ describe('removeInstalledSkill', () => {
       const updated = load(content) as WorkspaceConfig;
       expect(updated.plugins).toEqual([]);
     } finally {
-      process.env.HOME = originalHome;
+      restoreHomeDir();
       resetFetchCache();
     }
   });
