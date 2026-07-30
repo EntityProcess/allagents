@@ -145,6 +145,42 @@ syncMode: copy
     expect(existsSync(join(testDir, '.github', 'hooks', 'user.json'))).toBe(true);
   });
 
+  it('rejects an entire plugin declaration when any event is not an array', async () => {
+    const invalidPlugin = await writePlugin('invalid-plugin', 'SessionStart');
+    const validPlugin = await writePlugin('valid-plugin', 'PostToolUse');
+    await writeFile(
+      join(invalidPlugin, 'hooks.json'),
+      JSON.stringify({
+        version: 1,
+        hooks: {
+          SessionStart: [
+            {
+              type: 'command',
+              bash: 'bash "${COPILOT_PLUGIN_ROOT}/hooks/invalid-plugin.sh"',
+            },
+          ],
+          UserPromptSubmit: { type: 'command', bash: 'echo invalid' },
+        },
+      }),
+    );
+    await writeWorkspace(['invalid-plugin', 'valid-plugin']);
+
+    const result = await syncWorkspace(testDir);
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toContain(
+      `Copilot hooks: event 'UserPromptSubmit' in ${join(invalidPlugin, 'hooks.json')} must be an array`,
+    );
+    const hooks = JSON.parse(
+      await readFile(join(testDir, '.github', 'hooks', 'allagents.json'), 'utf-8'),
+    ) as {
+      hooks: Record<string, Array<{ env: Record<string, string> }>>;
+    };
+    expect(hooks.hooks.SessionStart).toBeUndefined();
+    expect(hooks.hooks.PostToolUse).toHaveLength(1);
+    expect(hooks.hooks.PostToolUse?.[0]?.env.COPILOT_PLUGIN_ROOT).toBe(validPlugin);
+  });
+
   it('does not overwrite an existing unowned allagents hook file', async () => {
     await writePlugin('plugin-a', 'SessionStart');
     await writeWorkspace(['plugin-a']);

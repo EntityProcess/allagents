@@ -57,7 +57,7 @@ function parseHooksFile(
       warnings.push(
         `Copilot hooks: event '${eventName}' in ${source} must be an array`,
       );
-      continue;
+      return null;
     }
     hooks[eventName] = entries;
   }
