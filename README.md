@@ -135,11 +135,22 @@ that file. Codex plugins can declare hooks in `.codex-plugin/plugin.json` with a
 `hooks` path, path array, inline object, or inline object array; otherwise
 AllAgents falls back to `hooks/hooks.json`.
 
-For Copilot, root `hooks/` can sync to either project or user hook directories.
-Repository hooks under `.github/hooks/` remain project-scoped and are never
-promoted into the user-global `~/.copilot/hooks/` directory. Potential copies
-from older versions are left untouched and reported for manual review because
-their ownership was not tracked.
+For Copilot project sync, AllAgents combines plugin hook declarations from
+`hooks.json` or `hooks/hooks.json` in `.github/hooks/allagents.json` and binds
+`COPILOT_PLUGIN_ROOT` for each plugin. Other repository hooks under
+`.github/hooks/` remain project-scoped and are never promoted into the
+user-global `~/.copilot/hooks/` directory. Copilot package metadata under
+`.github/plugin/` is not copied into the project overlay. Potential user-scope
+copies from older versions are left untouched and reported for manual review
+because their ownership was not tracked.
+
+Marketplace registration and `plugin.json` are not required for direct plugin
+sources. A plugin without a supported hook declaration continues syncing its
+other artifacts. AllAgents warns and omits a declaration that cannot be read or
+parsed as JSON or lacks the version-1 `hooks` object envelope. A declaration
+with `disableAllHooks: true` adds no entries; otherwise, a non-array event value
+also omits the declaration. Skipping a declaration does not reject the plugin
+or itself suppress other eligible artifacts, including repository hook files.
 
 ## Documentation
 

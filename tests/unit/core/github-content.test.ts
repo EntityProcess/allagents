@@ -67,6 +67,26 @@ describe('copyGitHubContent', () => {
     expect(content).toBe('{"hooks":[]}');
   });
 
+  it('does not copy Copilot package metadata into the project overlay', async () => {
+    await mkdir(join(pluginDir, '.github', 'plugin'), { recursive: true });
+    await mkdir(join(pluginDir, '.github', 'prompts'), { recursive: true });
+    await writeFile(
+      join(pluginDir, '.github', 'plugin', 'plugin.json'),
+      '{"name":"package-only"}',
+    );
+    await writeFile(join(pluginDir, '.github', 'prompts', 'keep.md'), '# Keep');
+
+    const results = await copyGitHubContent(pluginDir, workspaceDir, 'copilot');
+
+    expect(results).toHaveLength(1);
+    expect(
+      existsSync(join(workspaceDir, '.github', 'plugin', 'plugin.json')),
+    ).toBe(false);
+    expect(existsSync(join(workspaceDir, '.github', 'prompts', 'keep.md'))).toBe(
+      true,
+    );
+  });
+
   it('skips clients without githubPath', async () => {
     await mkdir(join(pluginDir, '.github', 'prompts'), { recursive: true });
     await writeFile(join(pluginDir, '.github', 'prompts', 'test.md'), '# Test');

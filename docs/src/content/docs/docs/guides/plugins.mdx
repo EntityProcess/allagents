@@ -12,6 +12,7 @@ my-plugin/
 ├── skills/          # Cross-client skills
 ├── agents/          # Agent definitions (Claude, Copilot, Factory)
 ├── hooks/           # Hook definitions (Claude, Copilot, Factory)
+├── hooks.json       # Copilot plugin hook declaration (optional)
 ├── commands/        # Commands (Claude, OpenCode)
 ├── .github/         # Project-scoped GitHub overrides (Copilot, VSCode)
 │   ├── copilot-instructions.md
@@ -23,6 +24,26 @@ my-plugin/
 ```
 
 :::note
+At project scope, Copilot plugin hook declarations from `hooks.json` or
+`hooks/hooks.json` are combined in the AllAgents-owned
+`.github/hooks/allagents.json` file. Each entry receives its plugin-specific
+`COPILOT_PLUGIN_ROOT`, so declarations continue to resolve files from the
+plugin package. The generated file is tracked independently from other
+repository hook files. Package metadata under `.github/plugin/` is not copied
+into the project overlay.
+
+This does not require a marketplace manifest or `plugin.json`. Direct local and
+GitHub plugin sources continue to use conventional directory discovery. If a
+plugin has no supported hook declaration, its other artifacts still sync and it
+adds no entries to `allagents.json`. AllAgents warns and omits a declaration
+that cannot be read or parsed as JSON or lacks the version-1 `hooks` object
+envelope. A declaration with `disableAllHooks: true` adds no entries; otherwise,
+a non-array event value also warns and omits the declaration. AllAgents does not
+fully validate each hook entry. Skipping a declaration does not reject the
+plugin or itself suppress other eligible artifacts—including repository hook
+files—or valid declarations from other plugins. Ordinary client selection and
+exclusion settings still apply.
+
 At user scope, root `hooks/` entries sync to the client's user hook directory.
 Repository hooks under `.github/hooks/` stay project-scoped and are not copied
 to `~/.copilot/hooks/`. Potential copies from older versions are left untouched
