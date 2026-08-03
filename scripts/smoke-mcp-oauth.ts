@@ -7,6 +7,9 @@ interface ParsedArgs {
   tool?: string;
 }
 
+const USAGE =
+  'Usage: bun run smoke:mcp-oauth <server-url> [question] [--tool <name>]';
+
 function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = [];
   let tool: string | undefined;
@@ -20,8 +23,17 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
+  const serverUrl = positionals[0];
+  if (!serverUrl) {
+    console.error(USAGE);
+    console.error(
+      'Provide the URL of any OAuth-protected remote MCP server you want to smoke-test — none is hardcoded here on purpose.',
+    );
+    process.exit(1);
+  }
+
   return {
-    serverUrl: positionals[0] ?? 'https://knowledge.mcp.wtg.zone',
+    serverUrl,
     question: positionals[1] ?? 'how to rename a company branch',
     tool,
   };
