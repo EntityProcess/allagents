@@ -161,6 +161,10 @@ Later connections reuse this cache — no browser prompt — and an expired acce
 
 None beyond `allagents` itself — the proxy has no separate runtime dependency to fetch or cache.
 
+:::caution
+`allagents` must be installed and on `PATH` (`npm install -g allagents` or `bun install -g allagents`) — running it via `npx allagents` is **not** enough for this feature. The proxy command is invoked directly by each MCP client (Claude Code, Codex, etc.), not by you, and the generated config embeds a bare `command: "allagents"`. `npx` resolves and runs the package for *your own* shell invocation, but doesn't add anything to `PATH` for another process to find afterward — so a client spawning that config later will fail with "command not found" unless `allagents` is genuinely installed.
+:::
+
 ## Scope
 
 MCP proxy works with both project-scoped and user-scoped syncs.
