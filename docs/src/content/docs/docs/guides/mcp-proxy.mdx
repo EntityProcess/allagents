@@ -1,11 +1,9 @@
 ---
 title: MCP Proxy
-description: Transparently proxy HTTP MCP servers through mcp-remote for clients that need stdio transport.
+description: Transparently proxy HTTP MCP servers through a built-in stdio bridge, with OAuth handled for you.
 ---
 
-Some MCP servers use HTTP transport with OAuth authentication, but not every AI client supports HTTP natively. The MCP proxy feature rewrites HTTP server configs to use [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) as a local stdio bridge, so all clients connect through an already-authenticated proxy.
-
-When AllAgents generates a proxied client config, it does so through the public `allagents mcp proxy <serverUrl>` helper command.
+Some MCP servers use HTTP transport with OAuth authentication, but not every AI client supports HTTP natively. The MCP proxy feature rewrites HTTP server configs to run through AllAgents' own built-in stdio bridge (`allagents mcp proxy <serverUrl>`), so all clients connect through an already-authenticated proxy — no separate package to install.
 
 ## Quick Start
 
@@ -39,7 +37,8 @@ clients:
 
 mcpProxy:
   # Claude Code supports HTTP MCP natively, so it gets the original URL.
-  # Codex only speaks stdio, so rewrite its config to use `npx mcp-remote`.
+  # Codex only speaks stdio, so rewrite its config to run through the
+  # built-in `allagents mcp proxy` bridge.
   clients:
     - codex
 ```
@@ -49,19 +48,20 @@ what each client received:
 
 ```bash
 cat .mcp.json            # Claude — original HTTP config
-cat .codex/config.toml   # Codex — rewritten to `npx mcp-remote` stdio
+cat .codex/config.toml   # Codex — rewritten to `allagents mcp proxy` stdio
 ```
 
 DeepWiki is a public, no-auth MCP server, so this example works end-to-end
-with nothing more than Node.js installed (for `npx`). Point any of your
+with nothing more than `allagents` itself installed. Point any of your
 configured clients at the workspace and you can immediately call tools like
 `read_wiki_structure` or `ask_question` against any indexed GitHub repo.
 
 ## Why Use MCP Proxy
 
-- **OAuth handled once** — `mcp-remote` manages OAuth flows and caches tokens in `~/.mcp-auth/`
+- **OAuth handled once** — the built-in proxy runs the full PKCE authorization flow the first time it connects, then caches the client registration and tokens under `~/.allagents/oauth-proxy/`; subsequent connections reuse them (with automatic token refresh) instead of reopening a browser
 - **Stdio everywhere** — clients that only support stdio can connect to HTTP servers
 - **Transparent** — configure which clients need proxying and AllAgents rewrites configs automatically during sync
+- **Nothing extra to install** — the proxy is built into the `allagents` binary; there's no separate package to fetch or cache on first use
 
 ## Configuration
 
@@ -92,7 +92,7 @@ mcpProxy:
 2. For each server + client pair, it checks if proxying is needed:
    - Is the client listed in `mcpProxy.clients`?
    - Is there a per-server override in `mcpProxy.servers.<name>.proxy` that includes this client?
-3. If yes **and** the server uses HTTP transport (has a `url` field), the config is rewritten to use `mcp-remote` via stdio
+3. If yes **and** the server uses HTTP transport (has a `url` field), the config is rewritten to invoke `allagents mcp proxy` via stdio
 4. Stdio servers are never transformed — they pass through unchanged
 
 ### Transform Example
@@ -112,14 +112,8 @@ With `mcpProxy.clients: [claude]`, the synced config for Claude becomes:
 ```json
 {
   "knowledge-base": {
-    "command": "npx",
-    "args": [
-      "mcp-remote",
-      "https://knowledge.mcp.example.com",
-      "--http",
-      "--static-oauth-client-metadata",
-      "@~/.allagents/mcp-remote/mcp-metadata-settings.json"
-    ]
+    "command": "allagents",
+    "args": ["mcp", "proxy", "https://knowledge.mcp.example.com"]
   }
 }
 ```
@@ -147,25 +141,25 @@ In this example:
 
 Per-server `proxy` lists are additive — they extend the default `clients`, not replace them.
 
-## Metadata File
+## OAuth & Token Cache
 
-AllAgents automatically creates a metadata file at `~/.allagents/mcp-remote/mcp-metadata-settings.json` on first sync. This file is passed to `mcp-remote` via the `--static-oauth-client-metadata` flag and contains:
+The first time `allagents mcp proxy <url>` connects to a server that requires OAuth, it runs the standard authorization-code + PKCE flow: it registers a client with the server's authorization server (or reuses a cached registration), opens your browser to complete the login, and exchanges the resulting code for tokens.
 
-```json
-{
-  "client_uri": "http://localhost"
-}
+Client registration, tokens, and discovery metadata are cached per server under:
+
+```
+~/.allagents/oauth-proxy/<hash-of-server-url>/
+  client-info.json
+  tokens.json
+  code-verifier.txt
+  discovery.json
 ```
 
-The file is created once and never overwritten, so you can customize it if needed.
+Later connections reuse this cache — no browser prompt — and an expired access token is refreshed automatically using the cached refresh token, still without reopening a browser. If you ever need to force a fresh login for a specific server (e.g. a revoked token), delete that server's subdirectory and reconnect.
 
 ## Prerequisites
 
-The proxy uses `npx mcp-remote` to launch the bridge process. Because it runs through `npx`, there is nothing to install — `npx` downloads `mcp-remote` automatically on first use and caches it for subsequent runs. The only requirement is Node.js (which provides `npx`).
-
-:::note
-The first time a proxied server starts, `npx` fetches `mcp-remote` from npm, which may add a few seconds of delay. Subsequent launches use the cached package and start immediately.
-:::
+None beyond `allagents` itself — the proxy has no separate runtime dependency to fetch or cache.
 
 ## Scope
 

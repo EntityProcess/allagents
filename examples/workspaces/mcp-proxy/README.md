@@ -4,16 +4,15 @@ A minimal, **copy-and-run** workspace that demonstrates the
 [MCP Proxy](https://allagents.dev/docs/guides/mcp-proxy/) feature.
 
 It installs a single plugin (`deepwiki`) that exposes a real public HTTP MCP
-server (`https://mcp.deepwiki.com/mcp`), and proxies it through
-[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) for Codex — which
-only supports stdio transport.
+server (`https://mcp.deepwiki.com/mcp`), and proxies it through AllAgents'
+own built-in stdio bridge for Codex — which only supports stdio transport.
 
 ## What gets synced
 
 | Client | Transport | Config file |
 |--------|-----------|-------------|
 | `claude` | HTTP (untouched) | `.mcp.json` |
-| `codex`  | stdio via `npx mcp-remote` | `.codex/config.toml` |
+| `codex`  | stdio via `allagents mcp proxy` | `.codex/config.toml` |
 
 ## Running it
 
@@ -43,8 +42,9 @@ cat .codex/config.toml        # Rewritten stdio config for Codex
 You should see Codex invoking:
 
 ```
-npx mcp-remote https://mcp.deepwiki.com/mcp --http \
-  --static-oauth-client-metadata @~/.allagents/mcp-remote/mcp-metadata-settings.json
+[mcp_servers.deepwiki]
+command = "allagents"
+args = ["mcp", "proxy", "https://mcp.deepwiki.com/mcp"]
 ```
 
 DeepWiki is a public, no-auth server, so you can connect immediately and
@@ -53,11 +53,9 @@ proxied client.
 
 ## Requirements
 
-- [Node.js](https://nodejs.org/) (provides `npx`, needed to run `mcp-remote`
-  on demand). Nothing to install globally — `npx` fetches and caches
-  `mcp-remote` automatically the first time a proxied server starts.
+None beyond `allagents` itself — the proxy is built into the binary, with
+no separate package to fetch or cache on first use.
 
 ## See also
 
 - [MCP Proxy guide](https://allagents.dev/docs/guides/mcp-proxy/)
-- [`mcp-remote` on npm](https://www.npmjs.com/package/mcp-remote)
