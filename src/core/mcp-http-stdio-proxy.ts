@@ -36,8 +36,9 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+export const AUTH_URL_LOG_PREFIX = 'If the browser does not open, visit: ';
 
-function hashServerUrl(serverUrl: string): string {
+export function hashServerUrl(serverUrl: string): string {
   return createHash('sha256').update(serverUrl).digest('hex').slice(0, 16);
 }
 
@@ -379,9 +380,17 @@ class FileOAuthClientProvider implements OAuthClientProvider {
       server.listen(this.port, '127.0.0.1', () => {
         console.error('Opening browser for authorization...');
         console.error(
-          `If the browser does not open, visit: ${authorizationUrl.toString()}`,
+          `${AUTH_URL_LOG_PREFIX}${authorizationUrl.toString()}`,
         );
-        void tryOpenBrowser(authorizationUrl.toString());
+        // Test-only escape hatch: e2e tests fetch the URL themselves against a local
+        // dummy IdP, and skipping the real OS browser-open avoids ever launching one.
+        if (process.env.ALLAGENTS_MCP_OAUTH_NO_BROWSER === '1') {
+          console.error(
+            'Skipping automatic browser open (ALLAGENTS_MCP_OAUTH_NO_BROWSER=1).',
+          );
+        } else {
+          void tryOpenBrowser(authorizationUrl.toString());
+        }
       });
     });
   }
