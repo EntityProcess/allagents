@@ -20,6 +20,7 @@
     "test:coverage": "bun test --coverage",
     "test:e2e": "bun test tests/e2e",
     "smoke:mcp-oauth": "bun run scripts/smoke-mcp-oauth.ts",
+    "dev:mcp-server": "bun run scripts/dev-mcp-server.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src",
     "lint:fix": "biome lint --write src",

@@ -1,14 +1,12 @@
 #!/usr/bin/env bun
 import { connectToMcpProxy } from '../tests/helpers/mcp-proxy-client.ts';
+import { startDummyMcpOAuthServer } from '../tests/helpers/dummy-mcp-oauth-server.ts';
 
 interface ParsedArgs {
-  serverUrl: string;
+  serverUrl?: string;
   question: string;
   tool?: string;
 }
-
-const USAGE =
-  'Usage: bun run smoke:mcp-oauth <server-url> [question] [--tool <name>]';
 
 function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = [];
@@ -23,17 +21,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
-  const serverUrl = positionals[0];
-  if (!serverUrl) {
-    console.error(USAGE);
-    console.error(
-      'Provide the URL of any OAuth-protected remote MCP server you want to smoke-test — none is hardcoded here on purpose.',
-    );
-    process.exit(1);
-  }
-
   return {
-    serverUrl,
+    serverUrl: positionals[0],
     question: positionals[1] ?? 'how to rename a company branch',
     tool,
   };
@@ -140,49 +129,90 @@ function pickTool(
 }
 
 async function main() {
-  const { serverUrl, question, tool } = parseArgs(process.argv.slice(2));
-
-  console.log(`Connecting to ${serverUrl} via 'allagents mcp proxy'...`);
-  console.log(
-    'If this server requires OAuth, a browser window will open — complete the login there, then return here.',
+  const { serverUrl: explicitUrl, question, tool } = parseArgs(
+    process.argv.slice(2),
   );
 
-  const connection = await connectToMcpProxy({
-    serverUrl,
-    onAuthorizationUrl: (url) => {
-      console.log(`Authorization URL (in case the browser didn't open): ${url}`);
-    },
-  });
+  const selfContained = !explicitUrl;
+  const dummyServer = selfContained
+    ? await startDummyMcpOAuthServer()
+    : undefined;
+  const serverUrl = explicitUrl ?? dummyServer?.mcpUrl;
+  if (!serverUrl) throw new Error('unreachable');
+
+  if (selfContained) {
+    console.log(
+      'No server URL provided — started a local dummy MCP+OAuth server (fully self-contained, no external network, no real login screen).',
+    );
+  }
+  console.log(`Connecting to ${serverUrl} via 'allagents mcp proxy'...`);
+  if (!selfContained) {
+    console.log(
+      'If this server requires OAuth, a browser window will open — complete the login there, then return here.',
+    );
+  }
 
   try {
-    console.log('Connected. Listing tools...');
-    const { tools } = await connection.client.listTools();
-    console.log(
-      `Available tools: ${tools.map((t) => t.name).join(', ') || '(none)'}`,
-    );
-
-    const selected = pickTool(tools, tool);
-    console.log(
-      `Selected tool '${selected.name}'. Input schema: ${JSON.stringify(selected.inputSchema)}`,
-    );
-    const args = buildToolArguments(selected.inputSchema, question);
-    console.log(
-      `Calling tool '${selected.name}' with arguments ${JSON.stringify(args)}...`,
-    );
-
-    const result = await connection.client.callTool({
-      name: selected.name,
-      arguments: args,
+    const connection = await connectToMcpProxy({
+      serverUrl,
+      env: selfContained ? { ALLAGENTS_MCP_OAUTH_NO_BROWSER: '1' } : undefined,
+      onAuthorizationUrl: (url) => {
+        if (selfContained) {
+          // Same trick the e2e tests use: the dummy IdP auto-approves any
+          // request, so a plain fetch (curl-equivalent) completes the login.
+          console.log('Completing OAuth automatically against the dummy IdP...');
+          fetch(url).catch((error) => {
+            console.error('Auto-authorize request failed:', error);
+          });
+        } else {
+          console.log(
+            `Authorization URL (in case the browser didn't open): ${url}`,
+          );
+        }
+      },
     });
 
-    console.log('\n--- Response ---');
-    console.log(JSON.stringify(result, null, 2));
-    console.log('----------------\n');
-    console.log(
-      'Smoke test complete. Re-run this script again to confirm no second OAuth prompt appears (cached token reused).',
-    );
+    try {
+      console.log('Connected. Listing tools...');
+      const { tools } = await connection.client.listTools();
+      console.log(
+        `Available tools: ${tools.map((t) => t.name).join(', ') || '(none)'}`,
+      );
+
+      const selected = pickTool(tools, tool);
+      console.log(
+        `Selected tool '${selected.name}'. Input schema: ${JSON.stringify(selected.inputSchema)}`,
+      );
+      const args = buildToolArguments(selected.inputSchema, question);
+      console.log(
+        `Calling tool '${selected.name}' with arguments ${JSON.stringify(args)}...`,
+      );
+
+      const result = await connection.client.callTool({
+        name: selected.name,
+        arguments: args,
+      });
+
+      console.log('\n--- Response ---');
+      console.log(JSON.stringify(result, null, 2));
+      console.log('----------------\n');
+      if (selfContained) {
+        console.log(
+          '(This is a fixture response from the local dummy server, not real data.\n' +
+            'Each run starts a fresh dummy server on a new port, so this mode cannot\n' +
+            'demonstrate cached-token reuse — that\'s covered by tests/e2e/mcp-proxy-oauth.test.ts.\n' +
+            'Pass a real server URL as the first argument to test against something persistent.)',
+        );
+      } else {
+        console.log(
+          'Smoke test complete. Re-run this script again to confirm no second OAuth prompt appears (cached token reused).',
+        );
+      }
+    } finally {
+      await connection.close();
+    }
   } finally {
-    await connection.close();
+    await dummyServer?.stop();
   }
 }
 
