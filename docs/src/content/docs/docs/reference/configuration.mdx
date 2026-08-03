@@ -162,6 +162,72 @@ When multiple repositories (or multiple client paths within the same repo) conta
 
 This differs from [plugin skill deduplication](/docs/guides/plugins/#duplicate-skill-handling), which keeps all copies and renames them for uniqueness. Repository skills are an index of pointers, so only the best source is kept.
 
+## Lifecycle Hooks
+
+The optional `lifecycleHooks` section lets a workspace run scripts at defined
+phases of the sync/update flow. This is an escape hatch for runtime prerequisites
+that AllAgents cannot sync as agent artifacts (e.g., installing helper binaries
+like `agent-tui` or `bd`).
+
+```yaml
+lifecycleHooks:
+  preSync:
+    # String shorthand (required, name derived from script)
+    - scripts/check-deps.sh
+
+    # Object form with explicit name
+    - name: install-agent-tui
+      script: |
+        if ! command -v agent-tui >/dev/null 2>&1; then
+          cargo install agent-tui
+        fi
+
+    # Optional script — failure is logged as a warning, sync continues
+    - name: nice-to-have
+      script: ./optional-setup.sh
+      optional: true
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `script` | Yes | — | Shell command to execute (run via `sh -c`) |
+| `name` | No | `script` value | Display name for CLI output |
+| `optional` | No | `false` | If `true`, failure is a warning instead of an abort |
+
+### Behavior
+
+- **Ordering**: Scripts run in the order listed, before any plugin validation or filesystem mutation.
+- **Required scripts**: A failing required script (the default) aborts the sync before any changes are made to the workspace.
+- **Optional scripts**: A failing optional script is logged as a warning; sync continues.
+- **Dry-run**: `--dry-run` shows which scripts would run without executing them.
+- **Environment**: Each script runs in the workspace root with these variables set:
+
+| Variable | Description |
+|---|---|
+| `ALLAGENTS_WORKSPACE` | Absolute path to the workspace root |
+| `ALLAGENTS_CONFIG_DIR` | Absolute path to `.allagents/` |
+
+### Idempotent script pattern
+
+Scripts can store a marker (pinned version, commit hash) under `.allagents/` to
+skip redundant work on re-run:
+
+```bash
+MARKER="$ALLAGENTS_CONFIG_DIR/.my-tool-version"
+CURRENT=$(cat "$MARKER" 2>/dev/null || echo "none")
+if [ "$CURRENT" = "1.2.3" ] && command -v my-tool >/dev/null 2>&1; then
+  exit 0
+fi
+# ... install my-tool ...
+echo "1.2.3" > "$MARKER"
+```
+
+See `examples/workspaces/lifecycle-hooks/` for a complete working example.
+
+:::caution[Security]
+Lifecycle scripts are arbitrary local commands. Review any script from a plugin or template before enabling it in your workspace. Only the workspace owner can opt in — scripts are never silently executed.
+:::
+
 ## MCP Servers
 
 The optional top-level `mcpServers` field defines MCP servers managed directly by the workspace. Servers defined here are synced to all configured project-scoped MCP clients (`claude`, `codex`, `vscode`, `copilot`).

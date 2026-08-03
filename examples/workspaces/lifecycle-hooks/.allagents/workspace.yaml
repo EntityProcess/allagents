@@ -1,0 +1,64 @@
+version: 2
+
+# Example: Workspace with lifecycle hooks for runtime prerequisites
+#
+# This workspace uses lifecycleHooks.preSync scripts to ensure required
+# binaries are available before plugin artifacts are synced.
+#
+# SECURITY: These are arbitrary local commands. Review scripts from any
+# plugin or template before enabling them in your workspace.
+#
+# Scripts run in the workspace root directory and receive:
+#   ALLAGENTS_WORKSPACE  - absolute path to the workspace root
+#   ALLAGENTS_CONFIG_DIR - absolute path to the .allagents/ directory
+#
+# Idempotent pattern: scripts can store a marker (e.g., a pinned version
+# or commit hash) under .allagents/ to skip redundant work on re-run.
+
+repositories: []
+
+plugins:
+  # Beads project-management skills and Codex hooks.
+  - https://github.com/gastownhall/beads/tree/main/plugins/beads
+
+  # Agent TUI skills.
+  - https://github.com/pproenca/agent-tui/tree/master/skills
+
+clients:
+  - codex
+
+syncMode: copy
+
+lifecycleHooks:
+  preSync:
+    # Install agent-tui if not already present.
+    # Uses .allagents/.agent-tui-version as an idempotency marker.
+    - name: install-agent-tui
+      script: |
+        AGENT_TUI_VERSION="0.5.0"
+        MARKER="$ALLAGENTS_CONFIG_DIR/.agent-tui-version"
+        CURRENT=$(cat "$MARKER" 2>/dev/null || echo "none")
+        if [ "$CURRENT" = "$AGENT_TUI_VERSION" ] && command -v agent-tui >/dev/null 2>&1; then
+          echo "agent-tui $AGENT_TUI_VERSION already installed"
+          exit 0
+        fi
+        echo "Installing agent-tui $AGENT_TUI_VERSION..."
+        # Replace with actual install command for your platform:
+        # cargo install agent-tui --version "$AGENT_TUI_VERSION"
+        # npm install -g agent-tui@"$AGENT_TUI_VERSION"
+        echo "$AGENT_TUI_VERSION" > "$MARKER"
+
+    # Install bd (Beads CLI) if not already present.
+    - name: install-bd
+      script: |
+        BD_VERSION="0.3.0"
+        MARKER="$ALLAGENTS_CONFIG_DIR/.bd-version"
+        CURRENT=$(cat "$MARKER" 2>/dev/null || echo "none")
+        if [ "$CURRENT" = "$BD_VERSION" ] && command -v bd >/dev/null 2>&1; then
+          echo "bd $BD_VERSION already installed"
+          exit 0
+        fi
+        echo "Installing bd $BD_VERSION..."
+        # Replace with actual install command:
+        # cargo install bd --version "$BD_VERSION"
+        echo "$BD_VERSION" > "$MARKER"
