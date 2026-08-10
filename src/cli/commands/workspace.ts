@@ -9,6 +9,7 @@ import {
   syncWorkspace,
 } from '../../core/sync.js';
 import type { SyncResult } from '../../core/sync.js';
+import { formatLifecycleResults } from '../../core/lifecycle-scripts.js';
 import {
   ensureUserWorkspace,
   getUserWorkspaceConfig,
@@ -328,6 +329,16 @@ const syncCmd = command({
         console.log(line);
       }
       console.log('');
+
+      // Print lifecycle hook results
+      if (result.lifecycleResults) {
+        for (const [phase, phaseResult] of Object.entries(result.lifecycleResults)) {
+          for (const line of formatLifecycleResults(phase, phaseResult)) {
+            console.log(line);
+          }
+          console.log('');
+        }
+      }
 
       // Print plugin results
       for (const pluginResult of result.pluginResults) {

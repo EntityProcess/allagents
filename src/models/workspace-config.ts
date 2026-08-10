@@ -276,6 +276,31 @@ export function getClientInstallMode(
 }
 
 /**
+ * Normalized lifecycle script entry with all fields resolved.
+ */
+export interface NormalizedLifecycleScript {
+  script: string;
+  name: string;
+  optional: boolean;
+}
+
+/**
+ * Normalize a lifecycle script entry to its full form.
+ */
+export function normalizeLifecycleScript(
+  entry: LifecycleScript,
+): NormalizedLifecycleScript {
+  if (typeof entry === 'string') {
+    return { script: entry, name: entry, optional: false };
+  }
+  return {
+    script: entry.script,
+    name: entry.name ?? entry.script,
+    optional: entry.optional ?? false,
+  };
+}
+
+/**
  * Resolve effective install mode for a (plugin, client) pair.
  * Priority: plugin-level > client-level > 'file' default.
  */
@@ -358,6 +383,35 @@ export const McpServerConfigSchema = z.union([
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
 /**
+ * A single lifecycle script entry.
+ *
+ * String shorthand: "scripts/setup.sh" (required, name derived from script)
+ * Object form: { script, name?, optional? }
+ */
+export const LifecycleScriptSchema = z.union([
+  z.string(),
+  z.object({
+    script: z.string(),
+    name: z.string().optional(),
+    optional: z.boolean().optional(),
+  }),
+]);
+
+export type LifecycleScript = z.infer<typeof LifecycleScriptSchema>;
+
+/**
+ * Lifecycle hooks that run at defined phases of the sync/update flow.
+ *
+ * preSync: scripts that run before plugin artifacts are synced.
+ * A failing required (non-optional) script aborts the sync before filesystem mutation.
+ */
+export const LifecycleHooksSchema = z.object({
+  preSync: z.array(LifecycleScriptSchema).optional(),
+});
+
+export type LifecycleHooks = z.infer<typeof LifecycleHooksSchema>;
+
+/**
  * Complete workspace configuration (workspace.yaml)
  */
 export const WorkspaceConfigSchema = z.object({
@@ -375,6 +429,12 @@ export const WorkspaceConfigSchema = z.object({
    * plugin-defined servers on name conflicts.
    */
   mcpServers: z.record(McpServerConfigSchema).optional(),
+  /**
+   * Lifecycle hooks that run at defined phases of the sync/update flow.
+   * Scripts run in the workspace root and receive ALLAGENTS_WORKSPACE and
+   * ALLAGENTS_CONFIG_DIR environment variables.
+   */
+  lifecycleHooks: LifecycleHooksSchema.optional(),
   /** @deprecated Use inline skills field on plugin entry instead. Will be removed in v3. */
   disabledSkills: z.array(z.string()).optional(),
   /** @deprecated Use inline skills field on plugin entry instead. Will be removed in v3. */
