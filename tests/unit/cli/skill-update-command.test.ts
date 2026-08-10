@@ -37,13 +37,13 @@ async function initCheckout(path: string): Promise<void> {
 
 describe('skill update command adapters', () => {
   test('normalizes project, user, and all scopes', () => {
-    expect(normalizeSkillUpdateScopes('project', '/work')).toEqual(['project']);
-    expect(normalizeSkillUpdateScopes('user', '/work')).toEqual(['user']);
-    expect(normalizeSkillUpdateScopes('all', '/work')).toEqual([
+    expect(normalizeSkillUpdateScopes('project')).toEqual(['project']);
+    expect(normalizeSkillUpdateScopes('user')).toEqual(['user']);
+    expect(normalizeSkillUpdateScopes('all')).toEqual([
       'project',
       'user',
     ]);
-    expect(normalizeSkillUpdateScopes(undefined, '/work')).toEqual(['project']);
+    expect(normalizeSkillUpdateScopes(undefined)).toEqual(['project']);
   });
 
   test('retains deletion units in every non-interactive mode, including --yes', () => {
@@ -85,10 +85,10 @@ describe('skill update command adapters', () => {
       ],
     } satisfies SkillUpdatePreflight;
 
-    expect(resolveNonInteractiveSkillUpdateDecisions(plan, false)).toEqual({
+    expect(resolveNonInteractiveSkillUpdateDecisions(plan)).toEqual({
       'deleted-cache': 'retain',
     });
-    expect(resolveNonInteractiveSkillUpdateDecisions(plan, true)).toEqual({
+    expect(resolveNonInteractiveSkillUpdateDecisions(plan)).toEqual({
       'deleted-cache': 'retain',
     });
   });
@@ -185,7 +185,7 @@ describe('skill update command adapters', () => {
     } satisfies SkillUpdatePreflight;
     const result = await executeSkillUpdatePlan(
       plan,
-      resolveNonInteractiveSkillUpdateDecisions(plan, true),
+      resolveNonInteractiveSkillUpdateDecisions(plan),
       {
         advanceNode: async () => {
           throw new Error('retained sources must not advance');

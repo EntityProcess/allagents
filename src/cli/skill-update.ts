@@ -5,10 +5,7 @@ import simpleGit from 'simple-git';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import {
   type MarketplaceEntry,
-  getProjectRegistryPath,
-  getRegistryPath,
-  loadMergedRegistries,
-  loadRegistryFromPath,
+  findMarketplace,
   parseLocation,
   parsePluginSpec,
 } from '../core/marketplace.js';
@@ -25,8 +22,8 @@ import {
   buildSkillUpdatePreflight,
   createGitHubSkillUpdateInstallation,
   executeSkillUpdatePlan,
-  getEffectivePluginSource,
   type InstallationInspection,
+  matchesSkillUpdateFilter,
   type UnitInspection,
 } from '../core/skill-update.js';
 import { discoverSkillEntriesFromPluginRoot } from '../core/skills.js';
@@ -37,7 +34,11 @@ import type {
   PluginSkillsConfig,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
-import { getPluginSource, WorkspaceConfigSchema } from '../models/workspace-config.js';
+import {
+  getEffectivePluginSource,
+  getPluginSource,
+  WorkspaceConfigSchema,
+} from '../models/workspace-config.js';
 import { cleanupTempDir, cloneToTemp, gitHubUrl } from '../core/git.js';
 import {
   getPluginCachePath,
@@ -45,7 +46,7 @@ import {
   parseGitHubUrl,
 } from '../utils/plugin-path.js';
 import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
-import { createSkillUpdateReconciler } from './skill-removal.js';
+import { createSkillUpdateReconciler } from './skill-update-reconciliation.js';
 
 export interface SkillUpdateInventory {
   installations: SkillUpdateInstallation[];
@@ -66,7 +67,6 @@ export interface PreparedSkillUpdate {
 /** Normalize the public scope flag after the caller has resolved its default. */
 export function normalizeSkillUpdateScopes(
   scope: string | undefined,
-  _workspacePath: string,
 ): SkillUpdateScope[] {
   switch (scope ?? 'project') {
     case 'project':
@@ -85,7 +85,6 @@ export function normalizeSkillUpdateScopes(
 /** --yes suppresses questions; it intentionally never authorizes deletion. */
 export function resolveNonInteractiveSkillUpdateDecisions(
   plan: SkillUpdatePreflight,
-  _yes: boolean,
 ): Record<string, SkillUpdateDecision> {
   return Object.fromEntries(
     plan.units
@@ -101,18 +100,10 @@ export function findUnmatchedSkillUpdateFilters(
 ): string[] {
   const selected = new Set(scopes);
   return filters.filter((filter) => {
-    const expected = filter.toLocaleLowerCase();
     return !inventory.installations.some(
       (installation) =>
         selected.has(installation.scope) &&
-        installation.skills.some(
-          (skill) =>
-            skill.enabled &&
-            (skill.name.toLocaleLowerCase() === expected ||
-              skill.subpath.toLocaleLowerCase() === expected ||
-              `${installation.pluginName}:${skill.subpath}`.toLocaleLowerCase() ===
-                expected),
-        ),
+        matchesSkillUpdateFilter(installation, filter),
     );
   });
 }
@@ -248,25 +239,11 @@ async function marketplaceForScope(
   workspacePath: string,
   sourceLocation?: string,
 ): Promise<MarketplaceEntry | null> {
-  const findEntry = (
-    marketplaces: Record<string, MarketplaceEntry>,
-  ): MarketplaceEntry | null =>
-    marketplaces[name] ??
-    (sourceLocation
-      ? Object.values(marketplaces).find(
-          (entry) => entry.source.location === sourceLocation,
-        )
-      : undefined) ??
-    null;
-  if (scope === 'user') {
-    const registry = await loadRegistryFromPath(getRegistryPath());
-    return findEntry(registry.marketplaces);
-  }
-  const { registry } = await loadMergedRegistries(
-    getRegistryPath(),
-    getProjectRegistryPath(workspacePath),
+  return findMarketplace(
+    name,
+    sourceLocation,
+    scope === 'project' ? workspacePath : undefined,
   );
-  return findEntry(registry.marketplaces);
 }
 
 async function inventoryDirect(

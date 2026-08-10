@@ -4,12 +4,12 @@ import {
   buildSkillUpdatePreflight,
   createGitHubSkillUpdateInstallation,
   executeSkillUpdatePlan,
-  getEffectivePluginSource,
   inspectRemoteSkillUpdateUnit,
   type CheckoutNode,
   type SkillUpdateInstallation,
   type UnitInspection,
 } from '../../../src/core/skill-update.js';
+import { getEffectivePluginSource } from '../../../src/models/workspace-config.js';
 
 const projectNode: CheckoutNode = {
   id: '/cache/acme-skills',

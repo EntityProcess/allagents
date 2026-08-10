@@ -11,11 +11,7 @@ import {
   restPositionals,
   string,
 } from 'cmd-ts';
-import {
-  CONFIG_DIR,
-  WORKSPACE_CONFIG_FILE,
-  getHomeDir,
-} from '../../constants.js';
+import { getHomeDir } from '../../constants.js';
 import {
   addMarketplace,
   findMarketplace,
@@ -101,19 +97,12 @@ import {
 } from '../skill-update.js';
 
 /**
- * Check if a directory has a project-level .allagents config
- */
-function hasProjectConfig(dir: string): boolean {
-  return existsSync(join(dir, CONFIG_DIR, WORKSPACE_CONFIG_FILE));
-}
-
-/**
  * Determine effective scope when no --scope flag is provided.
  * Defaults to user scope unless cwd has a project config.
  */
 function resolveScope(cwd: string): 'user' | 'project' {
   if (isUserConfigPath(cwd)) return 'user';
-  if (hasProjectConfig(cwd)) return 'project';
+  if (hasProjectSkillConfig(cwd)) return 'project';
   return 'user';
 }
 
@@ -303,7 +292,7 @@ const listCmd = command({
   handler: async ({ scope }) => {
     try {
       const cwd = process.cwd();
-      const inProjectDir = !isUserConfigPath(cwd) && hasProjectConfig(cwd);
+      const inProjectDir = !isUserConfigPath(cwd) && hasProjectSkillConfig(cwd);
 
       // Resolve which scopes to display
       const showUser = scope !== 'project';
@@ -2370,7 +2359,7 @@ async function installFromSearch(repos: string[]): Promise<boolean> {
   const installableRepos: string[] = [];
 
   for (const repo of repos) {
-    const isInstalledProject = hasProjectConfig(workspacePath)
+    const isInstalledProject = hasProjectSkillConfig(workspacePath)
       ? await hasPlugin(repo, workspacePath)
       : false;
     const isInstalledUser = await hasUserPlugin(repo);
@@ -2679,10 +2668,7 @@ const updateCmd = command({
       selectedScope ??= hasProjectSkillConfig(workspacePath)
         ? 'project'
         : 'user';
-      const scopes = normalizeSkillUpdateScopes(
-        selectedScope,
-        workspacePath,
-      );
+      const scopes = normalizeSkillUpdateScopes(selectedScope);
 
       if (!isJsonMode()) console.log('Checking for skill updates…');
       const prepared = await prepareSkillUpdate({
@@ -2701,10 +2687,7 @@ const updateCmd = command({
         );
       }
 
-      let decisions = resolveNonInteractiveSkillUpdateDecisions(
-        prepared.plan,
-        yes,
-      );
+      let decisions = resolveNonInteractiveSkillUpdateDecisions(prepared.plan);
       if (interactive) {
         decisions = {};
         const p = await import('@clack/prompts');

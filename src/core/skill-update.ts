@@ -1,9 +1,9 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PluginEntry } from '../models/workspace-config.js';
 import {
+  type PluginEntry,
+  getEffectivePluginSource,
   getPluginSource,
-  getEffectivePluginSource as resolveEffectivePluginSource,
 } from '../models/workspace-config.js';
 import { getPluginCachePath, parseGitHubUrl } from '../utils/plugin-path.js';
 import { cleanupTempDir, cloneToTemp, gitHubUrl } from './git.js';
@@ -194,10 +194,6 @@ export interface SkillUpdateExecutionResult {
   syncedScopes: SkillUpdateScope[];
 }
 
-/** Re-exported here so update inventory and sync share one effective identity. */
-export const getEffectivePluginSource = (plugin: PluginEntry): string =>
-  resolveEffectivePluginSource(plugin);
-
 /**
  * Convert a direct GitHub config entry plus its pre-update skill snapshot into
  * the canonical physical-cache inventory consumed by preflight.
@@ -206,7 +202,7 @@ export function createGitHubSkillUpdateInstallation(
   input: CreateGitHubSkillUpdateInstallationInput,
 ): SkillUpdateInstallation | null {
   const rawSource = getPluginSource(input.plugin);
-  const effectiveSource = resolveEffectivePluginSource(input.plugin);
+  const effectiveSource = getEffectivePluginSource(input.plugin);
   const parsed = parseGitHubUrl(effectiveSource);
   if (!parsed) return null;
 
@@ -266,10 +262,11 @@ export function buildPhysicalRefreshUnits(
   while (remaining.size > 0) {
     const first = remaining.values().next().value as string;
     const queue = [first];
+    let cursor = 0;
     const component: SkillUpdateInstallation[] = [];
 
-    while (queue.length > 0) {
-      const id = queue.shift();
+    while (cursor < queue.length) {
+      const id = queue[cursor++];
       if (!id || !remaining.delete(id)) continue;
       const entry = byId.get(id);
       if (!entry) continue;
@@ -385,7 +382,7 @@ export async function inspectRemoteSkillUpdateUnit(
   }
 }
 
-function matchesFilter(
+export function matchesSkillUpdateFilter(
   installation: SkillUpdateInstallation,
   filter: string,
 ): boolean {
@@ -430,7 +427,9 @@ export async function buildSkillUpdatePreflight(
           selectedScopes.has(entry.scope) &&
           entry.nodes.length > 0 &&
           (filters.length === 0 ||
-            filters.some((filter) => matchesFilter(entry, filter))),
+            filters.some((filter) =>
+              matchesSkillUpdateFilter(entry, filter),
+            )),
       ),
   );
 
