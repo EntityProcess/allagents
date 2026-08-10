@@ -763,7 +763,12 @@ async function assertExpectedOrigin(
   git: ReturnType<typeof simpleGit>,
   node: CheckoutNode,
 ): Promise<void> {
-  const origin = (await git.raw(['remote', 'get-url', 'origin'])).trim();
+  // `git remote get-url` applies url.<base>.insteadOf rewriting. Read the
+  // configured value so an isolated/local transport override cannot make a
+  // correctly configured GitHub checkout fail the origin safety check.
+  const origin = (
+    await git.raw(['config', '--get', 'remote.origin.url'])
+  ).trim();
   if (normalizeRemoteUrl(origin) !== normalizeRemoteUrl(node.remoteUrl)) {
     throw new Error(
       `Refusing to update ${node.cachePath}: origin '${origin}' does not match expected remote '${node.remoteUrl}'`,
