@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, type Dirent } from 'node:fs';
+import { type Dirent, existsSync, lstatSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 import { load } from 'js-yaml';
@@ -106,6 +106,27 @@ export async function discoverNestedSkillEntries(
   return walkForSkillMd(scanRoot, scanRoot, warnings);
 }
 
+/** Discover all skills owned by a resolved plugin root. */
+export async function discoverSkillEntriesFromPluginRoot(
+  pluginPath: string,
+  warnings: string[] = [],
+): Promise<DiscoveredSkillEntry[]> {
+  const skillsDir = join(pluginPath, 'skills');
+  if (existsSync(skillsDir)) {
+    return discoverNestedSkillEntries(skillsDir, warnings);
+  }
+
+  const nestedSkills = await discoverNestedSkillEntries(pluginPath, warnings);
+  if (nestedSkills.length > 0) return nestedSkills;
+
+  const rootSkillMd = join(pluginPath, 'SKILL.md');
+  if (!existsSync(rootSkillMd)) return [];
+  const skillContent = await readFile(rootSkillMd, 'utf-8');
+  const metadata = parseSkillMetadata(skillContent);
+  const skillName = metadata?.name ?? basename(pluginPath);
+  return [{ name: skillName, subpath: skillName, skillPath: pluginPath }];
+}
+
 async function walkForSkillMd(
   scanRoot: string,
   currentDir: string,
@@ -184,8 +205,6 @@ export async function getAllSkillsFromPlugins(
 
     const pluginPath = resolved.path;
     const pluginName = resolved.pluginName ?? getPluginName(pluginPath);
-    const skillsDir = join(pluginPath, 'skills');
-
     // Inline plugin-level skills config (v2+); undefined = all enabled (or use v1 fallback below)
     const pluginSkillsConfig: PluginSkillsConfig | undefined =
       typeof pluginEntry === 'string' ? undefined : pluginEntry.skills;
@@ -196,29 +215,7 @@ export async function getAllSkillsFromPlugins(
       enabledSkills &&
       [...enabledSkills].some((s) => s.startsWith(`${pluginName}`));
 
-    let skillEntries: DiscoveredSkillEntry[];
-    if (existsSync(skillsDir)) {
-      // Standard layout: plugin/skills/<skill-name>/, possibly nested deeper.
-      skillEntries = await discoverNestedSkillEntries(skillsDir);
-    } else {
-      const nestedSkills = await discoverNestedSkillEntries(pluginPath);
-      if (nestedSkills.length > 0) {
-        skillEntries = nestedSkills;
-      } else {
-        // Root-level single-skill layout: plugin/SKILL.md
-        const rootSkillMd = join(pluginPath, 'SKILL.md');
-        if (existsSync(rootSkillMd)) {
-          const skillContent = await readFile(rootSkillMd, 'utf-8');
-          const metadata = parseSkillMetadata(skillContent);
-          const skillName = metadata?.name ?? basename(pluginPath);
-          skillEntries = [
-            { name: skillName, subpath: skillName, skillPath: pluginPath },
-          ];
-        } else {
-          skillEntries = [];
-        }
-      }
-    }
+    const skillEntries = await discoverSkillEntriesFromPluginRoot(pluginPath);
 
     const pluginSkillsMode: SkillInfo['pluginSkillsMode'] =
       pluginSkillsConfig === undefined

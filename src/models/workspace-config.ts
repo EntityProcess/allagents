@@ -207,6 +207,39 @@ export function getPluginSource(plugin: PluginEntry): string {
 }
 
 /**
+ * Resolve the source exactly as sync will fetch it, including object-form pins.
+ * An inline ref remains authoritative when both forms are present.
+ */
+export function getEffectivePluginSource(plugin: PluginEntry): string {
+  const source = getPluginSource(plugin);
+  const pin = getPluginPin(plugin);
+  if (!pin) return source;
+  if (
+    source.startsWith('.') ||
+    source.startsWith('/') ||
+    source.includes('\\') ||
+    /^[a-zA-Z]:/.test(source) ||
+    (/^[a-z]+:\/\//i.test(source) &&
+      !/^https?:\/\/(?:www\.)?github\.com\//i.test(source)) ||
+    source.slice(0, source.indexOf('/')).includes('@')
+  ) {
+    return source;
+  }
+
+  if (/\/tree\/|\/blob\//.test(source)) return source;
+  const shorthand = source
+    .replace(/^https?:\/\/(?:www\.)?github\.com\//, '')
+    .replace(/^github\.com\//, '')
+    .replace(/^gh:/, '');
+  const parts = shorthand.split('/');
+  const repoSegment = parts[1];
+  if (!repoSegment || repoSegment.includes('@')) return source;
+
+  parts[1] = `${repoSegment}@${pin}`;
+  return parts.join('/');
+}
+
+/**
  * Resolve optional plugin-level clients from plugin entry
  */
 export function getPluginClients(
