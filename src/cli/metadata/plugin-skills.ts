@@ -63,6 +63,75 @@ export const skillsRemoveMeta: AgentCommandMeta = {
   },
 };
 
+export const skillsUpdateMeta: AgentCommandMeta = {
+  command: 'skill update',
+  description:
+    'Update installed skills and safely reconcile skills deleted upstream',
+  whenToUse:
+    'To refresh project or user skills while preserving local copies unless an interactive deletion is explicitly confirmed',
+  examples: [
+    'allagents skill update',
+    'allagents skill update code-review glow-api',
+    'allagents skill update --scope user',
+    'allagents skill update --scope all',
+    'allagents skill update --yes',
+    'allagents --json skill update --scope project',
+  ],
+  expectedOutput:
+    'Reports updated, removed, retained, skipped, failed, or cancelled refresh units',
+  positionals: [
+    {
+      name: 'skills',
+      type: 'string',
+      required: false,
+      description:
+        'Optional installed skill names or qualified subpaths to update',
+    },
+  ],
+  options: [
+    {
+      flag: '--scope',
+      short: '-s',
+      type: 'string',
+      description: 'Scope: project, user, or all',
+    },
+    {
+      flag: '--yes',
+      short: '-y',
+      type: 'boolean',
+      description:
+        'Run without prompts (deleted-upstream skills are retained, not removed)',
+    },
+  ],
+  outputSchema: {
+    scopes: ['string'],
+    results: [
+      {
+        id: 'string',
+        source: 'string',
+        status: 'string',
+        error: 'string?',
+      },
+    ],
+    syncedScopes: ['string'],
+    skippedLocalSources: ['string'],
+    summary: {
+      updated: 'number',
+      removed: 'number',
+      retained: 'number',
+      skipped: 'number',
+      failed: 'number',
+      cancelled: 'number',
+    },
+  },
+  jsonFields: [
+    'id',
+    'source',
+    'status',
+    'error',
+  ] as const,
+};
+
 export const skillsSearchMeta: AgentCommandMeta = {
   command: 'skill search',
   description:

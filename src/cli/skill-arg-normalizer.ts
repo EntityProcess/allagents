@@ -1,4 +1,10 @@
-const SKILL_SUBCOMMANDS = new Set(['list', 'remove', 'add', 'search']);
+const SKILL_SUBCOMMANDS = new Set([
+  'list',
+  'remove',
+  'add',
+  'search',
+  'update',
+]);
 
 export function normalizeSkillAlias(args: string[]): string[] {
   if (args.length === 0) return args;

@@ -42,6 +42,11 @@ export interface SkillUpdateInstallation {
   rootSubpath: string;
   nodes: CheckoutNode[];
   skills: InstalledSkill[];
+  /** Marketplace lookup metadata used to resolve the new plugin root from the inspected manifest. */
+  marketplace?: {
+    nodeId: string;
+    pluginName: string;
+  };
   /** True only when inventory proved this config entry owns skills and nothing else. */
   standaloneSkillSource?: boolean;
 }
@@ -168,9 +173,17 @@ export type SkillUpdateExecutionStatus =
   | 'failed'
   | 'cancelled';
 
+export interface SkillUpdateSkillCounts {
+  updated: number;
+  removed: number;
+  retained: number;
+}
+
 export interface SkillUpdateUnitExecution {
   id: string;
   status: SkillUpdateExecutionStatus;
+  /** Per-skill impacts; status remains the physical refresh-unit outcome. */
+  skillCounts: SkillUpdateSkillCounts;
   error?: string;
 }
 
@@ -503,7 +516,15 @@ function execution(
   status: SkillUpdateExecutionStatus,
   error?: string,
 ): SkillUpdateUnitExecution {
-  return { id: unit.id, status, ...(error && { error }) };
+  const skillCounts: SkillUpdateSkillCounts = {
+    updated:
+      status === 'updated' || status === 'removed'
+        ? unit.survivors.length
+        : 0,
+    removed: status === 'removed' ? unit.deleted.length : 0,
+    retained: status === 'retained' ? unit.deleted.length : 0,
+  };
+  return { id: unit.id, status, skillCounts, ...(error && { error }) };
 }
 
 /**
@@ -598,6 +619,7 @@ export async function executeSkillUpdatePlan(
       results.push({
         id: `sync:${scope}`,
         status: 'failed',
+        skillCounts: { updated: 0, removed: 0, retained: 0 },
         ...(syncResult.error && { error: syncResult.error }),
       });
     }

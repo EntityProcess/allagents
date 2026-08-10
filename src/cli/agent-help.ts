@@ -19,6 +19,7 @@ import {
   skillsAddMeta,
   skillsRemoveMeta,
   skillsSearchMeta,
+  skillsUpdateMeta,
 } from './metadata/plugin-skills.js';
 
 const allCommands: AgentCommandMeta[] = [
@@ -38,6 +39,7 @@ const allCommands: AgentCommandMeta[] = [
   skillsAddMeta,
   skillsRemoveMeta,
   skillsSearchMeta,
+  skillsUpdateMeta,
   updateMeta,
 ];
 

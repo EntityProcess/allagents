@@ -26,6 +26,13 @@ describe('normalizeSkillHelpArgs', () => {
 });
 
 describe('normalizeSkillArgs', () => {
+  test('keeps update filters attached to the update subcommand', () => {
+    expect(normalizeSkillArgs(['skills', 'update', 'code-review'])).toEqual([
+      'skill',
+      'update',
+      'code-review',
+    ]);
+  });
   test('keeps non-skill commands unchanged', () => {
     expect(normalizeSkillArgs(['plugin', 'install', 'foo'])).toEqual(['plugin', 'install', 'foo']);
   });

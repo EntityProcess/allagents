@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import {
+  buildPhysicalRefreshUnits,
   buildSkillUpdatePreflight,
   createGitHubSkillUpdateInstallation,
   executeSkillUpdatePlan,
@@ -116,6 +117,43 @@ describe('createGitHubSkillUpdateInstallation', () => {
     expect(shorthand?.rootSubpath).toBe('');
     expect(pinned?.nodes[0]?.ref).toBe('v2');
     expect(pinned?.nodes[0]?.id).not.toBe(shorthand?.nodes[0]?.id);
+  });
+
+  it('groups direct-source siblings by physical checkout while keeping refs separate', () => {
+    const sibling = installation({
+      id: 'project:1',
+      configIndex: 1,
+      rawSource: 'acme/skills/plugins/sibling',
+      effectiveSource: 'acme/skills/plugins/sibling',
+      rootSubpath: 'plugins/sibling',
+    });
+    const pinnedNode: CheckoutNode = {
+      ...projectNode,
+      id: '/cache/acme-skills-v2',
+      cachePath: '/cache/acme-skills-v2',
+      ref: 'v2',
+    };
+    const pinned = installation({
+      id: 'project:2',
+      configIndex: 2,
+      rawSource: 'acme/skills@v2',
+      effectiveSource: 'acme/skills@v2',
+      rootNodeId: pinnedNode.id,
+      nodes: [pinnedNode],
+    });
+
+    const units = buildPhysicalRefreshUnits([
+      installation(),
+      sibling,
+      pinned,
+    ]);
+
+    expect(units).toHaveLength(2);
+    expect(
+      units.find((unit) => unit.id === projectNode.id)?.installations.map(
+        (entry) => entry.rawSource,
+      ),
+    ).toEqual(['acme/skills', 'acme/skills/plugins/sibling']);
   });
 });
 
@@ -381,6 +419,8 @@ describe('executeSkillUpdatePlan', () => {
     );
 
     expect(result.cancelled).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.units.every((unit) => unit.status === 'cancelled')).toBe(true);
     expect(advanceNode).not.toHaveBeenCalled();
     expect(reconcileUnit).not.toHaveBeenCalled();
   });

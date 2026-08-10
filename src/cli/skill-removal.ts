@@ -143,7 +143,17 @@ function transformConfig(
     const deleted = unit.deleted.filter(
       (impact) => impact.installationId === installation.id,
     );
-    if (deleted.length === 0 || typeof entry === 'string') continue;
+    if (deleted.length === 0) continue;
+    if (
+      installation.standaloneSkillSource &&
+      !unit.survivors.some(
+        (impact) => impact.installationId === installation.id,
+      )
+    ) {
+      removeIndexes.add(installation.configIndex);
+      continue;
+    }
+    if (typeof entry === 'string') continue;
     if (!Array.isArray(entry.skills)) {
       // Implicit and blocklist installs are purged by the confirmed offline
       // sync. Recording an exclusion for content that no longer exists would

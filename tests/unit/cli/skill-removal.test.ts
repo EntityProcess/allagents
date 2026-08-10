@@ -392,6 +392,40 @@ describe('createSkillUpdateReconciler', () => {
     ]);
   });
 
+  it('removes a standalone raw-string source before the string-entry early return', async () => {
+    const standaloneSource = 'https://github.com/acme/solo/tree/main/skill';
+    const config: WorkspaceConfig = {
+      repositories: [],
+      clients: ['copilot'],
+      plugins: [standaloneSource],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config), 'utf-8');
+    const standalone = installation({
+      id: 'project:0',
+      scope: 'project',
+      configIndex: 0,
+      rawSource: standaloneSource,
+      standaloneSkillSource: true,
+    });
+
+    const prepared = await createSkillUpdateReconciler({
+      workspacePath: tmpDir,
+      userConfigPath,
+    })(
+      unit([standalone], {
+        [standalone.id]: [
+          { name: 'solo', subpath: 'solo', selector: 'solo' },
+        ],
+      }),
+    );
+    await prepared.commit();
+
+    const updated = load(
+      await readFile(join(tmpDir, '.allagents/workspace.yaml'), 'utf-8'),
+    ) as WorkspaceConfig;
+    expect(updated.plugins).toEqual([]);
+  });
+
   it('does not add stale exclusions for implicit or blocklist entries', async () => {
     const implicitSource = 'https://github.com/acme/implicit';
     const blocklistSource = 'https://github.com/acme/blocklist';
