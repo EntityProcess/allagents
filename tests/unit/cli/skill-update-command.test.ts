@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dump } from 'js-yaml';
-import simpleGit from 'simple-git';
 import {
   buildSkillUpdateInventory,
   inspectSkillUpdateUnit,
@@ -26,17 +25,47 @@ afterEach(() => {
   else process.env.ALLAGENTS_TEST_HOME = originalTestHome;
 });
 
+function runGit(path: string, args: string[]): string {
+  const result = Bun.spawnSync(['git', '-C', path, ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `git ${args.join(' ')} failed in ${path}: ${result.stderr.toString().trim()}`,
+    );
+  }
+  return result.stdout.toString().trim();
+}
+
 async function initCheckout(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
-  const git = simpleGit(path);
-  await git.init();
-  await git.addConfig('user.name', 'Skill Update Test');
-  await git.addConfig('user.email', 'skill-update@example.test');
-  await git.add('.');
-  await git.commit('fixture');
+  runGit(path, ['init']);
+  runGit(path, ['config', '--local', 'user.name', 'Skill Update Test']);
+  runGit(path, [
+    'config',
+    '--local',
+    'user.email',
+    'skill-update@example.test',
+  ]);
+  runGit(path, ['add', '.']);
+  runGit(path, ['commit', '-m', 'fixture']);
 }
 
 describe('skill update command adapters', () => {
+  test('creates git fixtures without depending on the simple-git module', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'allagents-skill-update-git-'));
+    try {
+      await writeFile(join(root, 'fixture.txt'), 'fixture');
+      await initCheckout(root);
+
+      expect(runGit(root, ['rev-parse', '--is-inside-work-tree'])).toBe('true');
+      expect(runGit(root, ['log', '-1', '--format=%s'])).toBe('fixture');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('normalizes project, user, and all scopes', () => {
     expect(normalizeSkillUpdateScopes('project')).toEqual(['project']);
     expect(normalizeSkillUpdateScopes('user')).toEqual(['user']);
@@ -330,7 +359,7 @@ describe('skill update command adapters', () => {
         }),
       );
       await initCheckout(root);
-      const sha = (await simpleGit(root).revparse(['HEAD'])).trim();
+      const sha = runGit(root, ['rev-parse', 'HEAD']);
       const result = await inspectSkillUpdateUnit({
         id: root,
         nodes: [
@@ -377,7 +406,7 @@ describe('skill update command adapters', () => {
         JSON.stringify({ name: 'catalog', description: 'test', plugins: [] }),
       );
       await initCheckout(root);
-      const sha = (await simpleGit(root).revparse(['HEAD'])).trim();
+      const sha = runGit(root, ['rev-parse', 'HEAD']);
       const missing = join(root, 'missing-dependency.git');
       const result = await inspectSkillUpdateUnit({
         id: root,
@@ -515,17 +544,21 @@ describe('skill update command adapters', () => {
     const cache = join(root, 'cache');
     try {
       await mkdir(remote, { recursive: true });
-      await simpleGit(remote).init(true, { '--initial-branch': 'main' });
-      await simpleGit().clone(remote, work);
-      const workGit = simpleGit(work);
-      await workGit.addConfig('user.name', 'Skill Update Test');
-      await workGit.addConfig('user.email', 'skill-update@example.test');
+      runGit(remote, ['init', '--bare', '--initial-branch=main']);
+      runGit(root, ['clone', remote, work]);
+      runGit(work, ['config', '--local', 'user.name', 'Skill Update Test']);
+      runGit(work, [
+        'config',
+        '--local',
+        'user.email',
+        'skill-update@example.test',
+      ]);
       await writeFile(join(work, 'SKILL.md'), 'first');
-      await workGit.add('.');
-      await workGit.commit('first');
-      await workGit.push('origin', 'main');
-      const sha = (await workGit.revparse(['HEAD'])).trim();
-      await simpleGit().clone(remote, cache);
+      runGit(work, ['add', '.']);
+      runGit(work, ['commit', '-m', 'first']);
+      runGit(work, ['push', 'origin', 'main']);
+      const sha = runGit(work, ['rev-parse', 'HEAD']);
+      runGit(root, ['clone', remote, cache]);
 
       await expect(
         moveSkillUpdateCheckout(
@@ -552,7 +585,7 @@ describe('skill update command adapters', () => {
         },
         sha,
       );
-      expect((await simpleGit(cache).revparse(['HEAD'])).trim()).toBe(sha);
+      expect(runGit(cache, ['rev-parse', 'HEAD'])).toBe(sha);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -1,9 +1,11 @@
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve } from 'node:path';
-import simpleGit from 'simple-git';
+import { normalize, sep } from 'node:path';
+import { promisify } from 'node:util';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
-import { cleanupTempDir, cloneToTemp, gitHubUrl } from '../core/git.js';
 import {
   type MarketplaceEntry,
   findMarketplace,
@@ -50,6 +52,91 @@ import {
   parseGitHubUrl,
 } from '../utils/plugin-path.js';
 import { createSkillUpdateReconciler } from './skill-update-reconciliation.js';
+
+const execFileAsync = promisify(execFile);
+const SKILL_UPDATE_GIT_TIMEOUT_MS = 300_000;
+const SKILL_UPDATE_GIT_CONFIG = [
+  '-c',
+  'filter.lfs.required=false',
+  '-c',
+  'filter.lfs.smudge=',
+  '-c',
+  'filter.lfs.clean=',
+  '-c',
+  'filter.lfs.process=',
+];
+
+async function runSkillUpdateGit(
+  args: string[],
+  cwd?: string,
+): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      [...SKILL_UPDATE_GIT_CONFIG, ...args],
+      {
+        ...(cwd && { cwd }),
+        env: {
+          ...process.env,
+          GIT_LFS_SKIP_SMUDGE: '1',
+          GIT_TERMINAL_PROMPT: '0',
+        },
+        maxBuffer: 4 * 1024 * 1024,
+        timeout: SKILL_UPDATE_GIT_TIMEOUT_MS,
+      },
+    );
+    return String(stdout).trim();
+  } catch (error) {
+    const detail =
+      error && typeof error === 'object' && 'stderr' in error
+        ? String(error.stderr).trim()
+        : '';
+    throw new Error(
+      `git ${args.join(' ')} failed${cwd ? ` in ${cwd}` : ''}${detail ? `: ${detail}` : ''}`,
+      { cause: error },
+    );
+  }
+}
+
+function skillUpdateGitHubUrl(owner: string, repo: string): string {
+  return `https://github.com/${owner}/${repo}.git`;
+}
+
+async function cloneSkillUpdateCheckout(
+  url: string,
+  ref?: string,
+): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), 'allagents-skill-update-'));
+  try {
+    await runSkillUpdateGit([
+      'clone',
+      '--depth',
+      '1',
+      ...(ref ? ['--branch', ref] : []),
+      '--',
+      url,
+      directory,
+    ]);
+    return directory;
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function cleanupSkillUpdateCheckout(directory: string): Promise<void> {
+  const normalizedDirectory = normalize(resolve(directory));
+  const normalizedTemp = normalize(resolve(tmpdir()));
+  if (
+    normalizedDirectory === normalizedTemp ||
+    !normalizedDirectory.startsWith(`${normalizedTemp}${sep}`)
+  ) {
+    throw new Error(
+      'Refusing to clean a skill update checkout outside the temp directory',
+    );
+  }
+  await rm(directory, { recursive: true, force: true });
+}
 
 export interface SkillUpdateInventory {
   installations: SkillUpdateInstallation[];
@@ -139,7 +226,7 @@ async function readConfig(
 
 async function revision(path: string): Promise<string> {
   if (!existsSync(path)) throw new Error(`Checkout not found: ${path}`);
-  const sha = (await simpleGit(path).revparse(['HEAD'])).trim();
+  const sha = await runSkillUpdateGit(['rev-parse', 'HEAD'], path);
   if (!sha) throw new Error(`Could not resolve checkout revision: ${path}`);
   return sha;
 }
@@ -230,7 +317,7 @@ function nodeForMarketplace(entry: MarketplaceEntry): CheckoutNode | null {
     return {
       id: managedPath,
       cachePath: managedPath,
-      remoteUrl: gitHubUrl(parsed.owner, parsed.repo),
+      remoteUrl: skillUpdateGitHubUrl(parsed.owner, parsed.repo),
       role: 'root',
       currentSha: '',
       ...(parsed.branch && { ref: parsed.branch }),
@@ -356,7 +443,7 @@ async function inventoryMarketplace(
     rootNode = {
       id: cachePath,
       cachePath,
-      remoteUrl: gitHubUrl(parsed.owner, parsed.repo),
+      remoteUrl: skillUpdateGitHubUrl(parsed.owner, parsed.repo),
       role: 'dependency',
       currentSha: await revision(cachePath),
       ...(parsed.branch && { ref: parsed.branch }),
@@ -654,7 +741,7 @@ export async function inspectSkillUpdateUnit(
     const nodes: UnitInspection['nodes'] = [];
     const cloneNode = async (node: CheckoutNode): Promise<void> => {
       if (checkoutPaths.has(node.id)) return;
-      const checkout = await cloneToTemp(node.remoteUrl, node.ref);
+      const checkout = await cloneSkillUpdateCheckout(node.remoteUrl, node.ref);
       checkoutPaths.set(node.id, checkout);
       nodes.push({ nodeId: node.id, sha: await revision(checkout) });
     };
@@ -726,7 +813,7 @@ export async function inspectSkillUpdateUnit(
   } finally {
     await Promise.all(
       [...checkoutPaths.values()].map((path) =>
-        cleanupTempDir(path).catch(() => {}),
+        cleanupSkillUpdateCheckout(path).catch(() => {}),
       ),
     );
   }
@@ -759,16 +846,14 @@ function normalizeRemoteUrl(url: string): string {
   return url.replace(/[\\/]$/, '').replace(/\.git$/, '');
 }
 
-async function assertExpectedOrigin(
-  git: ReturnType<typeof simpleGit>,
-  node: CheckoutNode,
-): Promise<void> {
+async function assertExpectedOrigin(node: CheckoutNode): Promise<void> {
   // `git remote get-url` applies url.<base>.insteadOf rewriting. Read the
   // configured value so an isolated/local transport override cannot make a
   // correctly configured GitHub checkout fail the origin safety check.
-  const origin = (
-    await git.raw(['config', '--get', 'remote.origin.url'])
-  ).trim();
+  const origin = await runSkillUpdateGit(
+    ['config', '--get', 'remote.origin.url'],
+    node.cachePath,
+  );
   if (normalizeRemoteUrl(origin) !== normalizeRemoteUrl(node.remoteUrl)) {
     throw new Error(
       `Refusing to update ${node.cachePath}: origin '${origin}' does not match expected remote '${node.remoteUrl}'`,
@@ -780,14 +865,19 @@ export async function moveSkillUpdateCheckout(
   node: CheckoutNode,
   sha: string,
 ): Promise<void> {
-  const git = simpleGit(node.cachePath);
-  await assertExpectedOrigin(git, node);
+  await assertExpectedOrigin(node);
 
   try {
-    await git.raw(['fetch', '--depth', '1', 'origin', node.ref ?? 'HEAD']);
+    await runSkillUpdateGit(
+      ['fetch', '--depth', '1', 'origin', node.ref ?? 'HEAD'],
+      node.cachePath,
+    );
   } catch (refError) {
     try {
-      await git.raw(['fetch', '--depth', '1', 'origin', sha]);
+      await runSkillUpdateGit(
+        ['fetch', '--depth', '1', 'origin', sha],
+        node.cachePath,
+      );
     } catch (shaError) {
       throw new Error(
         `Could not fetch ref '${node.ref ?? 'HEAD'}' or inspected revision '${sha}': ${refError instanceof Error ? refError.message : String(refError)}; ${shaError instanceof Error ? shaError.message : String(shaError)}`,
@@ -795,20 +885,28 @@ export async function moveSkillUpdateCheckout(
     }
   }
   try {
-    await git.raw(['cat-file', '-e', `${sha}^{commit}`]);
+    await runSkillUpdateGit(
+      ['cat-file', '-e', `${sha}^{commit}`],
+      node.cachePath,
+    );
   } catch {
     // Some servers do not include the exact preflight commit in the shallow
     // ref fetch. Try the immutable SHA before declaring the transaction failed.
-    await git.raw(['fetch', '--depth', '1', 'origin', sha]);
+    await runSkillUpdateGit(
+      ['fetch', '--depth', '1', 'origin', sha],
+      node.cachePath,
+    );
   }
-  await git.reset(['--hard', sha]);
+  await runSkillUpdateGit(['reset', '--hard', sha], node.cachePath);
 }
 
 async function restoreCheckout(node: CheckoutNode, sha: string): Promise<void> {
-  const git = simpleGit(node.cachePath);
-  await assertExpectedOrigin(git, node);
-  await git.raw(['cat-file', '-e', `${sha}^{commit}`]);
-  await git.reset(['--hard', sha]);
+  await assertExpectedOrigin(node);
+  await runSkillUpdateGit(
+    ['cat-file', '-e', `${sha}^{commit}`],
+    node.cachePath,
+  );
+  await runSkillUpdateGit(['reset', '--hard', sha], node.cachePath);
 }
 
 export async function executePreparedSkillUpdate(
