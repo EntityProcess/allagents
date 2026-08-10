@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   type PluginEntry,
   getEffectivePluginSource,
@@ -124,6 +124,15 @@ export interface BuildSkillUpdatePreflightInput {
   installations: SkillUpdateInstallation[];
   selectedScopes: SkillUpdateScope[];
   filters?: string[];
+  failures?: SkillUpdateInventoryFailure[];
+}
+
+export interface SkillUpdateInventoryFailure {
+  id: string;
+  scope: SkillUpdateScope;
+  source: string;
+  nodeIds: string[];
+  error: string;
 }
 
 export interface BuildSkillUpdatePreflightDeps {
@@ -146,6 +155,48 @@ export interface InspectRemoteSkillUpdateDeps {
   pathExists?: (path: string) => boolean;
   discoverPluginSkills?: (pluginRoot: string) => Promise<DiscoveredSkill[]>;
   cleanup?: (checkoutPath: string) => Promise<void>;
+}
+
+function pathIsWithin(base: string, candidate: string): boolean {
+  const pathFromBase = relative(base, candidate);
+  return (
+    pathFromBase === '' ||
+    (pathFromBase !== '..' &&
+      !pathFromBase.startsWith(`..${sep}`) &&
+      !isAbsolute(pathFromBase))
+  );
+}
+
+/** Resolve an untrusted repository subpath without allowing checkout escapes. */
+export function resolveCheckoutSubpath(
+  checkoutPath: string,
+  subpath: string,
+): string {
+  if (!subpath) return checkoutPath;
+  if (isAbsolute(subpath)) {
+    throw new Error(`Plugin subpath '${subpath}' must not be absolute`);
+  }
+
+  const lexicalBase = resolve(checkoutPath);
+  const candidate = resolve(lexicalBase, subpath);
+  if (!pathIsWithin(lexicalBase, candidate)) {
+    throw new Error(
+      `Plugin subpath '${subpath}' resolves outside its checkout`,
+    );
+  }
+
+  // A lexically contained path can still escape through a symlink. Check the
+  // resolved target whenever it exists; missing roots are classified later.
+  if (existsSync(candidate)) {
+    const realBase = realpathSync(lexicalBase);
+    const realCandidate = realpathSync(candidate);
+    if (!pathIsWithin(realBase, realCandidate)) {
+      throw new Error(
+        `Plugin subpath '${subpath}' resolves outside its checkout`,
+      );
+    }
+  }
+  return candidate;
 }
 
 export type SkillUpdateDecision = 'remove' | 'retain' | 'cancel';
@@ -350,9 +401,10 @@ export async function inspectRemoteSkillUpdateUnit(
           `Inspected checkout missing for ${installation.rootNodeId}`,
         );
       }
-      const pluginRoot = installation.rootSubpath
-        ? join(checkoutPath, installation.rootSubpath)
-        : checkoutPath;
+      const pluginRoot = resolveCheckoutSubpath(
+        checkoutPath,
+        installation.rootSubpath,
+      );
       if (!pathExists(pluginRoot)) {
         throw new Error(
           `Configured plugin declared root '${installation.rootSubpath || '.'}' no longer exists in ${installation.effectiveSource}`,
@@ -427,24 +479,37 @@ export async function buildSkillUpdatePreflight(
           selectedScopes.has(entry.scope) &&
           entry.nodes.length > 0 &&
           (filters.length === 0 ||
-            filters.some((filter) =>
-              matchesSkillUpdateFilter(entry, filter),
-            )),
+            filters.some((filter) => matchesSkillUpdateFilter(entry, filter))),
       ),
   );
 
   const units: SkillUpdateUnit[] = [];
   for (const unit of physicalUnits) {
+    const nodeIds = new Set(unit.nodes.map((node) => node.id));
+    const sharedFailures = (input.failures ?? []).filter((failure) =>
+      failure.nodeIds.some((nodeId) => nodeIds.has(nodeId)),
+    );
     let inspection: UnitInspection;
-    try {
-      inspection = await deps.inspectUnit(unit);
-    } catch (error) {
+    if (sharedFailures.length > 0) {
       inspection = {
         outcome: 'failed',
         nodes: [],
         installations: [],
-        error: error instanceof Error ? error.message : String(error),
+        error: sharedFailures
+          .map((failure) => `${failure.source}: ${failure.error}`)
+          .join('; '),
       };
+    } else {
+      try {
+        inspection = await deps.inspectUnit(unit);
+      } catch (error) {
+        inspection = {
+          outcome: 'failed',
+          nodes: [],
+          installations: [],
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     }
 
     const deleted: SkillUpdateSkillImpact[] = [];
@@ -490,8 +555,8 @@ export async function buildSkillUpdatePreflight(
       (failedInstallation?.outcome === 'failed'
         ? failedInstallation.error
         : undefined);
-    const blockedByOutOfScope = deleted.some(
-      (skill) => !selectedScopes.has(skill.scope),
+    const blockedByOutOfScope = unit.installations.some(
+      (installation) => !selectedScopes.has(installation.scope),
     );
 
     units.push({
@@ -507,6 +572,26 @@ export async function buildSkillUpdatePreflight(
     });
   }
 
+  const unitNodeIds = new Set(
+    physicalUnits.flatMap((unit) => unit.nodes.map((node) => node.id)),
+  );
+  for (const failure of input.failures ?? []) {
+    if (!selectedScopes.has(failure.scope)) continue;
+    if (failure.nodeIds.some((nodeId) => unitNodeIds.has(nodeId))) continue;
+    units.push({
+      id: failure.id,
+      nodes: [],
+      installations: [],
+      outcome: 'failed',
+      inspectedNodes: [],
+      deleted: [],
+      survivors: [],
+      removedInstallationIds: [],
+      blockedByOutOfScope: false,
+      error: `${failure.source}: ${failure.error}`,
+    });
+  }
+
   return { selectedScopes: input.selectedScopes, units };
 }
 
@@ -517,9 +602,7 @@ function execution(
 ): SkillUpdateUnitExecution {
   const skillCounts: SkillUpdateSkillCounts = {
     updated:
-      status === 'updated' || status === 'removed'
-        ? unit.survivors.length
-        : 0,
+      status === 'updated' || status === 'removed' ? unit.survivors.length : 0,
     removed: status === 'removed' ? unit.deleted.length : 0,
     retained: status === 'retained' ? unit.deleted.length : 0,
   };
@@ -557,9 +640,16 @@ export async function executeSkillUpdatePlan(
       continue;
     }
 
+    if (unit.blockedByOutOfScope) {
+      results.push(
+        execution(unit, unit.deleted.length > 0 ? 'retained' : 'skipped'),
+      );
+      continue;
+    }
+
     if (unit.deleted.length > 0) {
       const decision = decisions[unit.id] ?? 'retain';
-      if (unit.blockedByOutOfScope || decision !== 'remove') {
+      if (decision !== 'remove') {
         results.push(execution(unit, 'retained'));
         continue;
       }
@@ -568,10 +658,12 @@ export async function executeSkillUpdatePlan(
     const revisionByNode = new Map(
       unit.inspectedNodes.map((entry) => [entry.nodeId, entry.sha]),
     );
-    const orderedNodes = [...unit.nodes].sort((left, right) => {
-      if (left.role === right.role) return left.id.localeCompare(right.id);
-      return left.role === 'dependency' ? -1 : 1;
-    });
+    const orderedNodes = unit.nodes
+      .filter((node) => revisionByNode.has(node.id))
+      .sort((left, right) => {
+        if (left.role === right.role) return left.id.localeCompare(right.id);
+        return left.role === 'dependency' ? -1 : 1;
+      });
     const changedNodes: CheckoutNode[] = [];
     let prepared: PreparedUnitReconciliation | undefined;
 
@@ -580,8 +672,10 @@ export async function executeSkillUpdatePlan(
       for (const node of orderedNodes) {
         const sha = revisionByNode.get(node.id);
         if (!sha) throw new Error(`Missing inspected revision for ${node.id}`);
-        await deps.advanceNode(node, sha);
+        // Include the active node in rollback even if advance fails after a
+        // destructive reset but before its promise settles.
         changedNodes.push(node);
+        await deps.advanceNode(node, sha);
       }
       await prepared.commit();
 
@@ -594,32 +688,50 @@ export async function executeSkillUpdatePlan(
         execution(unit, unit.deleted.length > 0 ? 'removed' : 'updated'),
       );
     } catch (error) {
-      await prepared?.rollback().catch(() => {});
-      for (const node of changedNodes.reverse()) {
-        await deps.restoreNode(node, node.currentSha).catch(() => {});
+      const errors = [error instanceof Error ? error.message : String(error)];
+      if (prepared) {
+        try {
+          await prepared.rollback();
+        } catch (rollbackError) {
+          errors.push(
+            `Config rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          );
+        }
       }
-      results.push(
-        execution(
-          unit,
-          'failed',
-          error instanceof Error ? error.message : String(error),
-        ),
-      );
+      for (const node of changedNodes.reverse()) {
+        try {
+          await deps.restoreNode(node, node.currentSha);
+        } catch (rollbackError) {
+          errors.push(
+            `Checkout rollback failed for ${node.id}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          );
+        }
+      }
+      results.push(execution(unit, 'failed', errors.join('; ')));
     }
   }
 
   const syncedScopes: SkillUpdateScope[] = [];
   for (const scope of plan.selectedScopes) {
     if (!scopesToSync.has(scope)) continue;
-    const syncResult = await deps.syncScope(scope, { offline: true });
-    if (syncResult.success) {
-      syncedScopes.push(scope);
-    } else {
+    try {
+      const syncResult = await deps.syncScope(scope, { offline: true });
+      if (syncResult.success) {
+        syncedScopes.push(scope);
+        continue;
+      }
       results.push({
         id: `sync:${scope}`,
         status: 'failed',
         skillCounts: { updated: 0, removed: 0, retained: 0 },
         ...(syncResult.error && { error: syncResult.error }),
+      });
+    } catch (error) {
+      results.push({
+        id: `sync:${scope}`,
+        status: 'failed',
+        skillCounts: { updated: 0, removed: 0, retained: 0 },
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }

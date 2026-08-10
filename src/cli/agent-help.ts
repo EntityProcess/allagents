@@ -84,14 +84,23 @@ function resolveAlias(commandPath: string): string {
 }
 
 /**
- * Look up a meta by the runtime command path (e.g. "skills list").
+ * Look up metadata by a runtime command path (e.g. "skill update foo").
  * Resolves deprecated aliases (e.g. "workspace status" -> "status").
  * Used by index.ts to validate `--json=<fields>` against the per-command
- * allowlist before dispatching.
+ * allowlist before dispatching. A longest-prefix match allows command metadata
+ * to resolve when positional arguments follow the command tokens.
  */
-export function findMetaByCommand(commandPath: string): AgentCommandMeta | undefined {
+export function findMetaByCommand(
+  commandPath: string,
+): AgentCommandMeta | undefined {
   if (!commandPath) return undefined;
-  return allCommands.find((c) => c.command === resolveAlias(commandPath));
+  const resolved = resolveAlias(commandPath);
+  const exact = allCommands.find((command) => command.command === resolved);
+  if (exact) return exact;
+
+  return allCommands
+    .filter((command) => resolved.startsWith(`${command.command} `))
+    .sort((a, b) => b.command.length - a.command.length)[0];
 }
 
 export function printAgentHelp(args: string[], version: string): void {

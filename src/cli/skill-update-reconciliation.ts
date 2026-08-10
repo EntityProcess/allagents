@@ -68,6 +68,7 @@ function removePluginEntry(config: WorkspaceConfig, index: number): void {
 function selectorForImpact(
   allowlist: string[],
   impact: SkillUpdateUnit['deleted'][number],
+  allowBareWithQualified = false,
 ): string | undefined {
   if (impact.selector && allowlist.includes(impact.selector)) {
     return impact.selector;
@@ -77,14 +78,127 @@ function selectorForImpact(
   // leaf fallback when there is no competing qualified selector in the entry.
   if (
     allowlist.includes(impact.name) &&
-    !allowlist.some(
-      (selector) =>
-        selector !== impact.name && selector.split('/').at(-1) === impact.name,
-    )
+    (allowBareWithQualified ||
+      !allowlist.some(
+        (selector) =>
+          selector !== impact.name &&
+          selector.split('/').at(-1) === impact.name,
+      ))
   ) {
     return impact.name;
   }
   return undefined;
+}
+
+function reconcileSelectorList(
+  selectors: string[],
+  deleted: SkillUpdateUnit['deleted'],
+  survivors: SkillUpdateUnit['survivors'],
+  prefix = '',
+): string[] {
+  const localSelectors = prefix
+    ? selectors
+        .filter((selector) => selector.startsWith(prefix))
+        .map((selector) => selector.slice(prefix.length))
+    : selectors;
+  const replacements = new Map<string, string[]>();
+
+  for (const impact of deleted) {
+    const selector = selectorForImpact(
+      localSelectors,
+      impact,
+      prefix.length > 0,
+    );
+    if (!selector) continue;
+
+    const survivingPaths =
+      selector === impact.name
+        ? survivors
+            .filter(
+              (survivor) =>
+                survivor.name === impact.name &&
+                survivor.subpath !== impact.subpath,
+            )
+            .map((survivor) => `${prefix}${survivor.subpath}`)
+        : [];
+    replacements.set(`${prefix}${selector}`, survivingPaths);
+  }
+
+  if (replacements.size === 0) return selectors;
+
+  const replacementValues = new Set([...replacements.values()].flat());
+  const emittedReplacementValues = new Set<string>();
+  const reconciled: string[] = [];
+
+  for (const selector of selectors) {
+    const replacement = replacements.get(selector);
+    if (replacement) {
+      for (const survivingSelector of replacement) {
+        if (emittedReplacementValues.has(survivingSelector)) continue;
+        reconciled.push(survivingSelector);
+        emittedReplacementValues.add(survivingSelector);
+      }
+      continue;
+    }
+    if (
+      replacementValues.has(selector) &&
+      emittedReplacementValues.has(selector)
+    ) {
+      continue;
+    }
+    reconciled.push(selector);
+    if (replacementValues.has(selector)) {
+      emittedReplacementValues.add(selector);
+    }
+  }
+
+  return reconciled;
+}
+
+function reconcileLegacySelectors(
+  config: WorkspaceConfig,
+  installations: SkillUpdateInstallation[],
+  unit: SkillUpdateUnit,
+): void {
+  if (config.version !== undefined && config.version >= 2) return;
+
+  const installationIdsByPlugin = new Map<string, Set<string>>();
+  for (const installation of installations) {
+    const ids =
+      installationIdsByPlugin.get(installation.pluginName) ?? new Set();
+    ids.add(installation.id);
+    installationIdsByPlugin.set(installation.pluginName, ids);
+  }
+
+  for (const [pluginName, installationIds] of installationIdsByPlugin) {
+    const deleted = unit.deleted.filter((impact) =>
+      installationIds.has(impact.installationId),
+    );
+    if (deleted.length === 0) continue;
+    const survivors = unit.survivors.filter((impact) =>
+      installationIds.has(impact.installationId),
+    );
+    const prefix = `${pluginName}:`;
+
+    if (config.enabledSkills) {
+      config.enabledSkills = reconcileSelectorList(
+        config.enabledSkills,
+        deleted,
+        survivors,
+        prefix,
+      );
+      if (config.enabledSkills.length === 0) config.enabledSkills = undefined;
+    }
+    if (config.disabledSkills) {
+      config.disabledSkills = reconcileSelectorList(
+        config.disabledSkills,
+        deleted,
+        survivors,
+        prefix,
+      );
+      if (config.disabledSkills.length === 0) config.disabledSkills = undefined;
+    }
+  }
 }
 
 function transformConfig(
@@ -141,21 +255,23 @@ function transformConfig(
       continue;
     }
 
-    const selectors = new Set<string>();
     for (const impact of deleted) {
-      const selector = selectorForImpact(entry.skills, impact);
-      if (!selector) {
+      if (!selectorForImpact(entry.skills, impact)) {
         throw new Error(
           `Configured selector for ${installation.pluginName}:${impact.subpath} no longer matches ${path}`,
         );
       }
-      selectors.add(selector);
     }
-    entry.skills = entry.skills.filter((selector) => !selectors.has(selector));
+    const survivors = unit.survivors.filter(
+      (impact) => impact.installationId === installation.id,
+    );
+    entry.skills = reconcileSelectorList(entry.skills, deleted, survivors);
     if (entry.skills.length === 0 && installation.standaloneSkillSource) {
       removeIndexes.add(installation.configIndex);
     }
   }
+
+  reconcileLegacySelectors(config, installations, unit);
 
   for (const index of [...removeIndexes].sort((left, right) => right - left)) {
     removePluginEntry(config, index);

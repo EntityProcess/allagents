@@ -7,6 +7,7 @@ import simpleGit from 'simple-git';
 import {
   buildSkillUpdateInventory,
   inspectSkillUpdateUnit,
+  moveSkillUpdateCheckout,
   normalizeSkillUpdateScopes,
   resolveNonInteractiveSkillUpdateDecisions,
   skillUpdateExitCode,
@@ -362,6 +363,196 @@ describe('skill update command adapters', () => {
       expect(result.installations).toEqual([
         { installationId: 'project:0', outcome: 'plugin-removed' },
       ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('does not fetch an obsolete external dependency after its marketplace entry is removed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'allagents-skill-update-obsolete-'));
+    try {
+      await mkdir(join(root, '.claude-plugin'), { recursive: true });
+      await writeFile(
+        join(root, '.claude-plugin/marketplace.json'),
+        JSON.stringify({ name: 'catalog', description: 'test', plugins: [] }),
+      );
+      await initCheckout(root);
+      const sha = (await simpleGit(root).revparse(['HEAD'])).trim();
+      const missing = join(root, 'missing-dependency.git');
+      const result = await inspectSkillUpdateUnit({
+        id: root,
+        nodes: [
+          {
+            id: missing,
+            cachePath: missing,
+            remoteUrl: missing,
+            role: 'dependency',
+            currentSha: 'old',
+          },
+          {
+            id: root,
+            cachePath: root,
+            remoteUrl: root,
+            role: 'root',
+            currentSha: sha,
+          },
+        ],
+        installations: [
+          {
+            id: 'project:0',
+            scope: 'project',
+            configIndex: 0,
+            rawSource: 'gone@catalog',
+            effectiveSource: 'gone@catalog',
+            pluginName: 'gone',
+            rootNodeId: missing,
+            rootSubpath: '',
+            nodes: [],
+            skills: [{ name: 'gone', subpath: 'gone', enabled: true }],
+            marketplace: { nodeId: root, pluginName: 'gone' },
+          },
+        ],
+      });
+
+      expect(result.outcome).toBe('resolved');
+      expect(result.nodes).toEqual([{ nodeId: root, sha }]);
+      expect(result.installations[0]?.outcome).toBe('plugin-removed');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('records a selected inventory failure while preserving healthy independent units', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'allagents-skill-update-failures-'));
+    const home = join(root, 'home');
+    const workspace = join(root, 'workspace');
+    process.env.ALLAGENTS_TEST_HOME = home;
+    try {
+      const healthy = getPluginCachePath('acme', 'healthy-skills');
+      await mkdir(join(healthy, 'skills/keep'), { recursive: true });
+      await writeFile(
+        join(healthy, 'skills/keep/SKILL.md'),
+        '---\nname: keep\ndescription: keep\n---\n',
+      );
+      await initCheckout(healthy);
+      await mkdir(join(workspace, '.allagents'), { recursive: true });
+      await writeFile(
+        join(workspace, '.allagents/workspace.yaml'),
+        dump({
+          version: 2,
+          repositories: [],
+          clients: ['copilot'],
+          plugins: ['acme/healthy-skills', 'acme/missing-skills'],
+        }),
+      );
+
+      const inventory = await buildSkillUpdateInventory(workspace, ['project']);
+
+      expect(inventory.installations.map((entry) => entry.rawSource)).toEqual([
+        'acme/healthy-skills',
+      ]);
+      expect(inventory.failures).toHaveLength(1);
+      expect(inventory.failures[0]).toMatchObject({
+        scope: 'project',
+        source: 'acme/missing-skills',
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a remote marketplace registry path outside the managed cache', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'allagents-skill-update-registry-'));
+    const home = join(root, 'home');
+    const workspace = join(root, 'workspace');
+    const outside = join(root, 'outside-marketplace');
+    process.env.ALLAGENTS_TEST_HOME = home;
+    try {
+      await mkdir(join(outside, '.claude-plugin'), { recursive: true });
+      await writeFile(
+        join(outside, '.claude-plugin/marketplace.json'),
+        JSON.stringify({ name: 'catalog', description: 'test', plugins: [] }),
+      );
+      await initCheckout(outside);
+      await mkdir(join(home, '.allagents'), { recursive: true });
+      await mkdir(join(workspace, '.allagents'), { recursive: true });
+      await writeFile(
+        join(home, '.allagents/marketplaces.json'),
+        JSON.stringify({
+          version: 1,
+          marketplaces: {
+            catalog: {
+              name: 'catalog',
+              source: { type: 'github', location: 'acme/catalog' },
+              path: outside,
+            },
+          },
+        }),
+      );
+      await writeFile(
+        join(workspace, '.allagents/workspace.yaml'),
+        dump({
+          version: 2,
+          repositories: [],
+          clients: ['copilot'],
+          plugins: ['gone@catalog'],
+        }),
+      );
+
+      const inventory = await buildSkillUpdateInventory(workspace, ['project']);
+
+      expect(inventory.installations).toEqual([]);
+      expect(inventory.failures[0]?.error).toContain('managed cache');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('verifies origin before resetting and falls back to the inspected SHA when the ref is gone', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'allagents-skill-update-move-'));
+    const remote = join(root, 'remote.git');
+    const work = join(root, 'work');
+    const cache = join(root, 'cache');
+    try {
+      await mkdir(remote, { recursive: true });
+      await simpleGit(remote).init(true, { '--initial-branch': 'main' });
+      await simpleGit().clone(remote, work);
+      const workGit = simpleGit(work);
+      await workGit.addConfig('user.name', 'Skill Update Test');
+      await workGit.addConfig('user.email', 'skill-update@example.test');
+      await writeFile(join(work, 'SKILL.md'), 'first');
+      await workGit.add('.');
+      await workGit.commit('first');
+      await workGit.push('origin', 'main');
+      const sha = (await workGit.revparse(['HEAD'])).trim();
+      await simpleGit().clone(remote, cache);
+
+      await expect(
+        moveSkillUpdateCheckout(
+          {
+            id: cache,
+            cachePath: cache,
+            remoteUrl: join(root, 'different.git'),
+            ref: 'deleted-ref',
+            role: 'root',
+            currentSha: sha,
+          },
+          sha,
+        ),
+      ).rejects.toThrow('origin');
+
+      await moveSkillUpdateCheckout(
+        {
+          id: cache,
+          cachePath: cache,
+          remoteUrl: remote,
+          ref: 'deleted-ref',
+          role: 'root',
+          currentSha: sha,
+        },
+        sha,
+      );
+      expect((await simpleGit(cache).revparse(['HEAD'])).trim()).toBe(sha);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

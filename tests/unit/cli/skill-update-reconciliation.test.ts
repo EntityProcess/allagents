@@ -49,6 +49,10 @@ describe('createSkillUpdateReconciler', () => {
       Array<{ name: string; subpath: string; selector?: string }>
     >,
     removedInstallationIds: string[] = [],
+    survivorsByInstallation: Record<
+      string,
+      Array<{ name: string; subpath: string; selector?: string }>
+    > = {},
   ): SkillUpdateUnit {
     return {
       id: 'cache',
@@ -66,7 +70,16 @@ describe('createSkillUpdateReconciler', () => {
           source: entry.rawSource,
         })),
       ),
-      survivors: [],
+      survivors: installations.flatMap((entry) =>
+        (survivorsByInstallation[entry.id] ?? []).map((skill) => ({
+          ...skill,
+          enabled: true,
+          installationId: entry.id,
+          scope: entry.scope,
+          pluginName: entry.pluginName,
+          source: entry.rawSource,
+        })),
+      ),
       blockedByOutOfScope: false,
       removedInstallationIds,
     };
@@ -126,6 +139,147 @@ describe('createSkillUpdateReconciler', () => {
         skills: ['nested/two/review'],
       },
     ]);
+  });
+
+  it('expands a shared bare allowlist selector to surviving qualified paths', async () => {
+    const source = 'https://github.com/acme/skills';
+    const config: WorkspaceConfig = {
+      version: 2,
+      repositories: [],
+      clients: ['copilot'],
+      plugins: [
+        {
+          source,
+          clients: ['copilot'],
+          skills: ['before', 'review', 'nested/two/review', 'after'],
+        },
+      ],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config), 'utf-8');
+    const entry = installation({
+      id: 'project:0',
+      scope: 'project',
+      configIndex: 0,
+      rawSource: source,
+    });
+
+    const prepared = await createSkillUpdateReconciler({
+      workspacePath: tmpDir,
+      userConfigPath,
+    })(
+      unit(
+        [entry],
+        {
+          [entry.id]: [
+            { name: 'review', subpath: 'nested/one/review', selector: 'review' },
+          ],
+        },
+        [],
+        {
+          [entry.id]: [
+            { name: 'review', subpath: 'nested/two/review', selector: 'review' },
+            { name: 'review', subpath: 'nested/three/review', selector: 'review' },
+          ],
+        },
+      ),
+    );
+    expect(
+      load(
+        await readFile(join(tmpDir, '.allagents/workspace.yaml'), 'utf-8'),
+      ),
+    ).toEqual(config);
+    await prepared.commit();
+
+    const updated = load(
+      await readFile(join(tmpDir, '.allagents/workspace.yaml'), 'utf-8'),
+    ) as WorkspaceConfig;
+    expect(updated.plugins).toEqual([
+      {
+        source,
+        clients: ['copilot'],
+        skills: [
+          'before',
+          'nested/two/review',
+          'nested/three/review',
+          'after',
+        ],
+      },
+    ]);
+  });
+
+  it('reconciles legacy top-level selectors for confirmed deletions', async () => {
+    const source = 'https://github.com/acme/skills';
+    const config: WorkspaceConfig = {
+      version: 1,
+      repositories: [],
+      clients: ['copilot'],
+      plugins: [{ source, clients: ['copilot'] }],
+      enabledSkills: [
+        'skills:before',
+        'skills:review',
+        'skills:nested/two/review',
+        'skills:gone',
+        'other:gone',
+      ],
+      disabledSkills: [
+        'skills:review',
+        'skills:nested/two/review',
+        'skills:gone',
+        'other:gone',
+      ],
+    };
+    await writeFile(join(tmpDir, '.allagents/workspace.yaml'), dump(config), 'utf-8');
+    const entry = installation({
+      id: 'project:0',
+      scope: 'project',
+      configIndex: 0,
+      rawSource: source,
+      pluginName: 'skills',
+    });
+
+    const prepared = await createSkillUpdateReconciler({
+      workspacePath: tmpDir,
+      userConfigPath,
+    })(
+      unit(
+        [entry],
+        {
+          [entry.id]: [
+            { name: 'review', subpath: 'nested/one/review', selector: 'review' },
+            { name: 'gone', subpath: 'gone', selector: 'gone' },
+          ],
+        },
+        [],
+        {
+          [entry.id]: [
+            { name: 'review', subpath: 'nested/two/review', selector: 'review' },
+            { name: 'review', subpath: 'nested/three/review', selector: 'review' },
+          ],
+        },
+      ),
+    );
+    expect(
+      load(
+        await readFile(join(tmpDir, '.allagents/workspace.yaml'), 'utf-8'),
+      ),
+    ).toEqual(config);
+    await prepared.commit();
+
+    const updated = load(
+      await readFile(join(tmpDir, '.allagents/workspace.yaml'), 'utf-8'),
+    ) as WorkspaceConfig;
+    expect(updated.enabledSkills).toEqual([
+      'skills:before',
+      'skills:nested/two/review',
+      'skills:nested/three/review',
+      'other:gone',
+    ]);
+    expect(updated.disabledSkills).toEqual([
+      'skills:nested/two/review',
+      'skills:nested/three/review',
+      'other:gone',
+    ]);
+    expect(updated.plugins).toEqual([{ source, clients: ['copilot'] }]);
   });
 
   it('keeps an empty allowlist for non-skill artifacts but removes a standalone source', async () => {

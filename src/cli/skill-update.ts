@@ -3,28 +3,32 @@ import { readFile } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import { cleanupTempDir, cloneToTemp, gitHubUrl } from '../core/git.js';
 import {
   type MarketplaceEntry,
   findMarketplace,
+  getMarketplacesDir,
   parseLocation,
   parsePluginSpec,
 } from '../core/marketplace.js';
 import { getPluginName, resetFetchCache } from '../core/plugin.js';
 import {
   type CheckoutNode,
+  type InstallationInspection,
   type InstalledSkill,
   type SkillUpdateDecision,
   type SkillUpdateExecutionResult,
   type SkillUpdateInstallation,
+  type SkillUpdateInventoryFailure,
   type SkillUpdatePreflight,
   type SkillUpdateScope,
   type SkillUpdateUnitInput,
+  type UnitInspection,
   buildSkillUpdatePreflight,
   createGitHubSkillUpdateInstallation,
   executeSkillUpdatePlan,
-  type InstallationInspection,
   matchesSkillUpdateFilter,
-  type UnitInspection,
+  resolveCheckoutSubpath,
 } from '../core/skill-update.js';
 import { discoverSkillEntriesFromPluginRoot } from '../core/skills.js';
 import { syncUserWorkspace, syncWorkspace } from '../core/sync.js';
@@ -35,22 +39,22 @@ import type {
   WorkspaceConfig,
 } from '../models/workspace-config.js';
 import {
+  WorkspaceConfigSchema,
   getEffectivePluginSource,
   getPluginSource,
-  WorkspaceConfigSchema,
 } from '../models/workspace-config.js';
-import { cleanupTempDir, cloneToTemp, gitHubUrl } from '../core/git.js';
+import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import {
   getPluginCachePath,
   isGitHubUrl,
   parseGitHubUrl,
 } from '../utils/plugin-path.js';
-import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import { createSkillUpdateReconciler } from './skill-update-reconciliation.js';
 
 export interface SkillUpdateInventory {
   installations: SkillUpdateInstallation[];
   skippedLocalSources: string[];
+  failures: SkillUpdateInventoryFailure[];
 }
 
 export interface PrepareSkillUpdateOptions {
@@ -191,7 +195,9 @@ function enabledSkills(
   });
 }
 
-function pluginSkillsConfig(plugin: PluginEntry): PluginSkillsConfig | undefined {
+function pluginSkillsConfig(
+  plugin: PluginEntry,
+): PluginSkillsConfig | undefined {
   return typeof plugin === 'string' ? undefined : plugin.skills;
 }
 
@@ -213,11 +219,17 @@ async function isStandaloneSkillRoot(
 
 function nodeForMarketplace(entry: MarketplaceEntry): CheckoutNode | null {
   if (entry.source.type === 'local') return null;
+  const managedPath = resolveCheckoutSubpath(getMarketplacesDir(), entry.name);
+  if (resolve(entry.path) !== resolve(managedPath)) {
+    throw new Error(
+      `Remote marketplace '${entry.name}' is outside the AllAgents-managed cache: ${entry.path}`,
+    );
+  }
   if (entry.source.type === 'github') {
     const parsed = parseLocation(entry.source.location);
     return {
-      id: entry.path,
-      cachePath: entry.path,
+      id: managedPath,
+      cachePath: managedPath,
       remoteUrl: gitHubUrl(parsed.owner, parsed.repo),
       role: 'root',
       currentSha: '',
@@ -225,8 +237,8 @@ function nodeForMarketplace(entry: MarketplaceEntry): CheckoutNode | null {
     };
   }
   return {
-    id: entry.path,
-    cachePath: entry.path,
+    id: managedPath,
+    cachePath: managedPath,
     remoteUrl: entry.source.location,
     role: 'root',
     currentSha: '',
@@ -255,10 +267,16 @@ async function inventoryDirect(
   const effectiveSource = getEffectivePluginSource(plugin);
   const parsed = parseGitHubUrl(effectiveSource);
   if (!parsed) return null;
-  const cachePath = getPluginCachePath(parsed.owner, parsed.repo, parsed.branch);
-  const root = parsed.subpath ? join(cachePath, parsed.subpath) : cachePath;
+  const cachePath = getPluginCachePath(
+    parsed.owner,
+    parsed.repo,
+    parsed.branch,
+  );
+  const root = resolveCheckoutSubpath(cachePath, parsed.subpath ?? '');
   if (!existsSync(root)) {
-    throw new Error(`Cached plugin root not found for ${effectiveSource}: ${root}`);
+    throw new Error(
+      `Cached plugin root not found for ${effectiveSource}: ${root}`,
+    );
   }
   const discovered = await discoverSkillEntriesFromPluginRoot(root);
   const pluginName = getPluginName(root);
@@ -330,7 +348,11 @@ async function inventoryMarketplace(
         `External marketplace plugin '${rawSource}' is not backed by a supported GitHub source`,
       );
     }
-    const cachePath = getPluginCachePath(parsed.owner, parsed.repo, parsed.branch);
+    const cachePath = getPluginCachePath(
+      parsed.owner,
+      parsed.repo,
+      parsed.branch,
+    );
     rootNode = {
       id: cachePath,
       cachePath,
@@ -340,13 +362,13 @@ async function inventoryMarketplace(
       ...(parsed.branch && { ref: parsed.branch }),
     };
     nodes.unshift(rootNode);
-    root = parsed.subpath ? join(cachePath, parsed.subpath) : cachePath;
+    root = resolveCheckoutSubpath(cachePath, parsed.subpath ?? '');
   } else {
     const source =
       manifestPlugin && typeof manifestPlugin.source === 'string'
         ? manifestPlugin.source
         : join(spec.subpath ?? 'plugins', spec.plugin);
-    root = resolve(marketplace.path, source);
+    root = resolveCheckoutSubpath(marketplaceNode.cachePath, source);
   }
   if (!existsSync(root)) {
     throw new Error(`Installed marketplace plugin root not found: ${root}`);
@@ -388,12 +410,11 @@ export async function buildSkillUpdateInventory(
 ): Promise<SkillUpdateInventory> {
   const installations: SkillUpdateInstallation[] = [];
   const skippedLocalSources: string[] = [];
+  const failures: SkillUpdateInventoryFailure[] = [];
   const deferred: SkillUpdateInstallation[] = [];
-  const deferredErrors: Array<{
-    source: string;
-    nodeIds: string[];
-    error: unknown;
-  }> = [];
+  const deferredErrors: Array<
+    SkillUpdateInventoryFailure & { errorCause: unknown }
+  > = [];
   const selected = new Set(selectedScopes);
 
   const potentialNodeIds = async (
@@ -413,7 +434,8 @@ export async function buildSkillUpdateInventory(
       workspacePath,
       spec.owner && spec.repo ? `${spec.owner}/${spec.repo}` : undefined,
     );
-    return marketplace ? [marketplace.path] : [];
+    const node = marketplace ? nodeForMarketplace(marketplace) : null;
+    return node ? [node.id] : [];
   };
 
   // Inventory selected scopes first, then attach healthy consumers from the
@@ -421,7 +443,21 @@ export async function buildSkillUpdateInventory(
   // an unrelated broken user plugin from blocking a project-only update while
   // still making shared caches a cross-scope safety boundary.
   for (const scope of ['project', 'user'] as const) {
-    const config = await readConfig(scope, workspacePath);
+    let config: WorkspaceConfig | null;
+    try {
+      config = await readConfig(scope, workspacePath);
+    } catch (error) {
+      if (selected.has(scope)) {
+        failures.push({
+          id: `inventory:${scope}:config`,
+          scope,
+          source: configPath(scope, workspacePath),
+          nodeIds: [],
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      continue;
+    }
     if (!config) continue;
     for (const [configIndex, plugin] of config.plugins.entries()) {
       const rawSource = getPluginSource(plugin);
@@ -449,12 +485,21 @@ export async function buildSkillUpdateInventory(
           installation = 'local';
         }
       } catch (error) {
-        if (selected.has(scope)) throw error;
-        deferredErrors.push({
+        const failure = {
+          id: `inventory:${scope}:${configIndex}`,
+          scope,
           source: rawSource,
-          nodeIds: await potentialNodeIds(rawSource, plugin, scope),
-          error,
-        });
+          nodeIds: [] as string[],
+          error: error instanceof Error ? error.message : String(error),
+        };
+        try {
+          failure.nodeIds = await potentialNodeIds(rawSource, plugin, scope);
+        } catch {
+          // The original inventory error remains authoritative. An unknown
+          // physical identity becomes a standalone selected-scope failure.
+        }
+        if (selected.has(scope)) failures.push(failure);
+        else deferredErrors.push({ ...failure, errorCause: error });
         continue;
       }
       if (installation === 'local') {
@@ -477,9 +522,7 @@ export async function buildSkillUpdateInventory(
     changed = false;
     for (let index = deferred.length - 1; index >= 0; index--) {
       const installation = deferred[index];
-      if (
-        !installation?.nodes.some((node) => touchedNodeIds.has(node.id))
-      ) {
+      if (!installation?.nodes.some((node) => touchedNodeIds.has(node.id))) {
         continue;
       }
       deferred.splice(index, 1);
@@ -488,15 +531,19 @@ export async function buildSkillUpdateInventory(
       changed = true;
     }
   }
-  const sharedFailure = deferredErrors.find((candidate) =>
+  const sharedFailures = deferredErrors.filter((candidate) =>
     candidate.nodeIds.some((nodeId) => touchedNodeIds.has(nodeId)),
   );
-  if (sharedFailure) {
-    throw new Error(
-      `Could not safely inventory shared source ${sharedFailure.source}: ${sharedFailure.error instanceof Error ? sharedFailure.error.message : String(sharedFailure.error)}`,
-    );
+  for (const sharedFailure of sharedFailures) {
+    failures.push({
+      id: sharedFailure.id,
+      scope: sharedFailure.scope,
+      source: sharedFailure.source,
+      nodeIds: sharedFailure.nodeIds,
+      error: `Could not safely inventory shared source: ${sharedFailure.errorCause instanceof Error ? sharedFailure.errorCause.message : String(sharedFailure.errorCause)}`,
+    });
   }
-  return { installations, skippedLocalSources };
+  return { installations, skippedLocalSources, failures };
 }
 
 async function inspectInstallation(
@@ -557,20 +604,22 @@ async function inspectInstallation(
       }
       const checkout = checkoutPaths.get(expectedNode);
       if (!checkout) {
-        throw new Error(`Inspected external checkout missing for ${expectedNode}`);
+        throw new Error(
+          `Inspected external checkout missing for ${expectedNode}`,
+        );
       }
-      root = parsed.subpath ? join(checkout, parsed.subpath) : checkout;
+      root = resolveCheckoutSubpath(checkout, parsed.subpath ?? '');
     } else {
-      root = resolve(marketplaceCheckout, entry.source);
+      root = resolveCheckoutSubpath(marketplaceCheckout, entry.source);
     }
   } else {
     const checkout = checkoutPaths.get(installation.rootNodeId);
     if (!checkout) {
-      throw new Error(`Inspected checkout missing for ${installation.rawSource}`);
+      throw new Error(
+        `Inspected checkout missing for ${installation.rawSource}`,
+      );
     }
-    root = installation.rootSubpath
-      ? join(checkout, installation.rootSubpath)
-      : checkout;
+    root = resolveCheckoutSubpath(checkout, installation.rootSubpath);
   }
 
   if (!existsSync(root)) {
@@ -603,13 +652,57 @@ export async function inspectSkillUpdateUnit(
   const checkoutPaths = new Map<string, string>();
   try {
     const nodes: UnitInspection['nodes'] = [];
-    for (const node of unit.nodes) {
+    const cloneNode = async (node: CheckoutNode): Promise<void> => {
+      if (checkoutPaths.has(node.id)) return;
       const checkout = await cloneToTemp(node.remoteUrl, node.ref);
       checkoutPaths.set(node.id, checkout);
       nodes.push({ nodeId: node.id, sha: await revision(checkout) });
+    };
+
+    // Marketplace roots authoritatively determine whether an external plugin
+    // still exists. Inspect them before touching dependencies that may now be
+    // obsolete or unreachable.
+    for (const node of unit.nodes.filter(
+      (candidate) => candidate.role === 'root',
+    )) {
+      await cloneNode(node);
     }
     const installations: InstallationInspection[] = [];
+    const removed = new Set<string>();
+    for (const installation of unit.installations.filter(
+      (candidate) => candidate.marketplace,
+    )) {
+      const marketplaceCheckout = checkoutPaths.get(
+        installation.marketplace?.nodeId ?? '',
+      );
+      if (!marketplaceCheckout) continue;
+      const manifest = await parseMarketplaceManifest(marketplaceCheckout);
+      if (!manifest.success || manifest.warnings.length > 0) continue;
+      const entry = manifest.data.plugins.find(
+        (candidate) => candidate.name === installation.marketplace?.pluginName,
+      );
+      if (!entry) {
+        removed.add(installation.id);
+        installations.push({
+          installationId: installation.id,
+          outcome: 'plugin-removed',
+        });
+      }
+    }
+
+    const neededNodeIds = new Set(
+      unit.installations
+        .filter((installation) => !removed.has(installation.id))
+        .flatMap((installation) => installation.nodes.map((node) => node.id)),
+    );
+    for (const node of unit.nodes.filter(
+      (candidate) =>
+        candidate.role === 'dependency' && neededNodeIds.has(candidate.id),
+    )) {
+      await cloneNode(node);
+    }
     for (const installation of unit.installations) {
+      if (removed.has(installation.id)) continue;
       installations.push(
         await inspectInstallation(installation, checkoutPaths),
       );
@@ -650,6 +743,7 @@ export async function prepareSkillUpdate(
     {
       installations: inventory.installations,
       selectedScopes: options.scopes,
+      failures: inventory.failures,
       ...(options.filters && { filters: options.filters }),
     },
     { inspectUnit: inspectSkillUpdateUnit },
@@ -657,9 +751,44 @@ export async function prepareSkillUpdate(
   return { inventory, plan };
 }
 
-async function moveCheckout(node: CheckoutNode, sha: string): Promise<void> {
+function normalizeRemoteUrl(url: string): string {
+  const parsed = parseGitHubUrl(url);
+  if (parsed && !url.startsWith('/') && !url.startsWith('file:')) {
+    return `github:${parsed.owner.toLocaleLowerCase()}/${parsed.repo.toLocaleLowerCase()}`;
+  }
+  return url.replace(/[\\/]$/, '').replace(/\.git$/, '');
+}
+
+async function assertExpectedOrigin(
+  git: ReturnType<typeof simpleGit>,
+  node: CheckoutNode,
+): Promise<void> {
+  const origin = (await git.raw(['remote', 'get-url', 'origin'])).trim();
+  if (normalizeRemoteUrl(origin) !== normalizeRemoteUrl(node.remoteUrl)) {
+    throw new Error(
+      `Refusing to update ${node.cachePath}: origin '${origin}' does not match expected remote '${node.remoteUrl}'`,
+    );
+  }
+}
+
+export async function moveSkillUpdateCheckout(
+  node: CheckoutNode,
+  sha: string,
+): Promise<void> {
   const git = simpleGit(node.cachePath);
-  await git.raw(['fetch', '--depth', '1', 'origin', node.ref ?? 'HEAD']);
+  await assertExpectedOrigin(git, node);
+
+  try {
+    await git.raw(['fetch', '--depth', '1', 'origin', node.ref ?? 'HEAD']);
+  } catch (refError) {
+    try {
+      await git.raw(['fetch', '--depth', '1', 'origin', sha]);
+    } catch (shaError) {
+      throw new Error(
+        `Could not fetch ref '${node.ref ?? 'HEAD'}' or inspected revision '${sha}': ${refError instanceof Error ? refError.message : String(refError)}; ${shaError instanceof Error ? shaError.message : String(shaError)}`,
+      );
+    }
+  }
   try {
     await git.raw(['cat-file', '-e', `${sha}^{commit}`]);
   } catch {
@@ -670,11 +799,9 @@ async function moveCheckout(node: CheckoutNode, sha: string): Promise<void> {
   await git.reset(['--hard', sha]);
 }
 
-async function restoreCheckout(
-  node: CheckoutNode,
-  sha: string,
-): Promise<void> {
+async function restoreCheckout(node: CheckoutNode, sha: string): Promise<void> {
   const git = simpleGit(node.cachePath);
+  await assertExpectedOrigin(git, node);
   await git.raw(['cat-file', '-e', `${sha}^{commit}`]);
   await git.reset(['--hard', sha]);
 }
@@ -685,7 +812,7 @@ export async function executePreparedSkillUpdate(
   workspacePath: string,
 ): Promise<SkillUpdateExecutionResult> {
   const result = await executeSkillUpdatePlan(prepared.plan, decisions, {
-    advanceNode: moveCheckout,
+    advanceNode: moveSkillUpdateCheckout,
     restoreNode: restoreCheckout,
     reconcileUnit: createSkillUpdateReconciler({ workspacePath }),
     syncScope: async (scope) => {
@@ -751,7 +878,9 @@ export function skillUpdateSummary(
 }
 
 /** Map an orchestration result to the documented process exit contract. */
-export function skillUpdateExitCode(result: SkillUpdateExecutionResult): number {
+export function skillUpdateExitCode(
+  result: SkillUpdateExecutionResult,
+): number {
   if (result.cancelled) return 0;
   return result.success ? 0 : 1;
 }

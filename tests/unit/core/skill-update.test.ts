@@ -1,10 +1,14 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildPhysicalRefreshUnits,
   buildSkillUpdatePreflight,
   createGitHubSkillUpdateInstallation,
   executeSkillUpdatePlan,
   inspectRemoteSkillUpdateUnit,
+  resolveCheckoutSubpath,
   type CheckoutNode,
   type SkillUpdateInstallation,
   type UnitInspection,
@@ -211,6 +215,60 @@ describe('buildSkillUpdatePreflight', () => {
     expect(result.units[0]?.error).toContain('malformed');
   });
 
+  it('types inventory failures while continuing healthy independent units', async () => {
+    const inspectUnit = mock(async () => resolved('project:0', ['keep', 'deleted']));
+    const result = await buildSkillUpdatePreflight(
+      {
+        installations: [installation()],
+        selectedScopes: ['project'],
+        failures: [
+          {
+            id: 'inventory:project:1',
+            scope: 'project',
+            source: 'acme/broken',
+            nodeIds: ['/cache/broken'],
+            error: 'checkout is unreadable',
+          },
+        ],
+      },
+      { inspectUnit },
+    );
+
+    expect(inspectUnit).toHaveBeenCalledTimes(1);
+    expect(result.units.map((unit) => [unit.id, unit.outcome])).toEqual([
+      [projectNode.id, 'resolved'],
+      ['inventory:project:1', 'failed'],
+    ]);
+  });
+
+  it('fails a shared component closed without inspecting or mutating it', async () => {
+    const inspectUnit = mock(async () => resolved('project:0', ['keep']));
+    const result = await buildSkillUpdatePreflight(
+      {
+        installations: [installation()],
+        selectedScopes: ['project'],
+        failures: [
+          {
+            id: 'inventory:user:0',
+            scope: 'user',
+            source: 'acme/shared-broken',
+            nodeIds: [projectNode.id],
+            error: 'shared checkout inventory failed',
+          },
+        ],
+      },
+      { inspectUnit },
+    );
+
+    expect(inspectUnit).not.toHaveBeenCalled();
+    expect(result.units).toHaveLength(1);
+    expect(result.units[0]).toMatchObject({
+      id: projectNode.id,
+      outcome: 'failed',
+      error: expect.stringContaining('shared checkout inventory failed'),
+    });
+  });
+
   it('blocks a selected-scope update when a shared-cache deletion affects another scope', async () => {
     const user = installation({
       id: 'user:0',
@@ -236,6 +294,57 @@ describe('buildSkillUpdatePreflight', () => {
 
     expect(result.units[0]?.blockedByOutOfScope).toBe(true);
     expect(result.units[0]?.deleted).toHaveLength(2);
+  });
+
+  it('blocks every update when the physical checkout has any out-of-scope consumer', async () => {
+    const user = installation({
+      id: 'user:0',
+      scope: 'user',
+      configIndex: 0,
+      skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
+    });
+    const result = await buildSkillUpdatePreflight(
+      {
+        installations: [
+          installation({
+            skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
+          }),
+          user,
+        ],
+        selectedScopes: ['project'],
+      },
+      {
+        inspectUnit: async () => ({
+          outcome: 'resolved',
+          nodes: [{ nodeId: projectNode.id, sha: 'new-sha' }],
+          installations: [
+            {
+              installationId: 'project:0',
+              outcome: 'resolved',
+              skills: [{ name: 'keep', subpath: 'keep' }],
+            },
+            {
+              installationId: 'user:0',
+              outcome: 'resolved',
+              skills: [{ name: 'keep', subpath: 'keep' }],
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(result.units[0]?.deleted).toEqual([]);
+    expect(result.units[0]?.blockedByOutOfScope).toBe(true);
+
+    const advanceNode = mock(async () => {});
+    const executionResult = await executeSkillUpdatePlan(result, {}, {
+      advanceNode,
+      restoreNode: async () => {},
+      reconcileUnit: async () => ({ commit: async () => {}, rollback: async () => {} }),
+      syncScope: async () => ({ success: true }),
+    });
+    expect(advanceNode).not.toHaveBeenCalled();
+    expect(executionResult.units[0]?.status).toBe('skipped');
   });
 
   it('retains the exact installation IDs authoritatively removed by a marketplace', async () => {
@@ -304,6 +413,28 @@ describe('inspectRemoteSkillUpdateUnit', () => {
       ],
     });
     expect(cleanup).toHaveBeenCalledWith('/tmp/inspected');
+  });
+
+  it('rejects parent, absolute, and symlink subpaths outside the checkout', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'allagents-skill-path-'));
+    const checkout = join(root, 'checkout');
+    const outside = join(root, 'outside');
+    await mkdir(checkout);
+    await mkdir(outside);
+    await symlink(outside, join(checkout, 'escaped-link'));
+    try {
+      expect(() => resolveCheckoutSubpath(checkout, '../outside')).toThrow(
+        'outside its checkout',
+      );
+      expect(() => resolveCheckoutSubpath(checkout, outside)).toThrow(
+        'absolute',
+      );
+      expect(() => resolveCheckoutSubpath(checkout, 'escaped-link')).toThrow(
+        'outside its checkout',
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('classifies a missing declared root as failure, never deletion', async () => {
@@ -478,9 +609,60 @@ describe('executeSkillUpdatePlan', () => {
     });
 
     expect(advanced).toEqual([dependency.id, root.id]);
-    expect(restored).toEqual([`${dependency.id}:dependency-old`]);
+    expect(restored).toEqual([
+      `${root.id}:root-old`,
+      `${dependency.id}:dependency-old`,
+    ]);
     expect(rollback).toHaveBeenCalledTimes(1);
     expect(syncScope).not.toHaveBeenCalled();
     expect(result.success).toBe(false);
+  });
+
+  it('reports reconciliation and checkout rollback failures', async () => {
+    const plan = await buildSkillUpdatePreflight(
+      { installations: [installation()], selectedScopes: ['project'] },
+      { inspectUnit: async () => resolved('project:0', ['keep', 'deleted']) },
+    );
+    const result = await executeSkillUpdatePlan(plan, {}, {
+      advanceNode: async () => {
+        throw new Error('advance failed after reset');
+      },
+      restoreNode: async () => {
+        throw new Error('restore failed');
+      },
+      reconcileUnit: async () => ({
+        commit: async () => {},
+        rollback: async () => {
+          throw new Error('config rollback failed');
+        },
+      }),
+      syncScope: async () => ({ success: true }),
+    });
+
+    expect(result.units[0]?.error).toContain('advance failed after reset');
+    expect(result.units[0]?.error).toContain('config rollback failed');
+    expect(result.units[0]?.error).toContain('restore failed');
+  });
+
+  it('turns a rejected scope sync into a failed partial result', async () => {
+    const plan = await buildSkillUpdatePreflight(
+      { installations: [installation()], selectedScopes: ['project'] },
+      { inspectUnit: async () => resolved('project:0', ['keep', 'deleted']) },
+    );
+    const result = await executeSkillUpdatePlan(plan, {}, {
+      advanceNode: async () => {},
+      restoreNode: async () => {},
+      reconcileUnit: async () => ({ commit: async () => {}, rollback: async () => {} }),
+      syncScope: async () => {
+        throw new Error('sync exploded');
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.units.at(-1)).toMatchObject({
+      id: 'sync:project',
+      status: 'failed',
+      error: 'sync exploded',
+    });
   });
 });

@@ -154,6 +154,11 @@ describe('findMetaByCommand', () => {
     expect(meta!.command).toBe('status');
   });
 
+  test('resolves command metadata when rest-positionals follow the command', () => {
+    const meta = findMetaByCommand('skill update code-review glow-api');
+    expect(meta?.command).toBe('skill update');
+  });
+
   test('returns undefined for unknown command', () => {
     expect(findMetaByCommand('workspace frobnicate')).toBeUndefined();
   });
