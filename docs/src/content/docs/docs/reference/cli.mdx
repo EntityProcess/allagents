@@ -134,6 +134,7 @@ allagents plugin marketplace update [name]
 allagents skill list [--scope <scope>]
 allagents skill remove <skill> [--plugin <plugin>] [--scope <scope>]
 allagents skill add <skill> [--from <source>] [--plugin <plugin>] [--scope <scope>]
+allagents skill update [skill...] [--scope <scope>] [--yes]
 ```
 
 ### plugin list
@@ -256,6 +257,50 @@ allagents skill add brainstorming --plugin superpowers
 ```
 
 After enabling, the skill is removed from `disabledSkills` and sync is run to restore it.
+
+### skill update
+
+Check installed remote skills for upstream changes, update surviving skills, and safely reconcile skills that were deleted upstream.
+
+```bash
+allagents skill update
+allagents skill update code-review glow-api
+allagents skill update --scope user
+allagents skill update --scope all
+allagents skill update --yes
+allagents --json skill update --scope project
+```
+
+| Argument or flag | Description |
+|------|-------------|
+| `[skill...]` | Update only the physical sources containing the named enabled skills. Names, qualified paths, and `plugin:path` selectors are accepted. All enabled siblings sharing a selected source are still checked for deletion safety. |
+| `-s, --scope <scope>` | Scope: `project` (default when a project config exists), `user`, or `all`. |
+| `-y, --yes` | Run without prompts. This does **not** authorize deletion: a source with upstream deletions is retained and skipped. |
+
+AllAgents performs a read-only preflight against disposable checkouts before changing a config or plugin cache. When an installed skill has disappeared upstream, interactive terminals list the affected skill copies and ask once for the shared physical source:
+
+- **Yes** removes the deleted skill selectors or standalone skill entries, advances that source to the inspected revision, and updates its surviving skills.
+- **No** keeps the local copies and skips every update from that physical source, including survivor updates.
+- Cancelling any confirmation stops the whole operation before the first mutation.
+
+Non-interactive runs—including `--yes`, redirected input/output, CI, and `--json`—behave like **No** for sources with deletions. This makes unattended updates safe by default. Sources without deletion candidates can still update normally.
+
+Plugin subpaths, marketplace entries, and project/user installs can share one physical cache. A decision therefore applies to the complete connected cache unit rather than only the config spelling that selected it. If an update in one scope would affect a deleted skill in an unselected scope, AllAgents keeps the cache unchanged and asks you to rerun with `--scope all`. A failed or declined unit does not prevent independent physical sources from updating.
+
+After accepted caches advance, AllAgents syncs affected clients from those exact cached revisions in offline mode. Declined caches are not refreshed indirectly by the final sync.
+
+With `--json`, each physical source result has one of these statuses:
+
+| Status | Meaning |
+|------|-------------|
+| `updated` | The source advanced and surviving skills were synced; no deletion was required. |
+| `removed` | Confirmed deleted skills were removed and surviving skills were updated. |
+| `retained` | Deleted local copies were kept, so the complete shared source was left unchanged. |
+| `skipped` | A physical update unit was intentionally skipped without an operational failure. |
+| `failed` | Preflight, transaction, or offline sync failed for this source. Independent sources may still succeed. |
+| `cancelled` | Confirmation was cancelled before any changes were made. |
+
+Local plugin sources are listed separately in `data.skippedLocalSources`. The JSON summary reports per-skill `updated`, `removed`, and `retained` counts plus physical-source `skipped`, `failed`, and `cancelled` counts. Usage errors exit with status 2, operational failures with status 1, and safe retained/skipped results with status 0.
 
 :::tip
 `allagents skill ...` is the canonical singular form. The plural alias
