@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PluginEntry } from '../models/workspace-config.js';
 import {
-  getEffectivePluginSource as resolveEffectivePluginSource,
   getPluginSource,
+  getEffectivePluginSource as resolveEffectivePluginSource,
 } from '../models/workspace-config.js';
 import { getPluginCachePath, parseGitHubUrl } from '../utils/plugin-path.js';
 import { cleanupTempDir, cloneToTemp, gitHubUrl } from './git.js';
@@ -26,6 +26,8 @@ export interface CheckoutNode {
 export interface InstalledSkill {
   name: string;
   subpath: string;
+  /** Exact config selector, retained to disambiguate duplicate leaf names. */
+  selector?: string;
   enabled: boolean;
 }
 
@@ -40,6 +42,8 @@ export interface SkillUpdateInstallation {
   rootSubpath: string;
   nodes: CheckoutNode[];
   skills: InstalledSkill[];
+  /** True only when inventory proved this config entry owns skills and nothing else. */
+  standaloneSkillSource?: boolean;
 }
 
 export interface DiscoveredSkill {
@@ -100,6 +104,8 @@ export interface SkillUpdateUnit extends SkillUpdateUnitInput {
   inspectedNodes: InspectedNodeRevision[];
   deleted: SkillUpdateSkillImpact[];
   survivors: SkillUpdateSkillImpact[];
+  /** Installations whose marketplace entry was authoritatively removed upstream. */
+  removedInstallationIds: string[];
   blockedByOutOfScope: boolean;
   error?: string;
 }
@@ -126,6 +132,7 @@ export interface CreateGitHubSkillUpdateInstallationInput {
   pluginName: string;
   currentSha: string;
   skills: InstalledSkill[];
+  standaloneSkillSource?: boolean;
 }
 
 export interface InspectRemoteSkillUpdateDeps {
@@ -215,6 +222,7 @@ export function createGitHubSkillUpdateInstallation(
     rootSubpath: parsed.subpath ?? '',
     nodes: [node],
     skills: input.skills,
+    ...(input.standaloneSkillSource && { standaloneSkillSource: true }),
   };
 }
 
@@ -461,6 +469,9 @@ export async function buildSkillUpdatePreflight(
     const failedInstallation = inspection.installations.find(
       (entry) => entry.outcome === 'failed',
     );
+    const removedInstallationIds = inspection.installations
+      .filter((entry) => entry.outcome === 'plugin-removed')
+      .map((entry) => entry.installationId);
     const outcome = failedInstallation ? 'failed' : inspection.outcome;
     const error =
       inspection.error ??
@@ -477,6 +488,8 @@ export async function buildSkillUpdatePreflight(
       inspectedNodes: inspection.nodes,
       deleted: outcome === 'failed' ? [] : deleted,
       survivors: outcome === 'failed' ? [] : survivors,
+      removedInstallationIds:
+        outcome === 'failed' ? [] : removedInstallationIds,
       blockedByOutOfScope,
       ...(error && { error }),
     });

@@ -199,6 +199,45 @@ describe('buildSkillUpdatePreflight', () => {
     expect(result.units[0]?.blockedByOutOfScope).toBe(true);
     expect(result.units[0]?.deleted).toHaveLength(2);
   });
+
+  it('retains the exact installation IDs authoritatively removed by a marketplace', async () => {
+    const retained = installation({
+      id: 'project:1',
+      configIndex: 1,
+      rawSource: 'keep@marketplace',
+      effectiveSource: 'keep@marketplace',
+      skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
+    });
+    const result = await buildSkillUpdatePreflight(
+      {
+        installations: [installation(), retained],
+        selectedScopes: ['project'],
+      },
+      {
+        inspectUnit: async () => ({
+          outcome: 'resolved',
+          nodes: [{ nodeId: projectNode.id, sha: 'new-sha' }],
+          installations: [
+            { installationId: 'project:0', outcome: 'plugin-removed' },
+            {
+              installationId: 'project:1',
+              outcome: 'resolved',
+              skills: [{ name: 'keep', subpath: 'keep' }],
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(result.units[0]?.removedInstallationIds).toEqual(['project:0']);
+    expect(result.units[0]?.deleted.map((skill) => skill.installationId)).toEqual([
+      'project:0',
+      'project:0',
+    ]);
+    expect(result.units[0]?.survivors.map((skill) => skill.installationId)).toEqual([
+      'project:1',
+    ]);
+  });
 });
 
 describe('inspectRemoteSkillUpdateUnit', () => {
