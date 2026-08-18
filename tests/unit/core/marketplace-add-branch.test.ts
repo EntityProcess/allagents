@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, parse } from 'node:path';
 import { tmpdir } from 'node:os';
 import { stubHomeDir } from '../../helpers/env.js';
 
@@ -173,6 +175,82 @@ describe('addMarketplace branch support', () => {
       expect(result.error).toContain('Invalid marketplace name');
     }
 
+    expect(cloneCalls).toHaveLength(0);
+    expect((await loadRegistry()).marketplaces).toEqual({});
+  });
+
+  it('should reject broad local roots without modifying them', async () => {
+    const markerPath = join(testHome, 'home-marker.txt');
+    const homeLink = join(testHome, 'home-link');
+    const rootLink = join(testHome, 'root-link');
+    writeFileSync(markerPath, 'keep');
+    symlinkSync(testHome, homeLink, 'dir');
+    symlinkSync(parse(testHome).root, rootLink, 'dir');
+
+    for (const source of [
+      testHome,
+      parse(testHome).root,
+      homeLink,
+      rootLink,
+    ]) {
+      const result = await addMarketplace(source);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        'must be a specific directory, not a filesystem root or the user\'s home directory',
+      );
+    }
+
+    expect(readFileSync(markerPath, 'utf-8')).toBe('keep');
+    expect(lstatSync(homeLink).isSymbolicLink()).toBe(true);
+    expect(lstatSync(rootLink).isSymbolicLink()).toBe(true);
+    expect((await loadRegistry()).marketplaces).toEqual({});
+  });
+
+  it('should reject a symlink at a managed remote cache path', async () => {
+    const targetPath = join(testHome, 'user-owned-target');
+    const cachePath = join(
+      testHome,
+      '.allagents',
+      'plugins',
+      'marketplaces',
+      'repo',
+    );
+    mkdirSync(targetPath, { recursive: true });
+    writeFileSync(join(targetPath, 'marker.txt'), 'keep');
+    mkdirSync(join(cachePath, '..'), { recursive: true });
+    symlinkSync(targetPath, cachePath, 'dir');
+
+    const result = await addMarketplace('owner/repo');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('cannot be a symbolic link');
+    expect(lstatSync(cachePath).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(targetPath, 'marker.txt'), 'utf-8')).toBe('keep');
+    expect(cloneCalls).toHaveLength(0);
+    expect((await loadRegistry()).marketplaces).toEqual({});
+  });
+
+  it('should reject relocation of only the internal marketplace cache root', async () => {
+    const targetPath = join(testHome, 'user-owned-cache-root');
+    const marketplaceRoot = join(
+      testHome,
+      '.allagents',
+      'plugins',
+      'marketplaces',
+    );
+    mkdirSync(targetPath, { recursive: true });
+    writeFileSync(join(targetPath, 'marker.txt'), 'keep');
+    mkdirSync(join(marketplaceRoot, '..'), { recursive: true });
+    symlinkSync(targetPath, marketplaceRoot, 'dir');
+
+    const result = await addMarketplace('owner/repo');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      'cache root is not a safe AllAgents-owned directory',
+    );
+    expect(lstatSync(marketplaceRoot).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(targetPath, 'marker.txt'), 'utf-8')).toBe('keep');
     expect(cloneCalls).toHaveLength(0);
     expect((await loadRegistry()).marketplaces).toEqual({});
   });

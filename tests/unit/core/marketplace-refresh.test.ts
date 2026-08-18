@@ -5,6 +5,8 @@ import {
   readFileSync,
   rmSync,
   existsSync,
+  lstatSync,
+  symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -229,6 +231,32 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     expect(cloneToCalls.length).toBe(0);
   });
 
+  it('should accept a remote cache beneath an intentionally relocated AllAgents directory', async () => {
+    const relocatedAllagents = join(testHome, 'relocated-allagents');
+    mkdirSync(relocatedAllagents, { recursive: true });
+    symlinkSync(relocatedAllagents, join(testHome, '.allagents'), 'dir');
+    const mpPath = setupMarketplace('test-mp', [
+      { name: 'existing-plugin', source: './plugins/existing-plugin' },
+    ]);
+    setupRegistry({
+      'test-mp': {
+        name: 'test-mp',
+        source: { type: 'github', location: 'owner/test-mp' },
+        path: mpPath,
+      },
+    });
+
+    const result = await resolvePluginSpecWithAutoRegister(
+      'existing-plugin@test-mp',
+      { offline: true },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.pluginName).toBe('existing-plugin');
+    expect(lstatSync(join(testHome, '.allagents')).isSymbolicLink()).toBe(true);
+    expect(cloneToCalls).toHaveLength(0);
+  });
+
   it('should delete old cache directory during refresh', async () => {
     const mpPath = setupMarketplace('test-mp', []);
     setupRegistry({
@@ -346,6 +374,64 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
       source: { type: 'local', location: '/tmp/unrelated' },
       path: '/tmp/unrelated',
     });
+  });
+
+  it('should remove a broad local registration without accessing its home directory', async () => {
+    const homeMarker = join(testHome, 'home-marker.txt');
+    mkdirSync(testHome, { recursive: true });
+    writeFileSync(homeMarker, 'keep');
+    setupRegistry({
+      unsafe: {
+        name: 'unsafe',
+        source: { type: 'local', location: testHome },
+        path: testHome,
+      },
+    });
+
+    const result = await resolvePluginSpecWithAutoRegister('missing@unsafe');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Removed invalid marketplace registration');
+    expect(readFileSync(homeMarker, 'utf-8')).toBe('keep');
+    const registry = JSON.parse(
+      readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(registry.marketplaces.unsafe).toBeUndefined();
+    expect(cloneToCalls).toHaveLength(0);
+  });
+
+  it('should remove a symlinked remote registration without touching the link or target', async () => {
+    const targetPath = join(testHome, 'user-owned-target');
+    const cachePath = join(
+      testHome,
+      '.allagents',
+      'plugins',
+      'marketplaces',
+      'unsafe',
+    );
+    mkdirSync(targetPath, { recursive: true });
+    writeFileSync(join(targetPath, 'marker.txt'), 'keep');
+    mkdirSync(join(cachePath, '..'), { recursive: true });
+    symlinkSync(targetPath, cachePath, 'dir');
+    setupRegistry({
+      unsafe: {
+        name: 'unsafe',
+        source: { type: 'github', location: 'owner/unsafe' },
+        path: cachePath,
+      },
+    });
+
+    const result = await resolvePluginSpecWithAutoRegister('missing@unsafe');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Removed invalid marketplace registration');
+    expect(lstatSync(cachePath).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(targetPath, 'marker.txt'), 'utf-8')).toBe('keep');
+    const registry = JSON.parse(
+      readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(registry.marketplaces.unsafe).toBeUndefined();
+    expect(cloneToCalls).toHaveLength(0);
   });
 
   it('should not access a sibling marketplace cache referenced by an invalid entry', async () => {

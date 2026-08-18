@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdtemp,
+  rm,
+  mkdir,
+  readFile,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dump, load } from 'js-yaml';
@@ -244,5 +252,32 @@ describe('removeMarketplace cascade', () => {
     ) as MarketplaceRegistry;
     expect(registry.marketplaces.unsafe).toBeUndefined();
     expect(registry.marketplaces.unrelated).toBeDefined();
+  });
+
+  it('should warn without deleting a dangling remote cache symlink', async () => {
+    const cachePath = join(
+      testDir,
+      '.allagents',
+      'plugins',
+      'marketplaces',
+      'dangling',
+    );
+    await mkdir(join(cachePath, '..'), { recursive: true });
+    await symlink(join(testDir, 'missing-target'), cachePath, 'dir');
+    await writeRegistry({
+      dangling: {
+        name: 'dangling',
+        source: { type: 'github', location: 'owner/dangling' },
+        path: cachePath,
+      },
+    });
+
+    const result = await removeMarketplace('dangling');
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([
+      `Refused to delete unmanaged marketplace path: ${cachePath}`,
+    ]);
+    expect((await lstat(cachePath)).isSymbolicLink()).toBe(true);
   });
 });

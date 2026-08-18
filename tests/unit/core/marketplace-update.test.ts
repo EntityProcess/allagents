@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { stubHomeDir } from '../../helpers/env.js';
@@ -37,11 +37,21 @@ mock.module('simple-git', () => ({
 
 // Mock the git module's pull function
 mock.module('../../../src/core/git.js', () => ({
+  createGitEnv: () => ({
+    ...process.env,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_LFS_SKIP_SMUDGE: '1',
+  }),
   pull: mock((path: string) => {
     pullCalls.push({ path });
     return Promise.resolve();
   }),
+  cloneToTemp: mock(() => Promise.resolve('/tmp/fake')),
   cloneTo: mock(() => Promise.resolve()),
+  repoExists: mock(() => Promise.resolve(true)),
+  refExists: mock(() => Promise.resolve(true)),
+  cleanupTempDir: mock(() => Promise.resolve()),
+  classifyError: (error: Error) => error,
   gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
   GitCloneError: class extends Error {},
 }));
@@ -197,5 +207,37 @@ describe('updateMarketplace', () => {
 
     // Should pull
     expect(pullCalls.length).toBe(1);
+  });
+
+  it('should remove an unsafe registration without opening its directory', async () => {
+    const markerPath = join(testHome, 'home-marker.txt');
+    writeFileSync(markerPath, 'keep');
+    const registryPath = join(testHome, '.allagents', 'marketplaces.json');
+    writeFileSync(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        marketplaces: {
+          unsafe: {
+            name: 'unsafe',
+            source: { type: 'github', location: 'owner/unsafe' },
+            path: testHome,
+          },
+        },
+      }),
+    );
+
+    const results = await updateMarketplace('unsafe');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].success).toBe(false);
+    expect(results[0].error).toContain(
+      'Removed invalid marketplace registration',
+    );
+    expect(readFileSync(markerPath, 'utf-8')).toBe('keep');
+    expect(simpleGitCalls).toHaveLength(0);
+    expect(pullCalls).toHaveLength(0);
+    const registry = JSON.parse(readFileSync(registryPath, 'utf-8'));
+    expect(registry.marketplaces.unsafe).toBeUndefined();
   });
 });

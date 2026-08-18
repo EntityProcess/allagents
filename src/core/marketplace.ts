@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import simpleGit from 'simple-git';
@@ -13,7 +13,7 @@ import {
   parseMarketplaceManifest,
   resolvePluginSourcePath,
 } from '../utils/marketplace-manifest-parser.js';
-import { getPluginCachePath, parseGitHubUrl } from '../utils/plugin-path.js';
+import { getPluginCachePath, isFilesystemRoot, parseGitHubUrl } from '../utils/plugin-path.js';
 import { GitCloneError, cloneTo, gitHubUrl, pull } from './git.js';
 import { fetchPlugin } from './plugin.js';
 import type { FetchResult } from './plugin.js';
@@ -124,8 +124,67 @@ function isValidMarketplaceName(name: string): boolean {
 
 /** Return the exact managed cache path for a safe marketplace name. */
 function getManagedMarketplacePath(name: string): string | null {
-  if (!isValidMarketplaceName(name)) return null;
+  if (!isValidMarketplaceName(name) || !hasSafeManagedMarketplaceRoot()) {
+    return null;
+  }
   return resolve(getMarketplacesDir(), name);
+}
+
+/**
+ * Local marketplaces are user-owned, but a filesystem root or the user's
+ * entire home directory is too broad to be a marketplace boundary.
+ */
+function isUnsafeLocalMarketplacePath(marketplacePath: string): boolean {
+  const resolvedPath = canonicalizeExistingPath(marketplacePath);
+  const homePath = canonicalizeExistingPath(getHomeDir());
+  return isFilesystemRoot(resolvedPath) || resolvedPath === homePath;
+}
+
+/** Resolve symlinks for existing paths while retaining a stable fallback. */
+function canonicalizeExistingPath(candidatePath: string): string {
+  try {
+    return realpathSync(candidatePath);
+  } catch {
+    return resolve(candidatePath);
+  }
+}
+
+/**
+ * AllAgents creates managed remote caches as real directories. A symlink at
+ * that location has unknown ownership and must not be followed or removed.
+ */
+function isSymbolicLinkPath(candidatePath: string): boolean {
+  try {
+    return lstatSync(candidatePath).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** Check for a filesystem entry without following a dangling symlink. */
+function pathEntryExists(candidatePath: string): boolean {
+  try {
+    lstatSync(candidatePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The complete AllAgents state directory may be relocated as one unit, but
+ * its internal plugin/cache directories must remain real owned directories.
+ */
+function hasSafeManagedMarketplaceRoot(): boolean {
+  const allagentsPath = canonicalizeExistingPath(getAllagentsDir());
+  const homePath = canonicalizeExistingPath(getHomeDir());
+  if (isFilesystemRoot(allagentsPath) || allagentsPath === homePath) {
+    return false;
+  }
+  return (
+    !isSymbolicLinkPath(join(getAllagentsDir(), 'plugins')) &&
+    !isSymbolicLinkPath(getMarketplacesDir())
+  );
 }
 
 /**
@@ -135,9 +194,20 @@ function getManagedMarketplacePath(name: string): string | null {
 function hasManagedRemotePath(marketplace: MarketplaceEntry): boolean {
   if (marketplace.source.type === 'local') return false;
   if (!isValidMarketplaceName(marketplace.name)) return false;
+  if (!hasSafeManagedMarketplaceRoot()) return false;
   const cacheRoot = resolve(getMarketplacesDir());
   const marketplacePath = resolve(marketplace.path);
   if (dirname(marketplacePath) !== cacheRoot) return false;
+  if (isSymbolicLinkPath(marketplacePath)) return false;
+
+  // Ancestor symlinks may intentionally relocate the entire AllAgents state
+  // directory. Treat the canonical cache root as the ownership boundary while
+  // still refusing a symlink at an individual marketplace cache location.
+  const canonicalCacheRoot = canonicalizeExistingPath(cacheRoot);
+  const canonicalMarketplacePath = pathEntryExists(marketplacePath)
+    ? canonicalizeExistingPath(marketplacePath)
+    : resolve(canonicalCacheRoot, basename(marketplacePath));
+  if (dirname(canonicalMarketplacePath) !== canonicalCacheRoot) return false;
 
   const sourceName = marketplace.source.type === 'github'
     ? parseLocation(marketplace.source.location).repo
@@ -415,7 +485,21 @@ export async function addMarketplace(
 
   if (parsed.type === 'github' || parsed.type === 'git') {
     // Clone remote repository
-    marketplacePath = getManagedMarketplacePath(name) as string;
+    const managedMarketplacePath = getManagedMarketplacePath(name);
+    if (managedMarketplacePath === null) {
+      return {
+        success: false,
+        error: `Marketplace cache root is not a safe AllAgents-owned directory: ${getMarketplacesDir()}`,
+      };
+    }
+    marketplacePath = managedMarketplacePath;
+
+    if (isSymbolicLinkPath(marketplacePath)) {
+      return {
+        success: false,
+        error: `Remote marketplace cache cannot be a symbolic link: ${marketplacePath}`,
+      };
+    }
 
     // Check if directory already exists (from a previous partial registration)
     if (existsSync(marketplacePath)) {
@@ -450,6 +534,12 @@ export async function addMarketplace(
   } else {
     // Local directory - just verify it exists
     marketplacePath = parsed.location;
+    if (isUnsafeLocalMarketplacePath(marketplacePath)) {
+      return {
+        success: false,
+        error: `Local marketplace source must be a specific directory, not a filesystem root or the user's home directory: ${marketplacePath}`,
+      };
+    }
     if (!existsSync(marketplacePath)) {
       return {
         success: false,
@@ -566,7 +656,10 @@ export async function removeMarketplace(
       removedEntry = userRegistry.marketplaces[name];
       delete userRegistry.marketplaces[name];
       await saveRegistryToPath(userRegistry, userRegPath);
-      if (removedEntry.source.type !== 'local' && existsSync(removedEntry.path)) {
+      if (
+        removedEntry.source.type !== 'local' &&
+        pathEntryExists(removedEntry.path)
+      ) {
         if (hasManagedRemotePath(removedEntry)) {
           await rm(removedEntry.path, { recursive: true, force: true });
         } else {
@@ -586,7 +679,10 @@ export async function removeMarketplace(
       removedEntry = projectRegistry.marketplaces[name];
       delete projectRegistry.marketplaces[name];
       await saveRegistryToPath(projectRegistry, projectRegPath);
-      if (removedEntry.source.type !== 'local' && existsSync(removedEntry.path)) {
+      if (
+        removedEntry.source.type !== 'local' &&
+        pathEntryExists(removedEntry.path)
+      ) {
         if (hasManagedRemotePath(removedEntry)) {
           await rm(removedEntry.path, { recursive: true, force: true });
         } else {
@@ -719,14 +815,36 @@ export async function updateMarketplace(
       })()
     : Array.from(mergedEntries.values());
 
-  const toUpdate = toUpdateScoped.map((s) => s.entry);
   const results: Array<{ name: string; success: boolean; error?: string }> = [];
 
-  if (name && toUpdate.length === 0) {
+  if (name && toUpdateScoped.length === 0) {
     return [{ name, success: false, error: `Marketplace '${name}' not found` }];
   }
 
-  for (const marketplace of toUpdate) {
+  const invalidEntries = new Set<MarketplaceEntry>();
+  let userDirty = false;
+  let projectDirty = false;
+
+  for (const { entry: marketplace, scope } of toUpdateScoped) {
+    const hasUnsafeMarketplacePath =
+      marketplace.source.type === 'local'
+        ? isUnsafeLocalMarketplacePath(marketplace.path)
+        : !hasManagedRemotePath(marketplace);
+    if (hasUnsafeMarketplacePath) {
+      const registry = scope === 'user' ? userRegistry : projectRegistry;
+      if (registry && removeMarketplaceEntry(registry, marketplace)) {
+        if (scope === 'user') userDirty = true;
+        else projectDirty = true;
+      }
+      invalidEntries.add(marketplace);
+      results.push({
+        name: marketplace.name,
+        success: false,
+        error: getInvalidMarketplaceRegistrationError(marketplace),
+      });
+      continue;
+    }
+
     if (marketplace.source.type === 'local') {
       // Local marketplaces don't need updating
       results.push({
@@ -803,9 +921,8 @@ export async function updateMarketplace(
   }
 
   // Save updated timestamps back to the appropriate registries
-  let userDirty = false;
-  let projectDirty = false;
   for (const { entry, scope } of toUpdateScoped) {
+    if (invalidEntries.has(entry)) continue;
     if (scope === 'user') {
       userRegistry.marketplaces[entry.name] = entry;
       userDirty = true;
@@ -1166,19 +1283,33 @@ async function removeInvalidMarketplaceRegistration(
   registryPath: string,
 ): Promise<MarketplaceResult> {
   const registry = await loadRegistryFromPath(registryPath);
+  if (removeMarketplaceEntry(registry, marketplace)) {
+    await saveRegistryToPath(registry, registryPath);
+  }
+  return {
+    success: false,
+    error: getInvalidMarketplaceRegistrationError(marketplace),
+  };
+}
+
+function removeMarketplaceEntry(
+  registry: MarketplaceRegistry,
+  marketplace: MarketplaceEntry,
+): boolean {
   const entryKey = Object.entries(registry.marketplaces).find(
     ([key, entry]) =>
       key === marketplace.name ||
       (entry.name === marketplace.name && entry.path === marketplace.path),
   )?.[0];
-  if (entryKey) {
-    delete registry.marketplaces[entryKey];
-    await saveRegistryToPath(registry, registryPath);
-  }
-  return {
-    success: false,
-    error: `Removed invalid marketplace registration '${marketplace.name}'. Refused to access or delete unmanaged path: ${marketplace.path}. Re-add the marketplace to restore it safely.`,
-  };
+  if (!entryKey) return false;
+  delete registry.marketplaces[entryKey];
+  return true;
+}
+
+function getInvalidMarketplaceRegistrationError(
+  marketplace: MarketplaceEntry,
+): string {
+  return `Removed invalid marketplace registration '${marketplace.name}'. Refused to access or delete unmanaged path: ${marketplace.path}. Re-add the marketplace to restore it safely.`;
 }
 
 /**
@@ -1336,21 +1467,29 @@ export async function resolvePluginSpecWithAutoRegister(
   }
 
   let marketplaceRegistryPath: string | undefined;
+  const hasUnsafeMarketplacePath =
+    marketplace.source.type === 'local'
+      ? isUnsafeLocalMarketplacePath(marketplace.path)
+      : !hasManagedRemotePath(marketplace);
+  if (hasUnsafeMarketplacePath) {
+    marketplaceRegistryPath = await getMarketplaceRegistryPath(
+      marketplace.name,
+      options.workspacePath,
+    );
+    const invalidResult = await removeInvalidMarketplaceRegistration(
+      marketplace,
+      marketplaceRegistryPath,
+    );
+    return {
+      success: false,
+      error: `Plugin '${pluginName}' could not be resolved from marketplace '${marketplaceName}'.\n  ${invalidResult.error}`,
+    };
+  }
   if (marketplace.source.type !== 'local') {
     marketplaceRegistryPath = await getMarketplaceRegistryPath(
       marketplace.name,
       options.workspacePath,
     );
-    if (!hasManagedRemotePath(marketplace)) {
-      const invalidResult = await removeInvalidMarketplaceRegistration(
-        marketplace,
-        marketplaceRegistryPath,
-      );
-      return {
-        success: false,
-        error: `Plugin '${pluginName}' could not be resolved from marketplace '${marketplaceName}'.\n  ${invalidResult.error}`,
-      };
-    }
   }
 
   // Pull latest marketplace if online, not freshly cloned, and not yet updated this session
