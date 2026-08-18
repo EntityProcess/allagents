@@ -1,13 +1,20 @@
-import { addDisabledSkill, removeEnabledSkill, removePlugin } from '../core/workspace-modify.js';
-import { getAllSkillsFromPlugins, type SkillInfo } from '../core/skills.js';
+import { type SkillInfo, getAllSkillsFromPlugins } from '../core/skills.js';
 import {
   addUserDisabledSkill,
   removeUserEnabledSkill,
   removeUserPlugin,
 } from '../core/user-workspace.js';
+import {
+  addDisabledSkill,
+  removeEnabledSkill,
+  removePlugin,
+} from '../core/workspace-modify.js';
 
 export interface RemoveInstalledSkillOptions {
-  targetSkill: Pick<SkillInfo, 'name' | 'pluginName' | 'pluginSource' | 'pluginSkillsMode'>;
+  targetSkill: Pick<
+    SkillInfo,
+    'name' | 'pluginName' | 'pluginSource' | 'pluginSkillsMode'
+  >;
   isUser: boolean;
   workspacePath: string;
   allSkills?: SkillInfo[];
@@ -23,8 +30,11 @@ export async function removeInstalledSkill(
   options: RemoveInstalledSkillOptions,
 ): Promise<RemoveInstalledSkillResult> {
   const { targetSkill, isUser, workspacePath } = options;
-  const allSkills = options.allSkills ?? await getAllSkillsFromPlugins(workspacePath);
-  const pluginSkills = allSkills.filter((skill) => skill.pluginSource === targetSkill.pluginSource);
+  const allSkills =
+    options.allSkills ?? (await getAllSkillsFromPlugins(workspacePath));
+  const pluginSkills = allSkills.filter(
+    (skill) => skill.pluginSource === targetSkill.pluginSource,
+  );
   const remainingEnabledSkills = pluginSkills.filter(
     (skill) => !skill.disabled && skill.name !== targetSkill.name,
   );
@@ -40,9 +50,14 @@ export async function removeInstalledSkill(
   }
 
   const skillKey = `${targetSkill.pluginName}:${targetSkill.name}`;
-  const result = targetSkill.pluginSkillsMode === 'allowlist'
-    ? isUser ? await removeUserEnabledSkill(skillKey) : await removeEnabledSkill(skillKey, workspacePath)
-    : isUser ? await addUserDisabledSkill(skillKey) : await addDisabledSkill(skillKey, workspacePath);
+  const result =
+    targetSkill.pluginSkillsMode === 'allowlist'
+      ? isUser
+        ? await removeUserEnabledSkill(skillKey)
+        : await removeEnabledSkill(skillKey, workspacePath)
+      : isUser
+        ? await addUserDisabledSkill(skillKey)
+        : await addDisabledSkill(skillKey, workspacePath);
 
   if (!result.success) {
     return { success: false, error: result.error ?? 'Unknown error' };
@@ -50,6 +65,9 @@ export async function removeInstalledSkill(
 
   return {
     success: true,
-    action: targetSkill.pluginSkillsMode === 'allowlist' ? 'removed-skill' : 'disabled-skill',
+    action:
+      targetSkill.pluginSkillsMode === 'allowlist'
+        ? 'removed-skill'
+        : 'disabled-skill',
   };
 }

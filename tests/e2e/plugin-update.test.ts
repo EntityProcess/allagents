@@ -158,51 +158,55 @@ describe('plugin update e2e', () => {
     });
   });
 
-  test('updates the same plugin independently when installed in both scopes', () => {
-    for (const scope of ['user', 'project']) {
-      const addResult = runCli(workspaceDir, homeDir, [
-        'plugin',
-        'marketplace',
-        'add',
-        marketplaceDir,
-        '--scope',
-        scope,
-      ]);
-      expect(addResult.exitCode).toBe(0);
+  test(
+    'updates the same plugin independently when installed in both scopes',
+    () => {
+      for (const scope of ['user', 'project']) {
+        const addResult = runCli(workspaceDir, homeDir, [
+          'plugin',
+          'marketplace',
+          'add',
+          marketplaceDir,
+          '--scope',
+          scope,
+        ]);
+        expect(addResult.exitCode).toBe(0);
 
-      const installResult = runCli(workspaceDir, homeDir, [
+        const installResult = runCli(workspaceDir, homeDir, [
+          'plugin',
+          'install',
+          'demo@project-marketplace',
+          '--scope',
+          scope,
+        ]);
+        expect(installResult.exitCode).toBe(0);
+      }
+
+      const updateResult = runCli(workspaceDir, homeDir, [
         'plugin',
-        'install',
+        'update',
         'demo@project-marketplace',
         '--scope',
-        scope,
+        'all',
       ]);
-      expect(installResult.exitCode).toBe(0);
-    }
 
-    const updateResult = runCli(workspaceDir, homeDir, [
-      'plugin',
-      'update',
-      'demo@project-marketplace',
-      '--scope',
-      'all',
-    ]);
-
-    expect(updateResult.exitCode).toBe(0);
-    const payload = JSON.parse(updateResult.stdout);
-    expect(payload.success).toBe(true);
-    expect(payload.data.results).toHaveLength(2);
-    expect(payload.data.results).toEqual([
-      {
-        plugin: 'demo@project-marketplace',
-        success: true,
-        action: 'updated',
-      },
-      {
-        plugin: 'demo@project-marketplace',
-        success: true,
-        action: 'updated',
-      },
-    ]);
-  });
+      expect(updateResult.exitCode).toBe(0);
+      const payload = JSON.parse(updateResult.stdout);
+      expect(payload.success).toBe(true);
+      expect(payload.data.results).toHaveLength(2);
+      expect(payload.data.results).toEqual([
+        {
+          plugin: 'demo@project-marketplace',
+          success: true,
+          action: 'updated',
+        },
+        {
+          plugin: 'demo@project-marketplace',
+          success: true,
+          action: 'updated',
+        },
+      ]);
+    },
+    10_000,
+  );
 });

@@ -11,11 +11,7 @@ import {
   restPositionals,
   string,
 } from 'cmd-ts';
-import {
-  CONFIG_DIR,
-  WORKSPACE_CONFIG_FILE,
-  getHomeDir,
-} from '../../constants.js';
+import { getHomeDir } from '../../constants.js';
 import {
   addMarketplace,
   findMarketplace,
@@ -87,13 +83,8 @@ import {
   skillsSearchMeta,
 } from '../metadata/plugin-skills.js';
 import { removeInstalledSkill } from '../skill-removal.js';
-
-/**
- * Check if a directory has a project-level .allagents config
- */
-function hasProjectConfig(dir: string): boolean {
-  return existsSync(join(dir, CONFIG_DIR, WORKSPACE_CONFIG_FILE));
-}
+import { hasProjectSkillConfig } from '../skill-update.js';
+import { skillUpdateCmd } from './skill-update.js';
 
 /**
  * Determine effective scope when no --scope flag is provided.
@@ -101,7 +92,7 @@ function hasProjectConfig(dir: string): boolean {
  */
 function resolveScope(cwd: string): 'user' | 'project' {
   if (isUserConfigPath(cwd)) return 'user';
-  if (hasProjectConfig(cwd)) return 'project';
+  if (hasProjectSkillConfig(cwd)) return 'project';
   return 'user';
 }
 
@@ -291,7 +282,7 @@ const listCmd = command({
   handler: async ({ scope }) => {
     try {
       const cwd = process.cwd();
-      const inProjectDir = !isUserConfigPath(cwd) && hasProjectConfig(cwd);
+      const inProjectDir = !isUserConfigPath(cwd) && hasProjectSkillConfig(cwd);
 
       // Resolve which scopes to display
       const showUser = scope !== 'project';
@@ -2358,7 +2349,7 @@ async function installFromSearch(repos: string[]): Promise<boolean> {
   const installableRepos: string[] = [];
 
   for (const repo of repos) {
-    const isInstalledProject = hasProjectConfig(workspacePath)
+    const isInstalledProject = hasProjectSkillConfig(workspacePath)
       ? await hasPlugin(repo, workspacePath)
       : false;
     const isInstalledUser = await hasUserPlugin(repo);
@@ -2614,5 +2605,6 @@ export const skillsCmd = conciseSubcommands({
     remove: removeCmd,
     add: addCmd,
     search: searchCmd,
+    update: skillUpdateCmd,
   },
 });

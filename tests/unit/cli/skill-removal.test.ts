@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { load, dump } from 'js-yaml';
+import { dump, load } from 'js-yaml';
 import { removeInstalledSkill } from '../../../src/cli/skill-removal.js';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
 import {

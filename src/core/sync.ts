@@ -19,8 +19,7 @@ import type {
 } from '../models/workspace-config.js';
 import {
   getPluginClients,
-  getPluginPin,
-  getPluginSource,
+  getEffectivePluginSource,
   getPluginExclude,
   getClientTypes,
   normalizeClientEntry,
@@ -1248,14 +1247,7 @@ export function buildPluginSyncPlans(
   const workspaceClientTypes = getClientTypes(clientEntries);
 
   const plans = plugins.map((plugin) => {
-    const rawSource = getPluginSource(plugin);
-    const pin = getPluginPin(plugin);
-    // Apply the optional `pin:` workspace.yaml field by splicing `@<ref>` into
-    // GitHub-shaped sources. Marketplace and local sources ignore the pin
-    // since they don't go through fetchPlugin.
-    const source = pin && isGitHubUrl(rawSource) && !rawSource.includes('@')
-      ? `${rawSource}@${pin}`
-      : rawSource;
+    const source = getEffectivePluginSource(plugin);
     const pluginClientTypes = getPluginClients(plugin) ?? workspaceClientTypes;
 
     if (pluginClientTypes.length === 0) {
