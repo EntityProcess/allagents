@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { stubHomeDir } from '../../helpers/env.js';
@@ -48,6 +54,8 @@ mock.module('simple-git', () => ({
 }));
 
 const { addMarketplace, loadRegistry } = await import('../../../src/core/marketplace.js');
+const { cloneTo } = await import('../../../src/core/git.js');
+const cloneToMock = cloneTo as ReturnType<typeof mock>;
 
 describe('addMarketplace branch support', () => {
   let restoreHomeDir: () => void;
@@ -58,6 +66,13 @@ describe('addMarketplace branch support', () => {
     restoreHomeDir = stubHomeDir(testHome);
     mkdirSync(join(testHome, '.allagents'), { recursive: true });
     cloneCalls.length = 0;
+    cloneToMock.mockImplementation(
+      (url: string, dest: string, ref?: string) => {
+        cloneCalls.push({ url, dest, ref });
+        mkdirSync(dest, { recursive: true });
+        return Promise.resolve();
+      },
+    );
   });
 
   afterEach(() => {
@@ -131,5 +146,75 @@ describe('addMarketplace branch support', () => {
     const cloneCall = cloneCalls.find((c) => c.url.includes('owner/repo'));
     expect(cloneCall).toBeDefined();
     expect(cloneCall!.ref).toBeUndefined();
+  });
+
+  it('should reject a remote marketplace with an unsafe custom name', async () => {
+    const result = await addMarketplace('owner/repo', '../../..');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid marketplace name');
+    expect(cloneCalls).toHaveLength(0);
+    expect((await loadRegistry()).marketplaces).toEqual({});
+  });
+
+  it('should reject a remote marketplace with an unsafe derived name', async () => {
+    const result = await addMarketplace('owner/..');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid marketplace name');
+    expect(cloneCalls).toHaveLength(0);
+    expect((await loadRegistry()).marketplaces).toEqual({});
+  });
+
+  it('should reject marketplace names that alias or special-case Windows paths', async () => {
+    for (const name of ['CON', 'repo.', 'repo ', 'bad:name']) {
+      const result = await addMarketplace('owner/repo', name);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid marketplace name');
+    }
+
+    expect(cloneCalls).toHaveLength(0);
+    expect((await loadRegistry()).marketplaces).toEqual({});
+  });
+
+  it('should remove a newly cloned cache with an unsafe manifest name', async () => {
+    cloneToMock.mockImplementation(
+      (url: string, dest: string, ref?: string) => {
+        cloneCalls.push({ url, dest, ref });
+        mkdirSync(join(dest, '.claude-plugin'), { recursive: true });
+        writeFileSync(
+          join(dest, '.claude-plugin', 'marketplace.json'),
+          JSON.stringify({ name: '../../..', plugins: [] }),
+        );
+        return Promise.resolve();
+      },
+    );
+
+    const result = await addMarketplace('owner/unsafe-manifest');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid marketplace name');
+    expect(existsSync(cloneCalls[0].dest)).toBe(false);
+  });
+
+  it('should not delete a pre-existing cache with an unsafe manifest name', async () => {
+    const cachePath = join(
+      testHome,
+      '.allagents',
+      'plugins',
+      'marketplaces',
+      'unsafe-manifest',
+    );
+    mkdirSync(join(cachePath, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(cachePath, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({ name: '../../..', plugins: [] }),
+    );
+    writeFileSync(join(cachePath, 'marker.txt'), 'keep');
+
+    const result = await addMarketplace('owner/unsafe-manifest');
+
+    expect(result.success).toBe(false);
+    expect(readFileSync(join(cachePath, 'marker.txt'), 'utf-8')).toBe('keep');
   });
 });

@@ -37,6 +37,8 @@ mock.module('../../../src/core/git.js', () => ({
 const { resolvePluginSpecWithAutoRegister } = await import(
   '../../../src/core/marketplace.js'
 );
+const { cloneTo } = await import('../../../src/core/git.js');
+const cloneToMock = cloneTo as ReturnType<typeof mock>;
 
 describe('resolvePluginSpecWithAutoRegister refresh', () => {
   let restoreHomeDir: () => void;
@@ -46,6 +48,13 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     testHome = join(tmpdir(), `marketplace-refresh-test-${Date.now()}`);
     restoreHomeDir = stubHomeDir(testHome);
     cloneToCalls.length = 0;
+    cloneToMock.mockImplementation(
+      (url: string, path: string, branch?: string) => {
+        cloneToCalls.push({ url, path, branch });
+        mkdirSync(path, { recursive: true });
+        return Promise.resolve();
+      },
+    );
   });
 
   afterEach(() => {
@@ -104,10 +113,7 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
 
     // Override cloneTo to create the directory with the new plugin included
     cloneToCalls.length = 0;
-    const originalCloneTo = (
-      await import('../../../src/core/git.js')
-    ).cloneTo as ReturnType<typeof mock>;
-    originalCloneTo.mockImplementation(
+    cloneToMock.mockImplementation(
       (url: string, path: string, branch?: string) => {
         cloneToCalls.push({ url, path, branch });
         // Simulate fresh clone that now includes the missing plugin
@@ -142,6 +148,46 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     // Verify a clone was triggered (refresh happened)
     expect(cloneToCalls.length).toBe(1);
     expect(cloneToCalls[0].url).toContain('owner/test-mp');
+  });
+
+  it('should refresh a canonical marketplace whose cache uses the repository name', async () => {
+    const mpPath = setupMarketplace('repo-name', []);
+    writeFileSync(
+      join(mpPath, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({ name: 'canonical-name', plugins: [] }),
+    );
+    setupRegistry({
+      'canonical-name': {
+        name: 'canonical-name',
+        source: { type: 'github', location: 'owner/repo-name' },
+        path: mpPath,
+      },
+    });
+    cloneToMock.mockImplementation(
+      (_url: string, path: string, _branch?: string) => {
+        mkdirSync(join(path, '.claude-plugin'), { recursive: true });
+        writeFileSync(
+          join(path, '.claude-plugin', 'marketplace.json'),
+          JSON.stringify({
+            name: 'canonical-name',
+            plugins: [{ name: 'new-plugin', source: './plugins/new-plugin' }],
+          }),
+        );
+        mkdirSync(join(path, 'plugins', 'new-plugin'), { recursive: true });
+        return Promise.resolve();
+      },
+    );
+
+    const result = await resolvePluginSpecWithAutoRegister(
+      'new-plugin@canonical-name',
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.pluginName).toBe('new-plugin');
+    const registry = JSON.parse(
+      readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(registry.marketplaces['canonical-name'].path).toBe(mpPath);
   });
 
   it('should not refresh when offline', async () => {
@@ -197,10 +243,7 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     // Create a marker file in the old directory
     writeFileSync(join(mpPath, 'old-marker.txt'), 'old');
 
-    const originalCloneTo = (
-      await import('../../../src/core/git.js')
-    ).cloneTo as ReturnType<typeof mock>;
-    originalCloneTo.mockImplementation(
+    cloneToMock.mockImplementation(
       (_url: string, path: string, _branch?: string) => {
         // By the time clone is called, old directory should be deleted
         // (clone target is the new path based on marketplace name)
@@ -215,8 +258,9 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     expect(existsSync(join(mpPath, 'old-marker.txt'))).toBe(false);
   });
 
-  it('should preserve the registry entry when refresh fails', async () => {
+  it('should preserve the registry entry and cache when refresh fails', async () => {
     const mpPath = setupMarketplace('test-mp', []);
+    writeFileSync(join(mpPath, 'old-marker.txt'), 'old');
     setupRegistry({
       'test-mp': {
         name: 'test-mp',
@@ -226,10 +270,7 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
       },
     });
 
-    const originalCloneTo = (
-      await import('../../../src/core/git.js')
-    ).cloneTo as ReturnType<typeof mock>;
-    originalCloneTo.mockImplementation(() =>
+    cloneToMock.mockImplementation(() =>
       Promise.reject(new Error('clone failed')),
     );
 
@@ -238,6 +279,8 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     );
 
     expect(result.success).toBe(false);
+    expect(result.error).toContain('clone failed');
+    expect(readFileSync(join(mpPath, 'old-marker.txt'), 'utf-8')).toBe('old');
     const registry = JSON.parse(
       readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
     );
@@ -247,5 +290,89 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
       path: mpPath,
       lastUpdated: '2024-01-01T00:00:00.000Z',
     });
+  });
+
+  it('should restore the old cache when replacing the staged clone fails', async () => {
+    const mpPath = setupMarketplace('test-mp', []);
+    writeFileSync(join(mpPath, 'old-marker.txt'), 'old');
+    setupRegistry({
+      'test-mp': {
+        name: 'test-mp',
+        source: { type: 'github', location: 'owner/test-mp' },
+        path: mpPath,
+      },
+    });
+    cloneToMock.mockImplementation(() => Promise.resolve());
+
+    const result = await resolvePluginSpecWithAutoRegister(
+      'missing-plugin@test-mp',
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Failed to replace marketplace cache');
+    expect(readFileSync(join(mpPath, 'old-marker.txt'), 'utf-8')).toBe('old');
+  });
+
+  it('should remove only an unsafe remote registry entry without deleting its path', async () => {
+    const homeMarker = join(testHome, 'home-marker.txt');
+    mkdirSync(testHome, { recursive: true });
+    writeFileSync(homeMarker, 'keep');
+    setupRegistry({
+      unsafe: {
+        name: 'unsafe',
+        source: { type: 'github', location: 'owner/unsafe' },
+        path: testHome,
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+      },
+      unrelated: {
+        name: 'unrelated',
+        source: { type: 'local', location: '/tmp/unrelated' },
+        path: '/tmp/unrelated',
+      },
+    });
+
+    const result = await resolvePluginSpecWithAutoRegister('missing@unsafe');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Removed invalid marketplace registration');
+    expect(result.error).toContain('Refused to access or delete unmanaged path');
+    expect(readFileSync(homeMarker, 'utf-8')).toBe('keep');
+    const registry = JSON.parse(
+      readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(registry.marketplaces.unsafe).toBeUndefined();
+    expect(registry.marketplaces.unrelated).toEqual({
+      name: 'unrelated',
+      source: { type: 'local', location: '/tmp/unrelated' },
+      path: '/tmp/unrelated',
+    });
+  });
+
+  it('should not access a sibling marketplace cache referenced by an invalid entry', async () => {
+    const otherPath = setupMarketplace('other', []);
+    const markerPath = join(otherPath, 'other-marker.txt');
+    writeFileSync(markerPath, 'keep');
+    setupRegistry({
+      unsafe: {
+        name: 'unsafe',
+        source: { type: 'github', location: 'owner/unsafe' },
+        path: otherPath,
+      },
+      other: {
+        name: 'other',
+        source: { type: 'github', location: 'owner/other' },
+        path: otherPath,
+      },
+    });
+
+    const result = await resolvePluginSpecWithAutoRegister('missing@unsafe');
+
+    expect(result.success).toBe(false);
+    expect(readFileSync(markerPath, 'utf-8')).toBe('keep');
+    const registry = JSON.parse(
+      readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(registry.marketplaces.unsafe).toBeUndefined();
+    expect(registry.marketplaces.other).toBeDefined();
   });
 });

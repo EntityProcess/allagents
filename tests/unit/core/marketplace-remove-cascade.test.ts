@@ -215,4 +215,34 @@ describe('removeMarketplace cascade', () => {
     // Local source directory must NOT be deleted
     expect(existsSync(localSourceDir)).toBe(true);
   });
+
+  it('should remove an unsafe remote entry without deleting its referenced path', async () => {
+    const markerPath = join(testDir, 'home-marker.txt');
+    await writeFile(markerPath, 'keep', 'utf-8');
+    await writeRegistry({
+      unsafe: {
+        name: 'unsafe',
+        source: { type: 'github', location: 'owner/unsafe' },
+        path: testDir,
+      },
+      unrelated: {
+        name: 'unrelated',
+        source: { type: 'local', location: '/tmp/unrelated' },
+        path: '/tmp/unrelated',
+      },
+    });
+
+    const result = await removeMarketplace('unsafe');
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([
+      `Refused to delete unmanaged marketplace path: ${testDir}`,
+    ]);
+    expect(await readFile(markerPath, 'utf-8')).toBe('keep');
+    const registry = JSON.parse(
+      await readFile(join(testDir, '.allagents', 'marketplaces.json'), 'utf-8'),
+    ) as MarketplaceRegistry;
+    expect(registry.marketplaces.unsafe).toBeUndefined();
+    expect(registry.marketplaces.unrelated).toBeDefined();
+  });
 });

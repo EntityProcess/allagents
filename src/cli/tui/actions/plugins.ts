@@ -880,6 +880,10 @@ async function runMarketplaceDetail(
           continue;
         }
 
+        if (result.warnings && result.warnings.length > 0) {
+          p.note(result.warnings.join('\n'), 'Warning');
+        }
+
         cache?.invalidate();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

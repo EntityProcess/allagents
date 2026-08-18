@@ -491,12 +491,16 @@ const marketplaceRemoveCmd = command({
             name,
             path: result.marketplace?.path,
             retainedUserPlugins: result.retainedUserPlugins ?? [],
+            warnings: result.warnings ?? [],
           },
         });
         return;
       }
 
       console.log(`\u2713 Marketplace '${name}' removed`);
+      for (const warning of result.warnings ?? []) {
+        console.warn(`Warning: ${warning}`);
+      }
       if (result.retainedUserPlugins && result.retainedUserPlugins.length > 0) {
         console.log(`\n  \u26A0 ${result.retainedUserPlugins.length} plugin(s) still reference this marketplace:`);
         for (const p of result.retainedUserPlugins) {
