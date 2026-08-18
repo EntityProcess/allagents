@@ -14,7 +14,7 @@ import {
 import { getHomeDir } from '../../constants.js';
 import {
   addMarketplace,
-  findMarketplace,
+  findMarketplaceRegistration,
   listMarketplacePlugins,
   updateMarketplace,
 } from '../../core/marketplace.js';
@@ -636,14 +636,14 @@ async function installSkillViaMarketplace(opts: {
 
   // Check if the marketplace is already registered at any scope (user or project)
   let marketplaceName: string | undefined;
-  const existingAnyScope = await findMarketplace(
+  const existingAnyScope = await findMarketplaceRegistration(
     parsed?.repo ?? from,
     sourceLocation,
     isUser ? undefined : workspacePath,
   );
 
   if (existingAnyScope) {
-    marketplaceName = existingAnyScope.name;
+    marketplaceName = existingAnyScope.key;
     await updateMarketplace(
       marketplaceName,
       isUser ? undefined : workspacePath,
@@ -1173,14 +1173,14 @@ async function selectAndInstallSkillsFromSource(opts: {
     const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
 
     let marketplaceName: string | undefined;
-    const existingAnyScope = await findMarketplace(
+    const existingAnyScope = await findMarketplaceRegistration(
       parsed?.repo ?? from,
       sourceLocation,
       isUser ? undefined : workspacePath,
     );
 
     if (existingAnyScope) {
-      marketplaceName = existingAnyScope.name;
+      marketplaceName = existingAnyScope.key;
       await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
     } else {
       const scopeOptions = isUser
@@ -1525,14 +1525,14 @@ async function installAllViaMarketplace(opts: {
   const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
 
   let marketplaceName: string | undefined;
-  const existingAnyScope = await findMarketplace(
+  const existingAnyScope = await findMarketplaceRegistration(
     parsed?.repo ?? from,
     sourceLocation,
     isUser ? undefined : workspacePath,
   );
 
   if (existingAnyScope) {
-    marketplaceName = existingAnyScope.name;
+    marketplaceName = existingAnyScope.key;
     await updateMarketplace(
       marketplaceName,
       isUser ? undefined : workspacePath,

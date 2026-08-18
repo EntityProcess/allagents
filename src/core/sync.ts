@@ -71,6 +71,7 @@ import {
   getRegistryPath,
   getProjectRegistryPath,
   getMarketplace,
+  getMarketplaceAccessError,
 } from './marketplace.js';
 import {
   loadSyncState,
@@ -2516,6 +2517,7 @@ export async function seedFetchCacheFromMarketplaces(
 
     const entry = await getMarketplace(result.name);
     if (!entry || entry.source.type !== 'github') continue;
+    if (getMarketplaceAccessError(entry)) continue;
 
     // Seed the bare key (owner/repo without branch)
     seedFetchCache(entry.source.location, entry.path);

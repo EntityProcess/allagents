@@ -44,6 +44,12 @@ const { getMarketplaceVersion } = await import(
   '../../../src/core/marketplace.js'
 );
 
+const localMarketplace = (path: string) => ({
+  name: 'local-test',
+  source: { type: 'local' as const, location: path },
+  path,
+});
+
 describe('getMarketplaceVersion', () => {
   it('should return hash and date for a git repo', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mp-version-'));
@@ -56,7 +62,7 @@ describe('getMarketplaceVersion', () => {
       execSync('git add .', { cwd: dir, env });
       execSync('git commit -m "initial"', { cwd: dir, env });
 
-      const result = (await getMarketplaceVersion(dir)) as {
+      const result = (await getMarketplaceVersion(localMarketplace(dir))) as {
         hash: string;
         date: Date;
       } | null;
@@ -71,7 +77,7 @@ describe('getMarketplaceVersion', () => {
   it('should return null for a non-git directory', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mp-version-'));
     try {
-      const result = await getMarketplaceVersion(dir);
+      const result = await getMarketplaceVersion(localMarketplace(dir));
       expect(result).toBeNull();
     } finally {
       await rm(dir, { recursive: true });
@@ -79,9 +85,24 @@ describe('getMarketplaceVersion', () => {
   });
 
   it('should return null for a non-existent path', async () => {
-    const result = await getMarketplaceVersion(
-      '/tmp/nonexistent-marketplace-path',
-    );
+    const path = '/tmp/nonexistent-marketplace-path';
+    const result = await getMarketplaceVersion(localMarketplace(path));
     expect(result).toBeNull();
+  });
+
+  it('should not inspect an unmanaged remote registry path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mp-version-'));
+    const env = gitEnv(dir);
+    try {
+      execSync('git init', { cwd: dir, env });
+      const result = await getMarketplaceVersion({
+        name: 'unsafe',
+        source: { type: 'github', location: 'owner/unsafe' },
+        path: dir,
+      });
+      expect(result).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true });
+    }
   });
 });

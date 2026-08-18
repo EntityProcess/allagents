@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdtemp,
+  rm,
+  mkdir,
+  readFile,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dump, load } from 'js-yaml';
@@ -122,6 +130,31 @@ describe('removeMarketplace cascade', () => {
     expect(result.removedUserPlugins).toBeUndefined();
   });
 
+  it('should distinguish own registry aliases from Object prototype names', async () => {
+    const localPath = join(testDir, 'local-marketplace');
+    await mkdir(localPath, { recursive: true });
+    const marketplaces = JSON.parse(JSON.stringify({
+      ['__proto__']: {
+        name: '__proto__',
+        source: { type: 'local', location: localPath },
+        path: localPath,
+      },
+    })) as MarketplaceRegistry['marketplaces'];
+    await writeRegistry(marketplaces);
+
+    const missingResult = await removeMarketplace('toString');
+    expect(missingResult.success).toBe(false);
+    expect(missingResult.error).toContain("Marketplace 'toString' not found");
+
+    const result = await removeMarketplace('__proto__');
+    expect(result.success).toBe(true);
+    expect(await lstat(localPath)).toBeDefined();
+    const registryContent = JSON.parse(
+      await readFile(join(testDir, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(Object.hasOwn(registryContent.marketplaces, '__proto__')).toBe(false);
+  });
+
   it('should succeed when no user plugins reference the marketplace', async () => {
     await writeRegistry({
       'my-marketplace': {
@@ -214,5 +247,62 @@ describe('removeMarketplace cascade', () => {
     expect(result.success).toBe(true);
     // Local source directory must NOT be deleted
     expect(existsSync(localSourceDir)).toBe(true);
+  });
+
+  it('should remove an unsafe remote entry without deleting its referenced path', async () => {
+    const markerPath = join(testDir, 'home-marker.txt');
+    await writeFile(markerPath, 'keep', 'utf-8');
+    await writeRegistry({
+      unsafe: {
+        name: 'unsafe',
+        source: { type: 'github', location: 'owner/unsafe' },
+        path: testDir,
+      },
+      unrelated: {
+        name: 'unrelated',
+        source: { type: 'local', location: '/tmp/unrelated' },
+        path: '/tmp/unrelated',
+      },
+    });
+
+    const result = await removeMarketplace('unsafe');
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([
+      `Refused to delete unmanaged marketplace path: ${testDir}`,
+    ]);
+    expect(await readFile(markerPath, 'utf-8')).toBe('keep');
+    const registry = JSON.parse(
+      await readFile(join(testDir, '.allagents', 'marketplaces.json'), 'utf-8'),
+    ) as MarketplaceRegistry;
+    expect(registry.marketplaces.unsafe).toBeUndefined();
+    expect(registry.marketplaces.unrelated).toBeDefined();
+  });
+
+  it('should warn without deleting a dangling remote cache symlink', async () => {
+    const cachePath = join(
+      testDir,
+      '.allagents',
+      'plugins',
+      'marketplaces',
+      'dangling',
+    );
+    await mkdir(join(cachePath, '..'), { recursive: true });
+    await symlink(join(testDir, 'missing-target'), cachePath, 'dir');
+    await writeRegistry({
+      dangling: {
+        name: 'dangling',
+        source: { type: 'github', location: 'owner/dangling' },
+        path: cachePath,
+      },
+    });
+
+    const result = await removeMarketplace('dangling');
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([
+      `Refused to delete unmanaged marketplace path: ${cachePath}`,
+    ]);
+    expect((await lstat(cachePath)).isSymbolicLink()).toBe(true);
   });
 });

@@ -6,6 +6,7 @@ import {
   updateMarketplace,
   listMarketplacePlugins,
   findMarketplace,
+  findMarketplaceRegistration,
   parsePluginSpec,
   getAllagentsDir,
   getMarketplaceVersion,
@@ -15,6 +16,7 @@ import {
   loadRegistryFromPath,
   type ScopedMarketplaceEntry,
   getMarketplaceOverrides,
+  getMarketplaceAccessError,
 } from '../../core/marketplace.js';
 import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
 import { loadSyncState } from '../../core/sync-state.js';
@@ -276,7 +278,7 @@ const marketplaceListCmd = command({
       if (isJsonMode()) {
         const enriched = await Promise.all(
           marketplaces.map(async (mp) => {
-            const version = await getMarketplaceVersion(mp.path);
+            const version = await getMarketplaceVersion(mp);
             return {
               ...mp,
               ...(version && {
@@ -327,7 +329,7 @@ const marketplaceListCmd = command({
         console.log(`  ❯ ${mp.name} (${mp.scope})`);
         console.log(`    Source: ${sourceLabel}`);
 
-        const version = await getMarketplaceVersion(mp.path);
+        const version = await getMarketplaceVersion(mp);
         if (version) {
           const ts = version.date.toISOString().replace('T', ' ').slice(0, 16);
           console.log(`    Version: ${version.hash} (${ts})`);
@@ -491,12 +493,16 @@ const marketplaceRemoveCmd = command({
             name,
             path: result.marketplace?.path,
             retainedUserPlugins: result.retainedUserPlugins ?? [],
+            warnings: result.warnings ?? [],
           },
         });
         return;
       }
 
       console.log(`\u2713 Marketplace '${name}' removed`);
+      for (const warning of result.warnings ?? []) {
+        console.warn(`Warning: ${warning}`);
+      }
       if (result.retainedUserPlugins && result.retainedUserPlugins.length > 0) {
         console.log(`\n  \u26A0 ${result.retainedUserPlugins.length} plugin(s) still reference this marketplace:`);
         for (const p of result.retainedUserPlugins) {
@@ -1408,8 +1414,9 @@ const pluginUpdateCmd = command({
 
         return {
           parsePluginSpec,
-          getMarketplace: (name: string, sourceLocation?: string) =>
-            findMarketplace(name, sourceLocation, workspacePath),
+          getMarketplaceRegistration: (name: string, sourceLocation?: string) =>
+            findMarketplaceRegistration(name, sourceLocation, workspacePath),
+          validateMarketplaceAccess: getMarketplaceAccessError,
           parseMarketplaceManifest,
           updateMarketplace: async (name: string) => {
             // Skip if already updated in this scope during this run
