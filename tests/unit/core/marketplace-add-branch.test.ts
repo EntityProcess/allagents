@@ -179,6 +179,62 @@ describe('addMarketplace branch support', () => {
     expect((await loadRegistry()).marketplaces).toEqual({});
   });
 
+  it('should allow local aliases that are valid registry keys but unsafe remote cache names', async () => {
+    const localPath = join(testHome, 'local-marketplace');
+    mkdirSync(localPath, { recursive: true });
+
+    for (const alias of ['foo:bar', 'CON']) {
+      const result = await addMarketplace(localPath, alias);
+      expect(result.success).toBe(true);
+      expect(result.marketplace?.name).toBe(alias);
+    }
+
+    const registry = await loadRegistry();
+    expect(registry.marketplaces['foo:bar']).toBeDefined();
+    expect(registry.marketplaces.CON).toBeDefined();
+    expect(cloneCalls).toHaveLength(0);
+  });
+
+  it('should persist a prototype-named remote alias as an own registry entry', async () => {
+    const result = await addMarketplace('owner/repo', '__proto__');
+
+    expect(result.success).toBe(true);
+    const registry = await loadRegistry();
+    expect(Object.hasOwn(registry.marketplaces, '__proto__')).toBe(true);
+    expect(registry.marketplaces['__proto__'].name).toBe('__proto__');
+    expect(existsSync(registry.marketplaces['__proto__'].path)).toBe(true);
+  });
+
+  it('should allow a platform-valid local manifest name', async () => {
+    const localPath = join(testHome, 'local-manifest-marketplace');
+    mkdirSync(join(localPath, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(localPath, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({ name: 'foo:bar', plugins: [] }),
+    );
+
+    const result = await addMarketplace(localPath);
+
+    expect(result.success).toBe(true);
+    expect(result.marketplace?.name).toBe('foo:bar');
+    expect((await loadRegistry()).marketplaces['foo:bar']).toBeDefined();
+    expect(cloneCalls).toHaveLength(0);
+  });
+
+  it('should reject ambiguous local aliases', async () => {
+    const localPath = join(testHome, 'local-marketplace');
+    mkdirSync(localPath, { recursive: true });
+
+    for (const alias of ['.', '..', 'bad/name', 'bad\\name', 'bad\u0001name']) {
+      const result = await addMarketplace(localPath, alias);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid marketplace name');
+    }
+
+    expect((await loadRegistry()).marketplaces).toEqual({});
+    expect(cloneCalls).toHaveLength(0);
+  });
+
   it('should reject broad local roots without modifying them', async () => {
     const markerPath = join(testHome, 'home-marker.txt');
     const homeLink = join(testHome, 'home-link');

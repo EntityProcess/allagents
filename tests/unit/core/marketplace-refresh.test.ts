@@ -36,9 +36,11 @@ mock.module('../../../src/core/git.js', () => ({
   cleanupTempDir: mock(() => Promise.resolve()),
 }));
 
-const { resolvePluginSpecWithAutoRegister } = await import(
-  '../../../src/core/marketplace.js'
-);
+const {
+  listMarketplacePlugins,
+  resolvePluginSpec,
+  resolvePluginSpecWithAutoRegister,
+} = await import('../../../src/core/marketplace.js');
 const { cloneTo } = await import('../../../src/core/git.js');
 const cloneToMock = cloneTo as ReturnType<typeof mock>;
 
@@ -192,6 +194,41 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     expect(registry.marketplaces['canonical-name'].path).toBe(mpPath);
   });
 
+  it('should refresh a malformed alias under its exact registry key', async () => {
+    const mpPath = setupMarketplace('repo-name', []);
+    setupRegistry({
+      alias: {
+        name: 'canonical-name',
+        source: { type: 'github', location: 'owner/repo-name' },
+        path: mpPath,
+      },
+    });
+    cloneToMock.mockImplementation(
+      (_url: string, path: string, _branch?: string) => {
+        mkdirSync(join(path, '.claude-plugin'), { recursive: true });
+        writeFileSync(
+          join(path, '.claude-plugin', 'marketplace.json'),
+          JSON.stringify({
+            name: 'canonical-name',
+            plugins: [{ name: 'new-plugin', source: './plugins/new-plugin' }],
+          }),
+        );
+        mkdirSync(join(path, 'plugins', 'new-plugin'), { recursive: true });
+        return Promise.resolve();
+      },
+    );
+
+    const result = await resolvePluginSpecWithAutoRegister('new-plugin@alias');
+
+    expect(result.success).toBe(true);
+    const registry = JSON.parse(
+      readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(Object.keys(registry.marketplaces)).toEqual(['alias']);
+    expect(registry.marketplaces.alias.name).toBe('canonical-name');
+    expect(registry.marketplaces.alias.path).toBe(mpPath);
+  });
+
   it('should not refresh when offline', async () => {
     const mpPath = setupMarketplace('test-mp', []);
     setupRegistry({
@@ -320,6 +357,47 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     });
   });
 
+  it('should restore the old cache without overwriting a concurrent registry repair', async () => {
+    const mpPath = setupMarketplace('test-mp', []);
+    writeFileSync(join(mpPath, 'old-marker.txt'), 'old');
+    setupRegistry({
+      'test-mp': {
+        name: 'test-mp',
+        source: { type: 'github', location: 'owner/test-mp' },
+        path: mpPath,
+      },
+    });
+    const repairedPath = join(testHome, 'repaired-local-marketplace');
+    mkdirSync(repairedPath, { recursive: true });
+    cloneToMock.mockImplementation((_url: string, path: string) => {
+      mkdirSync(path, { recursive: true });
+      setupRegistry({
+        'test-mp': {
+          name: 'test-mp',
+          source: { type: 'local', location: repairedPath },
+          path: repairedPath,
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const result = await resolvePluginSpecWithAutoRegister(
+      'missing-plugin@test-mp',
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("registration 'test-mp' changed during refresh");
+    expect(readFileSync(join(mpPath, 'old-marker.txt'), 'utf-8')).toBe('old');
+    const registry = JSON.parse(
+      readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(registry.marketplaces['test-mp']).toEqual({
+      name: 'test-mp',
+      source: { type: 'local', location: repairedPath },
+      path: repairedPath,
+    });
+  });
+
   it('should restore the old cache when replacing the staged clone fails', async () => {
     const mpPath = setupMarketplace('test-mp', []);
     writeFileSync(join(mpPath, 'old-marker.txt'), 'old');
@@ -374,6 +452,103 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
       source: { type: 'local', location: '/tmp/unrelated' },
       path: '/tmp/unrelated',
     });
+  });
+
+  it('should refuse to list plugins through an unsafe registry path', async () => {
+    mkdirSync(join(testHome, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(testHome, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'unsafe',
+        plugins: [{ name: 'should-not-be-read', source: './plugin' }],
+      }),
+    );
+    setupRegistry({
+      unsafe: {
+        name: 'unsafe',
+        source: { type: 'github', location: 'owner/unsafe' },
+        path: testHome,
+      },
+    });
+
+    const result = await listMarketplacePlugins('unsafe');
+
+    expect(result.plugins).toEqual([]);
+    expect(result.warnings).toEqual([
+      `Refused to access unmanaged marketplace path: ${testHome}`,
+    ]);
+  });
+
+  it('should refuse direct plugin resolution through an unsafe registry path', async () => {
+    mkdirSync(join(testHome, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(testHome, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'unsafe',
+        plugins: [{ name: 'should-not-be-read', source: './plugin' }],
+      }),
+    );
+    mkdirSync(join(testHome, 'plugin'), { recursive: true });
+    setupRegistry({
+      unsafe: {
+        name: 'unsafe',
+        source: { type: 'github', location: 'owner/unsafe' },
+        path: testHome,
+      },
+    });
+
+    const result = await resolvePluginSpec('should-not-be-read@unsafe');
+
+    expect(result).toBeNull();
+  });
+
+  it('should remove an unsafe project alias without deleting a safe user entry', async () => {
+    const workspacePath = join(testHome, 'workspace');
+    const safePath = join(testHome, 'safe-local-marketplace');
+    mkdirSync(safePath, { recursive: true });
+    setupRegistry({
+      victim: {
+        name: 'victim',
+        source: { type: 'local', location: safePath },
+        path: safePath,
+      },
+    });
+    const projectRegistryPath = join(
+      workspacePath,
+      '.allagents',
+      'marketplaces.json',
+    );
+    mkdirSync(join(projectRegistryPath, '..'), { recursive: true });
+    writeFileSync(
+      projectRegistryPath,
+      JSON.stringify({
+        version: 1,
+        marketplaces: {
+          alias: {
+            name: 'victim',
+            source: { type: 'github', location: 'owner/unsafe' },
+            path: testHome,
+          },
+        },
+      }),
+    );
+
+    const result = await resolvePluginSpecWithAutoRegister(
+      'missing@owner/unsafe',
+      { workspacePath },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("registration 'alias'");
+    const userRegistry = JSON.parse(
+      readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    const projectRegistry = JSON.parse(
+      readFileSync(projectRegistryPath, 'utf-8'),
+    );
+    expect(userRegistry.marketplaces.victim).toBeDefined();
+    expect(projectRegistry.marketplaces.alias).toBeUndefined();
+    expect(cloneToCalls).toHaveLength(0);
   });
 
   it('should remove a broad local registration without accessing its home directory', async () => {

@@ -130,6 +130,31 @@ describe('removeMarketplace cascade', () => {
     expect(result.removedUserPlugins).toBeUndefined();
   });
 
+  it('should distinguish own registry aliases from Object prototype names', async () => {
+    const localPath = join(testDir, 'local-marketplace');
+    await mkdir(localPath, { recursive: true });
+    const marketplaces = JSON.parse(JSON.stringify({
+      ['__proto__']: {
+        name: '__proto__',
+        source: { type: 'local', location: localPath },
+        path: localPath,
+      },
+    })) as MarketplaceRegistry['marketplaces'];
+    await writeRegistry(marketplaces);
+
+    const missingResult = await removeMarketplace('toString');
+    expect(missingResult.success).toBe(false);
+    expect(missingResult.error).toContain("Marketplace 'toString' not found");
+
+    const result = await removeMarketplace('__proto__');
+    expect(result.success).toBe(true);
+    expect(await lstat(localPath)).toBeDefined();
+    const registryContent = JSON.parse(
+      await readFile(join(testDir, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(Object.hasOwn(registryContent.marketplaces, '__proto__')).toBe(false);
+  });
+
   it('should succeed when no user plugins reference the marketplace', async () => {
     await writeRegistry({
       'my-marketplace': {

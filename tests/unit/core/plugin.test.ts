@@ -133,9 +133,12 @@ describe('updatePlugin', () => {
     return null;
   });
 
-  const mockGetMarketplace = mock(async (name: string) => {
+  const mockGetMarketplaceRegistration = mock(async (name: string) => {
     if (name === 'test-marketplace') {
-      return { name: 'test-marketplace', path: '/mock/marketplace/path', source: { type: 'github' } };
+      return {
+        key: 'test-marketplace',
+        entry: { name: 'test-marketplace', path: '/mock/marketplace/path', source: { type: 'github' as const, location: 'owner/test-marketplace' } },
+      };
     }
     return null;
   });
@@ -159,7 +162,8 @@ describe('updatePlugin', () => {
 
   const updateDeps: UpdatePluginDeps = {
     parsePluginSpec: mockParsePluginSpec as unknown as UpdatePluginDeps['parsePluginSpec'],
-    getMarketplace: mockGetMarketplace as unknown as UpdatePluginDeps['getMarketplace'],
+    getMarketplaceRegistration: mockGetMarketplaceRegistration as unknown as UpdatePluginDeps['getMarketplaceRegistration'],
+    validateMarketplaceAccess: () => undefined,
     parseMarketplaceManifest: mockParseManifest as unknown as UpdatePluginDeps['parseMarketplaceManifest'],
     updateMarketplace: mockUpdateMarketplace as unknown as UpdatePluginDeps['updateMarketplace'],
     fetchFn: mockFetchFn as unknown as UpdatePluginDeps['fetchFn'],
@@ -167,7 +171,7 @@ describe('updatePlugin', () => {
 
   beforeEach(() => {
     mockParsePluginSpec.mockClear();
-    mockGetMarketplace.mockClear();
+    mockGetMarketplaceRegistration.mockClear();
     mockParseManifest.mockClear();
     mockUpdateMarketplace.mockClear();
     mockFetchFn.mockClear();
@@ -196,5 +200,42 @@ describe('updatePlugin', () => {
     const result = await updatePlugin('external-plugin@test-marketplace', updateDeps);
     expect(result.success).toBe(true);
     expect(result.action).toBe('updated');
+  });
+
+  it('should update the exact registry key after source fallback lookup', async () => {
+    const deps: UpdatePluginDeps = {
+      ...updateDeps,
+      getMarketplaceRegistration: mock(async () => ({
+        key: 'legacy-alias',
+        entry: {
+          name: 'canonical-name',
+          path: '/mock/marketplace/path',
+          source: { type: 'github' as const, location: 'owner/test-marketplace' },
+        },
+      })),
+    };
+
+    const result = await updatePlugin(
+      'embedded-plugin@owner/test-marketplace',
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockUpdateMarketplace).toHaveBeenCalledWith('legacy-alias');
+    expect(mockUpdateMarketplace).not.toHaveBeenCalledWith('canonical-name');
+  });
+
+  it('should reject unsafe marketplace access before parsing its manifest', async () => {
+    const deps: UpdatePluginDeps = {
+      ...updateDeps,
+      validateMarketplaceAccess: () => 'Refused unsafe marketplace path',
+    };
+
+    const result = await updatePlugin('embedded-plugin@test-marketplace', deps);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Refused unsafe marketplace path');
+    expect(mockParseManifest).not.toHaveBeenCalled();
+    expect(mockUpdateMarketplace).not.toHaveBeenCalled();
   });
 });

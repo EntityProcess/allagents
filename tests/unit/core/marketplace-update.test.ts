@@ -240,4 +240,42 @@ describe('updateMarketplace', () => {
     const registry = JSON.parse(readFileSync(registryPath, 'utf-8'));
     expect(registry.marketplaces.unsafe).toBeUndefined();
   });
+
+  it('should remove an unsafe alias by exact key without rewriting a safe entry', async () => {
+    const safePath = join(testHome, 'safe-local-marketplace');
+    mkdirSync(safePath, { recursive: true });
+    const registryPath = join(testHome, '.allagents', 'marketplaces.json');
+    writeFileSync(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        marketplaces: {
+          victim: {
+            name: 'other',
+            source: { type: 'local', location: safePath },
+            path: safePath,
+          },
+          alias: {
+            name: 'victim',
+            source: { type: 'github', location: 'owner/unsafe' },
+            path: testHome,
+          },
+        },
+      }),
+    );
+
+    const results = await updateMarketplace();
+
+    expect(results).toHaveLength(2);
+    const registry = JSON.parse(readFileSync(registryPath, 'utf-8'));
+    expect(registry.marketplaces.alias).toBeUndefined();
+    expect(registry.marketplaces.victim).toEqual({
+      name: 'other',
+      source: { type: 'local', location: safePath },
+      path: safePath,
+    });
+    expect(registry.marketplaces.other).toBeUndefined();
+    expect(simpleGitCalls).toHaveLength(0);
+    expect(pullCalls).toHaveLength(0);
+  });
 });

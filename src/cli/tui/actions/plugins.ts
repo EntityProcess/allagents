@@ -17,7 +17,8 @@ import {
   addMarketplace,
   removeMarketplace,
   updateMarketplace,
-  findMarketplace,
+  findMarketplaceRegistration,
+  getMarketplaceAccessError,
   parsePluginSpec,
   type MarketplaceEntry,
   type MarketplacePluginsResult,
@@ -42,8 +43,9 @@ function createUpdateDeps(workspacePath?: string) {
   const updatedMarketplaces = new Set<string>();
   return {
     parsePluginSpec,
-    getMarketplace: (name: string, sourceLocation?: string) =>
-      findMarketplace(name, sourceLocation, workspacePath),
+    getMarketplaceRegistration: (name: string, sourceLocation?: string) =>
+      findMarketplaceRegistration(name, sourceLocation, workspacePath),
+    validateMarketplaceAccess: getMarketplaceAccessError,
     parseMarketplaceManifest,
     updateMarketplace: async (name: string) => {
       if (updatedMarketplaces.has(name)) {

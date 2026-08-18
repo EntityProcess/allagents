@@ -20,6 +20,7 @@ import {
 } from '../utils/plugin-path.js';
 import {
   getMarketplace,
+  getMarketplaceAccessError,
   isPluginSpec,
   parsePluginSpec,
   resolvePluginSpecWithAutoRegister,
@@ -1091,6 +1092,7 @@ export async function resolveGitHubIdentity(
 
     const marketplace = await getMarketplace(parsed.marketplaceName);
     if (!marketplace) return null;
+    if (getMarketplaceAccessError(marketplace)) return null;
 
     const manifestResult = await parseMarketplaceManifest(marketplace.path);
     if (!manifestResult.success) return null;

@@ -341,6 +341,39 @@ describe('scope-aware registry loading and saving', () => {
       expect(result.entries[0].source.location).toBe('/project/shared');
       expect(result.overrides).toEqual(['shared']);
     });
+
+    it('uses registry keys for project precedence when embedded names differ', async () => {
+      const userPath = join(tmpDir, 'user-marketplaces.json');
+      const projectPath = join(tmpDir, 'project-marketplaces.json');
+
+      writeFileSync(userPath, JSON.stringify({
+        version: 1,
+        marketplaces: {
+          alias: {
+            name: 'user-canonical',
+            source: { type: 'github', location: 'user-org/repo' },
+            path: '/user/repo',
+          },
+        },
+      } satisfies MarketplaceRegistry));
+      writeFileSync(projectPath, JSON.stringify({
+        version: 1,
+        marketplaces: {
+          alias: {
+            name: 'project-canonical',
+            source: { type: 'local', location: '/project/repo' },
+            path: '/project/repo',
+          },
+        },
+      } satisfies MarketplaceRegistry));
+
+      const result = await listMarketplacesWithScope(userPath, projectPath);
+
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0].name).toBe('project-canonical');
+      expect(result.entries[0].scope).toBe('project');
+      expect(result.overrides).toEqual(['alias']);
+    });
   });
 });
 
