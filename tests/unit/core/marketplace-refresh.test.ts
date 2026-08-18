@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  existsSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { stubHomeDir } from '../../helpers/env.js';
@@ -207,5 +213,39 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
 
     // Old directory should be gone (rm was called before clone)
     expect(existsSync(join(mpPath, 'old-marker.txt'))).toBe(false);
+  });
+
+  it('should preserve the registry entry when refresh fails', async () => {
+    const mpPath = setupMarketplace('test-mp', []);
+    setupRegistry({
+      'test-mp': {
+        name: 'test-mp',
+        source: { type: 'github', location: 'owner/test-mp' },
+        path: mpPath,
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+      },
+    });
+
+    const originalCloneTo = (
+      await import('../../../src/core/git.js')
+    ).cloneTo as ReturnType<typeof mock>;
+    originalCloneTo.mockImplementation(() =>
+      Promise.reject(new Error('clone failed')),
+    );
+
+    const result = await resolvePluginSpecWithAutoRegister(
+      'missing-plugin@test-mp',
+    );
+
+    expect(result.success).toBe(false);
+    const registry = JSON.parse(
+      readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
+    );
+    expect(registry.marketplaces['test-mp']).toEqual({
+      name: 'test-mp',
+      source: { type: 'github', location: 'owner/test-mp' },
+      path: mpPath,
+      lastUpdated: '2024-01-01T00:00:00.000Z',
+    });
   });
 });

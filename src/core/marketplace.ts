@@ -1053,9 +1053,8 @@ export interface ResolvePluginSpecResult {
 }
 
 /**
- * Refresh a GitHub marketplace by removing it from registry, deleting the
- * cached directory, and re-adding it (fresh clone).
- * Unlike removeMarketplace, this does NOT cascade-remove user plugins.
+ * Refresh a remote marketplace by deleting the cached directory and cloning
+ * it again. The registry entry is replaced only after the clone succeeds.
  */
 async function refreshMarketplace(
   marketplace: MarketplaceEntry,
@@ -1064,17 +1063,13 @@ async function refreshMarketplace(
     return { success: true, marketplace };
   }
 
-  // Remove from registry without cascade
-  const registry = await loadRegistry();
-  delete registry.marketplaces[marketplace.name];
-  await saveRegistry(registry);
-
   // Delete the cached directory
   if (existsSync(marketplace.path)) {
     await rm(marketplace.path, { recursive: true, force: true });
   }
 
-  // Re-add with original source (will clone fresh)
+  // Re-add with the original source. addMarketplace replaces the registry
+  // entry only after a fresh clone succeeds, preserving it on failure.
   if (marketplace.source.type === 'github') {
     const { owner, repo, branch } = parseLocation(marketplace.source.location);
     return addMarketplace(`${owner}/${repo}`, marketplace.name, branch);
