@@ -25,6 +25,37 @@ describe('resolveSkillFromUrl', () => {
     });
   });
 
+  it('resolves a SKILL.md blob URL to its containing skill directory', () => {
+    const result = resolveSkillFromUrl(
+      'https://github.com/anthropics/skills/blob/main/skills/pdf/SKILL.md',
+    );
+    expect(result).toEqual({
+      skill: 'pdf',
+      from: 'https://github.com/anthropics/skills/blob/main/skills/pdf',
+      parsed: expect.objectContaining({
+        owner: 'anthropics',
+        repo: 'skills',
+        branch: 'main',
+        subpath: 'skills/pdf',
+      }),
+    });
+  });
+
+  it('resolves a root SKILL.md blob URL to the repository root', () => {
+    const result = resolveSkillFromUrl(
+      'https://github.com/owner/root-skill/blob/main/SKILL.md',
+    );
+    expect(result).toEqual({
+      skill: 'root-skill',
+      from: 'https://github.com/owner/root-skill/blob/main',
+      parsed: {
+        owner: 'owner',
+        repo: 'root-skill',
+        branch: 'main',
+      },
+    });
+  });
+
   it('extracts skill name from URL with deep subpath', () => {
     const result = resolveSkillFromUrl(
       'https://github.com/org/repo/tree/main/plugins/my-plugin/skills/cool-skill',
