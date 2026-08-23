@@ -56,6 +56,42 @@ describe('fetchPlugin', () => {
     expect(result.cachePath).toContain('owner-repo');
   });
 
+  it('uses the branch encoded in a deep GitHub URL', async () => {
+    existsSyncMock.mockReturnValueOnce(false);
+
+    const result = await fetchPlugin(
+      'https://github.com/owner/repo/blob/main/skills/example',
+      {},
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.cachePath).toContain('owner-repo@main');
+    expect(cloneToMock).toHaveBeenCalledWith(
+      'https://github.com/owner/repo.git',
+      expect.stringContaining('owner-repo@main'),
+      'main',
+    );
+  });
+
+  it('prefers an explicit branch override to the URL branch', async () => {
+    existsSyncMock.mockReturnValueOnce(false);
+
+    const result = await fetchPlugin(
+      'https://github.com/owner/repo/blob/main/skills/example',
+      { branch: 'release' },
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.cachePath).toContain('owner-repo@release');
+    expect(cloneToMock).toHaveBeenCalledWith(
+      'https://github.com/owner/repo.git',
+      expect.stringContaining('owner-repo@release'),
+      'release',
+    );
+  });
+
   it('should handle authentication errors', async () => {
     existsSyncMock.mockReturnValueOnce(false);
     cloneToMock.mockRejectedValueOnce(

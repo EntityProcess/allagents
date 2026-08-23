@@ -157,7 +157,8 @@ export async function fetchPlugin(
   }
 
   const { owner, repo } = parsed;
-  const cachePath = getPluginCachePath(owner, repo, branch);
+  const effectiveBranch = branch ?? parsed.branch;
+  const cachePath = getPluginCachePath(owner, repo, effectiveBranch);
 
   // Return cached result if this repo was already fetched this session
   const cached = fetchCache.get(cachePath);
@@ -170,7 +171,7 @@ export async function fetchPlugin(
     owner,
     repo,
     offline,
-    branch,
+    effectiveBranch,
     deps,
   );
   fetchCache.set(cachePath, promise);
