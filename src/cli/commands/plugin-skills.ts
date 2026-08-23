@@ -166,7 +166,8 @@ function extractInlineRef(spec: string): string | undefined {
  * If the skill argument is a GitHub URL, extract the skill name and return
  * it along with the URL as the plugin source. Returns null if not a URL.
  *
- * With subpath: skill name = last path segment
+ * With subpath: skill name = last path segment. A URL ending in SKILL.md is
+ * normalized to its containing skill directory.
  * Without subpath: skill name = repo name (caller should use resolveSkillNameFromRepo to check frontmatter)
  */
 export function resolveSkillFromUrl(
@@ -183,7 +184,18 @@ export function resolveSkillFromUrl(
 
   if (parsed.subpath) {
     const segments = parsed.subpath.split('/').filter(Boolean);
-    const name = segments[segments.length - 1];
+    if (segments.at(-1) === 'SKILL.md') {
+      const from = skill.slice(0, -'/SKILL.md'.length);
+      const containingParsed = parseGitHubUrl(from);
+      if (!containingParsed) return null;
+      return {
+        skill: segments.at(-2) ?? parsed.repo,
+        from,
+        parsed: containingParsed,
+      };
+    }
+
+    const name = segments.at(-1);
     if (!name) return null;
     return { skill: name, from: skill, parsed };
   }
