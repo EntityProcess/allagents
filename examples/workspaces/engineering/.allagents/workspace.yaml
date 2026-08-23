@@ -1,0 +1,27 @@
+version: 2
+
+repositories: []
+
+plugins:
+  # Compound's diff/PR review is stronger than Matt's review skill. Keep it
+  # alongside Matt's complementary whole-codebase architecture survey.
+  - source: https://github.com/EveryInc/compound-engineering-plugin
+    skills:
+      - ce-promote
+      - ce-code-review
+
+  # These three capabilities are adapted locally because their upstream
+  # versions hard-invoke unselected helper skills. The allowlist keeps the
+  # public Matt skill set exact and prevents future additions from auto-enabling.
+  - source: ./matt-pocock-engineering
+    skills:
+      - engineering/wayfinder
+      - engineering/grill-with-docs
+      - engineering/improve-codebase-architecture
+
+  - source: https://github.com/NousResearch/hermes-agent
+    skills:
+      - research/llm-wiki
+
+clients:
+  - universal
