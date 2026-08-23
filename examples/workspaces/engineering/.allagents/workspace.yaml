@@ -3,12 +3,23 @@ version: 2
 repositories: []
 
 plugins:
-  # Compound's diff/PR review is stronger than Matt's review skill. Keep it
-  # alongside Matt's complementary whole-codebase architecture survey.
+  # Keep established Compound workflow entry points even where Matt overlaps.
+  # The shipping skills below are the hard dependency closure for work/debug.
   - source: https://github.com/EveryInc/compound-engineering-plugin
     skills:
       - ce-promote
       - ce-code-review
+      - ce-ideate
+      - ce-brainstorm
+      - ce-plan
+      - ce-simplify-code
+      - ce-debug
+      - ce-pov
+      - ce-work
+      - ce-commit
+      - ce-commit-push-pr
+      - ce-babysit-pr
+      - ce-resolve-pr-feedback
 
   # These three capabilities are adapted locally because their upstream
   # versions hard-invoke unselected helper skills. The allowlist keeps the
