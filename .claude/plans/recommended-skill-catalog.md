@@ -272,7 +272,7 @@ Invariants checked by unit and manifest validation:
 
 The `recommended` catalog is the name of the built-in catalog, not a claim that every member is generally recommended. It contains all entries below so users can search a known set while seeing each source's actual classification.
 
-In this plan, `optional` is the optional/experimental classification requested by the product contract. The final six rows are the useful candidates sourced from EntityProcess's `ai-research-wiki` and rechecked against their upstream repositories: Anthropic Skills, Addy Osmani Agent Skills, Superpowers, Context Engineering Skills, Elastic Docs Skills, and Anthropic Knowledge Work Plugins.
+In this plan, `optional` is the optional/experimental classification requested by the product contract. The final five rows are the broadly reusable candidates sourced from EntityProcess's `ai-research-wiki` and rechecked against their upstream repositories: Anthropic Skills, Addy Osmani Agent Skills, Superpowers, Context Engineering Skills, and Anthropic Knowledge Work Plugins.
 
 | Source ID | Repository | Effective ref | Approved root | Classification | Kind / install / bulk policy | Install source and audited facts |
 |---|---|---|---|---|---|---|
@@ -286,7 +286,6 @@ In this plan, `optional` is the optional/experimental classification requested b
 | `addyosmani-agent-skills` | `addyosmani/agent-skills` | `main` | `skills` | `recommended` | `subtree` / `direct-selective` / `allowed` | `addyosmani/agent-skills@main/skills`; 24 audited skills; MIT. |
 | `obra-superpowers` | `obra/superpowers` | `main` | `skills` | `recommended` | `subtree` / `direct-selective` / `allowed` | `obra/superpowers@main/skills`; 14 audited skills; MIT. |
 | `context-engineering-skills` | `muratcankoylan/Agent-Skills-for-Context-Engineering` | `main` | `skills` | `recommended` | `repository` / `direct-selective` / `allowed` | `muratcankoylan/Agent-Skills-for-Context-Engineering@main`, repository root plus qualified allowlist; 23 repo-wide audited skills; MIT. |
-| `elastic-docs-skills` | `elastic/elastic-docs-skills` | `main` | `skills` | `recommended` | `repository` / `direct-selective` / `allowed` | `elastic/elastic-docs-skills@main`, repository root plus qualified allowlist; 20 repo-wide audited skills; Apache-2.0. |
 | `anthropic-knowledge-work` | `anthropics/knowledge-work-plugins` | `main` | `.` | `recommended` | `marketplace` / `marketplace-selective` / `allowed` | `anthropics/knowledge-work-plugins@main`; local root marketplace plugins only. 212 audited skills; Apache-2.0. Unsupported remote URL/git-subdir entries fail closed. |
 
 Metadata is mandatory catalog data, not runtime inference:
@@ -303,7 +302,6 @@ Metadata is mandatory catalog data, not runtime inference:
 | `addyosmani-agent-skills` | `software-engineering` | Addy Osmani | `https://github.com/addyosmani` | `https://skills.addy.ie` | `MIT` |
 | `obra-superpowers` | `software-engineering` | obra | `https://github.com/obra` | `https://github.com/obra/superpowers` | `MIT` |
 | `context-engineering-skills` | `agent-engineering` | Murat Can Koylan | `https://github.com/muratcankoylan` | `https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering` | `MIT` |
-| `elastic-docs-skills` | `documentation` | Elastic | `https://github.com/elastic` | `https://elastic.github.io/elastic-docs-skills/` | `Apache-2.0` |
 | `anthropic-knowledge-work` | `knowledge-work` | Anthropic | `https://github.com/anthropics` | `https://github.com/anthropics/knowledge-work-plugins` | `Apache-2.0` |
 
 `null` SPDX values deliberately preserve licensing ambiguity or mixed/per-skill metadata. The order above is stable catalog order and the final relevance tie-breaker. Counts are audit evidence and drift sentinels, not runtime acceptance limits; upstream additions/removals do not automatically change classification or policy.
@@ -686,7 +684,6 @@ Do not run `git config` outside a disposable fixture. Record command, upstream H
 | addyosmani agent skills | Search and project-selective install | Exact `addyosmani/agent-skills@main/skills` source/descriptor, audited discovery count 24, complete selected directories, zero failures. |
 | obra superpowers | Search and project-selective install | Exact `obra/superpowers@main/skills` source/descriptor, audited discovery count 14, complete selected directories, zero failures. |
 | context engineering | Search and project-selective install | Descriptor preserves ref, approved `skills` root, and repository install root; audited discovery count 23, zero failures. |
-| Elastic docs skills | Search and project-selective install | Descriptor preserves ref, approved `skills` root, and repository install root; audited discovery count 20, zero failures. |
 | Anthropic knowledge work | Search and marketplace-selective install of local manifest entries | Descriptor preserves `anthropics/knowledge-work-plugins@main` root; audited search count 212; mandatory manifest validation passes for local entries; unsupported remote entries fail closed. |
 
 Count drift is not automatically a failure. If upstream HEAD differs from the audited revision, record the new count and classify every delta before updating catalog expectations. Missing assets, boundary leakage, manifest misresolution, config collapse, clone failure, or any copy failure is a release blocker.

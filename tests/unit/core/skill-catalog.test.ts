@@ -20,7 +20,6 @@ const EXPECTED_SOURCES = [
   ['addyosmani-agent-skills', 'addyosmani/agent-skills', 'main', 'skills', 'skills', 'recommended', 'subtree', 'direct-selective', 'allowed', 'MIT'],
   ['obra-superpowers', 'obra/superpowers', 'main', 'skills', 'skills', 'recommended', 'subtree', 'direct-selective', 'allowed', 'MIT'],
   ['context-engineering-skills', 'muratcankoylan/Agent-Skills-for-Context-Engineering', 'main', 'skills', '.', 'recommended', 'repository', 'direct-selective', 'allowed', 'MIT'],
-  ['elastic-docs-skills', 'elastic/elastic-docs-skills', 'main', 'skills', '.', 'recommended', 'repository', 'direct-selective', 'allowed', 'Apache-2.0'],
   ['anthropic-knowledge-work', 'anthropics/knowledge-work-plugins', 'main', '.', '.', 'recommended', 'marketplace', 'marketplace-selective', 'allowed', 'Apache-2.0'],
 ] as const;
 
