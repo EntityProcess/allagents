@@ -34,7 +34,12 @@ function globalItem(repo: string, path: string): SkillSearchItem {
 function recommendedItem(): SkillSearchItem {
   const source = RECOMMENDED_SKILL_CATALOG.sources.find(
     (entry) => entry.sourceId === 'hermes-core',
-  )!;
+  );
+  if (!source) {
+    throw new Error(
+      'Missing hermes-core source in the recommended catalog fixture.',
+    );
+  }
   const path = 'skills/research/wiki/SKILL.md';
   const identity = catalogSourceIdentity({
     catalog: 'recommended',

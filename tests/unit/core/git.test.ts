@@ -3,6 +3,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import simpleGit from 'simple-git';
+import {
+  isIsolatedTestRun,
+  runTestFileIsolated,
+} from '../../helpers/isolation.js';
 import { cloneTo, createGitEnv } from '../../../src/core/git.js';
 
 describe('createGitEnv', () => {
@@ -39,6 +43,10 @@ describe('createGitEnv', () => {
 
 describe('cloneTo', () => {
   it('clones into an empty destination with controlled LFS filters', async () => {
+    if (!isIsolatedTestRun(import.meta.path)) {
+      runTestFileIsolated(import.meta.path);
+      return;
+    }
     const fixture = await mkdtemp(join(tmpdir(), 'allagents-git-test-'));
     const upstream = join(fixture, 'upstream');
     const remote = join(fixture, 'origin.git');

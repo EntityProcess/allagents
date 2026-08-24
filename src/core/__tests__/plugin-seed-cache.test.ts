@@ -2,6 +2,10 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import simpleGit from 'simple-git';
+import {
+  isIsolatedTestRun,
+  runTestFileIsolated,
+} from '../../../tests/helpers/isolation.js';
 import { describe, it, expect, beforeEach } from 'bun:test';
 import {
   seedFetchCache,
@@ -87,6 +91,10 @@ describe('seedFetchCache', () => {
   });
 
   it('retains branch and commit provenance for a seeded repository', async () => {
+    if (!isIsolatedTestRun(import.meta.path)) {
+      runTestFileIsolated(import.meta.path);
+      return;
+    }
     const repository = await mkdtemp(join(tmpdir(), 'allagents-seed-cache-'));
     try {
       const git = simpleGit(repository);

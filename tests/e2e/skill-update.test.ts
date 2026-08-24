@@ -1,6 +1,5 @@
 import {
   afterEach,
-  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -45,7 +44,7 @@ interface RemoteSourceFixture {
 const decoder = new TextDecoder();
 const cliEntry = join(import.meta.dir, '..', '..', 'dist', 'index.js');
 
-beforeAll(() => {
+function buildCli(): void {
   const build = Bun.spawnSync(['bun', 'run', 'build'], {
     cwd: join(import.meta.dir, '..', '..'),
     stderr: 'pipe',
@@ -59,7 +58,9 @@ beforeAll(() => {
   if (!existsSync(cliEntry)) {
     throw new Error(`Built CLI not found at ${cliEntry}`);
   }
-});
+}
+
+buildCli();
 
 function cliEnv(fixture: SkillUpdateFixture): Record<string, string> {
   return {

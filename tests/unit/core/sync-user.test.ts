@@ -1,4 +1,8 @@
 import simpleGit from 'simple-git';
+import {
+  isIsolatedTestRun,
+  runTestFileIsolated,
+} from '../../helpers/isolation.js';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -194,9 +198,18 @@ describe('syncUserWorkspace', () => {
   });
 
   it('persists catalog provenance for an offline user-scoped sync', async () => {
+    if (!isIsolatedTestRun(import.meta.path)) {
+      runTestFileIsolated(import.meta.path);
+      return;
+    }
     const source = RECOMMENDED_SKILL_CATALOG.sources.find(
       (entry) => entry.sourceId === 'hermes-core',
-    )!;
+    );
+    if (!source) {
+      throw new Error(
+        'Missing hermes-core source in the recommended catalog fixture.',
+      );
+    }
     const cachePath = getPluginCachePath(
       'NousResearch',
       'hermes-agent',

@@ -20,7 +20,12 @@ function sourceGroup(
 ): SelectedSkillSearchSource {
   const source = RECOMMENDED_SKILL_CATALOG.sources.find(
     (entry) => entry.sourceId === sourceId,
-  )!;
+  );
+  if (!source) {
+    throw new Error(
+      `Missing ${sourceId} source in the recommended catalog fixture.`,
+    );
+  }
   return {
     catalogIdentity: `recommended:${source.sourceId}@${source.effectiveRef}#${source.approvedRoot}`,
     installDescriptor: catalogInstallDescriptor(source),
