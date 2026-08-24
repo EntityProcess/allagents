@@ -47,6 +47,7 @@ import {
 } from '../models/workspace-config.js';
 import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import {
+  formatPluginSource,
   getPluginCachePath,
   isGitHubUrl,
   parseGitHubUrl,
@@ -939,10 +940,18 @@ export function hasProjectSkillConfig(workspacePath: string): boolean {
 export function unitDisplayName(
   unit: SkillUpdatePreflight['units'][number],
 ): string {
-  const sources = [
-    ...new Set(unit.installations.map((entry) => entry.rawSource)),
+  const labels = [
+    ...new Set(
+      unit.installations.flatMap((installation) =>
+        installation.standaloneSkillSource
+          ? installation.skills
+              .filter((skill) => skill.enabled)
+              .map((skill) => skill.name)
+          : [formatPluginSource(installation.rawSource)],
+      ),
+    ),
   ];
-  return sources.length > 0 ? sources.join(', ') : basename(unit.id);
+  return labels.length > 0 ? labels.join(', ') : basename(unit.id);
 }
 
 export interface SkillUpdateSummary {
