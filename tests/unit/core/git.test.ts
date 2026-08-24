@@ -50,7 +50,6 @@ describe('cloneTo', () => {
     }
     const fixture = await mkdtemp(join(tmpdir(), 'allagents-git-test-'));
     const upstream = join(fixture, 'upstream');
-    const remote = join(fixture, 'origin.git');
     const destination = join(fixture, 'clone');
     const gitConfig = join(fixture, 'gitconfig');
     const originalGitConfig = process.env.GIT_CONFIG_GLOBAL;
@@ -72,9 +71,6 @@ describe('cloneTo', () => {
       const committedPointer = Buffer.from(
         await git.show(['HEAD:asset.bin']),
       );
-      await simpleGit().raw(['init', '--bare', remote]);
-      await git.addRemote('origin', remote);
-      await git.push(['-u', 'origin', 'main']);
 
       await writeFile(
         gitConfig,
@@ -82,7 +78,7 @@ describe('cloneTo', () => {
       );
       process.env.GIT_CONFIG_GLOBAL = gitConfig;
 
-      await cloneTo(remote, destination, 'main');
+      await cloneTo(upstream, destination, 'main');
 
       expect(await readFile(join(destination, 'tracked.txt'), 'utf8')).toBe(
         'clean clone\n',
