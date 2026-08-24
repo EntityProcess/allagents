@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   SkillSearchError,
+  buildCatalogSearchQueries,
   buildSearchQueries,
   couldBeOwner,
   qualifiedName,
@@ -8,6 +9,7 @@ import {
   searchSkills,
   validateSkillSearchArgs,
 } from '../../../src/core/skill-search.js';
+import { RECOMMENDED_SKILL_CATALOG } from '../../../src/core/skill-catalog.js';
 
 /**
  * Helper: build a fake `fetch` that dispatches per Code Search query.
@@ -874,5 +876,297 @@ describe('searchSkills 401 error', () => {
       expect((error as SkillSearchError).kind).toBe('api');
       expect((error as SkillSearchError).message).toContain('gh auth login');
     }
+  });
+});
+
+interface CatalogSearchFixtureItem {
+  path: string;
+  sha: string;
+  repository: { full_name: string; description?: string };
+}
+
+function makeCatalogFetch(
+  search: (query: string, page: number) => {
+    items: CatalogSearchFixtureItem[];
+    total?: number;
+    incomplete?: boolean;
+    status?: number;
+  },
+  options: { mismatchedRepo?: string; calls?: string[] } = {},
+): typeof fetch {
+  const sourceByRepo = new Map(
+    RECOMMENDED_SKILL_CATALOG.sources.map((source) => [
+      source.repo.toLowerCase(),
+      source,
+    ]),
+  );
+  return (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    options.calls?.push(url.toString());
+    if (url.pathname === '/search/code') {
+      const response = search(
+        url.searchParams.get('q') ?? '',
+        Number(url.searchParams.get('page') ?? '1'),
+      );
+      return {
+        ok: !response.status || response.status < 400,
+        status: response.status ?? 200,
+        json: async () => ({
+          total_count: response.total ?? response.items.length,
+          incomplete_results: response.incomplete ?? false,
+          items: response.items,
+          ...(response.status ? { message: 'fixture failure' } : {}),
+        }),
+      };
+    }
+    const refMatch = url.pathname.match(
+      /^\/repos\/([^/]+\/[^/]+)\/git\/ref\/heads\/([^/]+)$/,
+    );
+    if (refMatch?.[1]) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ object: { sha: `head-${refMatch[1]}` } }),
+      };
+    }
+    if (url.pathname.includes('/git/blobs/')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ content: '# no frontmatter', encoding: 'utf-8' }),
+      };
+    }
+    const repoMatch = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)$/);
+    const repo = repoMatch?.[1];
+    const source = repo ? sourceByRepo.get(repo.toLowerCase()) : undefined;
+    if (repo && source) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          full_name: source.repo,
+          default_branch:
+            source.repo.toLowerCase() === options.mismatchedRepo?.toLowerCase()
+              ? 'unexpected'
+              : source.effectiveRef,
+          stargazers_count: 0,
+        }),
+      };
+    }
+    throw new Error(`Unexpected catalog fixture URL: ${url}`);
+  }) as unknown as typeof fetch;
+}
+
+describe('catalog query construction', () => {
+  it('batches only exact catalog repositories under the query ceiling', () => {
+    const queries = buildCatalogSearchQueries('build worker');
+    const expectedRepos = new Set(
+      RECOMMENDED_SKILL_CATALOG.sources.map((source) =>
+        source.repo.toLowerCase(),
+      ),
+    );
+    for (const query of queries) {
+      expect(query.q.length).toBeLessThanOrEqual(240);
+      expect(query.q).not.toContain('user:');
+      expect(query.q).not.toContain(' OR ');
+      expect(
+        [...query.q.matchAll(/repo:([^\s]+)/g)].map((match) => match[1]),
+      ).toEqual(query.repositories);
+      expect(query.repositories.map((repo) => repo.toLowerCase()).every((repo) => expectedRepos.has(repo))).toBe(true);
+    }
+    const primaryRepos = queries
+      .filter((query) => query.required)
+      .flatMap((query) => query.repositories.map((repo) => repo.toLowerCase()));
+    expect(new Set(primaryRepos)).toEqual(expectedRepos);
+    expect(primaryRepos.filter((repo) => repo === 'nousresearch/hermes-agent')).toHaveLength(1);
+  });
+});
+
+describe('catalog search boundaries', () => {
+  it('rejects unknown catalogs and owner conflicts before token resolution', async () => {
+    let tokenCalls = 0;
+    const tokenResolver = async () => {
+      tokenCalls += 1;
+      return undefined;
+    };
+    await expect(
+      searchSkills(
+        'docs',
+        { catalog: 'unknown' as 'recommended' },
+        { tokenResolver },
+      ),
+    ).rejects.toThrow('Unknown skill catalog "unknown"');
+    await expect(
+      searchSkills(
+        'docs',
+        { catalog: 'recommended', owner: 'anthropics' },
+        { tokenResolver },
+      ),
+    ).rejects.toThrow('--catalog and --owner cannot be used together');
+    expect(tokenCalls).toBe(0);
+  });
+
+  it('preflights each repository once while preserving both Hermes identities', async () => {
+    const calls: string[] = [];
+    const fetch = makeCatalogFetch(
+      () => ({
+        items: [
+          {
+            path: 'skills/browser/SKILL.md',
+            sha: 'core',
+            repository: { full_name: 'NousResearch/hermes-agent' },
+          },
+          {
+            path: 'optional-skills/browser/SKILL.md',
+            sha: 'optional',
+            repository: { full_name: 'NousResearch/hermes-agent' },
+          },
+        ],
+      }),
+      { calls },
+    );
+    const result = await searchSkills(
+      'browser',
+      { catalog: 'recommended', limit: 20 },
+      { fetch, logger: silentLogger, tokenResolver: async () => undefined },
+    );
+    expect(result.items.map((item) => item.catalog?.identity)).toEqual([
+      'recommended:hermes-core@main#skills',
+      'recommended:hermes-optional@main#optional-skills',
+    ]);
+    expect(
+      calls.filter(
+        (call) =>
+          new URL(call).pathname === '/repos/NousResearch/hermes-agent',
+      ),
+    ).toHaveLength(2);
+    expect(result.items[0]?.installSource).toBe(
+      'NousResearch/hermes-agent@main/skills',
+    );
+    expect(result.items[1]?.installSource).toBe(
+      'NousResearch/hermes-agent@main/optional-skills',
+    );
+  });
+
+  it('fails default-ref drift before any code search and never falls back', async () => {
+    const calls: string[] = [];
+    const fetch = makeCatalogFetch(() => ({ items: [] }), {
+      mismatchedRepo: 'NousResearch/hermes-agent',
+      calls,
+    });
+    await expect(
+      searchSkills(
+        'browser',
+        { catalog: 'recommended' },
+        { fetch, logger: silentLogger, tokenResolver: async () => undefined },
+      ),
+    ).rejects.toThrow('no longer resolves');
+    expect(calls.some((call) => new URL(call).pathname === '/search/code')).toBe(
+      false,
+    );
+  });
+
+  it('filters forged repositories and segment-prefix paths before processing', async () => {
+    const invalid = Array.from({ length: 100 }, (_, index) => ({
+      path:
+        index % 2 === 0
+          ? `skills-old/browser-${index}/SKILL.md`
+          : `optional-skills-old/browser-${index}/SKILL.md`,
+      sha: `invalid-${index}`,
+      repository: { full_name: 'NousResearch/hermes-agent' },
+    }));
+    const fetch = makeCatalogFetch((query, page) => {
+      if (query.includes('filename:SKILL.md browser') && page === 2) {
+        return {
+          items: [
+            {
+              path: 'skills/browser/SKILL.md',
+              sha: 'valid-later',
+              repository: { full_name: 'NousResearch/hermes-agent' },
+            },
+            {
+              path: 'skills/browser/SKILL.md',
+              sha: 'forged',
+              repository: { full_name: 'attacker/repo' },
+            },
+          ],
+          total: 102,
+        };
+      }
+      return { items: invalid, total: 102 };
+    });
+    const result = await searchSkills(
+      'browser',
+      { catalog: 'recommended', limit: 40 },
+      { fetch, logger: silentLogger, tokenResolver: async () => undefined },
+    );
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.path).toBe('skills/browser/SKILL.md');
+    expect(result.items[0]?.catalog?.discovery.repositoryHeadSha).toBe(
+      'head-NousResearch/hermes-agent',
+    );
+  });
+
+  it('keeps bounded empty results empty and exposes non-install policies', async () => {
+    const empty = await searchSkills(
+      'nothing',
+      { catalog: 'recommended' },
+      {
+        fetch: makeCatalogFetch(() => ({ items: [] })),
+        logger: silentLogger,
+        tokenResolver: async () => undefined,
+      },
+    );
+    expect(empty.items).toEqual([]);
+
+    const policies = await searchSkills(
+      'skill',
+      { catalog: 'recommended', limit: 20 },
+      {
+        fetch: makeCatalogFetch(() => ({
+          items: [
+            {
+              path: 'some-skill/SKILL.md',
+              sha: 'gstack',
+              repository: { full_name: 'garrytan/gstack' },
+            },
+            {
+              path: 'skills/some-skill/SKILL.md',
+              sha: 'composio',
+              repository: {
+                full_name: 'ComposioHQ/awesome-claude-skills',
+              },
+            },
+            {
+              path: 'templates/some-skill/SKILL.md',
+              sha: 'paperclip-outside',
+              repository: { full_name: 'paperclipai/companies' },
+            },
+            {
+              path: 'skills/company-creator/SKILL.md',
+              sha: 'paperclip-inside',
+              repository: {
+                full_name: 'paperclipai/companies',
+                description: 'Skill collection',
+              },
+            },
+          ],
+        })),
+        logger: silentLogger,
+        tokenResolver: async () => undefined,
+      },
+    );
+    const bySha = new Map(policies.items.map((item) => [item.sha, item]));
+    expect(bySha.get('gstack')?.installation.policy).toBe('external-installer');
+    expect(bySha.get('composio')?.installation.policy).toBe('search-only');
+    expect(bySha.get('paperclip-outside')?.installation.policy).toBe(
+      'search-only',
+    );
+    expect(bySha.get('paperclip-inside')?.installation.policy).toBe(
+      'direct-selective',
+    );
+    expect(bySha.get('paperclip-inside')?.installSelector).toBe(
+      'company-creator',
+    );
   });
 });

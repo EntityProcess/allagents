@@ -3,6 +3,10 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import {
+  CatalogInstallDescriptorSchema,
+  type CatalogInstallDescriptor,
+} from '../models/skill-catalog.js';
 import type {
   ClientEntry,
   PluginEntry,
@@ -25,6 +29,11 @@ import {
   parsePluginSpec,
   resolvePluginSpecWithAutoRegister,
 } from './marketplace.js';
+import {
+  RECOMMENDED_SKILL_CATALOG,
+  catalogInstallDescriptor,
+  catalogSourceIdentity,
+} from './skill-catalog.js';
 
 /**
  * Default clients for auto-created project workspace.yaml.
@@ -41,6 +50,11 @@ export interface ModifyResult {
   autoRegistered?: string; // marketplace name if auto-registered
   normalizedPlugin?: string; // plugin spec after normalization (e.g., plugin@manifest-name)
   replaced?: boolean; // true if an existing plugin was replaced with --force
+}
+
+export interface SourceAllowlistUpsertOptions {
+  identity?: 'repository-promoting' | 'catalog-exact';
+  catalogSource?: CatalogInstallDescriptor;
 }
 
 /**
@@ -118,7 +132,9 @@ export async function addPlugin(
 
   // Handle plugin@marketplace format
   if (isPluginSpec(plugin)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(plugin, { workspacePath });
+    const resolved = await resolvePluginSpecWithAutoRegister(plugin, {
+      workspacePath,
+    });
     if (!resolved.success) {
       return {
         success: false,
@@ -420,7 +436,8 @@ export function extractPluginNames(pluginSource: string): string[] {
       if (ownerRepo !== parsed.repo) names.push(ownerRepo);
       if (parsed.subpath) {
         const subpathName = parsed.subpath.split('/').filter(Boolean).pop();
-        if (subpathName && !names.includes(subpathName)) names.push(subpathName);
+        if (subpathName && !names.includes(subpathName))
+          names.push(subpathName);
       }
       if (!names.includes(parsed.repo)) names.push(parsed.repo);
       if (!names.includes(ownerRepo)) names.push(ownerRepo);
@@ -457,7 +474,8 @@ export function ensureObjectPluginEntry(
   index: number,
 ): Exclude<PluginEntry, string> {
   const entry = config.plugins[index];
-  if (entry === undefined) throw new Error(`Plugin entry at index ${index} not found`);
+  if (entry === undefined)
+    throw new Error(`Plugin entry at index ${index} not found`);
   if (typeof entry === 'string') {
     const objectEntry: Exclude<PluginEntry, string> = { source: entry };
     config.plugins[index] = objectEntry;
@@ -539,7 +557,9 @@ export function canonicalizeGitHubPluginSource(
     {
       owner: current.owner,
       repo: current.repo,
-      ...(current.branch || next.branch ? { branch: current.branch ?? next.branch } : {}),
+      ...(current.branch || next.branch
+        ? { branch: current.branch ?? next.branch }
+        : {}),
       ...(sharedParts.length > 0 ? { subpath: sharedParts.join('/') } : {}),
     },
     currentSource,
@@ -556,7 +576,9 @@ async function findPluginEntryByGitHubIdentity(
   for (let i = 0; i < config.plugins.length; i++) {
     const entry = config.plugins[i];
     if (!entry) continue;
-    const existingIdentity = await resolveGitHubIdentity(getPluginSource(entry));
+    const existingIdentity = await resolveGitHubIdentity(
+      getPluginSource(entry),
+    );
     if (existingIdentity === identity) return i;
   }
 
@@ -567,10 +589,108 @@ export async function upsertGitHubPluginSourceAllowlistInConfig(
   config: WorkspaceConfig,
   source: string,
   skillNames: string[],
+  options: SourceAllowlistUpsertOptions = {},
 ): Promise<ModifyResult> {
   const normalizedSkills = uniqueSkillNames(skillNames);
-  const exactIndex = config.plugins.findIndex((entry) => getPluginSource(entry) === source);
+  if (options.identity === 'catalog-exact') {
+    const parsedDescriptor = CatalogInstallDescriptorSchema.safeParse(
+      options.catalogSource,
+    );
+    if (!parsedDescriptor.success) {
+      return {
+        success: false,
+        error:
+          'Catalog-exact source updates require a valid catalog descriptor.',
+      };
+    }
+    const descriptor = parsedDescriptor.data;
+    const catalogEntry = RECOMMENDED_SKILL_CATALOG.sources.find(
+      (entry) => entry.sourceId === descriptor.sourceId,
+    );
+    if (
+      !catalogEntry ||
+      JSON.stringify(catalogInstallDescriptor(catalogEntry)) !==
+        JSON.stringify(descriptor)
+    ) {
+      return {
+        success: false,
+        error: `Catalog descriptor drift for ${descriptor.sourceId}.`,
+      };
+    }
+    if (
+      descriptor.sourceKind !== 'marketplace' &&
+      source !== descriptor.installSource
+    ) {
+      return {
+        success: false,
+        error: 'Catalog direct-install source does not match its descriptor.',
+      };
+    }
+    if (descriptor.sourceKind === 'marketplace' && !isPluginSpec(source)) {
+      return {
+        success: false,
+        error:
+          'Catalog marketplace entries require a plugin@marketplace source.',
+      };
+    }
 
+    const targetIdentity = catalogSourceIdentity({
+      catalog: descriptor.catalog,
+      sourceId: descriptor.sourceId,
+      effectiveRef: descriptor.effectiveRef,
+      approvedRoot: descriptor.approvedRoot,
+    });
+    for (let index = 0; index < config.plugins.length; index += 1) {
+      const existing = config.plugins[index];
+      if (!existing) continue;
+      if (typeof existing === 'string') {
+        if (existing !== source) continue;
+        config.plugins[index] = {
+          source,
+          skills: normalizedSkills,
+          catalogSource: descriptor,
+        };
+        return { success: true, normalizedPlugin: source };
+      }
+      if (existing.source !== source) continue;
+      if (existing.catalogSource) {
+        const existingIdentity = catalogSourceIdentity({
+          catalog: existing.catalogSource.catalog,
+          sourceId: existing.catalogSource.sourceId,
+          effectiveRef: existing.catalogSource.effectiveRef,
+          approvedRoot: existing.catalogSource.approvedRoot,
+        });
+        if (
+          existingIdentity !== targetIdentity ||
+          JSON.stringify(existing.catalogSource) !== JSON.stringify(descriptor)
+        ) {
+          return {
+            success: false,
+            error: `Conflicting catalog descriptor for source ${source}.`,
+          };
+        }
+      }
+      const existingSkills = Array.isArray(existing.skills)
+        ? existing.skills
+        : [];
+      existing.skills = uniqueSkillNames([
+        ...existingSkills,
+        ...normalizedSkills,
+      ]);
+      existing.catalogSource = descriptor;
+      return { success: true, normalizedPlugin: source };
+    }
+    config.plugins.push({
+      source,
+      skills: normalizedSkills,
+      catalogSource: descriptor,
+    });
+    return { success: true, normalizedPlugin: source };
+  }
+
+  const exactIndex = config.plugins.findIndex(
+    (entry) => getPluginSource(entry) === source,
+  );
   if (exactIndex !== -1) {
     const entry = ensureObjectPluginEntry(config, exactIndex);
     entry.source = source;
@@ -755,7 +875,10 @@ export async function removeDisabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -931,7 +1054,10 @@ export async function removeEnabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -1006,7 +1132,8 @@ export async function setPluginSkillsMode(
       entry.skills = [...skillNames];
     } else {
       // For blocklist, clear the field if no exclusions (= all enabled)
-      entry.skills = skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
+      entry.skills =
+        skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
     }
 
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
@@ -1023,6 +1150,7 @@ export async function upsertGitHubPluginSourceAllowlist(
   source: string,
   skillNames: string[],
   workspacePath: string = process.cwd(),
+  options: SourceAllowlistUpsertOptions = {},
 ): Promise<ModifyResult> {
   await ensureWorkspace(workspacePath);
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
@@ -1040,6 +1168,7 @@ export async function upsertGitHubPluginSourceAllowlist(
       config,
       source,
       skillNames,
+      options,
     );
     if (!result.success) return result;
 

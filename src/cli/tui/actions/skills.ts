@@ -1,5 +1,9 @@
 import * as p from '@clack/prompts';
-import { getAllSkillsFromPlugins, discoverSkillNames, type SkillInfo } from '../../../core/skills.js';
+import {
+  getAllSkillsFromPlugins,
+  discoverSkillNames,
+  type SkillInfo,
+} from '../../../core/skills.js';
 import {
   removeDisabledSkill,
   addEnabledSkill,
@@ -16,7 +20,11 @@ import {
   listMarketplaces,
   listMarketplacePlugins,
 } from '../../../core/marketplace.js';
-import { searchSkills, qualifiedName, type SkillSearchItem } from '../../../core/skill-search.js';
+import {
+  searchSkills,
+  qualifiedName,
+  type SkillSearchItem,
+} from '../../../core/skill-search.js';
 import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
@@ -88,18 +96,22 @@ interface MarketplaceSkillPreview {
  * Load skills available from all configured marketplaces.
  * Scans each marketplace plugin's local directory for skills.
  */
-async function loadMarketplaceSkills(cache?: TuiCache): Promise<MarketplaceSkillPreview[]> {
+async function loadMarketplaceSkills(
+  cache?: TuiCache,
+): Promise<MarketplaceSkillPreview[]> {
   const previews: MarketplaceSkillPreview[] = [];
 
   try {
     const cachedMarketplaces = cache?.getMarketplaces();
-    const marketplaces = cachedMarketplaces ?? await listMarketplaces();
+    const marketplaces = cachedMarketplaces ?? (await listMarketplaces());
     if (!cachedMarketplaces) cache?.setMarketplaces(marketplaces);
 
     for (const marketplace of marketplaces) {
       const cachedPlugins = cache?.getMarketplacePlugins(marketplace.name);
-      const result = cachedPlugins ?? await listMarketplacePlugins(marketplace.name);
-      if (!cachedPlugins) cache?.setMarketplacePlugins(marketplace.name, result);
+      const result =
+        cachedPlugins ?? (await listMarketplacePlugins(marketplace.name));
+      if (!cachedPlugins)
+        cache?.setMarketplacePlugins(marketplace.name, result);
 
       for (const plugin of result.plugins) {
         const skillNames = await discoverSkillNames(plugin.path);
@@ -110,7 +122,8 @@ async function loadMarketplaceSkills(cache?: TuiCache): Promise<MarketplaceSkill
             marketplaceName: marketplace.name,
             pluginRef: `${plugin.name}@${marketplace.name}`,
           };
-          if (plugin.description) preview.pluginDescription = plugin.description;
+          if (plugin.description)
+            preview.pluginDescription = plugin.description;
           previews.push(preview);
         }
       }
@@ -126,7 +139,10 @@ async function loadMarketplaceSkills(cache?: TuiCache): Promise<MarketplaceSkill
  * Skills — lets user toggle which skills are enabled/disabled via multiselect.
  * When no skills are installed, shows marketplace skills for discovery.
  */
-export async function runSkills(context: TuiContext, cache?: TuiCache): Promise<void> {
+export async function runSkills(
+  context: TuiContext,
+  cache?: TuiCache,
+): Promise<void> {
   try {
     const skills = await loadAllSkills(context);
 
@@ -204,7 +220,9 @@ async function runToggleSkills(
   const selectedSet = new Set(selected);
 
   // Compute diff
-  const toDisable = skills.filter((s) => !s.disabled && !selectedSet.has(s.key));
+  const toDisable = skills.filter(
+    (s) => !s.disabled && !selectedSet.has(s.key),
+  );
   const toEnable = skills.filter((s) => s.disabled && selectedSet.has(s.key));
 
   if (toDisable.length === 0 && toEnable.length === 0) {
@@ -220,7 +238,8 @@ async function runToggleSkills(
 
   // Disable newly unchecked skills
   for (const skill of toDisable) {
-    const effectivePath = skill.scope === 'user' ? getHomeDir() : context.workspacePath;
+    const effectivePath =
+      skill.scope === 'user' ? getHomeDir() : context.workspacePath;
     if (effectivePath) {
       await removeInstalledSkill({
         targetSkill: skill,
@@ -264,10 +283,14 @@ async function runToggleSkills(
 
   const changes: string[] = [];
   for (const skill of toEnable) {
-    changes.push(`✓ Enabled: ${skill.name} (${skill.pluginName}) [${skill.scope}]`);
+    changes.push(
+      `✓ Enabled: ${skill.name} (${skill.pluginName}) [${skill.scope}]`,
+    );
   }
   for (const skill of toDisable) {
-    changes.push(`✗ Disabled: ${skill.name} (${skill.pluginName}) [${skill.scope}]`);
+    changes.push(
+      `✗ Disabled: ${skill.name} (${skill.pluginName}) [${skill.scope}]`,
+    );
   }
   p.note(changes.join('\n'), 'Updated');
 }
@@ -304,13 +327,20 @@ async function runBrowseMarketplaceSkills(
   }
 
   // Group by plugin for display
-  const byPlugin = new Map<string, { ref: string; description?: string | undefined; skills: string[] }>();
+  const byPlugin = new Map<
+    string,
+    { ref: string; description?: string | undefined; skills: string[] }
+  >();
   for (const skill of marketplaceSkills) {
     const existing = byPlugin.get(skill.pluginRef);
     if (existing) {
       existing.skills.push(skill.skillName);
     } else {
-      const entry: { ref: string; description?: string | undefined; skills: string[] } = {
+      const entry: {
+        ref: string;
+        description?: string | undefined;
+        skills: string[];
+      } = {
         ref: skill.pluginRef,
         skills: [skill.skillName],
       };
@@ -343,7 +373,9 @@ async function runBrowseMarketplaceSkills(
 
   // Check if plugin is already installed in either scope
   const workspacePath = context.workspacePath ?? process.cwd();
-  const isInstalledProject = context.workspacePath ? await hasPlugin(selected, workspacePath) : false;
+  const isInstalledProject = context.workspacePath
+    ? await hasPlugin(selected, workspacePath)
+    : false;
   const isInstalledUser = await hasUserPlugin(selected);
 
   if (isInstalledProject || isInstalledUser) {
@@ -366,7 +398,10 @@ async function runBrowseMarketplaceSkills(
 /**
  * Search GitHub for skills by keyword, display results, and install a selected plugin.
  */
-async function runSearchOnlineSkills(context: TuiContext, cache?: TuiCache): Promise<void> {
+async function runSearchOnlineSkills(
+  context: TuiContext,
+  cache?: TuiCache,
+): Promise<void> {
   const query = await text({
     message: 'Search for skills on GitHub',
     placeholder: 'e.g. commit, deploy, aws',
@@ -385,7 +420,10 @@ async function runSearchOnlineSkills(context: TuiContext, cache?: TuiCache): Pro
     items = result.items;
   } catch (error) {
     s.stop('Search failed');
-    p.note(error instanceof Error ? error.message : String(error), 'Search Error');
+    p.note(
+      error instanceof Error ? error.message : String(error),
+      'Search Error',
+    );
     return;
   }
 
@@ -397,11 +435,12 @@ async function runSearchOnlineSkills(context: TuiContext, cache?: TuiCache): Pro
   }
 
   // One option per skill, showing name and repo
-  const options: Array<{ label: string; value: string; hint?: string }> = items.map((item) => ({
-    label: qualifiedName(item),
-    value: item.repo,
-    hint: item.repo + (item.description ? ` · ${item.description}` : ''),
-  }));
+  const options: Array<{ label: string; value: string; hint?: string }> =
+    items.map((item) => ({
+      label: qualifiedName(item),
+      value: item.installSource,
+      hint: item.repo + (item.description ? ` · ${item.description}` : ''),
+    }));
   options.push({ label: 'Back', value: '__back__' });
 
   const selected = await autocomplete({
@@ -416,7 +455,9 @@ async function runSearchOnlineSkills(context: TuiContext, cache?: TuiCache): Pro
 
   // Check if plugin is already installed in either scope
   const workspacePath = context.workspacePath ?? process.cwd();
-  const isInstalledProject = context.workspacePath ? await hasPlugin(selected, workspacePath) : false;
+  const isInstalledProject = context.workspacePath
+    ? await hasPlugin(selected, workspacePath)
+    : false;
   const isInstalledUser = await hasUserPlugin(selected);
 
   if (isInstalledProject || isInstalledUser) {

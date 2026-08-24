@@ -21,6 +21,8 @@
     "test:e2e": "bun test tests/e2e",
     "smoke:mcp-oauth": "bun run scripts/smoke-mcp-oauth.ts",
     "dev:mcp-server": "bun run scripts/dev-mcp-server.ts",
+    "catalog:validate": "bun run scripts/validate-skill-catalog.ts --ci",
+    "catalog:health": "bun run scripts/validate-skill-catalog.ts --report",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src",
     "lint:fix": "biome lint --write src",

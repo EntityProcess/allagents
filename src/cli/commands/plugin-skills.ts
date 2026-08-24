@@ -1,6 +1,7 @@
-import { existsSync } from 'node:fs';
+import * as prompts from '@clack/prompts';
+import { existsSync, realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import chalk from 'chalk';
 import {
   command,
@@ -12,6 +13,12 @@ import {
   string,
 } from 'cmd-ts';
 import { getHomeDir } from '../../constants.js';
+import type {
+  CatalogInstallDescriptor,
+  SkillCatalogClassification,
+  SkillCatalogInstallPolicy,
+  SkillCatalogWarning,
+} from '../../models/skill-catalog.js';
 import {
   addMarketplace,
   findMarketplaceRegistration,
@@ -31,6 +38,10 @@ import {
   searchSkills,
 } from '../../core/skill-search.js';
 import {
+  RECOMMENDED_SKILL_CATALOG,
+  catalogInstallDescriptor,
+} from '../../core/skill-catalog.js';
+import {
   type DiscoveredSkillEntry,
   discoverSkillEntries,
   discoverSkillNames,
@@ -43,7 +54,6 @@ import type { SyncResult } from '../../core/sync.js';
 import {
   addUserEnabledSkill,
   addUserPlugin,
-  hasUserPlugin,
   isUserConfigPath,
   removeUserDisabledSkill,
   setUserPluginSkillsMode,
@@ -52,13 +62,13 @@ import {
 import {
   addEnabledSkill,
   addPlugin,
-  hasPlugin,
   removeDisabledSkill,
   resolveGitHubIdentity,
   setPluginSkillsMode,
   upsertGitHubPluginSourceAllowlist,
 } from '../../core/workspace-modify.js';
 import {
+  parseCatalogLocalMarketplaceManifest,
   parseMarketplaceManifest,
   resolvePluginSourcePath,
 } from '../../utils/marketplace-manifest-parser.js';
@@ -67,6 +77,7 @@ import {
   isGitHubUrl,
   parseGitHubUrl,
   stripGitRef,
+  parseExactGitHubInstallSource,
 } from '../../utils/plugin-path.js';
 import { parseSkillMetadata } from '../../validators/skill.js';
 import {
@@ -170,9 +181,7 @@ function extractInlineRef(spec: string): string | undefined {
  * normalized to its containing skill directory.
  * Without subpath: skill name = repo name (caller should use resolveSkillNameFromRepo to check frontmatter)
  */
-export function resolveSkillFromUrl(
-  skill: string,
-): {
+export function resolveSkillFromUrl(skill: string): {
   skill: string;
   from: string;
   parsed: ReturnType<typeof parseGitHubUrl>;
@@ -1120,7 +1129,11 @@ async function selectAndInstallSkillsFromSource(opts: {
   isUser: boolean;
   workspacePath: string;
 }): Promise<
-  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: SyncResult }
+  | {
+      success: true;
+      installed: Array<{ pluginName: string; skills: string[] }>;
+      syncResult: SyncResult;
+    }
   | { success: false; error: string }
   | { success: 'cancelled' }
 > {
@@ -1144,14 +1157,17 @@ async function selectAndInstallSkillsFromSource(opts: {
     return installAllSkillsFromSource(opts);
   }
 
-  const p = await import('@clack/prompts');
+  const p = prompts;
 
   // Marketplace repos: show a grouped multiselect picker by plugin
   if (discovered.isMarketplace) {
     const allSkillNames = discovered.skills.map((s) => s.name);
 
     // Group skills by pluginName
-    const groups: Record<string, Array<{ label: string; value: string; hint?: string }>> = {};
+    const groups: Record<
+      string,
+      Array<{ label: string; value: string; hint?: string }>
+    > = {};
     for (const skill of discovered.skills) {
       const group = skill.pluginName ?? 'Other';
       if (!groups[group]) groups[group] = [];
@@ -1182,7 +1198,9 @@ async function selectAndInstallSkillsFromSource(opts: {
 
     // Subset selected → install per-plugin, filtered to selected skills
     const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
-    const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
+    const sourceLocation = parsed
+      ? `${parsed.owner}/${parsed.repo}`
+      : undefined;
 
     let marketplaceName: string | undefined;
     const existingAnyScope = await findMarketplaceRegistration(
@@ -1193,7 +1211,10 @@ async function selectAndInstallSkillsFromSource(opts: {
 
     if (existingAnyScope) {
       marketplaceName = existingAnyScope.key;
-      await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
+      await updateMarketplace(
+        marketplaceName,
+        isUser ? undefined : workspacePath,
+      );
     } else {
       const scopeOptions = isUser
         ? undefined
@@ -1213,7 +1234,10 @@ async function selectAndInstallSkillsFromSource(opts: {
     }
 
     if (!marketplaceName) {
-      return { success: false, error: `Failed to register marketplace from '${from}'` };
+      return {
+        success: false,
+        error: `Failed to register marketplace from '${from}'`,
+      };
     }
 
     const mktPlugins = await listMarketplacePlugins(
@@ -1221,7 +1245,10 @@ async function selectAndInstallSkillsFromSource(opts: {
       isUser ? undefined : workspacePath,
     );
     if (mktPlugins.plugins.length === 0) {
-      return { success: false, error: `No plugins found in marketplace '${marketplaceName}'.` };
+      return {
+        success: false,
+        error: `No plugins found in marketplace '${marketplaceName}'.`,
+      };
     }
 
     const installed: Array<{ pluginName: string; skills: string[] }> = [];
@@ -1231,7 +1258,9 @@ async function selectAndInstallSkillsFromSource(opts: {
         ? mktPlugin.skills.map((s) => s.split('/').pop() ?? '').filter(Boolean)
         : await discoverSkillNames(mktPlugin.path);
 
-      const pluginSelectedSkills = allPluginSkillNames.filter((n) => selectedNames.includes(n));
+      const pluginSelectedSkills = allPluginSkillNames.filter((n) =>
+        selectedNames.includes(n),
+      );
       if (pluginSelectedSkills.length === 0) continue;
 
       const pluginSpec = `${mktPlugin.name}@${marketplaceName}`;
@@ -1252,7 +1281,11 @@ async function selectAndInstallSkillsFromSource(opts: {
       }
 
       const setModeResult = isUser
-        ? await setUserPluginSkillsMode(mktPlugin.name, 'allowlist', pluginSelectedSkills)
+        ? await setUserPluginSkillsMode(
+            mktPlugin.name,
+            'allowlist',
+            pluginSelectedSkills,
+          )
         : await setPluginSkillsMode(
             mktPlugin.name,
             'allowlist',
@@ -1267,16 +1300,24 @@ async function selectAndInstallSkillsFromSource(opts: {
         };
       }
 
-      installed.push({ pluginName: mktPlugin.name, skills: pluginSelectedSkills });
+      installed.push({
+        pluginName: mktPlugin.name,
+        skills: pluginSelectedSkills,
+      });
     }
 
     if (installed.length === 0) {
-      return { success: false, error: 'No matching skills found in marketplace plugins.' };
+      return {
+        success: false,
+        error: 'No matching skills found in marketplace plugins.',
+      };
     }
 
     if (!isJsonMode()) {
       const total = installed.reduce((sum, i) => sum + i.skills.length, 0);
-      console.log(`✓ Enabled ${total} skill(s) across ${installed.length} plugin(s)`);
+      console.log(
+        `✓ Enabled ${total} skill(s) across ${installed.length} plugin(s)`,
+      );
     }
 
     const syncResult = isUser
@@ -1326,7 +1367,10 @@ async function selectAndInstallSkillsFromSource(opts: {
     };
   }
 
-  const existingEnabled = await getEnabledSkillsForGitHubSource(from, workspacePath);
+  const existingEnabled = await getEnabledSkillsForGitHubSource(
+    from,
+    workspacePath,
+  );
   const desiredSkills = [...existingEnabled];
   for (const name of selectedNames) {
     if (!desiredSkills.includes(name)) desiredSkills.push(name);
@@ -1334,7 +1378,11 @@ async function selectAndInstallSkillsFromSource(opts: {
 
   const updateResult = isUser
     ? await upsertUserGitHubPluginSourceAllowlist(from, desiredSkills)
-    : await upsertGitHubPluginSourceAllowlist(from, desiredSkills, workspacePath);
+    : await upsertGitHubPluginSourceAllowlist(
+        from,
+        desiredSkills,
+        workspacePath,
+      );
 
   if (!updateResult.success) {
     return {
@@ -1343,7 +1391,9 @@ async function selectAndInstallSkillsFromSource(opts: {
     };
   }
 
-  const pluginName = extractPrimaryPluginName(updateResult.normalizedPlugin ?? from);
+  const pluginName = extractPrimaryPluginName(
+    updateResult.normalizedPlugin ?? from,
+  );
   console.log(
     `✓ Enabled ${selectedNames.length} skill(s) from ${pluginName}: ${selectedNames.join(', ')}`,
   );
@@ -2298,28 +2348,87 @@ export function formatSkillSearchSummary(
 }
 
 export function formatSkillSearchHint(
-  item: Pick<SkillSearchItem, 'stars' | 'description'>,
+  item: Pick<SkillSearchItem, 'stars' | 'description'> &
+    Partial<Pick<SkillSearchItem, 'installation' | 'catalog'>>,
 ): string {
-  return [item.stars > 0 ? `★ ${item.stars}` : '', item.description ?? '']
+  const policy =
+    item.installation?.policy === 'search-only'
+      ? 'search only'
+      : item.installation?.policy === 'external-installer'
+        ? 'external installer'
+        : item.catalog?.classification === 'optional'
+          ? 'optional'
+          : '';
+  const warnings = item.catalog?.warnings
+    .map((warning) => warning.message)
+    .join(' ');
+  return [
+    item.stars > 0 ? `★ ${item.stars}` : '',
+    policy,
+    item.description ?? '',
+    warnings ?? '',
+  ]
     .filter(Boolean)
     .join('  ');
 }
 
-export function collectSelectedSkillSearchRepos(
-  items: Pick<SkillSearchItem, 'path' | 'repo'>[],
-  selectedPaths: string[],
-): string[] {
-  const selectedSet = new Set(selectedPaths);
-  const repos: string[] = [];
-  const seenRepos = new Set<string>();
+export interface SelectedSkillSearchSource {
+  catalogIdentity?: string;
+  installDescriptor?: CatalogInstallDescriptor;
+  installSource: string;
+  installPolicy: 'repository-install' | SkillCatalogInstallPolicy;
+  classification?: SkillCatalogClassification;
+  warnings: readonly SkillCatalogWarning[];
+  selectors: string[];
+}
 
-  for (const item of items) {
-    if (!selectedSet.has(item.path) || seenRepos.has(item.repo)) continue;
-    seenRepos.add(item.repo);
-    repos.push(item.repo);
+export function skillSearchSelectionKey(item: SkillSearchItem): string {
+  const identity = item.catalog?.identity ?? item.installSource.toLowerCase();
+  return `${identity}#${item.repo.toLowerCase()}#${item.path}`;
+}
+
+export function collectSelectedSkillSearchSources(
+  items: SkillSearchItem[],
+  selectedKeys: string[],
+): SelectedSkillSearchSource[] {
+  const selected = new Set(selectedKeys);
+  const known = new Set(items.map(skillSearchSelectionKey));
+  for (const key of selected) {
+    if (!known.has(key)) {
+      throw new SkillSearchError(
+        'Selected skill is not present in the current search result.',
+        'validation',
+      );
+    }
   }
 
-  return repos;
+  const groups = new Map<string, SelectedSkillSearchSource>();
+  for (const item of items) {
+    const selectionKey = skillSearchSelectionKey(item);
+    if (!selected.has(selectionKey)) continue;
+    const groupKey = item.catalog
+      ? `${item.catalog.identity}#${JSON.stringify(item.catalog.installDescriptor)}`
+      : item.installSource.toLowerCase();
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = {
+        ...(item.catalog && {
+          catalogIdentity: item.catalog.identity,
+          installDescriptor: item.catalog.installDescriptor,
+          classification: item.catalog.classification,
+        }),
+        installSource: item.installSource,
+        installPolicy: item.installation.policy,
+        warnings: item.catalog?.warnings ?? [],
+        selectors: [],
+      };
+      groups.set(groupKey, group);
+    }
+    if (!group.selectors.includes(item.installSelector)) {
+      group.selectors.push(item.installSelector);
+    }
+  }
+  return [...groups.values()];
 }
 
 /** Print results in gh-compatible tabular format: repo, skillName, description, stars. */
@@ -2342,7 +2451,15 @@ function printSearchResults(
             : item.description,
         )
       : '';
-    const starsAndDesc = [stars, desc].filter(Boolean).join('  ');
+    const policy =
+      item.installation.policy === 'search-only'
+        ? chalk.yellow('search only')
+        : item.installation.policy === 'external-installer'
+          ? chalk.yellow('external installer')
+          : item.catalog?.classification === 'optional'
+            ? chalk.yellow('optional')
+            : '';
+    const starsAndDesc = [policy, stars, desc].filter(Boolean).join('  ');
     console.log(
       `  ${chalk.cyan(repoCol)}  ${chalk.bold(nameCol)}  ${starsAndDesc}`,
     );
@@ -2350,35 +2467,429 @@ function printSearchResults(
   console.log('');
 }
 
-/**
- * Interactive install flow for a selected plugin from search results.
- * Returns true if plugin was installed.
- */
-async function installFromSearch(repos: string[]): Promise<boolean> {
-  const p = await import('@clack/prompts');
+type InstallSearchScope = 'project' | 'user';
 
-  const workspacePath = process.cwd();
-  const installableRepos: string[] = [];
+type InstallSearchDeps = {
+  fetchPlugin?: typeof fetchPlugin;
+  parseMarketplaceManifest?: typeof parseMarketplaceManifest;
+  addMarketplace?: typeof addMarketplace;
+  findMarketplaceRegistration?: typeof findMarketplaceRegistration;
+  updateMarketplace?: typeof updateMarketplace;
+  addPlugin?: typeof addPlugin;
+  addUserPlugin?: typeof addUserPlugin;
+  upsertProjectAllowlist?: typeof upsertGitHubPluginSourceAllowlist;
+  upsertUserAllowlist?: typeof upsertUserGitHubPluginSourceAllowlist;
+  syncWorkspace?: typeof syncWorkspace;
+  syncUserWorkspace?: typeof syncUserWorkspace;
+};
 
-  for (const repo of repos) {
-    const isInstalledProject = hasProjectSkillConfig(workspacePath)
-      ? await hasPlugin(repo, workspacePath)
-      : false;
-    const isInstalledUser = await hasUserPlugin(repo);
+export interface InstallSearchTransactionResult {
+  success: boolean;
+  installed: string[];
+  errors: Array<{ source: string; error: string }>;
+  syncResult?: SyncResult;
+}
 
-    if (isInstalledProject || isInstalledUser) {
-      const scopeLabel = isInstalledUser ? 'user' : 'project';
-      p.log.info(
-        `Plugin ${chalk.bold(repo)} is already installed (${scopeLabel} scope).`,
-      );
-      continue;
+function validateSelectedCatalogDescriptor(
+  group: SelectedSkillSearchSource,
+): CatalogInstallDescriptor {
+  const descriptor = group.installDescriptor;
+  if (!descriptor || !group.catalogIdentity) {
+    throw new SkillSearchError(
+      'Catalog selection is missing its exact install descriptor.',
+      'validation',
+    );
+  }
+  const source = RECOMMENDED_SKILL_CATALOG.sources.find(
+    (entry) => entry.sourceId === descriptor.sourceId,
+  );
+  const parsed = parseExactGitHubInstallSource(descriptor.installSource);
+  if (
+    !source ||
+    JSON.stringify(catalogInstallDescriptor(source)) !==
+      JSON.stringify(descriptor) ||
+    !parsed ||
+    parsed.repo.toLowerCase() !== descriptor.repo.toLowerCase() ||
+    parsed.ref !== descriptor.effectiveRef ||
+    parsed.root !== descriptor.installRoot ||
+    group.installSource !== descriptor.installSource
+  ) {
+    throw new SkillSearchError(
+      `Catalog install descriptor drift for ${descriptor.sourceId}.`,
+      'validation',
+    );
+  }
+  return descriptor;
+}
+
+async function configureCatalogDirectSource(
+  group: SelectedSkillSearchSource,
+  descriptor: CatalogInstallDescriptor,
+  scope: InstallSearchScope,
+  workspacePath: string,
+  deps: InstallSearchDeps,
+): Promise<
+  { success: true; label: string } | { success: false; error: string }
+> {
+  const fetchResult = await (deps.fetchPlugin ?? fetchPlugin)(
+    descriptor.installSource,
+    { branch: descriptor.effectiveRef },
+  );
+  if (!fetchResult.success) {
+    return {
+      success: false,
+      error: fetchResult.error ?? 'Failed to fetch catalog source.',
+    };
+  }
+  if (
+    fetchResult.resolvedRef &&
+    fetchResult.resolvedRef !== descriptor.effectiveRef
+  ) {
+    return {
+      success: false,
+      error: 'Catalog source resolved to an unexpected ref.',
+    };
+  }
+  const sourcePath = resolveFetchedSourcePath(
+    descriptor.installSource,
+    fetchResult.cachePath,
+  );
+  const available = await discoverSkillEntries(sourcePath);
+  for (const selector of group.selectors) {
+    if (!available.some((entry) => entry.subpath === selector)) {
+      return {
+        success: false,
+        error: `Selected skill '${selector}' no longer resolves inside ${descriptor.installSource}.`,
+      };
     }
+  }
+  const options = {
+    identity: 'catalog-exact' as const,
+    catalogSource: descriptor,
+  };
+  const result =
+    scope === 'project'
+      ? await (
+          deps.upsertProjectAllowlist ?? upsertGitHubPluginSourceAllowlist
+        )(descriptor.installSource, group.selectors, workspacePath, options)
+      : await (
+          deps.upsertUserAllowlist ?? upsertUserGitHubPluginSourceAllowlist
+        )(descriptor.installSource, group.selectors, options);
+  return result.success
+    ? { success: true, label: descriptor.installSource }
+    : { success: false, error: result.error ?? 'Failed to update workspace.' };
+}
 
-    installableRepos.push(repo);
+function isCanonicalPathWithin(root: string, candidate: string): boolean {
+  const relativePath = relative(root, candidate);
+  return (
+    relativePath !== '..' &&
+    !relativePath.startsWith(
+      `..${process.platform === 'win32' ? '\\' : '/'}`,
+    ) &&
+    resolve(root, relativePath) === candidate
+  );
+}
+
+async function configureCatalogMarketplaceSource(
+  group: SelectedSkillSearchSource,
+  descriptor: CatalogInstallDescriptor,
+  scope: InstallSearchScope,
+  workspacePath: string,
+  deps: InstallSearchDeps,
+): Promise<
+  { success: true; labels: string[] } | { success: false; error: string }
+> {
+  const fetchResult = await (deps.fetchPlugin ?? fetchPlugin)(
+    descriptor.installSource,
+    { branch: descriptor.effectiveRef },
+  );
+  if (!fetchResult.success) {
+    return {
+      success: false,
+      error: fetchResult.error ?? 'Failed to fetch catalog marketplace.',
+    };
+  }
+  if (
+    fetchResult.resolvedRef &&
+    fetchResult.resolvedRef !== descriptor.effectiveRef
+  ) {
+    return {
+      success: false,
+      error: 'Catalog marketplace resolved to an unexpected ref.',
+    };
+  }
+  const sourcePath = resolveFetchedSourcePath(
+    descriptor.installSource,
+    fetchResult.cachePath,
+  );
+  const manifest = await (
+    deps.parseMarketplaceManifest ?? parseCatalogLocalMarketplaceManifest
+  )(sourcePath);
+  if (!manifest.success || manifest.warnings.length > 0) {
+    return {
+      success: false,
+      error: manifest.success
+        ? `Authoritative marketplace manifest is not strictly valid: ${manifest.warnings.join('; ')}`
+        : manifest.error,
+    };
   }
 
-  if (installableRepos.length === 0) {
-    return false;
+  const canonicalRoot = realpathSync(sourcePath);
+  const matches = new Map<
+    string,
+    Array<{ pluginName: string; selector: string }>
+  >();
+  for (const plugin of manifest.data.plugins) {
+    if (typeof plugin.source !== 'string') continue;
+    const pluginPath = resolvePluginSourcePath(plugin.source, sourcePath);
+    let canonicalPluginPath: string;
+    try {
+      canonicalPluginPath = realpathSync(pluginPath);
+    } catch {
+      continue;
+    }
+    if (!isCanonicalPathWithin(canonicalRoot, canonicalPluginPath)) continue;
+
+    const declaredSkills = Array.isArray(plugin.skills)
+      ? plugin.skills
+      : plugin.skills
+        ? [plugin.skills]
+        : [];
+    const entries: DiscoveredSkillEntry[] = [];
+    if (declaredSkills.length === 0) {
+      entries.push(...(await discoverSkillEntries(canonicalPluginPath)));
+    } else {
+      for (const declaredSkill of declaredSkills) {
+        let canonicalSkillPath: string;
+        try {
+          canonicalSkillPath = realpathSync(
+            resolvePluginSourcePath(declaredSkill, canonicalPluginPath),
+          );
+        } catch {
+          continue;
+        }
+        if (
+          !isCanonicalPathWithin(canonicalRoot, canonicalSkillPath) ||
+          !isCanonicalPathWithin(canonicalPluginPath, canonicalSkillPath)
+        ) {
+          continue;
+        }
+        entries.push(...(await discoverSkillEntries(canonicalSkillPath)));
+      }
+    }
+    for (const entry of entries) {
+      const fullSelector = relative(canonicalRoot, entry.skillPath)
+        .split(/[\\/]/)
+        .join('/');
+      const candidates = new Set([
+        entry.subpath,
+        fullSelector,
+        fullSelector.startsWith('skills/')
+          ? fullSelector.slice('skills/'.length)
+          : fullSelector,
+      ]);
+      for (const requested of group.selectors) {
+        if (!candidates.has(requested)) continue;
+        const existing = matches.get(requested) ?? [];
+        existing.push({ pluginName: plugin.name, selector: entry.subpath });
+        matches.set(requested, existing);
+      }
+    }
+  }
+  for (const selector of group.selectors) {
+    const candidates = matches.get(selector) ?? [];
+    if (candidates.length !== 1) {
+      return {
+        success: false,
+        error:
+          candidates.length === 0
+            ? `Selected skill '${selector}' is outside the authoritative marketplace manifest.`
+            : `Selected skill '${selector}' is ambiguous in the authoritative marketplace manifest.`,
+      };
+    }
+  }
+
+  const scopeWorkspace = scope === 'project' ? workspacePath : undefined;
+  const existing = await (
+    deps.findMarketplaceRegistration ?? findMarketplaceRegistration
+  )(descriptor.sourceId, descriptor.repo, scopeWorkspace);
+  let marketplaceName: string | undefined;
+  if (existing) {
+    marketplaceName = existing.key;
+    await (deps.updateMarketplace ?? updateMarketplace)(
+      marketplaceName,
+      scopeWorkspace,
+    );
+  } else {
+    const registration = await (deps.addMarketplace ?? addMarketplace)(
+      descriptor.repo,
+      descriptor.sourceId,
+      descriptor.effectiveRef,
+      undefined,
+      scope === 'project' ? { scope: 'project', workspacePath } : undefined,
+    );
+    if (registration.success) marketplaceName = registration.marketplace?.name;
+  }
+  if (!marketplaceName) {
+    return { success: false, error: 'Failed to register catalog marketplace.' };
+  }
+
+  const selectorsByPlugin = new Map<string, string[]>();
+  for (const requested of group.selectors) {
+    const match = matches.get(requested)?.[0];
+    if (!match) continue;
+    const selectors = selectorsByPlugin.get(match.pluginName) ?? [];
+    if (!selectors.includes(match.selector)) selectors.push(match.selector);
+    selectorsByPlugin.set(match.pluginName, selectors);
+  }
+  const labels: string[] = [];
+  for (const [pluginName, selectors] of selectorsByPlugin) {
+    const pluginSpec = `${pluginName}@${marketplaceName}`;
+    const options = {
+      identity: 'catalog-exact' as const,
+      catalogSource: descriptor,
+    };
+    const result =
+      scope === 'project'
+        ? await (
+            deps.upsertProjectAllowlist ?? upsertGitHubPluginSourceAllowlist
+          )(pluginSpec, selectors, workspacePath, options)
+        : await (
+            deps.upsertUserAllowlist ?? upsertUserGitHubPluginSourceAllowlist
+          )(pluginSpec, selectors, options);
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error ?? `Failed to configure ${pluginSpec}.`,
+      };
+    }
+    labels.push(pluginSpec);
+  }
+  return { success: true, labels };
+}
+
+export async function installSelectedSkillSearchSources(
+  sources: SelectedSkillSearchSource[],
+  scope: InstallSearchScope,
+  workspacePath: string,
+  deps: InstallSearchDeps = {},
+): Promise<InstallSearchTransactionResult> {
+  for (const source of sources) {
+    if (
+      source.installPolicy === 'search-only' ||
+      source.installPolicy === 'external-installer'
+    ) {
+      return {
+        success: false,
+        installed: [],
+        errors: [
+          {
+            source: source.installSource,
+            error:
+              source.installPolicy === 'external-installer'
+                ? `Use the upstream lifecycle at ${source.installDescriptor ? RECOMMENDED_SKILL_CATALOG.sources.find((entry) => entry.sourceId === source.installDescriptor?.sourceId)?.homepage : source.installSource}.`
+                : 'This catalog source is search-only and cannot be installed.',
+          },
+        ],
+      };
+    }
+    if (source.installDescriptor) validateSelectedCatalogDescriptor(source);
+  }
+
+  const installed: string[] = [];
+  const errors: Array<{ source: string; error: string }> = [];
+  for (const source of sources) {
+    if (!source.installDescriptor) {
+      const result =
+        scope === 'project'
+          ? await (deps.addPlugin ?? addPlugin)(
+              source.installSource,
+              workspacePath,
+            )
+          : await (deps.addUserPlugin ?? addUserPlugin)(source.installSource);
+      if (result.success) installed.push(source.installSource);
+      else {
+        errors.push({
+          source: source.installSource,
+          error: result.error ?? 'Failed to install plugin.',
+        });
+      }
+      continue;
+    }
+    const descriptor = source.installDescriptor;
+    if (source.installPolicy === 'marketplace-selective') {
+      const result = await configureCatalogMarketplaceSource(
+        source,
+        descriptor,
+        scope,
+        workspacePath,
+        deps,
+      );
+      if (result.success) installed.push(...result.labels);
+      else errors.push({ source: source.installSource, error: result.error });
+    } else {
+      const result = await configureCatalogDirectSource(
+        source,
+        descriptor,
+        scope,
+        workspacePath,
+        deps,
+      );
+      if (result.success) installed.push(result.label);
+      else errors.push({ source: source.installSource, error: result.error });
+    }
+  }
+
+  let syncResult: SyncResult | undefined;
+  if (installed.length > 0) {
+    syncResult =
+      scope === 'project'
+        ? await (deps.syncWorkspace ?? syncWorkspace)(workspacePath)
+        : await (deps.syncUserWorkspace ?? syncUserWorkspace)();
+  }
+  return {
+    success:
+      errors.length === 0 && (syncResult?.success ?? installed.length > 0),
+    installed,
+    errors,
+    ...(syncResult && { syncResult }),
+  };
+}
+
+/** Interactive wrapper around the single catalog/global install transaction. */
+async function installFromSearch(
+  sources: SelectedSkillSearchSource[],
+): Promise<boolean> {
+  const p = prompts;
+  for (const source of sources) {
+    if (
+      source.installPolicy === 'search-only' ||
+      source.installPolicy === 'external-installer'
+    ) {
+      p.log.error(
+        source.installPolicy === 'external-installer'
+          ? `Use the upstream lifecycle for ${source.installSource}; AllAgents will not execute it.`
+          : `${source.installSource} is search-only.`,
+      );
+      return false;
+    }
+  }
+
+  const optionalSources = sources.filter(
+    (source) => source.classification === 'optional',
+  );
+  if (optionalSources.length > 0) {
+    const warningLines = optionalSources.flatMap((source) => [
+      source.installSource,
+      ...source.warnings.map((warning) => `  ${warning.message}`),
+    ]);
+    p.note(warningLines.join('\n'), 'Optional source warnings');
+    const confirmed = await p.confirm({
+      message: 'Install the selected optional skills?',
+      initialValue: false,
+    });
+    if (p.isCancel(confirmed) || !confirmed) return false;
   }
 
   const scopeChoice = await p.select({
@@ -2388,72 +2899,42 @@ async function installFromSearch(repos: string[]): Promise<boolean> {
       { label: 'User (global)', value: 'user' as const },
     ],
   });
-
   if (p.isCancel(scopeChoice)) return false;
 
-  const s = p.spinner();
-  s.start(
-    `Installing ${installableRepos.length === 1 ? 'plugin' : 'plugins'}...`,
-  );
-
+  const spinner = p.spinner();
+  spinner.start(`Installing ${sources.length === 1 ? 'source' : 'sources'}...`);
   try {
-    const installedRepos: string[] = [];
-    const failedRepos: Array<{ repo: string; error: string }> = [];
-
-    for (const repo of installableRepos) {
-      const result =
-        scopeChoice === 'project'
-          ? await addPlugin(repo, workspacePath)
-          : await addUserPlugin(repo);
-
-      if (!result.success) {
-        failedRepos.push({ repo, error: result.error ?? 'Unknown error' });
-        continue;
-      }
-
-      installedRepos.push(repo);
-    }
-
-    if (installedRepos.length === 0) {
-      s.stop('Installation failed');
-      for (const { repo, error } of failedRepos) {
-        p.log.error(`${chalk.bold(repo)}: ${error}`);
+    const result = await installSelectedSkillSearchSources(
+      sources,
+      scopeChoice,
+      process.cwd(),
+    );
+    if (result.installed.length === 0) {
+      spinner.stop('Installation failed');
+      for (const failure of result.errors) {
+        p.log.error(`${chalk.bold(failure.source)}: ${failure.error}`);
       }
       return false;
     }
-
-    s.message('Syncing...');
-    const syncResult =
-      scopeChoice === 'project'
-        ? await syncWorkspace(workspacePath)
-        : await syncUserWorkspace();
-
-    s.stop(
-      installedRepos.length === 1
-        ? 'Installed and synced'
-        : 'Installed plugins and synced',
+    spinner.stop(
+      result.success ? 'Installed and synced' : 'Installed with errors',
     );
-
-    for (const { repo, error } of failedRepos) {
-      p.log.error(`${chalk.bold(repo)}: ${error}`);
+    for (const failure of result.errors) {
+      p.log.error(`${chalk.bold(failure.source)}: ${failure.error}`);
     }
-
-    const lines = formatVerboseSyncLines(syncResult);
-    const noteLines =
-      installedRepos.length > 1 ? [...installedRepos, '', ...lines] : lines;
-    if (noteLines.length > 0) {
-      p.note(
-        noteLines.join('\n'),
-        installedRepos.length === 1
-          ? `Installed: ${installedRepos[0]}`
-          : `Installed: ${installedRepos.length} plugins`,
-      );
-    }
-
-    return true;
-  } catch (err) {
-    s.stop('Installation failed');
-    p.log.error(err instanceof Error ? err.message : String(err));
+    const lines = result.syncResult
+      ? formatVerboseSyncLines(result.syncResult)
+      : [];
+    p.note(
+      [...result.installed, ...(lines.length > 0 ? ['', ...lines] : [])].join(
+        '\n',
+      ),
+      `Installed: ${result.installed.length} source${result.installed.length === 1 ? '' : 's'}`,
+    );
+    return result.success;
+  } catch (error) {
+    spinner.stop('Installation failed');
+    p.log.error(error instanceof Error ? error.message : String(error));
     return false;
   }
 }
@@ -2468,6 +2949,12 @@ const searchCmd = command({
       long: 'owner',
       description: 'Scope to a single GitHub owner (org or user).',
     }),
+    catalog: option({
+      type: optional(string),
+      long: 'catalog',
+      description:
+        'Restrict results to a built-in catalog. Initially: recommended.',
+    }),
     page: option({
       type: optional(string),
       long: 'page',
@@ -2479,11 +2966,14 @@ const searchCmd = command({
       description: 'Results per page (1–100, default 15).',
     }),
   },
-  handler: async ({ query, owner, page, limit }) => {
+  handler: async ({ query, owner, catalog, page, limit }) => {
     try {
       const searchQuery = query.join(' ').trim();
       const opts: SkillSearchOptions = {};
       if (owner) opts.owner = owner;
+      if (catalog) {
+        opts.catalog = catalog as 'recommended';
+      }
       if (page !== undefined) {
         const n = Number.parseInt(page, 10);
         if (Number.isNaN(n)) {
@@ -2531,27 +3021,31 @@ const searchCmd = command({
 
       if (!isTTY) {
         // Non-interactive: print table with stars and exit
+        if (result.items.some((item) => item.catalog)) {
+          console.log('Catalog: Recommended');
+        }
         printSearchResults(result.items, searchQuery, result.truncated);
         return;
       }
 
       // Interactive mode: filter-as-you-type multiselect with install support
-      const { autocompleteMultiselect, isCancel, log } = await import(
-        '@clack/prompts'
-      );
+      const { autocompleteMultiselect, isCancel, log } = prompts;
 
       log.success(
-        formatSkillSearchSummary(
+        `${result.items.some((item) => item.catalog) ? 'Recommended · ' : ''}${formatSkillSearchSummary(
           result.items.length,
           searchQuery,
           result.truncated,
-        ),
+        )}`,
       );
 
       const options = result.items.map((item) => ({
         label: `${qualifiedName(item)}  ${chalk.dim(item.repo)}`,
-        value: item.path,
+        value: skillSearchSelectionKey(item),
         hint: formatSkillSearchHint(item),
+        disabled:
+          item.installation.policy === 'search-only' ||
+          item.installation.policy === 'external-installer',
       }));
 
       const selected = await autocompleteMultiselect({
@@ -2565,15 +3059,12 @@ const searchCmd = command({
         return;
       }
 
-      const reposToInstall = collectSelectedSkillSearchRepos(
+      const sourcesToInstall = collectSelectedSkillSearchSources(
         result.items,
         selected as string[],
       );
-      if (reposToInstall.length === 0) {
-        return;
-      }
-
-      await installFromSearch(reposToInstall);
+      if (sourcesToInstall.length === 0) return;
+      await installFromSearch(sourcesToInstall);
     } catch (error) {
       if (error instanceof SkillSearchError) {
         const exitCode = error.kind === 'validation' ? 2 : 1;

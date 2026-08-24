@@ -6,8 +6,13 @@ import { dump, load } from 'js-yaml';
 import {
   canonicalizeGitHubPluginSource,
   upsertGitHubPluginSourceAllowlist,
+  upsertGitHubPluginSourceAllowlistInConfig,
 } from '../../../src/core/workspace-modify.js';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
+import {
+  RECOMMENDED_SKILL_CATALOG,
+  catalogInstallDescriptor,
+} from '../../../src/core/skill-catalog.js';
 
 describe('canonicalizeGitHubPluginSource', () => {
   it('promotes sibling standalone skills to their shared subtree', () => {
@@ -76,5 +81,90 @@ describe('upsertGitHubPluginSourceAllowlist', () => {
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('catalog-exact source identity', () => {
+  const core = RECOMMENDED_SKILL_CATALOG.sources.find(
+    (source) => source.sourceId === 'hermes-core',
+  )!;
+  const optional = RECOMMENDED_SKILL_CATALOG.sources.find(
+    (source) => source.sourceId === 'hermes-optional',
+  )!;
+
+  for (const order of [
+    [core, optional],
+    [optional, core],
+  ]) {
+    it(`retains both Hermes roots when installed ${order.map((source) => source.sourceId).join(' then ')}`, async () => {
+      const config: WorkspaceConfig = {
+        version: 2,
+        repositories: [],
+        clients: ['universal'],
+        plugins: [],
+      };
+      for (const source of order) {
+        const result = await upsertGitHubPluginSourceAllowlistInConfig(
+          config,
+          source.installSource,
+          [`${source.sourceId}/selected`],
+          {
+            identity: 'catalog-exact',
+            catalogSource: catalogInstallDescriptor(source),
+          },
+        );
+        expect(result.success).toBe(true);
+      }
+      expect(config.plugins).toHaveLength(2);
+      expect(
+        config.plugins.map((entry) =>
+          typeof entry === 'string' ? entry : entry.source,
+        ),
+      ).toEqual(order.map((source) => source.installSource));
+      expect(
+        config.plugins.map((entry) =>
+          typeof entry === 'string'
+            ? undefined
+            : entry.catalogSource?.sourceId,
+        ),
+      ).toEqual(order.map((source) => source.sourceId));
+      expect(
+        config.plugins.some(
+          (entry) =>
+            typeof entry !== 'string' &&
+            entry.source === 'NousResearch/hermes-agent@main',
+        ),
+      ).toBe(false);
+    });
+  }
+
+  it('merges only ordered selectors for an identical full descriptor', async () => {
+    const config: WorkspaceConfig = {
+      version: 2,
+      repositories: [],
+      clients: ['universal'],
+      plugins: [],
+    };
+    const options = {
+      identity: 'catalog-exact' as const,
+      catalogSource: catalogInstallDescriptor(core),
+    };
+    await upsertGitHubPluginSourceAllowlistInConfig(
+      config,
+      core.installSource,
+      ['research/llm-wiki'],
+      options,
+    );
+    await upsertGitHubPluginSourceAllowlistInConfig(
+      config,
+      core.installSource,
+      ['research/blogwatcher', 'research/llm-wiki'],
+      options,
+    );
+    const entry = config.plugins[0];
+    expect(typeof entry === 'string' ? undefined : entry?.skills).toEqual([
+      'research/llm-wiki',
+      'research/blogwatcher',
+    ]);
   });
 });

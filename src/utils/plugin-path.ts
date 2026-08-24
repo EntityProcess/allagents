@@ -53,6 +53,51 @@ export interface ParsedPluginSource {
   branch?: string;
 }
 
+/** Exact ref-qualified GitHub install source used by catalog descriptors. */
+export interface ExactGitHubInstallSource {
+  repo: `${string}/${string}`;
+  ref: string;
+  root: '.' | string;
+}
+
+/**
+ * Parse the catalog's unambiguous `owner/repo@ref[/root]` spelling.
+ * Catalog refs are default branch names and cannot contain path separators.
+ */
+export function parseExactGitHubInstallSource(
+  value: string,
+): ExactGitHubInstallSource | null {
+  const match = value.match(
+    /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)@([A-Za-z0-9_.-]+)(?:\/(.+))?$/,
+  );
+  if (!match?.[1] || !match[2] || !match[3]) return null;
+  const root = match[4] ?? '.';
+  if (
+    root !== '.' &&
+    (root.startsWith('/') ||
+      root.endsWith('/') ||
+      root.includes('\\') ||
+      root
+        .split('/')
+        .some((segment) => !segment || segment === '.' || segment === '..'))
+  ) {
+    return null;
+  }
+  return {
+    repo: `${match[1]}/${match[2]}`,
+    ref: match[3],
+    root,
+  };
+}
+
+export function renderExactGitHubInstallSource(
+  descriptor: ExactGitHubInstallSource,
+): string {
+  return descriptor.root === '.'
+    ? `${descriptor.repo}@${descriptor.ref}`
+    : `${descriptor.repo}@${descriptor.ref}/${descriptor.root}`;
+}
+
 /**
  * Detect if a plugin source is a GitHub URL or shorthand
  * Supports:

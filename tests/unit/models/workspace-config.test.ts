@@ -51,6 +51,38 @@ describe('WorkspaceConfigSchema', () => {
 
 });
 
+  it('accepts a catalog descriptor without changing schema version 2', () => {
+    const parsed = WorkspaceConfigSchema.parse({
+      version: 2,
+      repositories: [],
+      clients: ['universal'],
+      plugins: [
+        {
+          source: 'NousResearch/hermes-agent@main/skills',
+          skills: ['research/llm-wiki'],
+          catalogSource: {
+            catalog: 'recommended',
+            catalogVersion: 1,
+            sourceId: 'hermes-core',
+            repo: 'NousResearch/hermes-agent',
+            effectiveRef: 'main',
+            approvedRoot: 'skills',
+            installSource: 'NousResearch/hermes-agent@main/skills',
+            installRoot: 'skills',
+            sourceKind: 'subtree',
+            installPolicy: 'direct-selective',
+          },
+        },
+      ],
+    });
+    expect(parsed.version).toBe(2);
+    expect(
+      typeof parsed.plugins[0] === 'string'
+        ? undefined
+        : parsed.plugins[0]?.catalogSource?.sourceId,
+    ).toBe('hermes-core');
+  });
+
 describe('ClientTypeSchema', () => {
   it('should accept all valid client types', () => {
     const validClients = [

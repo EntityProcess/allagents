@@ -94,7 +94,11 @@ export function resetFetchCache(): void {
  * @param path - Local path where the repo already exists
  * @param branch - Optional branch override (seeds branch-qualified cache key)
  */
-export function seedFetchCache(url: string, path: string, branch?: string): void {
+export function seedFetchCache(
+  url: string,
+  path: string,
+  branch?: string,
+): void {
   const parsed = parseGitHubUrl(url);
   if (!parsed) return;
 
@@ -409,14 +413,41 @@ export interface InstalledPluginUpdateResult {
  * Dependencies for updatePlugin (for testing)
  */
 export interface UpdatePluginDeps {
-  parsePluginSpec: (spec: string) => { plugin: string; marketplaceName: string; owner?: string; repo?: string } | null;
-  getMarketplaceRegistration: (name: string, sourceLocation?: string) => Promise<{
+  parsePluginSpec: (
+    spec: string,
+  ) => {
+    plugin: string;
+    marketplaceName: string;
+    owner?: string;
+    repo?: string;
+  } | null;
+  getMarketplaceRegistration: (
+    name: string,
+    sourceLocation?: string,
+  ) => Promise<{
     key: string;
-    entry: { name: string; path: string; source: { type: 'github' | 'git' | 'local'; location: string } };
+    entry: {
+      name: string;
+      path: string;
+      source: { type: 'github' | 'git' | 'local'; location: string };
+    };
   } | null>;
-  validateMarketplaceAccess: (marketplace: { name: string; path: string; source: { type: 'github' | 'git' | 'local'; location: string } }) => string | undefined;
-  parseMarketplaceManifest: (path: string) => Promise<{ success: boolean; data?: { plugins: Array<{ name: string; source: string | { url: string } }> } }>;
-  updateMarketplace: (name: string) => Promise<Array<{ name: string; success: boolean; error?: string }>>;
+  validateMarketplaceAccess: (marketplace: {
+    name: string;
+    path: string;
+    source: { type: 'github' | 'git' | 'local'; location: string };
+  }) => string | undefined;
+  parseMarketplaceManifest: (
+    path: string,
+  ) => Promise<{
+    success: boolean;
+    data?: {
+      plugins: Array<{ name: string; source: string | { url: string } }>;
+    };
+  }>;
+  updateMarketplace: (
+    name: string,
+  ) => Promise<Array<{ name: string; success: boolean; error?: string }>>;
   /** Optional fetch function for testing - defaults to fetchPlugin */
   fetchFn?: (url: string) => Promise<FetchResult>;
 }
@@ -444,7 +475,12 @@ export async function updatePlugin(
       return {
         plugin: pluginSpec,
         success: result.success,
-        action: result.action === 'updated' ? 'updated' : result.success ? 'skipped' : 'failed',
+        action:
+          result.action === 'updated'
+            ? 'updated'
+            : result.success
+              ? 'skipped'
+              : 'failed',
         ...(result.error && { error: result.error }),
       };
     }
@@ -458,7 +494,8 @@ export async function updatePlugin(
   }
 
   // Get marketplace info (with source location fallback for owner/repo format)
-  const sourceLocation = parsed.owner && parsed.repo ? `${parsed.owner}/${parsed.repo}` : undefined;
+  const sourceLocation =
+    parsed.owner && parsed.repo ? `${parsed.owner}/${parsed.repo}` : undefined;
   const registration = await deps.getMarketplaceRegistration(
     parsed.marketplaceName,
     sourceLocation,
@@ -544,7 +581,12 @@ export async function updatePlugin(
   return {
     plugin: pluginSpec,
     success: fetchResult.success,
-    action: fetchResult.action === 'updated' ? 'updated' : fetchResult.success ? 'skipped' : 'failed',
+    action:
+      fetchResult.action === 'updated'
+        ? 'updated'
+        : fetchResult.success
+          ? 'skipped'
+          : 'failed',
     ...(fetchResult.error && { error: fetchResult.error }),
   };
 }

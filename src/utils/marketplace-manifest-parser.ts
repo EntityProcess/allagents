@@ -34,9 +34,9 @@ export type ParseResult =
 export async function parseMarketplaceManifest(
   marketplacePath: string,
 ): Promise<ParseResult> {
-  const manifestPath = MANIFEST_PATHS
-    .map((path) => join(marketplacePath, path))
-    .find((path) => existsSync(path));
+  const manifestPath = MANIFEST_PATHS.map((path) =>
+    join(marketplacePath, path),
+  ).find((path) => existsSync(path));
 
   if (!manifestPath) {
     return {
@@ -73,6 +73,82 @@ export async function parseMarketplaceManifest(
 
   // Tier 2: lenient parsing
   return parseLeniently(json);
+}
+
+/**
+ * Parse only strictly valid, repository-local entries from a catalog
+ * marketplace. Object sources describe independent remote distributions and
+ * are deliberately excluded: catalog installation must not widen to them.
+ */
+export async function parseCatalogLocalMarketplaceManifest(
+  marketplacePath: string,
+): Promise<ParseResult> {
+  const manifestPath = MANIFEST_PATHS.map((path) =>
+    join(marketplacePath, path),
+  ).find((path) => existsSync(path));
+  if (!manifestPath) {
+    return {
+      success: false,
+      error: `Marketplace manifest not found (checked ${MANIFEST_PATHS.join(', ')})`,
+    };
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(await readFile(manifestPath, 'utf-8'));
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof SyntaxError
+          ? 'Failed to parse marketplace.json as JSON: invalid syntax'
+          : `Failed to read marketplace manifest: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  const manifest = MarketplaceManifestLenientSchema.safeParse(json);
+  if (!manifest.success) {
+    return {
+      success: false,
+      error: 'Marketplace manifest must contain a "plugins" array',
+    };
+  }
+
+  const plugins: MarketplacePluginEntry[] = [];
+  for (let index = 0; index < manifest.data.plugins.length; index++) {
+    const rawPlugin = manifest.data.plugins[index];
+    if (
+      typeof rawPlugin === 'object' &&
+      rawPlugin !== null &&
+      'source' in rawPlugin &&
+      typeof rawPlugin.source !== 'string'
+    ) {
+      continue;
+    }
+    const plugin = MarketplacePluginEntrySchema.safeParse(rawPlugin);
+    if (!plugin.success || typeof plugin.data.source !== 'string') {
+      return {
+        success: false,
+        error: `Local marketplace plugin at index ${index} is invalid.`,
+      };
+    }
+    plugins.push(plugin.data);
+  }
+
+  const rawManifest = json as Record<string, unknown>;
+  return {
+    success: true,
+    data: {
+      name:
+        typeof manifest.data.name === 'string' ? manifest.data.name : 'unknown',
+      description:
+        typeof rawManifest.description === 'string'
+          ? rawManifest.description
+          : '',
+      plugins,
+    },
+    warnings: [],
+  };
 }
 
 /**
@@ -144,7 +220,8 @@ function parseLeniently(json: unknown): ParseResult {
   // Build a manifest-like object with the valid plugins
   const data: MarketplaceManifest = {
     name: typeof raw.name === 'string' ? raw.name : 'unknown',
-    description: typeof obj.description === 'string' ? obj.description as string : '',
+    description:
+      typeof obj.description === 'string' ? (obj.description as string) : '',
     plugins: validPlugins,
   };
 
@@ -182,8 +259,11 @@ function extractPluginEntry(
     typeof obj.metadata === 'object' &&
     typeof (obj.metadata as Record<string, unknown>).description === 'string'
   ) {
-    description = (obj.metadata as Record<string, unknown>).description as string;
-    warnings.push(`plugins[${index}] ("${name}"): "description" found in metadata instead of top level`);
+    description = (obj.metadata as Record<string, unknown>)
+      .description as string;
+    warnings.push(
+      `plugins[${index}] ("${name}"): "description" found in metadata instead of top level`,
+    );
   } else {
     warnings.push(`plugins[${index}] ("${name}"): missing "description" field`);
   }
@@ -194,7 +274,9 @@ function extractPluginEntry(
   if (sourceResult.success) {
     source = sourceResult.data;
   } else {
-    warnings.push(`plugins[${index}] ("${name}"): missing or invalid "source" field`);
+    warnings.push(
+      `plugins[${index}] ("${name}"): missing or invalid "source" field`,
+    );
   }
 
   return {

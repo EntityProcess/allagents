@@ -26,12 +26,14 @@ import {
   resolveInstallMode,
   type ClientEntry,
 } from '../models/workspace-config.js';
+import { CatalogInstallDescriptorSchema } from '../models/skill-catalog.js';
 import {
   isGitHubUrl,
   parseGitHubUrl,
   parseFileSource,
   stripGitRef,
 } from '../utils/plugin-path.js';
+import { parseExactGitHubInstallSource } from '../utils/plugin-path.js';
 import { fetchPlugin, getPluginName, seedFetchCache } from './plugin.js';
 import {
   copyPluginToWorkspace,
@@ -118,6 +120,11 @@ import {
 } from './native/index.js';
 import { Stopwatch } from '../utils/stopwatch.js';
 import { processManagedRepos } from './managed-repos.js';
+import {
+  RECOMMENDED_SKILL_CATALOG,
+  catalogInstallDescriptor,
+  catalogSourceIdentity,
+} from './skill-catalog.js';
 
 /**
  * Result of deduplicating clients by skillsPath
@@ -1892,14 +1899,73 @@ async function syncVscodeWorkspaceFile(
  * the `@<ref>` suffix). Local plugins and marketplace specs are skipped since
  * they have no remote ref to record.
  */
-async function buildSourcesProvenance(
+export async function buildSourcesProvenance(
   validatedPlugins: ValidatedPlugin[],
   pluginEntries: PluginEntry[],
+  deps: { fetchPlugin?: typeof fetchPlugin } = {},
 ): Promise<Record<string, SyncStateSource>> {
+  const fetchPluginFn = deps.fetchPlugin ?? fetchPlugin;
   const sources: Record<string, SyncStateSource> = {};
+  const catalogPluginSpecs = new Set<string>();
 
-  // Index user-declared pins by their raw source string so we can attach them
-  // to the matching validated plugin (whose `.plugin` may have `@pin` spliced in).
+  for (const entry of pluginEntries) {
+    if (typeof entry === 'string' || !entry.catalogSource) continue;
+    const descriptorResult = CatalogInstallDescriptorSchema.safeParse(
+      entry.catalogSource,
+    );
+    if (!descriptorResult.success) continue;
+    const descriptor = descriptorResult.data;
+    const catalogEntry = RECOMMENDED_SKILL_CATALOG.sources.find(
+      (candidate) => candidate.sourceId === descriptor.sourceId,
+    );
+    if (
+      !catalogEntry ||
+      JSON.stringify(catalogInstallDescriptor(catalogEntry)) !==
+        JSON.stringify(descriptor)
+    ) {
+      continue;
+    }
+    const parsedSource = parseExactGitHubInstallSource(
+      descriptor.installSource,
+    );
+    if (
+      !parsedSource ||
+      parsedSource.repo.toLowerCase() !== descriptor.repo.toLowerCase() ||
+      parsedSource.ref !== descriptor.effectiveRef ||
+      parsedSource.root !== descriptor.installRoot
+    ) {
+      continue;
+    }
+    if (
+      !validatedPlugins.some(
+        (validated) => validated.success && validated.plugin === entry.source,
+      )
+    ) {
+      continue;
+    }
+
+    catalogPluginSpecs.add(entry.source);
+    const fetchResult = await fetchPluginFn(descriptor.installSource, {
+      branch: descriptor.effectiveRef,
+    });
+    if (!fetchResult.success || !fetchResult.resolvedSha) continue;
+    const identity = catalogSourceIdentity({
+      catalog: descriptor.catalog,
+      sourceId: descriptor.sourceId,
+      effectiveRef: descriptor.effectiveRef,
+      approvedRoot: descriptor.approvedRoot,
+    });
+    if (!sources[identity]) {
+      sources[identity] = {
+        pluginSpec: entry.source,
+        resolvedRef: fetchResult.resolvedRef ?? descriptor.effectiveRef,
+        resolvedSha: fetchResult.resolvedSha,
+        resolvedRoot: descriptor.installRoot,
+        catalogSource: descriptor,
+      };
+    }
+  }
+
   const pinByRawSource = new Map<string, string>();
   for (const entry of pluginEntries) {
     if (typeof entry === 'string') continue;
@@ -1907,21 +1973,20 @@ async function buildSourcesProvenance(
   }
 
   for (const validated of validatedPlugins) {
-    if (!validated.success) continue;
+    if (!validated.success || catalogPluginSpecs.has(validated.plugin))
+      continue;
     const spec = validated.plugin;
     if (!isGitHubUrl(spec)) continue;
     const parsed = parseGitHubUrl(spec);
     if (!parsed) continue;
 
-    // Re-call fetchPlugin to pick up the cached resolvedSha / resolvedRef.
-    const fetchResult = await fetchPlugin(spec, {
+    const fetchResult = await fetchPluginFn(spec, {
       ...(parsed.branch && { branch: parsed.branch }),
     });
     if (!fetchResult.success || !fetchResult.resolvedSha) continue;
 
     const rawBase = stripGitRef(`${parsed.owner}/${parsed.repo}`);
     const pinned = pinByRawSource.get(rawBase) ?? parsed.branch;
-
     sources[rawBase] = {
       pluginSpec: rawBase,
       resolvedRef: fetchResult.resolvedRef ?? parsed.branch ?? 'HEAD',
@@ -2191,7 +2256,12 @@ export async function syncWorkspace(
       ? new Set(config.enabledSkills)
       : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
-    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet, warnings),
+    collectAllSkills(
+      validPlugins,
+      disabledSkillsSet,
+      enabledSkillsSet,
+      warnings,
+    ),
   );
 
   // Build per-plugin skill name maps (handles conflicts automatically)
@@ -2239,9 +2309,14 @@ export async function syncWorkspace(
   // This preserves user-owned hooks and replaces only the allagents-managed
   // subset recorded in sync state.
   const codexHookSync = await sw.measure('codex-hooks-sync', async () =>
-    syncCodexProjectHooks(validPlugins, workspacePath, previousState?.codexHooks, {
-      dryRun,
-    }),
+    syncCodexProjectHooks(
+      validPlugins,
+      workspacePath,
+      previousState?.codexHooks,
+      {
+        dryRun,
+      },
+    ),
   );
   warnings.push(...codexHookSync.warnings);
 
@@ -2339,17 +2414,14 @@ export async function syncWorkspace(
 
     // Step 5d: Copy workspace files with GitHub cache
     // Pass repositories and skillsIndexRefs so conditional links are embedded in WORKSPACE-RULES
-    workspaceFileResults.push(...(await copyWorkspaceFiles(
-      sourcePath,
-      workspacePath,
-      filesToCopy,
-      {
+    workspaceFileResults.push(
+      ...(await copyWorkspaceFiles(sourcePath, workspacePath, filesToCopy, {
         dryRun,
         githubCache,
         repositories: config.repositories,
         skillsIndexRefs,
-      },
-    )));
+      })),
+    );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
     // Skip when repositories is empty (no agent files should be created)
@@ -2624,24 +2696,22 @@ export async function syncUserWorkspace(
       selectivePurgeWorkspace(homeDir, previousState, syncClients),
     );
 
-    const relocatedHooks = await sw.measure(
-      'legacy-copilot-hook-scan',
-      () =>
-        findRelocatedGitHubHooks(
-          validPlugins
-            .filter(
-              (plugin) =>
-                plugin.clients.includes('copilot') &&
-                plugin.fileArtifacts?.github !== false,
-            )
-            .map((plugin) => ({
-              pluginPath: plugin.resolved,
-              ...(plugin.exclude && { exclude: plugin.exclude }),
-            })),
-          homeDir,
-          'copilot',
-          { clientMappings: USER_CLIENT_MAPPINGS },
-        ),
+    const relocatedHooks = await sw.measure('legacy-copilot-hook-scan', () =>
+      findRelocatedGitHubHooks(
+        validPlugins
+          .filter(
+            (plugin) =>
+              plugin.clients.includes('copilot') &&
+              plugin.fileArtifacts?.github !== false,
+          )
+          .map((plugin) => ({
+            pluginPath: plugin.resolved,
+            ...(plugin.exclude && { exclude: plugin.exclude }),
+          })),
+        homeDir,
+        'copilot',
+        { clientMappings: USER_CLIENT_MAPPINGS },
+      ),
     );
 
     for (const filePath of relocatedHooks.found) {
@@ -2663,7 +2733,12 @@ export async function syncUserWorkspace(
       ? new Set(config.enabledSkills)
       : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
-    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet, warnings),
+    collectAllSkills(
+      validPlugins,
+      disabledSkillsSet,
+      enabledSkillsSet,
+      warnings,
+    ),
   );
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
 

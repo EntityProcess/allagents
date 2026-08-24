@@ -24,6 +24,7 @@ import {
 } from './marketplace.js';
 import {
   type ModifyResult,
+  type SourceAllowlistUpsertOptions,
   ensureObjectPluginEntry,
   extractPluginNames,
   findPluginEntryByName,
@@ -75,7 +76,9 @@ export function isUserConfigPath(workspacePath: string): boolean {
  * Ensure user-level workspace.yaml exists with default config.
  * Creates it if missing, does not overwrite existing.
  */
-export async function ensureUserWorkspace(clients?: ClientEntry[]): Promise<void> {
+export async function ensureUserWorkspace(
+  clients?: ClientEntry[],
+): Promise<void> {
   const configPath = getUserWorkspaceConfigPath();
   if (existsSync(configPath)) return;
 
@@ -528,7 +531,10 @@ export async function removeUserDisabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in user workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -682,7 +688,10 @@ export async function removeUserEnabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in user workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -750,7 +759,8 @@ export async function setUserPluginSkillsMode(
       entry.skills = [...skillNames];
     } else {
       // For blocklist, clear the field if no exclusions (= all enabled)
-      entry.skills = skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
+      entry.skills =
+        skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
     }
 
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
@@ -766,6 +776,7 @@ export async function setUserPluginSkillsMode(
 export async function upsertUserGitHubPluginSourceAllowlist(
   source: string,
   skillNames: string[],
+  options: SourceAllowlistUpsertOptions = {},
 ): Promise<ModifyResult> {
   await ensureUserWorkspace();
   const configPath = getUserWorkspaceConfigPath();
@@ -777,6 +788,7 @@ export async function upsertUserGitHubPluginSourceAllowlist(
       config,
       source,
       skillNames,
+      options,
     );
     if (!result.success) return result;
 

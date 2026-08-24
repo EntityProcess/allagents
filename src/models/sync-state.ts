@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CatalogInstallDescriptorSchema } from './skill-catalog.js';
 import { ClientTypeSchema } from './workspace-config.js';
 
 /**
@@ -20,6 +21,8 @@ export const SyncStateSourceSchema = z.object({
   resolvedRef: z.string(),
   resolvedSha: z.string(),
   pinnedRef: z.string().optional(),
+  catalogSource: CatalogInstallDescriptorSchema.optional(),
+  resolvedRoot: z.string().optional(),
 });
 
 export type SyncStateSource = z.infer<typeof SyncStateSourceSchema>;

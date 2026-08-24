@@ -344,4 +344,48 @@ description: Blog watcher
       }
     }
   });
+  it('returns exit 2 for an unknown catalog in JSON mode', () => {
+    const proc = Bun.spawnSync(
+      [
+        'bun',
+        'run',
+        join(import.meta.dir, '../../src/cli/index.ts'),
+        '--json',
+        'skill',
+        'search',
+        'docs',
+        '--catalog',
+        'unknown',
+      ],
+      { cwd: tmpDir, env: { ...process.env, HOME: tmpDir } },
+    );
+    expect(proc.exitCode).toBe(2);
+    const payload = JSON.parse(proc.stdout.toString());
+    expect(payload.success).toBe(false);
+    expect(payload.error).toBe(
+      'Unknown skill catalog "unknown". Available catalogs: recommended.',
+    );
+  });
+
+  it('returns exit 2 when catalog and owner are combined', () => {
+    const proc = Bun.spawnSync(
+      [
+        'bun',
+        'run',
+        join(import.meta.dir, '../../src/cli/index.ts'),
+        'skill',
+        'search',
+        'docs',
+        '--catalog',
+        'recommended',
+        '--owner',
+        'anthropics',
+      ],
+      { cwd: tmpDir, env: { ...process.env, HOME: tmpDir } },
+    );
+    expect(proc.exitCode).toBe(2);
+    expect(proc.stderr.toString()).toContain(
+      '--catalog and --owner cannot be used together.',
+    );
+  });
 });

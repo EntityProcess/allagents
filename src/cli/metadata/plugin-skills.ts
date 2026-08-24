@@ -124,30 +124,27 @@ export const skillsUpdateMeta: AgentCommandMeta = {
       cancelled: 'number',
     },
   },
-  jsonFields: [
-    'id',
-    'source',
-    'status',
-    'error',
-  ] as const,
+  jsonFields: ['id', 'source', 'status', 'error'] as const,
 };
 
 export const skillsSearchMeta: AgentCommandMeta = {
   command: 'skill search',
   description:
-    'Search GitHub for skills by querying SKILL.md files via the Code Search API. Results are ranked by relevance, with skill-name matches first. In TTY mode, shows a filter-as-you-type multi-select picker and offers to install the selected skills.',
+    'Search SKILL.md files through global GitHub Code Search, or constrain discovery to the built-in Recommended catalog with exact repository/ref/root boundaries. Catalog searches never fall back to global results. In TTY mode, installable results can be selectively installed.',
   whenToUse:
-    'To discover available skills from public GitHub repositories without leaving the CLI. Bridges "I want a skill that does X" → install.',
+    'To discover public GitHub skills globally, or to search a versioned catalog whose classification, policy, warnings, source metadata, and provenance are explicit. Recommended is a discovery label, not a security or license assertion.',
   examples: [
     'allagents skill search terraform',
     'allagents skill pr-search',
     'allagents skill "pr search"',
     'allagents skill search terraform --owner hashicorp',
+    'allagents skill search testing --catalog recommended',
+    'allagents --json skill search testing --catalog recommended',
     'allagents skill search docs --page 2 --limit 10',
     'allagents --json skill search docs --limit 5',
   ],
   expectedOutput:
-    'Skills ranked by relevance: repo, skill name, stars, description. In TTY mode, followed by a searchable multi-select install prompt.',
+    'Ranked global or Recommended catalog results with exact install source, selector, policy, warnings, metadata, and discovery provenance. Search-only and external-lifecycle entries remain visible but cannot be selected.',
   positionals: [
     {
       name: 'query',
@@ -161,6 +158,12 @@ export const skillsSearchMeta: AgentCommandMeta = {
       flag: '--owner',
       type: 'string',
       description: 'Scope to a single GitHub owner (org or user).',
+    },
+    {
+      flag: '--catalog',
+      type: 'string',
+      description:
+        'Restrict to a built-in catalog (currently recommended). Mutually exclusive with --owner; default-branch refs only; never falls back to global search.',
     },
     {
       flag: '--page',
@@ -184,6 +187,40 @@ export const skillsSearchMeta: AgentCommandMeta = {
         description: 'string',
         sha: 'string',
         stars: 'number',
+        installSource: 'string',
+        installSelector: 'string',
+        installation: {
+          policy:
+            'repository-install | direct-selective | marketplace-selective | search-only | external-installer',
+          reasonCodes: ['string'],
+        },
+        catalog: {
+          name: 'recommended?',
+          label: 'Recommended?',
+          version: '1?',
+          identity: 'string?',
+          sourceId: 'string?',
+          classification: 'recommended | optional | external-lifecycle?',
+          sourceKind:
+            'repository | subtree | marketplace | external-lifecycle?',
+          category: 'string?',
+          homepage: 'string?',
+          author: { name: 'string', url: 'string' },
+          spdxLicense: 'string | null',
+          warnings: [{ code: 'string', message: 'string' }],
+          discovery: {
+            catalogIdentity: 'string',
+            provider: 'github-code-search',
+            repo: 'string',
+            effectiveRef: 'string',
+            catalogVersion: 1,
+            approvedRoot: 'string',
+            repositoryHeadSha: 'string',
+            skillPath: 'string',
+            blobSha: 'string',
+          },
+          installDescriptor: 'CatalogInstallDescriptor',
+        },
       },
     ],
     total: 'number',

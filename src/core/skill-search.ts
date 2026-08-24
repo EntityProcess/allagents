@@ -1,3 +1,22 @@
+import type {
+  CatalogDiscoveryProvenance,
+  CatalogInstallDescriptor,
+  SkillCatalogAuthor,
+  SkillCatalogCategory,
+  SkillCatalogClassification,
+  SkillCatalogInstallPolicy,
+  SkillCatalogName,
+  SkillCatalogSourceKind,
+  SkillCatalogWarning,
+} from '../models/skill-catalog.js';
+import {
+  RECOMMENDED_SKILL_CATALOG,
+  catalogInstallDescriptor,
+  catalogSourceIdentity,
+  matchCatalogSource,
+  pathWithinCatalogRoot,
+  relativeToCatalogRoot,
+} from './skill-catalog.js';
 import { parseSkillMetadata } from '../validators/skill.js';
 
 /**
@@ -18,6 +37,7 @@ import { parseSkillMetadata } from '../validators/skill.js';
 const OWNER_REGEX = /^[A-Za-z0-9-]{1,39}$/;
 const SEARCH_PAGE_SIZE = 100;
 const MAX_RESULTS = 1000;
+const CATALOG_QUERY_MAX_LENGTH = 240;
 
 /**
  * GitHub username pattern: starts and ends with alphanumeric, may contain
@@ -46,6 +66,30 @@ export interface SkillSearchItem {
   sha: string;
   /** Repository star count (0 when unavailable). */
   stars: number;
+  /** Exact source passed to installation. */
+  installSource: string;
+  /** Qualified selector relative to the exact installation root. */
+  installSelector: string;
+  installation: {
+    policy: 'repository-install' | SkillCatalogInstallPolicy;
+    reasonCodes: readonly string[];
+  };
+  catalog?: {
+    name: SkillCatalogName;
+    label: 'Recommended';
+    version: 1;
+    identity: string;
+    sourceId: string;
+    classification: SkillCatalogClassification;
+    sourceKind: SkillCatalogSourceKind;
+    category: SkillCatalogCategory;
+    homepage: string;
+    author: SkillCatalogAuthor;
+    spdxLicense: string | null;
+    warnings: readonly SkillCatalogWarning[];
+    discovery: CatalogDiscoveryProvenance;
+    installDescriptor: CatalogInstallDescriptor;
+  };
 }
 
 export interface SkillSearchResult {
@@ -57,6 +101,7 @@ export interface SkillSearchResult {
 
 export interface SkillSearchOptions {
   owner?: string;
+  catalog?: SkillCatalogName;
   page?: number;
   limit?: number;
 }
@@ -64,7 +109,10 @@ export interface SkillSearchOptions {
 const ENRICHMENT_CONCURRENCY = 10;
 
 export class SkillSearchError extends Error {
-  constructor(message: string, public readonly kind: 'validation' | 'rate-limit' | 'api') {
+  constructor(
+    message: string,
+    public readonly kind: 'validation' | 'rate-limit' | 'api',
+  ) {
     super(message);
     this.name = 'SkillSearchError';
   }
@@ -78,14 +126,36 @@ export function validateSkillSearchArgs(
   query: string,
   options: SkillSearchOptions,
 ): void {
+  const requestedCatalog = options.catalog as string | undefined;
+  if (requestedCatalog !== undefined && requestedCatalog !== 'recommended') {
+    throw new SkillSearchError(
+      `Unknown skill catalog "${requestedCatalog}". Available catalogs: recommended.`,
+      'validation',
+    );
+  }
+  if (options.catalog !== undefined && options.owner !== undefined) {
+    throw new SkillSearchError(
+      '--catalog and --owner cannot be used together.',
+      'validation',
+    );
+  }
   if (query.trim().length < 2) {
-    throw new SkillSearchError('Search query must be at least 2 characters.', 'validation');
+    throw new SkillSearchError(
+      'Search query must be at least 2 characters.',
+      'validation',
+    );
   }
   if (options.page !== undefined && options.page < 1) {
     throw new SkillSearchError('--page must be >= 1.', 'validation');
   }
-  if (options.limit !== undefined && (options.limit < 1 || options.limit > 100)) {
-    throw new SkillSearchError('--limit must be between 1 and 100.', 'validation');
+  if (
+    options.limit !== undefined &&
+    (options.limit < 1 || options.limit > 100)
+  ) {
+    throw new SkillSearchError(
+      '--limit must be between 1 and 100.',
+      'validation',
+    );
   }
   if (options.owner !== undefined && !OWNER_REGEX.test(options.owner)) {
     throw new SkillSearchError(
@@ -147,21 +217,122 @@ export function buildSearchQueries(
   // doesn't mention the query term (e.g. `plugins/cargowise/skills/*/SKILL.md`
   // when searching "cargowise").
   const queries: SkillSearchQuery[] = [
-    { priority: 1, label: 'path', q: join('filename:SKILL.md', `path:${pathTerm}`, userClause) },
+    {
+      priority: 1,
+      label: 'path',
+      q: join('filename:SKILL.md', `path:${pathTerm}`, userClause),
+    },
   ];
 
   if (pathTerm !== trimmed) {
-    queries.push({ priority: 2, label: 'hyphen', q: join('filename:SKILL.md', pathTerm, userClause) });
+    queries.push({
+      priority: 2,
+      label: 'hyphen',
+      q: join('filename:SKILL.md', pathTerm, userClause),
+    });
   }
 
   if (!owner && couldBeOwner(trimmed)) {
-    queries.push({ priority: 3, label: 'owner', q: `filename:SKILL.md user:${trimmed}` });
+    queries.push({
+      priority: 3,
+      label: 'owner',
+      q: `filename:SKILL.md user:${trimmed}`,
+    });
   }
 
   // P4 always: primary content search.
-  queries.push({ priority: 4, label: 'primary', q: join('filename:SKILL.md', trimmed, userClause) });
+  queries.push({
+    priority: 4,
+    label: 'primary',
+    q: join('filename:SKILL.md', trimmed, userClause),
+  });
 
   return queries;
+}
+
+export interface CatalogSkillSearchQuery extends SkillSearchQuery {
+  batch: number;
+  required: boolean;
+  repositories: readonly string[];
+}
+
+/** Build deterministic repository-qualified Code Search batches. */
+export function buildCatalogSearchQueries(
+  query: string,
+): CatalogSkillSearchQuery[] {
+  const repositories = [
+    ...new Map(
+      RECOMMENDED_SKILL_CATALOG.sources.map((source) => [
+        source.repo.toLowerCase(),
+        source.repo,
+      ]),
+    ).values(),
+  ];
+  const trimmed = query.trim();
+  const pathTerm = trimmed.replace(/ /g, '-');
+  const variants: Array<
+    Pick<SkillSearchQuery, 'priority' | 'label'> & {
+      prefix: string;
+      required: boolean;
+    }
+  > = [
+    {
+      priority: 1,
+      label: 'path',
+      prefix: `filename:SKILL.md path:${pathTerm}`,
+      required: false,
+    },
+  ];
+  if (pathTerm !== trimmed) {
+    variants.push({
+      priority: 2,
+      label: 'hyphen',
+      prefix: `filename:SKILL.md ${pathTerm}`,
+      required: false,
+    });
+  }
+  variants.push({
+    priority: 4,
+    label: 'primary',
+    prefix: `filename:SKILL.md ${trimmed}`,
+    required: true,
+  });
+
+  // GitHub Code Search applies repeated repo qualifiers as a repository union;
+  // unlike a parenthesized OR expression, this syntax is accepted by the API.
+  // Returned items are still checked against the same batch and catalog roots.
+  return variants.flatMap((variant) =>
+    batchCatalogRepositories(variant.prefix, repositories).map(
+      (batch, index): CatalogSkillSearchQuery => ({
+        priority: variant.priority,
+        label: variant.label,
+        q: `${variant.prefix} ${batch.map((repo) => `repo:${repo}`).join(' ')}`,
+        batch: index,
+        required: variant.required,
+        repositories: batch,
+      }),
+    ),
+  );
+}
+
+function batchCatalogRepositories(
+  prefix: string,
+  repositories: readonly string[],
+): string[][] {
+  const batches: string[][] = [];
+  let current: string[] = [];
+  for (const repository of repositories) {
+    const candidate = [...current, repository];
+    const query = `${prefix} ${candidate.map((repo) => `repo:${repo}`).join(' ')}`;
+    if (query.length > CATALOG_QUERY_MAX_LENGTH && current.length > 0) {
+      batches.push(current);
+      current = [repository];
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
 }
 
 /**
@@ -170,9 +341,10 @@ export function buildSearchQueries(
  * falls back to a generic API error.
  */
 function classifyApiError(status: number, body: unknown): SkillSearchError {
-  const msg = typeof body === 'object' && body !== null && 'message' in body
-    ? String((body as { message: unknown }).message ?? '')
-    : '';
+  const msg =
+    typeof body === 'object' && body !== null && 'message' in body
+      ? String((body as { message: unknown }).message ?? '')
+      : '';
   if (status === 401) {
     return new SkillSearchError(
       'GitHub Code Search requires authentication. Run `gh auth login` or set GITHUB_TOKEN.',
@@ -226,7 +398,9 @@ export async function resolveGhToken(): Promise<string | undefined> {
  * namespace is set, or just `<name>` otherwise. Used as the dedup key
  * together with the repo full name.
  */
-export function qualifiedName(item: Pick<SkillSearchItem, 'name' | 'namespace'>): string {
+export function qualifiedName(
+  item: Pick<SkillSearchItem, 'name' | 'namespace'>,
+): string {
   return item.namespace ? `${item.namespace}/${item.name}` : item.name;
 }
 
@@ -281,7 +455,9 @@ function parseSkillPath(
   // No `skills` segment — use the parent directory of the skill file as the name.
   // Skip the file itself (last segment) and use the directory before it.
   const lastPart = parts[parts.length - 1]?.toLowerCase() ?? '';
-  const fileIdx = lastPart.endsWith('.md') ? parts.length - 2 : parts.length - 1;
+  const fileIdx = lastPart.endsWith('.md')
+    ? parts.length - 2
+    : parts.length - 1;
   if (fileIdx >= 0) {
     const parent = parts[fileIdx];
     if (parent) return { namespace: '', name: parent };
@@ -338,7 +514,11 @@ async function runOneQuery(
     items?: Array<{
       path?: string;
       sha?: string;
-      repository?: { full_name?: string; description?: string; stargazers_count?: number };
+      repository?: {
+        full_name?: string;
+        description?: string;
+        stargazers_count?: number;
+      };
     }>;
   };
 
@@ -355,6 +535,12 @@ async function runOneQuery(
       description: item.repository?.description ?? '',
       sha: item.sha ?? '',
       stars: item.repository?.stargazers_count ?? 0,
+      installSource: repo,
+      installSelector: namespace ? `${namespace}/${name}` : name,
+      installation: {
+        policy: 'repository-install',
+        reasonCodes: [],
+      },
     };
   });
 
@@ -383,7 +569,13 @@ async function fetchPrimaryPages(
   let truncated = false;
 
   for (let currentPage = 1; currentPage <= numPages; currentPage += 1) {
-    const result = await runOneQuery(q, currentPage, SEARCH_PAGE_SIZE, token, fetchFn);
+    const result = await runOneQuery(
+      q,
+      currentPage,
+      SEARCH_PAGE_SIZE,
+      token,
+      fetchFn,
+    );
     items.push(...result.items);
     total = result.total;
     truncated = truncated || result.truncated;
@@ -392,6 +584,7 @@ async function fetchPrimaryPages(
       break;
     }
   }
+  truncated = truncated || items.length < Math.min(total, MAX_RESULTS);
 
   return { items, total, truncated };
 }
@@ -423,18 +616,22 @@ export async function searchSkills(
 ): Promise<SkillSearchResult> {
   validateSkillSearchArgs(query, options);
   const fetchFn = deps.fetch ?? fetch;
-  const logger = deps.logger ?? ((msg: string) => process.stderr.write(`${msg}\n`));
-
+  const logger =
+    deps.logger ?? ((msg: string) => process.stderr.write(`${msg}\n`));
   const page = options.page ?? 1;
   const limit = options.limit ?? 15;
   const token = await (deps.tokenResolver ?? resolveGhToken)();
+
+  if (options.catalog === 'recommended') {
+    return searchCatalogSkills(query, page, limit, token, fetchFn, logger);
+  }
 
   const queries = buildSearchQueries(query, options.owner);
   const settled = await Promise.allSettled(
     queries.map((entry) =>
       entry.priority === 4
         ? fetchPrimaryPages(entry.q, page, limit, token, fetchFn)
-        : runOneQuery(entry.q, 1, SEARCH_PAGE_SIZE, token, fetchFn)
+        : runOneQuery(entry.q, 1, SEARCH_PAGE_SIZE, token, fetchFn),
     ),
   );
 
@@ -457,7 +654,9 @@ export async function searchSkills(
     } else {
       // Non-primary failure — log and continue. Primary failures are handled above.
       const reason =
-        outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+        outcome.reason instanceof Error
+          ? outcome.reason.message
+          : String(outcome.reason);
       logger(`Warning: skill search "${entry.label}" query failed: ${reason}`);
     }
   }
@@ -486,7 +685,11 @@ export async function searchSkills(
   const filtered = filterByRelevance(workingSet, query);
   rankByRelevance(filtered, query);
   const dedupedByName = deduplicateByName(filtered);
-  const { items: finalItems, totalPages } = paginate(dedupedByName, page, limit);
+  const { items: finalItems, totalPages } = paginate(
+    dedupedByName,
+    page,
+    limit,
+  );
 
   return {
     query,
@@ -496,17 +699,297 @@ export async function searchSkills(
   };
 }
 
+interface CatalogRepositoryPreflight {
+  repo: string;
+  effectiveRef: string;
+  headSha: string;
+}
+
+async function searchCatalogSkills(
+  query: string,
+  page: number,
+  limit: number,
+  token: string | undefined,
+  fetchFn: typeof fetch,
+  logger: (message: string) => void,
+): Promise<SkillSearchResult> {
+  const preflight = await preflightCatalogRepositories(token, fetchFn);
+  const queries = buildCatalogSearchQueries(query);
+  const settled = await Promise.allSettled(
+    queries.map((entry) =>
+      entry.required
+        ? fetchPrimaryPages(entry.q, page, limit, token, fetchFn)
+        : runOneQuery(entry.q, 1, SEARCH_PAGE_SIZE, token, fetchFn),
+    ),
+  );
+
+  type CatalogBucket = {
+    priority: number;
+    batch: number;
+    result: QueryRunResult;
+  };
+  const buckets: CatalogBucket[] = [];
+  for (let index = 0; index < queries.length; index += 1) {
+    const entry = queries[index];
+    const outcome = settled[index];
+    if (!entry || !outcome) continue;
+    if (outcome.status === 'rejected') {
+      if (entry.required) throw outcome.reason;
+      const reason =
+        outcome.reason instanceof Error
+          ? outcome.reason.message
+          : String(outcome.reason);
+      logger(
+        `Warning: Recommended catalog "${entry.label}" batch ${entry.batch + 1} failed: ${reason}`,
+      );
+      continue;
+    }
+    buckets.push({
+      priority: entry.priority,
+      batch: entry.batch,
+      result: outcome.value,
+    });
+  }
+  buckets.sort(
+    (left, right) => left.priority - right.priority || left.batch - right.batch,
+  );
+
+  const bounded = buckets
+    .flatMap((bucket) => bucket.result.items)
+    .map((item) => attachCatalogSource(item, preflight))
+    .filter((item): item is SkillSearchItem => item !== null);
+  const deduped = dedupeItems(bounded);
+  const visible = deduped.filter((item) => {
+    const firstSegment = item.path.split('/')[0] ?? '';
+    return !firstSegment.startsWith('.');
+  });
+
+  rankCatalogByRelevance(visible, query);
+  const workingSet = truncateForProcessing(visible, page, limit);
+  await Promise.all([
+    fetchStarsForItems(workingSet, token, fetchFn),
+    enrichDescriptionsForItems(workingSet, token, fetchFn),
+  ]);
+  const filtered = filterByRelevance(workingSet, query);
+  rankCatalogByRelevance(filtered, query);
+  const dedupedByName = deduplicateByName(filtered);
+  const { items, totalPages } = paginate(dedupedByName, page, limit);
+  return {
+    query,
+    items,
+    total: dedupedByName.length,
+    truncated:
+      buckets.some((bucket) => bucket.result.truncated) || totalPages > page,
+  };
+}
+
+async function preflightCatalogRepositories(
+  token: string | undefined,
+  fetchFn: typeof fetch,
+): Promise<ReadonlyMap<string, CatalogRepositoryPreflight>> {
+  const sourcesByRepository = new Map<
+    string,
+    (typeof RECOMMENDED_SKILL_CATALOG.sources)[number]
+  >();
+  for (const source of RECOMMENDED_SKILL_CATALOG.sources) {
+    const key = source.repo.toLowerCase();
+    const existing = sourcesByRepository.get(key);
+    if (existing && existing.effectiveRef !== source.effectiveRef) {
+      throw new SkillSearchError(
+        `Catalog repository ${source.repo} has conflicting effective refs.`,
+        'validation',
+      );
+    }
+    if (!existing) sourcesByRepository.set(key, source);
+  }
+
+  const headers = buildGitHubApiHeaders(token);
+  const results = await Promise.all(
+    [...sourcesByRepository.values()].map(async (source) => {
+      const repositoryResponse = await fetchFn(
+        `https://api.github.com/repos/${source.repo}`,
+        { headers },
+      );
+      let repositoryBody: unknown = null;
+      try {
+        repositoryBody = await repositoryResponse.json();
+      } catch {
+        // Error classification below handles an empty body.
+      }
+      if (!repositoryResponse.ok) {
+        throw classifyApiError(repositoryResponse.status, repositoryBody);
+      }
+      const repositoryFullName =
+        repositoryBody &&
+        typeof repositoryBody === 'object' &&
+        'full_name' in repositoryBody &&
+        typeof repositoryBody.full_name === 'string'
+          ? repositoryBody.full_name
+          : undefined;
+      const defaultBranch =
+        repositoryBody &&
+        typeof repositoryBody === 'object' &&
+        'default_branch' in repositoryBody &&
+        typeof repositoryBody.default_branch === 'string'
+          ? repositoryBody.default_branch
+          : undefined;
+      if (
+        repositoryFullName?.toLowerCase() !== source.repo.toLowerCase() ||
+        defaultBranch !== source.effectiveRef
+      ) {
+        throw new SkillSearchError(
+          `Recommended catalog source ${source.sourceId} no longer resolves to ${source.repo}@${source.effectiveRef}.`,
+          'api',
+        );
+      }
+
+      const refResponse = await fetchFn(
+        `https://api.github.com/repos/${source.repo}/git/ref/heads/${encodeURIComponent(source.effectiveRef)}`,
+        { headers },
+      );
+      let refBody: unknown = null;
+      try {
+        refBody = await refResponse.json();
+      } catch {
+        // Error classification below handles an empty body.
+      }
+      if (!refResponse.ok) throw classifyApiError(refResponse.status, refBody);
+      const refObject =
+        refBody && typeof refBody === 'object' && 'object' in refBody
+          ? refBody.object
+          : undefined;
+      const headSha =
+        refObject &&
+        typeof refObject === 'object' &&
+        'sha' in refObject &&
+        typeof refObject.sha === 'string'
+          ? refObject.sha
+          : undefined;
+      if (!headSha) {
+        throw new SkillSearchError(
+          `Recommended catalog source ${source.sourceId} did not resolve a head SHA.`,
+          'api',
+        );
+      }
+      return {
+        key: source.repo.toLowerCase(),
+        value: {
+          repo: source.repo,
+          effectiveRef: source.effectiveRef,
+          headSha,
+        },
+      };
+    }),
+  );
+  return new Map(results.map((result) => [result.key, result.value]));
+}
+
+function attachCatalogSource(
+  item: SkillSearchItem,
+  preflight: ReadonlyMap<string, CatalogRepositoryPreflight>,
+): SkillSearchItem | null {
+  const repository = preflight.get(item.repo.toLowerCase());
+  if (!repository) return null;
+  const source = matchCatalogSource(item.repo, item.path);
+  if (!source || source.effectiveRef !== repository.effectiveRef) return null;
+  const relativePath = relativeToCatalogRoot(item.path, source.installRoot);
+  if (relativePath === null || !relativePath.endsWith('/SKILL.md')) return null;
+
+  let selector = relativePath.slice(0, -'/SKILL.md'.length);
+  if (source.installRoot === '.' && selector.startsWith('skills/')) {
+    selector = selector.slice('skills/'.length);
+  }
+  if (!selector) return null;
+
+  let policy = source.installPolicy;
+  const reasonCodes: string[] = [];
+  if (
+    source.installableSubpath &&
+    !pathWithinCatalogRoot(item.path, source.installableSubpath)
+  ) {
+    policy = 'search-only';
+    reasonCodes.push('outside-installable-subpath');
+  }
+  if (policy === 'search-only') reasonCodes.push('search-only-source');
+  if (policy === 'external-installer') reasonCodes.push('external-lifecycle');
+
+  const identity = catalogSourceIdentity({
+    catalog: 'recommended',
+    sourceId: source.sourceId,
+    effectiveRef: source.effectiveRef,
+    approvedRoot: source.approvedRoot,
+  });
+  return {
+    ...item,
+    installSource: source.installSource,
+    installSelector: selector,
+    installation: { policy, reasonCodes },
+    catalog: {
+      name: 'recommended',
+      label: RECOMMENDED_SKILL_CATALOG.label,
+      version: RECOMMENDED_SKILL_CATALOG.schemaVersion,
+      identity,
+      sourceId: source.sourceId,
+      classification: source.classification,
+      sourceKind: source.sourceKind,
+      category: source.category,
+      homepage: source.homepage,
+      author: source.author,
+      spdxLicense: source.spdxLicense,
+      warnings: source.warnings,
+      discovery: {
+        catalogIdentity: identity,
+        provider: 'github-code-search',
+        repo: source.repo,
+        effectiveRef: source.effectiveRef,
+        catalogVersion: 1,
+        approvedRoot: source.approvedRoot,
+        repositoryHeadSha: repository.headSha,
+        skillPath: item.path,
+        blobSha: item.sha,
+      },
+      installDescriptor: catalogInstallDescriptor(source),
+    },
+  };
+}
+
+function rankCatalogByRelevance(items: SkillSearchItem[], query: string): void {
+  const sourceOrder = new Map(
+    RECOMMENDED_SKILL_CATALOG.sources.map((source, index) => [
+      source.sourceId,
+      index,
+    ]),
+  );
+  items.sort((left, right) => {
+    const score = relevanceScore(right, query) - relevanceScore(left, query);
+    if (score !== 0) return score;
+    const source =
+      (sourceOrder.get(left.catalog?.sourceId ?? '') ??
+        Number.MAX_SAFE_INTEGER) -
+      (sourceOrder.get(right.catalog?.sourceId ?? '') ??
+        Number.MAX_SAFE_INTEGER);
+    return (
+      source ||
+      left.repo.localeCompare(right.repo) ||
+      left.path.localeCompare(right.path)
+    );
+  });
+}
+
 /**
  * Drop duplicate hits by `repo + qualifiedName`. Same folder surfaced by
  * multiple query buckets (e.g. both `in:path` and content match) collapses to
  * one entry, with the higher-priority bucket's occurrence winning because
- * items are merged in priority order before this runs.
+ * catalog entries use full identity + path; global entries use repository +
+ * qualified name. Higher-priority query buckets win.
  */
 function dedupeItems(items: SkillSearchItem[]): SkillSearchItem[] {
   const seen = new Set<string>();
   const out: SkillSearchItem[] = [];
   for (const item of items) {
-    const key = `${item.repo}#${qualifiedName(item)}`;
+    const key = item.catalog
+      ? `${item.catalog.identity}#${item.path}`
+      : `${item.repo}#${qualifiedName(item)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(item);
@@ -514,7 +997,10 @@ function dedupeItems(items: SkillSearchItem[]): SkillSearchItem[] {
   return out;
 }
 
-function splitRepo(item: Pick<SkillSearchItem, 'repo'>): { owner: string; repoName: string } {
+function splitRepo(item: Pick<SkillSearchItem, 'repo'>): {
+  owner: string;
+  repoName: string;
+} {
   const [owner = item.repo, repoName = ''] = item.repo.split('/', 2);
   return { owner, repoName };
 }
@@ -552,7 +1038,10 @@ function rankByRelevance(items: SkillSearchItem[], query: string): void {
   items.sort((a, b) => relevanceScore(b, query) - relevanceScore(a, query));
 }
 
-function filterByRelevance(items: SkillSearchItem[], query: string): SkillSearchItem[] {
+function filterByRelevance(
+  items: SkillSearchItem[],
+  query: string,
+): SkillSearchItem[] {
   const term = query.trim().toLowerCase();
   const termHyphen = term.replace(/ /g, '-');
 
@@ -569,11 +1058,13 @@ function filterByRelevance(items: SkillSearchItem[], query: string): SkillSearch
   });
 }
 
-function truncateForProcessing(items: SkillSearchItem[], page: number, limit: number): SkillSearchItem[] {
+function truncateForProcessing(
+  items: SkillSearchItem[],
+  page: number,
+  limit: number,
+): SkillSearchItem[] {
   const maxToProcess = Math.max(page * limit * 3, limit * 3);
-  return items.length > maxToProcess
-    ? items.slice(0, maxToProcess)
-    : items;
+  return items.length > maxToProcess ? items.slice(0, maxToProcess) : items;
 }
 
 function deduplicateByName(items: SkillSearchItem[]): SkillSearchItem[] {
@@ -624,16 +1115,22 @@ async function fetchStarsForItems(
   const headers = buildGitHubApiHeaders(token);
 
   const starsMap = new Map<string, number>();
-  await forEachWithConcurrency(uniqueRepos, ENRICHMENT_CONCURRENCY, async (repo) => {
-    try {
-      const res = await fetchFn(`https://api.github.com/repos/${repo}`, { headers });
-      if (!res.ok) return;
-      const body = await res.json() as { stargazers_count?: number };
-      starsMap.set(repo, body.stargazers_count ?? 0);
-    } catch {
-      // ignore — stars stay 0
-    }
-  });
+  await forEachWithConcurrency(
+    uniqueRepos,
+    ENRICHMENT_CONCURRENCY,
+    async (repo) => {
+      try {
+        const res = await fetchFn(`https://api.github.com/repos/${repo}`, {
+          headers,
+        });
+        if (!res.ok) return;
+        const body = (await res.json()) as { stargazers_count?: number };
+        starsMap.set(repo, body.stargazers_count ?? 0);
+      } catch {
+        // ignore — stars stay 0
+      }
+    },
+  );
 
   for (const item of items) {
     const s = starsMap.get(item.repo);
@@ -649,28 +1146,40 @@ async function enrichDescriptionsForItems(
   const headers = buildGitHubApiHeaders(token);
 
   const descriptionMap = new Map<string, string>();
-  const uniqueSkills = [...new Set(items.map((item) => `${item.repo}#${item.sha}`))];
+  const uniqueSkills = [
+    ...new Set(items.map((item) => `${item.repo}#${item.sha}`)),
+  ];
 
-  await forEachWithConcurrency(uniqueSkills, ENRICHMENT_CONCURRENCY, async (key) => {
-    const [repo, sha] = key.split('#');
-    if (!repo || !sha) return;
+  await forEachWithConcurrency(
+    uniqueSkills,
+    ENRICHMENT_CONCURRENCY,
+    async (key) => {
+      const [repo, sha] = key.split('#');
+      if (!repo || !sha) return;
 
-    try {
-      const res = await fetchFn(`https://api.github.com/repos/${repo}/git/blobs/${sha}`, { headers });
-      if (!res.ok) return;
+      try {
+        const res = await fetchFn(
+          `https://api.github.com/repos/${repo}/git/blobs/${sha}`,
+          { headers },
+        );
+        if (!res.ok) return;
 
-      const body = await res.json() as { content?: string; encoding?: string };
-      const content = decodeGitBlob(body.content, body.encoding);
-      if (!content) return;
+        const body = (await res.json()) as {
+          content?: string;
+          encoding?: string;
+        };
+        const content = decodeGitBlob(body.content, body.encoding);
+        if (!content) return;
 
-      const metadata = parseSkillMetadata(content);
-      if (!metadata?.description) return;
+        const metadata = parseSkillMetadata(content);
+        if (!metadata?.description) return;
 
-      descriptionMap.set(key, metadata.description);
-    } catch {
-      // Ignore metadata fetch failures and keep the repo description fallback.
-    }
-  });
+        descriptionMap.set(key, metadata.description);
+      } catch {
+        // Ignore metadata fetch failures and keep the repo description fallback.
+      }
+    },
+  );
 
   for (const item of items) {
     const description = descriptionMap.get(`${item.repo}#${item.sha}`);
@@ -698,7 +1207,9 @@ async function forEachWithConcurrency<T>(
   await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 }
 
-function buildGitHubApiHeaders(token: string | undefined): Record<string, string> {
+function buildGitHubApiHeaders(
+  token: string | undefined,
+): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
@@ -708,7 +1219,10 @@ function buildGitHubApiHeaders(token: string | undefined): Record<string, string
   return headers;
 }
 
-function decodeGitBlob(content: string | undefined, encoding: string | undefined): string | undefined {
+function decodeGitBlob(
+  content: string | undefined,
+  encoding: string | undefined,
+): string | undefined {
   if (!content) return undefined;
   if (!encoding || encoding === 'utf-8') return content;
   if (encoding !== 'base64') return undefined;

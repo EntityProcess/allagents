@@ -1,4 +1,4 @@
-import simpleGit from 'simple-git';
+import simpleGit, { type SimpleGitOptions } from 'simple-git';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, normalize, resolve, sep } from 'node:path';
@@ -11,7 +11,9 @@ const CLONE_TIMEOUT_MS = (() => {
   const raw = process.env.ALLAGENTS_CLONE_TIMEOUT_MS;
   if (!raw) return DEFAULT_CLONE_TIMEOUT_MS;
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLONE_TIMEOUT_MS;
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_CLONE_TIMEOUT_MS;
 })();
 
 export function createGitEnv(): NodeJS.ProcessEnv {
@@ -23,15 +25,17 @@ export function createGitEnv(): NodeJS.ProcessEnv {
 }
 
 function createGit(baseDir?: string) {
-  return simpleGit(baseDir, {
+  const options = {
     timeout: { block: CLONE_TIMEOUT_MS },
+    allowUnsafeFilter: true,
     config: [
       'filter.lfs.required=false',
       'filter.lfs.smudge=',
       'filter.lfs.clean=',
       'filter.lfs.process=',
     ],
-  }).env(createGitEnv());
+  } as Partial<SimpleGitOptions> & { allowUnsafeFilter: true };
+  return simpleGit(baseDir, options).env(createGitEnv());
 }
 
 /**
@@ -45,10 +49,7 @@ export function gitHubUrl(owner: string, repo: string): string {
  * Shallow-clone a repository to an auto-created temp directory.
  * Caller must call `cleanupTempDir()` when done.
  */
-export async function cloneToTemp(
-  url: string,
-  ref?: string,
-): Promise<string> {
+export async function cloneToTemp(url: string, ref?: string): Promise<string> {
   const tempDir = await mkdtemp(join(tmpdir(), 'allagents-'));
   const git = createGit();
   const cloneOptions = ref
@@ -109,17 +110,10 @@ export async function repoExists(url: string): Promise<boolean> {
 /**
  * Check if a specific ref (branch/tag) exists on the remote.
  */
-export async function refExists(
-  url: string,
-  ref: string,
-): Promise<boolean> {
+export async function refExists(url: string, ref: string): Promise<boolean> {
   const git = createGit();
   try {
-    const result = await git.listRemote([
-      '--refs',
-      url,
-      ref,
-    ]);
+    const result = await git.listRemote(['--refs', url, ref]);
     return result.trim().length > 0;
   } catch {
     return false;

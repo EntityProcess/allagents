@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CatalogInstallDescriptorSchema } from './skill-catalog.js';
 
 /**
  * Managed mode for repositories:
@@ -194,6 +195,8 @@ export const PluginEntrySchema = z.union([
      * sync resolves the plugin at this ref instead of the default branch.
      */
     pin: z.string().optional(),
+    /** Exact origin descriptor for an explicit catalog installation. */
+    catalogSource: CatalogInstallDescriptorSchema.optional(),
   }),
 ]);
 

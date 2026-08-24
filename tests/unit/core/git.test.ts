@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { createGitEnv } from '../../../src/core/git.js';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import simpleGit from 'simple-git';
+import { cloneTo, createGitEnv } from '../../../src/core/git.js';
 
 describe('createGitEnv', () => {
   const originalHome = process.env.HOME;
@@ -30,5 +34,37 @@ describe('createGitEnv', () => {
       GIT_TERMINAL_PROMPT: '0',
       GIT_LFS_SKIP_SMUDGE: '1',
     });
+  });
+});
+
+describe('cloneTo', () => {
+  it('clones into an empty destination with controlled LFS filters', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'allagents-git-test-'));
+    const upstream = join(fixture, 'upstream');
+    const remote = join(fixture, 'origin.git');
+    const destination = join(fixture, 'clone');
+
+    try {
+      await mkdir(upstream);
+      const git = simpleGit(upstream);
+      await git.init();
+      await git.checkoutLocalBranch('main');
+      await git.addConfig('user.name', 'AllAgents Test');
+      await git.addConfig('user.email', 'test@allagents.dev');
+      await writeFile(join(upstream, 'tracked.txt'), 'clean clone\n');
+      await git.add('tracked.txt');
+      await git.commit('fixture');
+      await simpleGit().raw(['init', '--bare', remote]);
+      await git.addRemote('origin', remote);
+      await git.push(['-u', 'origin', 'main']);
+
+      await cloneTo(remote, destination, 'main');
+
+      expect(await readFile(join(destination, 'tracked.txt'), 'utf8')).toBe(
+        'clean clone\n',
+      );
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
   });
 });
