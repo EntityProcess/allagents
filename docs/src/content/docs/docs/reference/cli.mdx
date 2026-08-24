@@ -261,15 +261,30 @@ After enabling, the skill is removed from `disabledSkills` and sync is run to re
 
 ### skill search
 
-Search public `SKILL.md` files. The default remains global GitHub Code Search:
+Search public `SKILL.md` files. In an interactive terminal with no explicit
+`--catalog` or `--owner`, results appear in two ordered sections:
+
+1. **Recommended** — an independent catalog-bounded search, including catalog
+   classification, policy, warnings, metadata, and exact install descriptors.
+2. **All GitHub** — ordinary global results, excluding identical repository and
+   skill-path identities already shown in Recommended.
+
+This separate catalog query prevents Recommended matches from being displaced
+by global ranking or pagination. Both searches run concurrently after the user
+submits a term. If one side fails, its section is marked unavailable and the
+surviving results remain selectable rather than being presented as complete.
+
+Scripts, redirected output, and `--json` retain the existing global GitHub
+no-option contract:
 
 ```bash
 allagents skill search terraform
+allagents --json skill search terraform
 allagents skill search terraform --owner hashicorp
 ```
 
-Use the built-in Recommended catalog when discovery must stay within its exact
-repository and subtree boundaries:
+Use the built-in Recommended catalog explicitly when discovery must stay within
+its exact repository and subtree boundaries:
 
 ```bash
 allagents skill search testing --catalog recommended
@@ -279,14 +294,14 @@ allagents --json skill search testing --catalog recommended
 | Flag | Description |
 |------|-------------|
 | `--catalog recommended` | Search only the versioned built-in catalog. Unknown names are rejected. |
-| `--owner <owner>` | Limit global search to one GitHub owner. Mutually exclusive with `--catalog`. |
+| `--owner <owner>` | Limit global search to one GitHub owner; no Recommended results from other owners are injected. Mutually exclusive with `--catalog`. |
 | `--page <n>` | 1-indexed result page (default: `1`). |
-| `--limit <n>` | Results per page, from 1 to 100 (default: `15`). |
+| `--limit <n>` | Results per page, from 1 to 100 (default: `15`). In combined interactive mode, each section is fetched independently at this limit. |
 
 Unknown catalogs and the `--catalog`/`--owner` conflict exit with status 2.
-Catalog mode is a hard boundary: empty results, source-health failures, GitHub
-query failures, and manifest failures never fall back to global results.
-Repository constraints are applied to every GitHub query and results are also
+Explicit catalog mode is a hard boundary: empty results, source-health failures,
+GitHub query failures, and manifest failures never fall back to global results.
+Repository constraints are applied to every catalog query and results are also
 filtered against catalog roots before ranking and pagination.
 
 **Recommended** is a discovery label. It is not a security review, trust or
@@ -297,13 +312,12 @@ Optional sources require explicit confirmation. `search-only` results remain
 visible but cannot be installed; `external-installer` results point to the
 upstream lifecycle and AllAgents does not run it.
 
-In a TTY, select one or more installable results and choose project or user
-scope. Project installation works in a newly initialized disposable folder.
-Only the selected skill paths are enabled. Marketplace-backed selections are
-checked against their authoritative manifest; direct repositories and subtrees
-use the exact catalog repository, default-branch ref, and root. Hermes core
-(`skills`) and Hermes optional (`optional-skills`) are separate source
-identities and stay separate through installation and sync.
+In either interactive surface, select installable results and choose project or
+user scope. Catalog selections use the exact catalog install source and
+qualified selector. Marketplace-backed selections are checked against their
+authoritative manifest; direct repositories and subtrees use the exact catalog
+repository, default-branch ref, and root. Hermes core (`skills`) and Hermes
+optional (`optional-skills`) remain separate through installation and sync.
 
 Discovery provenance (the GitHub result path, blob SHA, repository-head SHA,
 approved boundary, and catalog version) explains how a result was found.

@@ -35,6 +35,7 @@ import {
   type SkillSearchItem,
   type SkillSearchOptions,
   qualifiedName,
+  searchInteractiveSkills,
   searchSkills,
 } from '../../core/skill-search.js';
 import {
@@ -96,6 +97,12 @@ import {
 } from '../metadata/plugin-skills.js';
 import { removeInstalledSkill } from '../skill-removal.js';
 import { hasProjectSkillConfig } from '../skill-update.js';
+import {
+  buildSkillSearchPresentationRows,
+  skillSearchSelectionKey,
+} from '../skill-search-presentation.js';
+
+export { skillSearchSelectionKey };
 import { skillUpdateCmd } from './skill-update.js';
 
 /**
@@ -2335,6 +2342,13 @@ const addCmd = command({
     }
   },
 });
+export function shouldUseInteractiveSkillSearch(
+  json: boolean,
+  stdinTTY: boolean | undefined,
+  stdoutTTY: boolean | undefined,
+): boolean {
+  return !json && stdinTTY === true && stdoutTTY === true;
+}
 
 // =============================================================================
 // skill search (GitHub Code Search)
@@ -2381,11 +2395,6 @@ export interface SelectedSkillSearchSource {
   classification?: SkillCatalogClassification;
   warnings: readonly SkillCatalogWarning[];
   selectors: string[];
-}
-
-export function skillSearchSelectionKey(item: SkillSearchItem): string {
-  const identity = item.catalog?.identity ?? item.installSource.toLowerCase();
-  return `${identity}#${item.repo.toLowerCase()}#${item.path}`;
 }
 
 export function collectSelectedSkillSearchSources(
@@ -2868,8 +2877,9 @@ export async function installSelectedSkillSearchSources(
 }
 
 /** Interactive wrapper around the single catalog/global install transaction. */
-async function installFromSearch(
+export async function installSkillSearchSourcesInteractively(
   sources: SelectedSkillSearchSource[],
+  workspacePath: string = process.cwd(),
 ): Promise<boolean> {
   const p = prompts;
   for (const source of sources) {
@@ -2917,7 +2927,7 @@ async function installFromSearch(
     const result = await installSelectedSkillSearchSources(
       sources,
       scopeChoice,
-      process.cwd(),
+      workspacePath,
     );
     if (result.installed.length === 0) {
       spinner.stop('Installation failed');
@@ -2963,7 +2973,7 @@ const searchCmd = command({
       type: optional(string),
       long: 'catalog',
       description:
-        'Restrict results to a built-in catalog. Initially: recommended.',
+        'Search only the built-in Recommended catalog (strict; no global fallback).',
     }),
     page: option({
       type: optional(string),
@@ -3011,26 +3021,26 @@ const searchCmd = command({
         opts.limit = n;
       }
 
-      const result = await searchSkills(searchQuery, opts);
-
-      if (isJsonMode()) {
-        jsonOutput({
-          success: true,
-          command: 'skill search',
-          data: result,
-        });
-        return;
-      }
-
-      if (result.items.length === 0) {
-        console.log(`No skills found for "${searchQuery}".`);
-        return;
-      }
-
-      const isTTY = process.stdout.isTTY && process.stdin.isTTY;
-
+      const isTTY = shouldUseInteractiveSkillSearch(
+        isJsonMode(),
+        process.stdin.isTTY,
+        process.stdout.isTTY,
+      );
       if (!isTTY) {
-        // Non-interactive: print table with stars and exit
+        const result = await searchSkills(searchQuery, opts);
+        if (isJsonMode()) {
+          jsonOutput({
+            success: true,
+            command: 'skill search',
+            data: result,
+          });
+          return;
+        }
+
+        if (result.items.length === 0) {
+          console.log(`No skills found for "${searchQuery}".`);
+          return;
+        }
         if (result.items.some((item) => item.catalog)) {
           console.log('Catalog: Recommended');
         }
@@ -3038,25 +3048,48 @@ const searchCmd = command({
         return;
       }
 
-      // Interactive mode: filter-as-you-type multiselect with install support
+      const interactiveResult = await searchInteractiveSkills(
+        searchQuery,
+        opts,
+      );
+      const items = interactiveResult.sections.flatMap(
+        (section) => section.items,
+      );
+      const truncated = interactiveResult.sections.some(
+        (section) => section.truncated,
+      );
       const { autocompleteMultiselect, isCancel, log } = prompts;
 
+      for (const section of interactiveResult.sections) {
+        if (section.error) {
+          log.warn(
+            `${section.label} unavailable: ${section.error.message} Partial results are shown.`,
+          );
+        }
+      }
+
+      if (items.length === 0) {
+        log.info(`No skills found for "${searchQuery}".`);
+        return;
+      }
+
       log.success(
-        `${result.items.some((item) => item.catalog) ? 'Recommended · ' : ''}${formatSkillSearchSummary(
-          result.items.length,
-          searchQuery,
-          result.truncated,
-        )}`,
+        formatSkillSearchSummary(items.length, searchQuery, truncated),
       );
 
-      const options = result.items.map((item) => ({
-        label: `${qualifiedName(item)}  ${chalk.dim(item.repo)}`,
-        value: skillSearchSelectionKey(item),
-        hint: formatSkillSearchHint(item),
-        disabled:
-          item.installation.policy === 'search-only' ||
-          item.installation.policy === 'external-installer',
-      }));
+      const options = buildSkillSearchPresentationRows(interactiveResult).map(
+        (row) => ({
+          label:
+            row.kind === 'item' && row.item
+              ? `${qualifiedName(row.item)}  ${chalk.dim(row.item.repo)}`
+              : chalk.bold(row.label),
+          value: row.value,
+          ...(row.kind === 'item' && row.item
+            ? { hint: formatSkillSearchHint(row.item) }
+            : {}),
+          disabled: row.disabled,
+        }),
+      );
 
       const selected = await autocompleteMultiselect({
         message: 'Select skills to install',
@@ -3065,16 +3098,14 @@ const searchCmd = command({
         required: false,
       });
 
-      if (isCancel(selected)) {
-        return;
-      }
+      if (isCancel(selected)) return;
 
       const sourcesToInstall = collectSelectedSkillSearchSources(
-        result.items,
+        items,
         selected as string[],
       );
       if (sourcesToInstall.length === 0) return;
-      await installFromSearch(sourcesToInstall);
+      await installSkillSearchSourcesInteractively(sourcesToInstall);
     } catch (error) {
       if (error instanceof SkillSearchError) {
         const exitCode = error.kind === 'validation' ? 2 : 1;

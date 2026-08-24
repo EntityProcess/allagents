@@ -95,7 +95,7 @@ clients:
 | `allagents plugin uninstall <spec>` | Remove a plugin |
 | `allagents plugin list` | List available plugins |
 | `allagents skill add <name>` | Add a skill from a repo (plural `skills` alias supported) |
-| `allagents skill search <query> [--catalog recommended]` | Search globally or within the built-in Recommended catalog |
+| `allagents skill search <query> [--catalog recommended]` | Discover Recommended first, then global GitHub; use `--catalog` for strict catalog-only search |
 | `allagents skill list` | List skills and status |
 | `allagents mcp add <name> <commandOrUrl>` | Add an MCP server and sync to clients |
 | `allagents mcp proxy <serverUrl>` | Bridge a remote HTTP MCP server to local stdio |
@@ -107,21 +107,27 @@ See the [full CLI reference](https://allagents.dev/docs/reference/cli/) for all 
 
 ## Recommended Skill Catalog
 
-`allagents skill search <query>` keeps the existing global GitHub search. Add
-`--catalog recommended` to search only the built-in, versioned Recommended
-catalog:
+In an interactive terminal, `allagents skill search <query>` automatically
+shows two ordered sections: **Recommended** first, then **All GitHub**. The
+Recommended section is fetched through the built-in catalog boundary rather
+than inferred from globally ranked results. Identical repository and skill-path
+hits are removed from All GitHub so the Recommended result wins.
+
+Scripts, redirected output, and `--json` keep the existing global GitHub
+no-option response. Use `--catalog recommended` when discovery must be strictly
+limited to the built-in, versioned catalog:
 
 ```bash
 allagents skill search testing --catalog recommended
 ```
 
-The catalog is a hard discovery boundary: catalog failures and empty results do
-not fall back to global search. **Recommended** is a discovery label, not a
-security, trust, quality, or license guarantee; review each result's source,
-classification, policy, warnings, and upstream content. In an interactive
-terminal, installable results can be selected for project scope (including a
-new disposable workspace) or user scope. Exact repository, ref, catalog root,
-selected skill subset, and provenance are retained for later syncs.
+Strict catalog failures and empty results never fall back to global search. In
+combined interactive discovery, the two searches run concurrently; if one is
+unavailable, its section is visibly marked and the surviving section remains
+usable. **Recommended** is a discovery label, not a security, trust, quality,
+or license guarantee. Review each result's source, classification, policy,
+warnings, and upstream content. Installable selections retain the exact
+repository, ref, catalog root, selected skill subset, and provenance.
 
 ## Supported Clients
 

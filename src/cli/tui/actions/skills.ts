@@ -21,15 +21,23 @@ import {
   listMarketplacePlugins,
 } from '../../../core/marketplace.js';
 import {
-  searchSkills,
-  qualifiedName,
-  type SkillSearchItem,
+  searchInteractiveSkills,
+  type InteractiveSkillSearchResult,
 } from '../../../core/skill-search.js';
 import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 import { installSelectedPlugin, runBrowsePluginSkills } from './plugins.js';
 import { removeInstalledSkill } from '../../skill-removal.js';
+import {
+  buildSkillSearchPresentationRows,
+  findSkillSearchSelection,
+} from '../../skill-search-presentation.js';
+import {
+  collectSelectedSkillSearchSources,
+  formatSkillSearchHint,
+  installSkillSearchSourcesInteractively,
+} from '../../commands/plugin-skills.js';
 
 const { multiselect, select, autocomplete, text } = p;
 
@@ -395,29 +403,48 @@ async function runBrowseMarketplaceSkills(
   }
 }
 
+export interface OnlineSkillSearchOption {
+  label: string;
+  value: string;
+  hint?: string;
+  disabled?: boolean;
+}
+
+/** Stable render model for the full-screen skill search picker. */
+export function buildOnlineSkillSearchOptions(
+  result: InteractiveSkillSearchResult,
+): OnlineSkillSearchOption[] {
+  return buildSkillSearchPresentationRows(result).map((row) => ({
+    label: row.label,
+    value: row.value,
+    ...(row.kind === 'item' && row.item
+      ? { hint: formatSkillSearchHint(row.item) }
+      : {}),
+    disabled: row.disabled,
+  }));
+}
+
 /**
- * Search GitHub for skills by keyword, display results, and install a selected plugin.
+ * Search Recommended and GitHub by keyword, then install the exact selection.
  */
 async function runSearchOnlineSkills(
   context: TuiContext,
   cache?: TuiCache,
 ): Promise<void> {
   const query = await text({
-    message: 'Search for skills on GitHub',
+    message: 'Search for skills',
     placeholder: 'e.g. commit, deploy, aws',
   });
 
-  if (p.isCancel(query) || !query || query.trim().length === 0) {
-    return;
-  }
+  if (p.isCancel(query) || !query || query.trim().length === 0) return;
 
+  const searchQuery = query.trim();
   const s = p.spinner();
-  s.start('Searching GitHub...');
+  s.start('Searching Recommended and GitHub...');
 
-  let items: SkillSearchItem[];
+  let result: InteractiveSkillSearchResult;
   try {
-    const result = await searchSkills(query.trim());
-    items = result.items;
+    result = await searchInteractiveSkills(searchQuery);
   } catch (error) {
     s.stop('Search failed');
     p.note(
@@ -427,49 +454,67 @@ async function runSearchOnlineSkills(
     return;
   }
 
+  const items = result.sections.flatMap((section) => section.items);
   s.stop(`Found ${items.length} skill${items.length !== 1 ? 's' : ''}`);
 
+  for (const section of result.sections) {
+    if (section.error) {
+      p.note(
+        `${section.error.message}\nResults from the other section are still available.`,
+        `${section.label} unavailable`,
+      );
+    }
+  }
+
   if (items.length === 0) {
-    p.note(`No skills found for "${query.trim()}".`, 'Search');
+    p.note(`No skills found for "${searchQuery}".`, 'Search');
     return;
   }
 
-  // One option per skill, showing name and repo
-  const options: Array<{ label: string; value: string; hint?: string }> =
-    items.map((item) => ({
-      label: qualifiedName(item),
-      value: item.installSource,
-      hint: item.repo + (item.description ? ` · ${item.description}` : ''),
-    }));
+  const options = buildOnlineSkillSearchOptions(result);
   options.push({ label: 'Back', value: '__back__' });
 
   const selected = await autocomplete({
-    message: `Results for "${query.trim()}"`,
+    message: `Results for "${searchQuery}"`,
     options,
     placeholder: 'Type to filter...',
   });
 
-  if (p.isCancel(selected) || selected === '__back__') {
+  if (p.isCancel(selected) || selected === '__back__') return;
+
+  const item = findSkillSearchSelection(result, selected);
+  if (!item) {
+    p.note('The selected skill is no longer in these results.', 'Search Error');
     return;
   }
 
-  // Check if plugin is already installed in either scope
+  if (item.catalog) {
+    const sources = collectSelectedSkillSearchSources(items, [selected]);
+    const installed = await installSkillSearchSourcesInteractively(
+      sources,
+      context.workspacePath ?? process.cwd(),
+    );
+    if (installed) cache?.invalidate();
+    return;
+  }
+
+  const installSource = item.installSource;
   const workspacePath = context.workspacePath ?? process.cwd();
   const isInstalledProject = context.workspacePath
-    ? await hasPlugin(selected, workspacePath)
+    ? await hasPlugin(installSource, workspacePath)
     : false;
-  const isInstalledUser = await hasUserPlugin(selected);
+  const isInstalledUser = await hasUserPlugin(installSource);
 
   if (isInstalledProject || isInstalledUser) {
     const scope = isInstalledUser ? 'user' : 'project';
-    await runBrowsePluginSkills(selected, scope, context, cache);
+    await runBrowsePluginSkills(installSource, scope, context, cache);
     return;
   }
 
-  const installed = await installSelectedPlugin(selected, context, cache);
+  const installed = await installSelectedPlugin(installSource, context, cache);
   if (installed) {
-    const nowInstalledUser = await hasUserPlugin(selected);
+    const nowInstalledUser = await hasUserPlugin(installSource);
     const scope = nowInstalledUser ? 'user' : 'project';
-    await runBrowsePluginSkills(selected, scope, context, cache);
+    await runBrowsePluginSkills(installSource, scope, context, cache);
   }
 }

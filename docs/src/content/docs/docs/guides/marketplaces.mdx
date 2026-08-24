@@ -29,7 +29,9 @@ The bare repo name (e.g., `repo`) is reserved for the default branch. Updates au
 ## Recommended Catalog vs. Marketplaces
 
 The built-in Recommended skill catalog is a static discovery index, not a
-`MarketplaceRegistry` entry. Search it with:
+`MarketplaceRegistry` entry. Interactive searches with no explicit owner or
+catalog show Recommended first and deduplicated All GitHub results second. Use
+the explicit flag for a strict catalog-only search suitable for scripts:
 
 ```bash
 allagents skill search <query> --catalog recommended
@@ -38,9 +40,9 @@ allagents skill search <query> --catalog recommended
 The catalog includes heterogeneous source types: direct repositories,
 subtrees, valid marketplace-backed distributions, search-only repositories,
 and projects with an external installation lifecycle. Catalog inclusion does
-not make a source a marketplace and does not imply that it is one-click
-installable. Search-only sources cannot be selected. External-lifecycle sources
-show upstream guidance; AllAgents never executes their installer.
+not make a source a marketplace or imply that it is one-click installable.
+Search-only sources cannot be selected. External-lifecycle sources show
+upstream guidance; AllAgents never executes their installer.
 
 For a marketplace-backed catalog result, AllAgents validates the authoritative
 upstream manifest and registers it only when the user selects an installable

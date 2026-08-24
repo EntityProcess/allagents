@@ -1,21 +1,44 @@
 # Recommended Skill Catalog Implementation Plan
 
-**Status:** Draft PR plan only
+**Status:** Implemented in draft PR #455; maintained product and verification plan
 **Date:** 2026-08-24
-**Implementation target:** A later feature branch based on then-current `origin/main`
+**Implementation target:** `feat/recommended-skill-catalog`, kept current with `origin/main`
 
 ## Decision
 
-Add one built-in, typed catalog named `recommended` without changing the default search scope:
+Add one built-in, typed catalog named `recommended`. Preserve global GitHub as
+the no-option core API, JSON, redirected-output, and non-TTY contract, while
+making human discovery intuitive:
 
 ```text
 allagents skill search <query> --catalog recommended
 searchSkills(query, { catalog: 'recommended' })
+searchInteractiveSkills(query) // Recommended, then deduplicated All GitHub
 ```
 
-Without `--catalog`, `skill search` remains global GitHub Code Search. `--catalog` and `--owner` are mutually exclusive and fail validation with exit code 2. When `--catalog recommended` is present, the named catalog is a hard boundary: an empty result, source-health failure, query-batch failure, or manifest failure never falls back to global GitHub results. The catalog is not a marketplace registry; it describes repositories, subtrees, valid marketplace-backed sources, search-only sources, and external-lifecycle distributions without registering any of them in `MarketplaceRegistry`.
+Without an explicit catalog or owner, both interactive search surfaces fetch a
+catalog-bounded Recommended result set and the legacy global result set
+concurrently after query submission. Recommended is rendered first. All GitHub
+is rendered second after removing only identical canonical repository plus
+qualified skill-path identities; display names alone never deduplicate. A
+failure on one side is visibly reported and leaves the surviving side usable.
 
-The one user-facing catalog label is exactly **Recommended**. This is a discovery label, not a security, trust, or license assertion. UI, JSON documentation, and release notes must never call catalog entries “verified” or “safe.” Every catalog result instead carries explicit source classification, install policy, metadata, and warnings. Catalog membership must never claim that a source is security-reviewed, license-approved, dependency-complete, compatible with every client, or safe to bulk-install.
+`--catalog` and `--owner` remain mutually exclusive and fail validation with
+exit code 2. `--owner` remains global-only. When `--catalog recommended` is
+present, the named catalog is a hard boundary: an empty result, source-health
+failure, query-batch failure, or manifest failure never falls back to global
+GitHub results. The catalog is not a marketplace registry; it describes
+repositories, subtrees, valid marketplace-backed sources, search-only sources,
+and external-lifecycle distributions without registering any of them in
+`MarketplaceRegistry`.
+
+The one user-facing catalog label is exactly **Recommended**. This is a
+discovery label, not a security, trust, or license assertion. UI, JSON
+documentation, and release notes must never call catalog entries “verified” or
+“safe.” Every catalog result instead carries explicit source classification,
+install policy, metadata, and warnings. Catalog membership must never claim
+that a source is security-reviewed, license-approved, dependency-complete,
+compatible with every client, or safe to bulk-install.
 
 ## Problem and observed repository state
 
@@ -92,19 +115,27 @@ Validation is centralized in `validateSkillSearchArgs()`:
 - Both are `SkillSearchError` with `kind: 'validation'`; CLI exit code remains 2 and JSON uses the existing failed command envelope.
 - Existing query length, page, limit, owner, API, and rate-limit behavior remains unchanged.
 
-TTY catalog results use the existing multi-select, but:
+TTY search uses ordered, visually distinct sections:
 
-- installable results are grouped by exact `installSource`;
-- search-only and external-lifecycle results remain visible but are disabled in the picker;
-- warnings are included in the hint and repeated once before an optional/experimental install;
-- no source is preselected;
-- only explicitly selected skills are enabled;
-- one source is fetched/configured once and all selected qualified selectors for it are written in one allowlist update;
-- all source mutations complete before one project/user sync, rather than syncing once per selected skill.
+- no explicit catalog or owner: Recommended first, then deduplicated All GitHub;
+- explicit `--catalog recommended`: Recommended only, with strict failures;
+- explicit `--owner`: All GitHub only, scoped to that owner;
+- installable catalog results remain grouped by exact `installSource` for mutation;
+- search-only and external-lifecycle results remain visible but disabled;
+- warnings are included in hints and repeated before optional installation;
+- no source is preselected, and only explicitly selected skills are enabled;
+- one source is fetched/configured once and selected qualified selectors share one allowlist update;
+- all source mutations complete before one project/user sync.
 
-Non-TTY output keeps the table format and appends a concise policy marker only when needed, such as `optional`, `search only`, or `external installer`. JSON is authoritative for full warnings.
+Non-TTY and JSON no-catalog output keep the legacy global result/table or JSON
+envelope. JSON remains authoritative for full warnings. Neither path invokes a
+catalog query unless `--catalog recommended` is explicit.
 
-The TUI action `src/cli/tui/actions/skills.ts::runSearchOnlineSkills()` continues using global search because it has no catalog selector in this scope. It must use `item.installSource` rather than reconstructing a repository source, preserving compatibility for global results where `installSource === repo`.
+The full-screen TUI action
+`src/cli/tui/actions/skills.ts::runSearchOnlineSkills()` uses the same
+`searchInteractiveSkills()` provider and presentation rows. Selection keys map
+back to the exact result, and catalog selections flow through the shared exact
+descriptor transaction rather than reconstructing a repository source.
 
 ### Core API
 
@@ -719,9 +750,9 @@ The audit commit informs architecture but does not, by itself, add `numman-ali/n
 
 - Workspace schema remains version 2 with an additive optional `catalogSource` descriptor. Existing entries parse unchanged; catalog-originated entries never drop this descriptor during modify/sync/update.
 - Sync-state schema remains version 1 with additive optional catalog descriptor/resolved-root fields. `sources` is derived state; a full sync replaces obsolete repository-only catalog provenance with full catalog-identity keys.
-- Existing global search calls receive additive fields and preserve no-option behavior.
-- Existing `--owner`, pagination, rate-limit, token lookup, relevance, and global install behavior remain intact.
-- Existing non-catalog source promotion remains the default matching mode; catalog installs use catalog-exact mode.
+- Existing global `searchSkills()` calls, JSON no-catalog output, and redirected no-catalog output preserve their behavior.
+- TTY no-owner/no-catalog discovery is intentionally additive: it uses the new interactive provider and shows Recommended before deduplicated All GitHub.
+- Existing `--owner`, pagination, rate-limit, relevance, and global install behavior remain intact; owner scope never injects catalog sources from other owners.
 - Marketplace registries are neither seeded nor modified merely by searching or health checking. Registration occurs only after explicit install selection for a valid marketplace entry.
 - No migration guesses catalog provenance for pre-existing repository entries. Only a future explicit catalog install/update can attach a descriptor.
 
@@ -732,7 +763,7 @@ The audit commit informs architecture but does not, by itself, add `numman-ali/n
 | GitHub Code Search ignores/misparses a large repository qualifier expression. | Deterministic short query batches, literal query tests, application-side exact repository/root filtering, fatal required-batch failures, no fallback. |
 | Search result comes from a different ref than installation. | MVP requires catalog ref to equal upstream default; read-only preflight binds discovery head; exact descriptor forces install ref; provenance remains separate. |
 | Boundary prefix error leaks `optional-skills-old`. | Segment-based approved-root matcher with adversarial cases before ranking/pagination. |
-| Catalog grows request count and hits Code Search rate limits. | Deduplicate only network repository preflights, batch qualifiers, retain token resolution, document truncation; never collapse source identities. |
+| Combined interactive discovery increases request count and can hit Code Search rate limits. | Resolve authentication once, fetch catalog and global sets concurrently with independent limits, label section-local failures, preserve surviving results, and never reinterpret a failed strict catalog query as global. |
 | Search results advertise paths a manifest cannot install. | Mandatory authoritative-manifest CI validation plus install-time preflight; fail closed. |
 | Two Hermes entries collapse in config or state. | Full catalog identity, persisted exact descriptors, catalog-exact upsert, two-order E2E matrix. |
 | Selected skill loses assets. | Explicit install root plus qualified allowlist; asset-bearing fixture and Paperclip `references/` check. |
@@ -750,7 +781,7 @@ The audit commit informs architecture but does not, by itself, add `numman-ali/n
 4. **Extend the core search API.** Add catalog option, default-ref preflight, qualifier batching, segment-boundary enforcement, metadata/discovery provenance, stable ordering, and no-fallback tests.
 5. **Persist exact install descriptors.** Extend workspace/sync-state schemas additively; implement catalog-exact upsert and full catalog-identity provenance keys.
 6. **Implement catalog-aware CLI selection/install.** Add flag/validation, identity grouping, exact direct/marketplace descriptors, warnings, one-sync transaction, and stale-selection guards.
-7. **Update the global TUI consumer.** Use `installSource` without adding catalog selection to the TUI.
+7. **Update both interactive consumers.** Share concurrent grouped discovery and stable presentation rows; preserve exact catalog selection/install descriptors in the full-screen TUI.
 8. **Run focused automated suites.** Catalog, health/manifest, search, selection, workspace identity, provenance, clone, and plugin-skills E2E.
 9. **Run the disposable project matrix.** Fresh `HOME` per row, built CLI, actual remote sources, exact config/state/filesystem evidence.
 10. **Update durable docs and changelog.** README, CLI reference, marketplace distinction, maintenance/review gate, and `Unreleased` entries.
@@ -771,6 +802,6 @@ Implementation is complete only when:
 - authoritative marketplace manifests pass the required CI validator and install-time preflight;
 - read-only health checks report drift without mutation;
 - project workspace config preserves exact catalog install descriptor/root/ref through subsequent sync/update;
-- global search remains the no-option default but is never a named-catalog fallback;
+- global search remains the core API, JSON, non-TTY, and owner-scoped no-catalog default; interactive no-owner/no-catalog discovery shows Recommended first without becoming a named-catalog fallback;
 - focused tests and every applicable disposable matrix row pass with evidence recorded in the implementation PR;
 - the reviewed PR passes `Catalog Manifest` CI and README, CLI reference, marketplace guide, and changelog match the shipped contract.

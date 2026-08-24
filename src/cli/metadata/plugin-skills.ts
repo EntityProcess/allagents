@@ -130,9 +130,9 @@ export const skillsUpdateMeta: AgentCommandMeta = {
 export const skillsSearchMeta: AgentCommandMeta = {
   command: 'skill search',
   description:
-    'Search SKILL.md files through global GitHub Code Search, or constrain discovery to the built-in Recommended catalog with exact repository/ref/root boundaries. Catalog searches never fall back to global results. In TTY mode, installable results can be selectively installed.',
+    'Discover SKILL.md files interactively with Recommended first and deduplicated global GitHub results second. JSON and redirected no-catalog output remain global-only. Use --catalog recommended for a strict catalog boundary that never falls back. Installable TTY results can be selectively installed with exact catalog descriptors.',
   whenToUse:
-    'To discover public GitHub skills globally, or to search a versioned catalog whose classification, policy, warnings, source metadata, and provenance are explicit. Recommended is a discovery label, not a security or license assertion.',
+    'To discover public GitHub skills with catalog context, or to enforce a versioned catalog boundary whose classification, policy, warnings, source metadata, and provenance are explicit. Recommended is a discovery label, not a security or license assertion.',
   examples: [
     'allagents skill search terraform',
     'allagents skill pr-search',
@@ -144,7 +144,7 @@ export const skillsSearchMeta: AgentCommandMeta = {
     'allagents --json skill search docs --limit 5',
   ],
   expectedOutput:
-    'Ranked global or Recommended catalog results with exact install source, selector, policy, warnings, metadata, and discovery provenance. Search-only and external-lifecycle entries remain visible but cannot be selected.',
+    'Interactive Recommended and All GitHub sections, or strict single-scope machine results, with exact install source, selector, policy, warnings, metadata, and provenance. Search-only and external-lifecycle entries remain visible but cannot be selected.',
   positionals: [
     {
       name: 'query',
@@ -163,7 +163,7 @@ export const skillsSearchMeta: AgentCommandMeta = {
       flag: '--catalog',
       type: 'string',
       description:
-        'Restrict to a built-in catalog (currently recommended). Mutually exclusive with --owner; default-branch refs only; never falls back to global search.',
+        'Restrict to the built-in Recommended catalog. Mutually exclusive with --owner; strict default-branch/ref/root boundary; never falls back to global search.',
     },
     {
       flag: '--page',

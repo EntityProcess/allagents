@@ -106,6 +106,31 @@ export interface SkillSearchOptions {
   limit?: number;
 }
 
+export type InteractiveSkillSearchSectionId = 'recommended' | 'github';
+
+export interface InteractiveSkillSearchSection {
+  id: InteractiveSkillSearchSectionId;
+  label: 'Recommended' | 'All GitHub';
+  items: SkillSearchItem[];
+  truncated: boolean;
+  error?: {
+    kind: SkillSearchError['kind'] | 'unknown';
+    message: string;
+  };
+}
+
+export interface InteractiveSkillSearchResult {
+  query: string;
+  sections: InteractiveSkillSearchSection[];
+}
+
+type InteractiveSkillSearchDeps = {
+  search?: (
+    query: string,
+    options: SkillSearchOptions,
+  ) => Promise<SkillSearchResult>;
+};
+
 const ENRICHMENT_CONCURRENCY = 10;
 
 export class SkillSearchError extends Error {
@@ -701,6 +726,123 @@ export async function searchSkills(
     items: finalItems,
     total: dedupedByName.length,
     truncated: buckets.some((b) => b.result.truncated) || totalPages > page,
+  };
+}
+
+/**
+ * Search provider for human-driven discovery.
+ *
+ * With no explicit catalog or owner, Recommended and global GitHub are fetched
+ * independently and concurrently. This keeps catalog matches outside global
+ * ranking/page limits. Explicit catalog and owner searches remain single-scope
+ * and fail with the strict `searchSkills` contract.
+ */
+export async function searchInteractiveSkills(
+  query: string,
+  options: SkillSearchOptions = {},
+  deps: InteractiveSkillSearchDeps = {},
+): Promise<InteractiveSkillSearchResult> {
+  const strictSearch = deps.search ?? searchSkills;
+
+  if (options.catalog !== undefined) {
+    const result = await strictSearch(query, options);
+    return {
+      query: result.query,
+      sections: [
+        {
+          id: 'recommended',
+          label: 'Recommended',
+          items: result.items,
+          truncated: result.truncated,
+        },
+      ],
+    };
+  }
+
+  if (options.owner !== undefined) {
+    const result = await strictSearch(query, options);
+    return {
+      query: result.query,
+      sections: [
+        {
+          id: 'github',
+          label: 'All GitHub',
+          items: result.items,
+          truncated: result.truncated,
+        },
+      ],
+    };
+  }
+
+  const recommendedOptions: SkillSearchOptions = {
+    ...options,
+    catalog: 'recommended',
+  };
+  const sharedToken = deps.search ? undefined : resolveGhToken();
+  const combinedSearch =
+    deps.search ??
+    ((searchQuery: string, searchOptions: SkillSearchOptions) =>
+      searchSkills(searchQuery, searchOptions, {
+        tokenResolver: () => sharedToken as Promise<string | undefined>,
+      }));
+  const [recommended, github] = await Promise.allSettled([
+    combinedSearch(query, recommendedOptions),
+    combinedSearch(query, options),
+  ]);
+
+  const recommendedItems =
+    recommended.status === 'fulfilled' ? recommended.value.items : [];
+  const recommendedIdentities = new Set(
+    recommendedItems.map(interactiveSkillIdentity),
+  );
+  const githubItems =
+    github.status === 'fulfilled'
+      ? github.value.items.filter(
+          (item) => !recommendedIdentities.has(interactiveSkillIdentity(item)),
+        )
+      : [];
+
+  return {
+    query,
+    sections: [
+      {
+        id: 'recommended',
+        label: 'Recommended',
+        items: recommendedItems,
+        truncated:
+          recommended.status === 'fulfilled'
+            ? recommended.value.truncated
+            : false,
+        ...(recommended.status === 'rejected' && {
+          error: interactiveSearchError(recommended.reason),
+        }),
+      },
+      {
+        id: 'github',
+        label: 'All GitHub',
+        items: githubItems,
+        truncated:
+          github.status === 'fulfilled' ? github.value.truncated : false,
+        ...(github.status === 'rejected' && {
+          error: interactiveSearchError(github.reason),
+        }),
+      },
+    ],
+  };
+}
+
+/** Canonical repository plus exact discovered skill path. */
+export function interactiveSkillIdentity(item: SkillSearchItem): string {
+  const path = item.path.replace(/\\/g, '/').replace(/^\/+/, '');
+  return `${item.repo.trim().toLowerCase()}#${path}`;
+}
+
+function interactiveSearchError(
+  error: unknown,
+): NonNullable<InteractiveSkillSearchSection['error']> {
+  return {
+    kind: error instanceof SkillSearchError ? error.kind : 'unknown',
+    message: error instanceof Error ? error.message : String(error),
   };
 }
 

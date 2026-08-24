@@ -3,6 +3,7 @@ import {
   collectSelectedSkillSearchSources,
   formatSkillSearchHint,
   formatSkillSearchSummary,
+  shouldUseInteractiveSkillSearch,
   skillSearchSelectionKey,
 } from '../../../src/cli/commands/plugin-skills.js';
 import type { SkillSearchItem } from '../../../src/core/skill-search.js';
@@ -102,6 +103,15 @@ describe('formatSkillSearchSummary', () => {
     expect(formatSkillSearchSummary(15, 'mapping', true)).toBe(
       'Showing 15 skills matching "mapping" (truncated)',
     );
+  });
+});
+
+describe('interactive search mode selection', () => {
+  it('keeps JSON and non-TTY no-catalog output on the legacy provider', () => {
+    expect(shouldUseInteractiveSkillSearch(true, true, true)).toBe(false);
+    expect(shouldUseInteractiveSkillSearch(false, false, true)).toBe(false);
+    expect(shouldUseInteractiveSkillSearch(false, true, false)).toBe(false);
+    expect(shouldUseInteractiveSkillSearch(false, true, true)).toBe(true);
   });
 });
 
