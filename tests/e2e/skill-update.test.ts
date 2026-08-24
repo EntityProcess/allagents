@@ -1,5 +1,6 @@
 import {
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -60,7 +61,7 @@ function buildCli(): void {
   }
 }
 
-buildCli();
+beforeAll(buildCli, 60_000);
 
 function cliEnv(fixture: SkillUpdateFixture): Record<string, string> {
   return {

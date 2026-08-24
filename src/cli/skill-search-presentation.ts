@@ -22,6 +22,7 @@ export function buildSkillSearchPresentationRows(
   result: InteractiveSkillSearchResult,
 ): SkillSearchPresentationRow[] {
   const rows: SkillSearchPresentationRow[] = [];
+  const hasResults = result.sections.some((section) => section.items.length > 0);
   for (const section of result.sections) {
     rows.push({
       kind: 'heading',
@@ -33,7 +34,7 @@ export function buildSkillSearchPresentationRows(
     if (section.error) {
       rows.push({
         kind: 'status',
-        label: 'Unavailable — partial results shown',
+        label: hasResults ? 'Unavailable — partial results shown' : 'Unavailable',
         value: `__skill-search-error:${section.id}`,
         disabled: true,
       });

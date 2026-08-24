@@ -460,7 +460,9 @@ async function runSearchOnlineSkills(
   for (const section of result.sections) {
     if (section.error) {
       p.note(
-        `${section.error.message}\nResults from the other section are still available.`,
+        items.length > 0
+          ? `${section.error.message}\nResults from the other section are still available.`
+          : section.error.message,
         `${section.label} unavailable`,
       );
     }

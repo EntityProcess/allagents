@@ -2527,6 +2527,9 @@ function validateSelectedCatalogDescriptor(
     expectedIdentity !== group.catalogIdentity ||
     JSON.stringify(catalogInstallDescriptor(source)) !==
       JSON.stringify(descriptor) ||
+    group.installPolicy !== descriptor.installPolicy ||
+    group.classification !== source.classification ||
+    JSON.stringify(group.warnings) !== JSON.stringify(source.warnings) ||
     !parsed ||
     parsed.repo.toLowerCase() !== descriptor.repo.toLowerCase() ||
     parsed.ref !== descriptor.effectiveRef ||
@@ -3062,9 +3065,9 @@ const searchCmd = command({
 
       for (const section of interactiveResult.sections) {
         if (section.error) {
-          log.warn(
-            `${section.label} unavailable: ${section.error.message} Partial results are shown.`,
-          );
+          const suffix =
+            items.length > 0 ? ' Partial results are shown.' : '';
+          log.warn(`${section.label} unavailable: ${section.error.message}${suffix}`);
         }
       }
 

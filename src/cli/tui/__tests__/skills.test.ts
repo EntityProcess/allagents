@@ -122,6 +122,37 @@ describe('online skill search TUI model', () => {
     ).toBe(github);
   });
 
+  it('does not claim partial results when every section failed', () => {
+    const result: InteractiveSkillSearchResult = {
+      query: 'wiki',
+      sections: [
+        {
+          id: 'recommended',
+          label: 'Recommended',
+          items: [],
+          truncated: false,
+          error: { kind: 'rate-limit', message: 'Catalog unavailable' },
+        },
+        {
+          id: 'github',
+          label: 'All GitHub',
+          items: [],
+          truncated: false,
+          error: { kind: 'api', message: 'GitHub unavailable' },
+        },
+      ],
+    };
+
+    expect(
+      buildOnlineSkillSearchOptions(result).map((option) => option.label),
+    ).toEqual([
+      '── Recommended ──',
+      'Unavailable',
+      '── All GitHub ──',
+      'Unavailable',
+    ]);
+  });
+
   it('preserves the selected Recommended subtree descriptor', () => {
     const recommended = recommendedItem();
     const result: InteractiveSkillSearchResult = {

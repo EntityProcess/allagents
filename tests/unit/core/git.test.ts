@@ -42,7 +42,7 @@ describe('createGitEnv', () => {
 });
 
 describe('cloneTo', () => {
-  it('clones into an empty destination with controlled LFS filters', async () => {
+  it('clones with controlled LFS filters despite hostile global config', async () => {
     if (!isIsolatedTestRun(import.meta.path)) {
       runTestFileIsolated(import.meta.path);
       return;
@@ -51,6 +51,8 @@ describe('cloneTo', () => {
     const upstream = join(fixture, 'upstream');
     const remote = join(fixture, 'origin.git');
     const destination = join(fixture, 'clone');
+    const gitConfig = join(fixture, 'gitconfig');
+    const originalGitConfig = process.env.GIT_CONFIG_GLOBAL;
 
     try {
       await mkdir(upstream);
@@ -60,18 +62,36 @@ describe('cloneTo', () => {
       await git.addConfig('user.name', 'AllAgents Test');
       await git.addConfig('user.email', 'test@allagents.dev');
       await writeFile(join(upstream, 'tracked.txt'), 'clean clone\n');
-      await git.add('tracked.txt');
+      await writeFile(join(upstream, '.gitattributes'), '*.bin filter=lfs\n');
+      const pointer =
+        'version https://git-lfs.github.com/spec/v1\noid sha256:fixture\nsize 7\n';
+      await writeFile(join(upstream, 'asset.bin'), pointer);
+      await git.add(['tracked.txt', '.gitattributes', 'asset.bin']);
       await git.commit('fixture');
       await simpleGit().raw(['init', '--bare', remote]);
       await git.addRemote('origin', remote);
       await git.push(['-u', 'origin', 'main']);
+
+      await writeFile(
+        gitConfig,
+        '[filter "lfs"]\n\trequired = true\n\tprocess = allagents-lfs-filter-must-not-run\n\tsmudge = allagents-lfs-filter-must-not-run\n',
+      );
+      process.env.GIT_CONFIG_GLOBAL = gitConfig;
 
       await cloneTo(remote, destination, 'main');
 
       expect(await readFile(join(destination, 'tracked.txt'), 'utf8')).toBe(
         'clean clone\n',
       );
+      expect(await readFile(join(destination, 'asset.bin'), 'utf8')).toBe(
+        pointer,
+      );
     } finally {
+      if (originalGitConfig === undefined) {
+        delete process.env.GIT_CONFIG_GLOBAL;
+      } else {
+        process.env.GIT_CONFIG_GLOBAL = originalGitConfig;
+      }
       await rm(fixture, { recursive: true, force: true });
     }
   });

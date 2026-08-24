@@ -7,6 +7,7 @@ import {
 } from '../src/core/skill-catalog-health.js';
 import { RECOMMENDED_SKILL_CATALOG } from '../src/core/skill-catalog.js';
 
+const GITHUB_REQUEST_TIMEOUT_MS = 30_000;
 const mode = process.argv[2];
 if (mode !== '--ci' && mode !== '--report') {
   console.error('Usage: bun run scripts/validate-skill-catalog.ts --ci|--report');
@@ -31,6 +32,7 @@ async function githubGet<T>(path: string): Promise<T> {
   const response = await fetch(`https://api.github.com${path}`, {
     method: 'GET',
     headers,
+    signal: AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`GitHub GET ${path} failed: ${response.status}`);

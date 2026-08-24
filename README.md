@@ -95,7 +95,7 @@ clients:
 | `allagents plugin uninstall <spec>` | Remove a plugin |
 | `allagents plugin list` | List available plugins |
 | `allagents skill add <name>` | Add a skill from a repo (plural `skills` alias supported) |
-| `allagents skill search <query> [--catalog recommended]` | Discover Recommended first, then global GitHub; use `--catalog` for strict catalog-only search |
+| `allagents skill search <query> [--catalog recommended]` | Interactive discovery shows Recommended then global GitHub; `--catalog` is strict catalog-only search |
 | `allagents skill list` | List skills and status |
 | `allagents mcp add <name> <commandOrUrl>` | Add an MCP server and sync to clients |
 | `allagents mcp proxy <serverUrl>` | Bridge a remote HTTP MCP server to local stdio |

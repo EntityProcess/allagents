@@ -153,6 +153,23 @@ describe('installSelectedSkillSearchSources', () => {
     expect(fetchPlugin).toHaveBeenCalledTimes(0);
   });
 
+  it('rejects spoofed catalog policy metadata before fetching or mutation', async () => {
+    const fetchPlugin = mock(async () => ({
+      success: true as const,
+      action: 'fetched' as const,
+      cachePath: '/unused',
+    }));
+    const group = sourceGroup('mattpocock-skills', ['typescript']);
+    group.installPolicy = 'direct-selective';
+
+    await expect(
+      installSelectedSkillSearchSources([group], 'project', '/workspace', {
+        fetchPlugin,
+      }),
+    ).rejects.toThrow('descriptor drift');
+    expect(fetchPlugin).toHaveBeenCalledTimes(0);
+  });
+
   it('resolves marketplace selectors through the authoritative local manifest', async () => {
     const cache = await mkdtemp(join(tmpdir(), 'catalog-marketplace-'));
     fixtures.push(cache);

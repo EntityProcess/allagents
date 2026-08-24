@@ -58,7 +58,7 @@ Subpath identity is also currently collapsed:
 - `src/cli/commands/plugin-skills.ts::recordSourceProvenance()` keys sync state by repository only.
 - `src/core/sync.ts::buildSourcesProvenance()` also writes `sources[owner/repo]`.
 
-Finally, clean clones currently fail before discovery. `src/core/git.ts::createGit()` supplies `filter.lfs.*` config values to `simple-git@3.30.0` but does not set `allowUnsafeFilter: true`. Clean-cache installs of `mattpocock/skills` and both Hermes subtrees hit simple-git's unsafe-filter rejection. Cache-seeded runs subsequently copied 36, 82, and 117 skills respectively with zero copy failures; those runs do not prove clean installability.
+Clean clones already use per-instance `simple-git@3.30.0` `config` values to disable LFS smudge/process handling. Those supported configuration arguments need a real hostile-global-config regression; an untyped `allowUnsafeFilter` property is not part of `SimpleGitOptions` in the pinned version and must not be used as a security bypass.
 
 ## Goals
 
@@ -497,13 +497,13 @@ Actual install provenance is `{ catalogSource, resolvedRef, resolvedSha, resolve
 
 Tests install core and optional in both orders and assert two workspace descriptors, two catalog-identity provenance keys, one physical cache identity, exact resolved roots/refs, and no promotion to repository root.
 
-## Clean-clone fix
+## Controlled clean-clone LFS behavior
 
-In `src/core/git.ts::createGit()`, set simple-git's `allowUnsafeFilter: true` alongside the existing `filter.lfs.*` config. Do not remove `GIT_LFS_SKIP_SMUDGE=1` or the LFS filter overrides; they prevent large LFS downloads during discovery/install. Do not apply a global user/repository git config.
+In `src/core/git.ts::createGit()`, retain the supported per-instance `config` values for `filter.lfs.*` together with `GIT_LFS_SKIP_SMUDGE=1`. Do not add unsupported unsafe-option casts, accept caller-supplied filter configuration, or alter global/user/repository git config.
 
-Add a regression to `tests/unit/core/git.test.ts` that creates a disposable local origin and calls the real `cloneTo()` into an empty destination. The test must exercise the configured `filter.lfs.*` path so it fails with simple-git's unsafe-filter rejection if `allowUnsafeFilter` is removed. Assert clone success and expected tracked content; do not merely snapshot an options object.
+The regression in `tests/unit/core/git.test.ts` creates a disposable local origin, supplies hostile required LFS filters through an isolated global config, and calls the real `cloneTo()` into an empty destination. It asserts clone success and unchanged pointer content, so removing the controlled per-instance filter overrides fails the contract.
 
-This fix is stage zero for catalog install claims. A cache-seeded run is not acceptable evidence.
+This check is stage zero for clean catalog install claims. A cache-seeded run is not acceptable evidence.
 
 ## Manifest validation, read-only health, and review gate
 
@@ -547,6 +547,18 @@ Add a `Catalog Manifest` job to `.github/workflows/ci.yml` that installs project
   - Single schema-version-1 `Recommended` catalog, stable source IDs, explicit repo/ref/roots, metadata, warnings, identity constructor, and segment-boundary helpers.
 - `src/core/skill-catalog-health.ts`
   - Offline validation and dependency-injected read-only GitHub health/manifest checks.
+- `src/cli/skill-search-presentation.ts`
+  - Shared stable section/status/item rows and exact selection-key mapping for both interactive search surfaces.
+- `src/cli/tui/__tests__/skills.test.ts`
+  - Full-screen TUI section order, failure labels, selection mapping, and descriptor preservation.
+- `tests/helpers/isolation.ts`
+  - Bounded subprocess isolation for real-git tests that mutate process-global state.
+- `tests/unit/cli/skill-search-install.test.ts`
+  - Exact direct/marketplace install transactions, policy enforcement, spoof resistance, and one-sync coverage.
+- `tests/unit/core/interactive-skill-search.test.ts`
+  - Concurrent section ordering, deduplication, strict scopes, and partial-failure behavior.
+- `tests/unit/core/skill-catalog-provenance.test.ts`
+  - Exact dual-root catalog provenance and shared physical-cache behavior.
 - `scripts/validate-skill-catalog.ts`
   - Read-only `--ci` and `--report` entry points over the same catalog/validator.
 - `tests/unit/core/skill-catalog.test.ts`
@@ -568,7 +580,7 @@ Add a `Catalog Manifest` job to `.github/workflows/ci.yml` that installs project
 - `src/cli/metadata/plugin-skills.ts::skillsSearchMeta`
   - Document `--catalog`, mutual exclusion, Recommended label, policy/metadata/provenance JSON fields, no fallback, and arbitrary-ref exclusion.
 - `src/cli/tui/actions/skills.ts::runSearchOnlineSkills`
-  - Consume `installSource`; keep this TUI surface on global search in this change.
+  - Use the same combined interactive provider and stable presentation rows, then pass catalog selections through the shared exact-descriptor transaction.
 - `src/utils/plugin-path.ts`
   - Parse/render exact repo/ref/root descriptors and retain segment-safe path normalization; repository identity is not catalog identity.
 - `src/models/workspace-config.ts::PluginEntrySchema`
@@ -577,12 +589,16 @@ Add a `Catalog Manifest` job to `.github/workflows/ci.yml` that installs project
   - Add repository-promoting versus catalog-exact upsert mode and preserve/validate catalog descriptors.
 - `src/core/user-workspace.ts`
   - Thread catalog-exact mode and descriptor through user-scoped allowlist upsert.
+- `src/core/plugin.ts`
+  - Preserve resolved ref/SHA provenance for seeded, cached, online, and offline fetches.
 - `src/models/sync-state.ts::SyncStateSourceSchema`
   - Add optional catalog descriptor and resolved root while retaining sync-state schema version 1.
 - `src/core/sync.ts::buildSourcesProvenance`
   - Emit full catalog-identity keys and exact root/ref install provenance.
 - `src/core/git.ts::createGit`
-  - Enable `allowUnsafeFilter` for the intentional fixed LFS filters.
+  - Keep controlled LFS filters on the supported per-instance `config` API without enabling unrelated unsafe git behavior.
+- `src/utils/marketplace-manifest-parser.ts`
+  - Parse only strictly valid repository-local catalog marketplace entries; exclude unsupported remote lifecycle entries from catalog installation.
 - `package.json`
   - Add `catalog:validate` and `catalog:health` scripts.
 - `.github/workflows/ci.yml`
@@ -590,25 +606,35 @@ Add a `Catalog Manifest` job to `.github/workflows/ci.yml` that installs project
 
 `src/core/marketplace.ts` and `src/utils/marketplace-manifest-parser.ts` remain marketplace dependencies rather than catalog registries. Reuse their manifest schemas/resolution rules; do not store catalog entries in `MarketplaceRegistry`.
 
-### Modified tests
+### Modified and added tests
 
-- `tests/unit/core/skill-search.test.ts`
-- `tests/unit/cli/skill-search-summary.test.ts`
-- `tests/unit/cli/skills-add-standalone-install.test.ts`
-- `tests/unit/core/github-skill-source-promotion.test.ts`
-- `tests/unit/core/git.test.ts`
-- `tests/unit/models/workspace-config.test.ts`
-- `tests/unit/models/sync-state-schema.test.ts`
+- `src/cli/tui/__tests__/skills.test.ts`
+- `src/core/__tests__/plugin-seed-cache.test.ts`
 - `tests/e2e/plugin-skills.test.ts`
+- `tests/e2e/skill-update.test.ts`
+- `tests/helpers/isolation.ts`
+- `tests/unit/cli/skill-search-install.test.ts`
+- `tests/unit/cli/skill-search-summary.test.ts`
+- `tests/unit/core/git.test.ts`
+- `tests/unit/core/github-skill-source-promotion.test.ts`
+- `tests/unit/core/interactive-skill-search.test.ts`
+- `tests/unit/core/skill-catalog-health.test.ts`
+- `tests/unit/core/skill-catalog-provenance.test.ts`
+- `tests/unit/core/skill-catalog.test.ts`
+- `tests/unit/core/skill-search.test.ts`
+- `tests/unit/core/sync-user.test.ts`
+- `tests/unit/models/skill-catalog.test.ts`
+- `tests/unit/models/sync-state-schema.test.ts`
+- `tests/unit/models/workspace-config.test.ts`
 
-Add a focused TUI unit only if the existing action is first made dependency-injectable without production-only indirection; otherwise cover `installSource` through the exported selection helper and perform the TUI smoke check manually.
+The real-git tests use bounded isolated subprocesses so process-global git/cache state cannot create suite-order dependence. The skill-update E2E build stays in an explicitly timed `beforeAll` hook rather than running as a module-import side effect.
 
 ### Documentation and changelog
 
 - `README.md` command table: add `allagents skill search <query> [--catalog recommended]`, label the catalog Recommended, and state global is the no-option default but never a catalog fallback.
 - `docs/src/content/docs/docs/reference/cli.mdx`: add complete search syntax, flags, metadata/policy/provenance JSON fields, mutual exclusion, no-fallback behavior, default-ref-only MVP, and project config descriptor semantics.
 - `docs/src/content/docs/docs/guides/marketplaces.mdx`: distinguish catalog sources from marketplaces and document authoritative-manifest validation without registering plain repositories.
-- `CHANGELOG.md` under `Unreleased` / `Added`: Recommended catalog search, versioned source identity, exact ref/root descriptors, read-only health/CI validation, and warnings. Under `Fixed`: clean clone failure caused by simple-git unsafe LFS filter validation.
+- `CHANGELOG.md` under `Unreleased` / `Added`: Recommended catalog search, versioned source identity, exact ref/root descriptors, read-only health/CI validation, and warnings.
 
 ## Automated test matrix
 
@@ -771,11 +797,11 @@ The audit commit informs architecture but does not, by itself, add `numman-ali/n
 | Recommended label is mistaken for endorsement. | Required warnings and metadata; never expose verified/safe/trusted booleans or wording. |
 | Upstream ref/layout/count/license changes. | Read-only health report and required CI validation; record upstream SHA; catalog changes only through reviewed PRs. |
 | Health tooling mutates upstream/local state. | GET-only dependency surface, mutation-negative tests, no repair/update mode. |
-| LFS workaround weakens git safety globally. | Set `allowUnsafeFilter` only on the controlled `simple-git` instance with fixed filter keys; never accept user-supplied filters or alter global git config. |
+| LFS handling weakens git safety globally. | Use only fixed, per-instance `SimpleGitOptions.config` entries; never accept user-supplied filters, set unsafe protocol/pack options, or alter global git config. |
 
 ## Staged execution order
 
-1. **Fix clean clones first.** Add `allowUnsafeFilter`, the real local-clone regression, and confirm clean remote Matt/Hermes clones reach discovery.
+1. **Prove clean clones first.** Keep the supported per-instance LFS config, add the hostile-global-config real clone regression, and confirm clean remote Matt/Hermes clones reach discovery.
 2. **Add the one versioned catalog and validator.** Land stable IDs, metadata, explicit refs/roots, full identity, policy enums, static invariants, and audited source rows.
 3. **Add read-only health and CI manifest gate.** Implement GET-only checks, package scripts, required `Catalog Manifest` job, and review evidence format.
 4. **Extend the core search API.** Add catalog option, default-ref preflight, qualifier batching, segment-boundary enforcement, metadata/discovery provenance, stable ordering, and no-fallback tests.

@@ -15,10 +15,6 @@
 - Interactive `skill search` and full-screen TUI discovery now fetch Recommended and global GitHub results concurrently, render Recommended first and All GitHub second, and let Recommended win exact repository/skill-path duplicates. Partial failures are labeled while surviving results remain usable. JSON, redirected no-catalog output, owner-scoped search, and explicit strict catalog search keep their previous boundaries. Exact catalog install descriptors survive selection in both interactive surfaces. Optional sources require confirmation, while search-only and external-installer sources remain non-installable.
 - Added authenticated, read-only catalog health validation in CI for repository/ref/root drift, skill presence, local authoritative marketplace paths, and source identity. The check never mutates, vendors, or automatically updates catalog entries.
 
-### Fixed
-
-- Clean Git clones now pass Git LFS filter overrides as supported `simple-git` configuration arguments, so project-scoped installs succeed without a pre-seeded cache while still preventing LFS smudge downloads.
-
 ## [1.0.0] - 2026-03-13
 
 ### Breaking Changes

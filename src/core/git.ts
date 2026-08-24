@@ -1,4 +1,4 @@
-import simpleGit, { type SimpleGitOptions } from 'simple-git';
+import simpleGit from 'simple-git';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, normalize, resolve, sep } from 'node:path';
@@ -25,17 +25,15 @@ export function createGitEnv(): NodeJS.ProcessEnv {
 }
 
 function createGit(baseDir?: string) {
-  const options = {
+  return simpleGit(baseDir, {
     timeout: { block: CLONE_TIMEOUT_MS },
-    allowUnsafeFilter: true,
     config: [
       'filter.lfs.required=false',
       'filter.lfs.smudge=',
       'filter.lfs.clean=',
       'filter.lfs.process=',
     ],
-  } as Partial<SimpleGitOptions> & { allowUnsafeFilter: true };
-  return simpleGit(baseDir, options).env(createGitEnv());
+  }).env(createGitEnv());
 }
 
 /**
