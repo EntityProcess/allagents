@@ -40,6 +40,7 @@ import {
 import {
   RECOMMENDED_SKILL_CATALOG,
   catalogInstallDescriptor,
+  catalogSourceIdentity,
 } from '../../core/skill-catalog.js';
 import {
   type DiscoveredSkillEntry,
@@ -2407,7 +2408,7 @@ export function collectSelectedSkillSearchSources(
     const selectionKey = skillSearchSelectionKey(item);
     if (!selected.has(selectionKey)) continue;
     const groupKey = item.catalog
-      ? `${item.catalog.identity}#${JSON.stringify(item.catalog.installDescriptor)}`
+      ? `${item.catalog.identity}#${JSON.stringify(item.catalog.installDescriptor)}#${item.installation.policy}`
       : item.installSource.toLowerCase();
     let group = groups.get(groupKey);
     if (!group) {
@@ -2504,8 +2505,17 @@ function validateSelectedCatalogDescriptor(
     (entry) => entry.sourceId === descriptor.sourceId,
   );
   const parsed = parseExactGitHubInstallSource(descriptor.installSource);
+  const expectedIdentity = source
+    ? catalogSourceIdentity({
+        catalog: descriptor.catalog,
+        sourceId: descriptor.sourceId,
+        effectiveRef: descriptor.effectiveRef,
+        approvedRoot: descriptor.approvedRoot,
+      })
+    : undefined;
   if (
     !source ||
+    expectedIdentity !== group.catalogIdentity ||
     JSON.stringify(catalogInstallDescriptor(source)) !==
       JSON.stringify(descriptor) ||
     !parsed ||

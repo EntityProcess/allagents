@@ -131,6 +131,23 @@ describe('installSelectedSkillSearchSources', () => {
     expect(sync).toHaveBeenCalledTimes(0);
   });
 
+  it('rejects a mismatched catalog identity before fetching or mutation', async () => {
+    const fetchPlugin = mock(async () => ({
+      success: true as const,
+      action: 'fetched' as const,
+      cachePath: '/unused',
+    }));
+    const group = sourceGroup('hermes-core', ['research/wiki']);
+    group.catalogIdentity = 'recommended:hermes-optional@main#optional-skills';
+
+    await expect(
+      installSelectedSkillSearchSources([group], 'project', '/workspace', {
+        fetchPlugin,
+      }),
+    ).rejects.toThrow('descriptor drift');
+    expect(fetchPlugin).toHaveBeenCalledTimes(0);
+  });
+
   it('resolves marketplace selectors through the authoritative local manifest', async () => {
     const cache = await mkdtemp(join(tmpdir(), 'catalog-marketplace-'));
     fixtures.push(cache);

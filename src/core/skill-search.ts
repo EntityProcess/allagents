@@ -557,18 +557,21 @@ async function fetchPrimaryPages(
   limit: number,
   token: string | undefined,
   fetchFn: typeof fetch,
+  acceptItem?: (item: SkillSearchItem) => boolean,
 ): Promise<QueryRunResult> {
   const needed = page * limit * 3;
-  const numPages = Math.min(
+  const requestedPages = Math.min(
     Math.max(1, Math.ceil(needed / SEARCH_PAGE_SIZE)),
     MAX_RESULTS / SEARCH_PAGE_SIZE,
   );
+  const maxPages = acceptItem ? MAX_RESULTS / SEARCH_PAGE_SIZE : requestedPages;
 
   const items: SkillSearchItem[] = [];
+  let accepted = 0;
   let total = 0;
   let truncated = false;
 
-  for (let currentPage = 1; currentPage <= numPages; currentPage += 1) {
+  for (let currentPage = 1; currentPage <= maxPages; currentPage += 1) {
     const result = await runOneQuery(
       q,
       currentPage,
@@ -577,12 +580,14 @@ async function fetchPrimaryPages(
       fetchFn,
     );
     items.push(...result.items);
+    accepted += acceptItem
+      ? result.items.filter(acceptItem).length
+      : result.items.length;
     total = result.total;
     truncated = truncated || result.truncated;
 
-    if (result.items.length < SEARCH_PAGE_SIZE) {
-      break;
-    }
+    if (result.items.length < SEARCH_PAGE_SIZE) break;
+    if (currentPage >= requestedPages && accepted >= needed) break;
   }
   truncated = truncated || items.length < Math.min(total, MAX_RESULTS);
 
@@ -718,7 +723,14 @@ async function searchCatalogSkills(
   const settled = await Promise.allSettled(
     queries.map((entry) =>
       entry.required
-        ? fetchPrimaryPages(entry.q, page, limit, token, fetchFn)
+        ? fetchPrimaryPages(
+            entry.q,
+            page,
+            limit,
+            token,
+            fetchFn,
+            (item) => attachCatalogSource(item, preflight) !== null,
+          )
         : runOneQuery(entry.q, 1, SEARCH_PAGE_SIZE, token, fetchFn),
     ),
   );

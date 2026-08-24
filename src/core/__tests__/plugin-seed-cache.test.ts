@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import simpleGit from 'simple-git';
 import { describe, it, expect, beforeEach } from 'bun:test';
 import {
   seedFetchCache,
@@ -80,6 +84,29 @@ describe('seedFetchCache', () => {
     expect(result.success).toBe(true);
     expect(result.action).toBe('skipped');
     expect(result.cachePath).toBe(marketplacePath);
+  });
+
+  it('retains branch and commit provenance for a seeded repository', async () => {
+    const repository = await mkdtemp(join(tmpdir(), 'allagents-seed-cache-'));
+    try {
+      const git = simpleGit(repository);
+      await git.init();
+      await git.checkoutLocalBranch('main');
+      await git.addConfig('user.name', 'AllAgents Test');
+      await git.addConfig('user.email', 'test@allagents.dev');
+      await writeFile(join(repository, 'tracked.txt'), 'seeded\n');
+      await git.add('tracked.txt');
+      await git.commit('fixture');
+      const sha = (await git.revparse(['HEAD'])).trim();
+
+      seedFetchCache('owner/provenance', repository, 'main');
+      const result = await fetchPlugin('owner/provenance', { branch: 'main' });
+
+      expect(result.resolvedRef).toBe('main');
+      expect(result.resolvedSha).toBe(sha);
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
   });
 
   it('ignores invalid URLs', () => {

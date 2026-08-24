@@ -1,3 +1,4 @@
+import simpleGit from 'simple-git';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -5,6 +6,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dump } from 'js-yaml';
 import { syncUserWorkspace } from '../../../src/core/sync.js';
+import {
+  RECOMMENDED_SKILL_CATALOG,
+  catalogInstallDescriptor,
+} from '../../../src/core/skill-catalog.js';
+import { resetFetchCache } from '../../../src/core/plugin.js';
+import { getPluginCachePath } from '../../../src/utils/plugin-path.js';
 import { WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
 import { stubHomeDir } from '../../helpers/env.js';
@@ -16,6 +23,7 @@ describe('syncUserWorkspace', () => {
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'allagents-sync-user-test-'));
     restoreHomeDir = stubHomeDir(testDir);
+    resetFetchCache();
   });
 
   afterEach(async () => {
@@ -183,6 +191,59 @@ describe('syncUserWorkspace', () => {
     expect(stateContent.version).toBe(1);
     expect(stateContent.files.claude).toBeDefined();
     expect(stateContent.files.claude.length).toBeGreaterThan(0);
+  });
+
+  it('persists catalog provenance for an offline user-scoped sync', async () => {
+    const source = RECOMMENDED_SKILL_CATALOG.sources.find(
+      (entry) => entry.sourceId === 'hermes-core',
+    )!;
+    const cachePath = getPluginCachePath(
+      'NousResearch',
+      'hermes-agent',
+      source.effectiveRef,
+    );
+    const skillDir = join(cachePath, 'skills', 'research', 'wiki');
+    await mkdir(join(skillDir, 'references'), { recursive: true });
+    await writeFile(join(skillDir, 'SKILL.md'), '# wiki\n');
+    await writeFile(join(skillDir, 'references', 'source.md'), 'asset\n');
+    const git = simpleGit(cachePath);
+    await git.init();
+    await git.checkoutLocalBranch('main');
+    await git.addConfig('user.name', 'AllAgents Test');
+    await git.addConfig('user.email', 'test@allagents.dev');
+    await git.add('.');
+    await git.commit('fixture');
+    const sha = (await git.revparse(['HEAD'])).trim();
+
+    await writeUserConfig({
+      repositories: [],
+      plugins: [
+        {
+          source: source.installSource,
+          skills: ['research/wiki'],
+          catalogSource: catalogInstallDescriptor(source),
+        },
+      ],
+      clients: ['claude'],
+      syncMode: 'copy',
+    });
+
+    const result = await syncUserWorkspace({ offline: true });
+    expect(result.success).toBe(true);
+    expect(
+      existsSync(
+        join(testDir, '.claude', 'skills', 'wiki', 'references', 'source.md'),
+      ),
+    ).toBe(true);
+    const state = JSON.parse(
+      await readFile(join(testDir, '.allagents', 'sync-state.json'), 'utf-8'),
+    );
+    const provenance =
+      state.sources?.['recommended:hermes-core@main#skills'];
+    expect(provenance?.resolvedRef).toBe('main');
+    expect(provenance?.resolvedSha).toBe(sha);
+    expect(provenance?.resolvedRoot).toBe('skills');
+    expect(provenance?.catalogSource?.installSource).toBe(source.installSource);
   });
 
   it('does not write files in dry-run mode', async () => {

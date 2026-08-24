@@ -1097,7 +1097,7 @@ describe('catalog search boundaries', () => {
     });
     const result = await searchSkills(
       'browser',
-      { catalog: 'recommended', limit: 40 },
+      { catalog: 'recommended', limit: 15 },
       { fetch, logger: silentLogger, tokenResolver: async () => undefined },
     );
     expect(result.items).toHaveLength(1);

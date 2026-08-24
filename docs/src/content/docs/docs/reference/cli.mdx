@@ -306,11 +306,11 @@ use the exact catalog repository, default-branch ref, and root. Hermes core
 identities and stay separate through installation and sync.
 
 Discovery provenance (the GitHub result path, blob SHA, repository-head SHA,
-query batch, and catalog version) explains how a result was found. Install
-provenance (repository, ref, root, source ID, and selected paths) controls later
-syncs and is persisted in `workspace.yaml` and `.allagents/sync-state.json`.
-These are deliberately distinct: a search blob SHA is evidence, not an
-install/update pin.
+approved boundary, and catalog version) explains how a result was found.
+Install provenance (repository, ref, root, source ID, and plugin spec) is
+persisted in `.allagents/sync-state.json`; the selected paths and full catalog
+descriptor remain in `workspace.yaml` and control later syncs. These are
+deliberately distinct: a search blob SHA is evidence, not an install/update pin.
 
 ### skill update
 

@@ -28,12 +28,26 @@ function globalItem(path: string, repo: string): SkillSearchItem {
   };
 }
 
-function catalogItem(sourceId: 'hermes-core' | 'hermes-optional'): SkillSearchItem {
+function catalogItem(
+  sourceId: 'hermes-core' | 'hermes-optional' | 'paperclip-companies',
+  options: {
+    selector?: string;
+    path?: string;
+    policy?: SkillSearchItem['installation']['policy'];
+  } = {},
+): SkillSearchItem {
   const source = RECOMMENDED_SKILL_CATALOG.sources.find(
     (entry) => entry.sourceId === sourceId,
   )!;
-  const selector = sourceId === 'hermes-core' ? 'research/wiki' : 'browser';
-  const path = `${source.approvedRoot}/${selector}/SKILL.md`;
+  const selector =
+    options.selector ??
+    (sourceId === 'hermes-core'
+      ? 'research/wiki'
+      : sourceId === 'hermes-optional'
+        ? 'browser'
+        : 'company-creator');
+  const path =
+    options.path ?? `${source.approvedRoot}/${selector}/SKILL.md`;
   const identity = catalogSourceIdentity({
     catalog: 'recommended',
     sourceId,
@@ -44,7 +58,10 @@ function catalogItem(sourceId: 'hermes-core' | 'hermes-optional'): SkillSearchIt
     ...globalItem(path, source.repo),
     installSource: source.installSource,
     installSelector: selector,
-    installation: { policy: source.installPolicy, reasonCodes: [] },
+    installation: {
+      policy: options.policy ?? source.installPolicy,
+      reasonCodes: [],
+    },
     catalog: {
       name: 'recommended',
       label: 'Recommended',
@@ -144,6 +161,26 @@ describe('collectSelectedSkillSearchSources', () => {
     expect(groups.map((group) => group.selectors)).toEqual([
       ['research/wiki'],
       ['browser'],
+    ]);
+  });
+
+  it('keeps result-specific non-installable policy separate within one source', () => {
+    const installable = catalogItem('paperclip-companies', {
+      path: 'skills/company-creator/SKILL.md',
+    });
+    const searchOnly = catalogItem('paperclip-companies', {
+      selector: 'template-only',
+      path: 'templates/template-only/SKILL.md',
+      policy: 'search-only',
+    });
+    const groups = collectSelectedSkillSearchSources(
+      [installable, searchOnly],
+      [installable, searchOnly].map(skillSearchSelectionKey),
+    );
+
+    expect(groups.map((group) => group.installPolicy)).toEqual([
+      'direct-selective',
+      'search-only',
     ]);
   });
 

@@ -103,18 +103,24 @@ export function seedFetchCache(
   if (!parsed) return;
 
   const { owner, repo } = parsed;
-  const cachePath = getPluginCachePath(owner, repo, branch ?? parsed.branch);
+  const effectiveBranch = branch ?? parsed.branch;
+  const cachePath = getPluginCachePath(owner, repo, effectiveBranch);
 
-  // Don't overwrite if already populated (e.g. by a prior fetchPlugin call)
+  // Don't overwrite if already populated (e.g. by a prior fetchPlugin call).
   if (fetchCache.has(cachePath)) return;
 
   fetchCache.set(
     cachePath,
-    Promise.resolve({
-      success: true,
-      action: 'skipped' as const,
-      cachePath: path,
-    }),
+    (async (): Promise<FetchResult> => {
+      const sha = await resolveHeadSha(path);
+      return {
+        success: true,
+        action: 'skipped',
+        cachePath: path,
+        ...(effectiveBranch && { resolvedRef: effectiveBranch }),
+        ...(sha && { resolvedSha: sha }),
+      };
+    })(),
   );
 }
 
@@ -204,11 +210,14 @@ async function doFetchPlugin(
   const isCached = existsSyncFn(cachePath);
 
   if (isCached && offline) {
-    // Offline mode: use cached version without fetching
+    // Offline provenance still comes from the cached repository itself.
+    const sha = await resolveHeadSha(cachePath);
     return {
       success: true,
       action: 'skipped',
       cachePath,
+      ...(branch && { resolvedRef: branch }),
+      ...(sha && { resolvedSha: sha }),
     };
   }
 

@@ -2939,6 +2939,7 @@ export async function syncUserWorkspace(
   if (!dryRun) {
     const { pluginsByClient: nativePluginsByClient } =
       collectNativePluginSources(validPlugins);
+    const sources = await buildSourcesProvenance(validPlugins, config.plugins);
     await sw.measure('persist-state', () =>
       persistSyncState(
         homeDir,
@@ -2949,6 +2950,7 @@ export async function syncUserWorkspace(
         nativeResult,
         {
           clientMappings: USER_CLIENT_MAPPINGS,
+          ...(Object.keys(sources).length > 0 && { sources }),
           ...(Object.keys(mcpResults).length > 0 && {
             mcpTrackedServers: Object.fromEntries(
               Object.entries(mcpResults).map(([scope, r]) => [
