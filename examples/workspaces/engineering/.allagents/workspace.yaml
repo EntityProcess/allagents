@@ -4,7 +4,7 @@ repositories: []
 
 plugins:
   # Keep established Compound workflow entry points even where Matt overlaps.
-  # The shipping skills below are the hard dependency closure for work/debug.
+  # Explicitly include reachable automatic and user-visible handoffs without enabling unrelated upstream skills.
   - source: https://github.com/EveryInc/compound-engineering-plugin
     skills:
       - ce-promote
@@ -20,6 +20,17 @@ plugins:
       - ce-commit-push-pr
       - ce-babysit-pr
       - ce-resolve-pr-feedback
+      - ce-doc-review
+      - ce-prototype
+      - lfg
+      - ce-test-browser
+      - ce-proof
+      - ce-explain
+      - ce-compound
+      - ce-compound-refresh
+      - ce-handoff
+      - ce-polish
+      - ce-setup
 
   # Preserve Matt's upstream composition by installing the selected capabilities
   # with every helper skill they invoke. The explicit closure prevents unrelated
