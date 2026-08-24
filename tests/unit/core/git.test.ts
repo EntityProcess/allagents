@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -63,11 +64,14 @@ describe('cloneTo', () => {
       await git.addConfig('user.email', 'test@allagents.dev');
       await writeFile(join(upstream, 'tracked.txt'), 'clean clone\n');
       await writeFile(join(upstream, '.gitattributes'), '*.bin filter=lfs\n');
-      const pointer =
-        'version https://git-lfs.github.com/spec/v1\noid sha256:fixture\nsize 7\n';
+      const payload = Buffer.from('fixture payload\n');
+      const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${createHash('sha256').update(payload).digest('hex')}\nsize ${payload.byteLength}\n`;
       await writeFile(join(upstream, 'asset.bin'), pointer);
       await git.add(['tracked.txt', '.gitattributes', 'asset.bin']);
       await git.commit('fixture');
+      const committedPointer = Buffer.from(
+        await git.show(['HEAD:asset.bin']),
+      );
       await simpleGit().raw(['init', '--bare', remote]);
       await git.addRemote('origin', remote);
       await git.push(['-u', 'origin', 'main']);
@@ -83,9 +87,12 @@ describe('cloneTo', () => {
       expect(await readFile(join(destination, 'tracked.txt'), 'utf8')).toBe(
         'clean clone\n',
       );
-      expect(await readFile(join(destination, 'asset.bin'), 'utf8')).toBe(
-        pointer,
+      const clonedAsset = await readFile(join(destination, 'asset.bin'));
+      expect(clonedAsset).toEqual(committedPointer);
+      expect(clonedAsset.toString('utf8')).toMatch(
+        /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:[0-9a-f]{64}\nsize \d+\n$/,
       );
+      expect(clonedAsset).not.toEqual(payload);
     } finally {
       if (originalGitConfig === undefined) {
         delete process.env.GIT_CONFIG_GLOBAL;
