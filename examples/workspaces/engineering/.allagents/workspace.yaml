@@ -3,34 +3,10 @@ version: 2
 repositories: []
 
 plugins:
-  # Keep established Compound workflow entry points even where Matt overlaps.
-  # Explicitly include reachable automatic and user-visible handoffs without enabling unrelated upstream skills.
+  # Intentionally enable the complete Compound Engineering plugin. The release
+  # pin keeps every included skill and asset reproducible across updates.
   - source: https://github.com/EveryInc/compound-engineering-plugin
-    skills:
-      - ce-promote
-      - ce-code-review
-      - ce-ideate
-      - ce-brainstorm
-      - ce-plan
-      - ce-simplify-code
-      - ce-debug
-      - ce-pov
-      - ce-work
-      - ce-commit
-      - ce-commit-push-pr
-      - ce-babysit-pr
-      - ce-resolve-pr-feedback
-      - ce-doc-review
-      - ce-prototype
-      - lfg
-      - ce-test-browser
-      - ce-proof
-      - ce-explain
-      - ce-compound
-      - ce-compound-refresh
-      - ce-handoff
-      - ce-polish
-      - ce-setup
+    pin: compound-engineering-v3.23.3
 
   # Preserve Matt's upstream composition by installing the selected capabilities
   # with every helper skill they invoke. The explicit closure prevents unrelated
