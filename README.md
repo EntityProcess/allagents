@@ -95,6 +95,7 @@ clients:
 | `allagents plugin uninstall <spec>` | Remove a plugin |
 | `allagents plugin list` | List available plugins |
 | `allagents skill add <name>` | Add a skill from a repo (plural `skills` alias supported) |
+| `allagents skill search <query> [--catalog recommended]` | Search globally or within the built-in Recommended catalog |
 | `allagents skill list` | List skills and status |
 | `allagents mcp add <name> <commandOrUrl>` | Add an MCP server and sync to clients |
 | `allagents mcp proxy <serverUrl>` | Bridge a remote HTTP MCP server to local stdio |
@@ -103,6 +104,24 @@ clients:
 | `allagents self update` | Update AllAgents CLI |
 
 See the [full CLI reference](https://allagents.dev/docs/reference/cli/) for all options.
+
+## Recommended Skill Catalog
+
+`allagents skill search <query>` keeps the existing global GitHub search. Add
+`--catalog recommended` to search only the built-in, versioned Recommended
+catalog:
+
+```bash
+allagents skill search testing --catalog recommended
+```
+
+The catalog is a hard discovery boundary: catalog failures and empty results do
+not fall back to global search. **Recommended** is a discovery label, not a
+security, trust, quality, or license guarantee; review each result's source,
+classification, policy, warnings, and upstream content. In an interactive
+terminal, installable results can be selected for project scope (including a
+new disposable workspace) or user scope. Exact repository, ref, catalog root,
+selected skill subset, and provenance are retained for later syncs.
 
 ## Supported Clients
 

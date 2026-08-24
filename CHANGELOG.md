@@ -8,6 +8,17 @@
 
   **Migration**: Re-run `allagents mcp update` or `allagents update` after upgrading so synced client configs are regenerated with `mcp proxy`.
 
+### Added
+
+- **Recommended skill catalog**: Added `allagents skill search <query> --catalog recommended`, a hard discovery boundary over curated repository, subtree, marketplace-backed, search-only, and external-lifecycle sources. The catalog includes gstack, Paperclip companies, Matt Pocock skills, Composio awesome skills, distinct Hermes core and optional roots, Anthropic skills and knowledge-work plugins, Addy Osmani skills, obra superpowers, context-engineering skills, and Elastic docs skills.
+- Catalog results expose classification, install policy, warnings, source metadata, exact install source and selector, and separate discovery provenance. **Recommended** is a discovery label, not a security, trust, quality, or license guarantee.
+- Interactive catalog search supports selective project- or user-scoped installation. Project installs retain exact repository/ref/root/source identity and the selected subset in workspace and sync state; optional sources require confirmation, while search-only and external-installer sources remain non-installable.
+- Added authenticated, read-only catalog health validation in CI for repository/ref/root drift, skill presence, local authoritative marketplace paths, and source identity. The check never mutates, vendors, or automatically updates catalog entries.
+
+### Fixed
+
+- Clean Git clones now pass Git LFS filter overrides as supported `simple-git` configuration arguments, so project-scoped installs succeed without a pre-seeded cache while still preventing LFS smudge downloads.
+
 ## [1.0.0] - 2026-03-13
 
 ### Breaking Changes

@@ -135,6 +135,7 @@ allagents skill list [--scope <scope>]
 allagents skill remove <skill> [--plugin <plugin>] [--scope <scope>]
 allagents skill add <skill> [--from <source>] [--plugin <plugin>] [--scope <scope>]
 allagents skill update [skill...] [--scope <scope>] [--yes]
+allagents skill search <query> [--catalog recommended] [--owner <owner>] [--page <n>] [--limit <n>]
 ```
 
 ### plugin list
@@ -257,6 +258,59 @@ allagents skill add brainstorming --plugin superpowers
 ```
 
 After enabling, the skill is removed from `disabledSkills` and sync is run to restore it.
+
+### skill search
+
+Search public `SKILL.md` files. The default remains global GitHub Code Search:
+
+```bash
+allagents skill search terraform
+allagents skill search terraform --owner hashicorp
+```
+
+Use the built-in Recommended catalog when discovery must stay within its exact
+repository and subtree boundaries:
+
+```bash
+allagents skill search testing --catalog recommended
+allagents --json skill search testing --catalog recommended
+```
+
+| Flag | Description |
+|------|-------------|
+| `--catalog recommended` | Search only the versioned built-in catalog. Unknown names are rejected. |
+| `--owner <owner>` | Limit global search to one GitHub owner. Mutually exclusive with `--catalog`. |
+| `--page <n>` | 1-indexed result page (default: `1`). |
+| `--limit <n>` | Results per page, from 1 to 100 (default: `15`). |
+
+Unknown catalogs and the `--catalog`/`--owner` conflict exit with status 2.
+Catalog mode is a hard boundary: empty results, source-health failures, GitHub
+query failures, and manifest failures never fall back to global results.
+Repository constraints are applied to every GitHub query and results are also
+filtered against catalog roots before ranking and pagination.
+
+**Recommended** is a discovery label. It is not a security review, trust or
+quality guarantee, or license assertion. Results expose their classification
+(`recommended`, `optional`, or `external-lifecycle`), source kind, install
+policy, author and homepage metadata, SPDX value when known, and warnings.
+Optional sources require explicit confirmation. `search-only` results remain
+visible but cannot be installed; `external-installer` results point to the
+upstream lifecycle and AllAgents does not run it.
+
+In a TTY, select one or more installable results and choose project or user
+scope. Project installation works in a newly initialized disposable folder.
+Only the selected skill paths are enabled. Marketplace-backed selections are
+checked against their authoritative manifest; direct repositories and subtrees
+use the exact catalog repository, default-branch ref, and root. Hermes core
+(`skills`) and Hermes optional (`optional-skills`) are separate source
+identities and stay separate through installation and sync.
+
+Discovery provenance (the GitHub result path, blob SHA, repository-head SHA,
+query batch, and catalog version) explains how a result was found. Install
+provenance (repository, ref, root, source ID, and selected paths) controls later
+syncs and is persisted in `workspace.yaml` and `.allagents/sync-state.json`.
+These are deliberately distinct: a search blob SHA is evidence, not an
+install/update pin.
 
 ### skill update
 
