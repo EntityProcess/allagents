@@ -21,10 +21,12 @@ plugins:
       - ce-babysit-pr
       - ce-resolve-pr-feedback
 
-  # These three capabilities are adapted locally because their upstream
+  # These three capabilities are adapted in this repository because their upstream
   # versions hard-invoke unselected helper skills. The allowlist keeps the
   # public Matt skill set exact and prevents future additions from auto-enabling.
-  - source: ./matt-pocock-engineering
+  # Relative plugin sources resolve from the workspace root; this path requires
+  # the repository's examples/ and skills/ layout rather than a standalone copy.
+  - source: ../../../skills/matt-pocock-engineering
     skills:
       - engineering/wayfinder
       - engineering/grill-with-docs
