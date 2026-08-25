@@ -15,7 +15,7 @@ import {
 export type PluginSourceType = 'github' | 'local';
 
 /**
- * Strip an inline `@<ref>` pin suffix from a plugin spec.
+ * Strip an inline `@<ref>` suffix from a plugin spec.
  *
  * `owner/repo@v1.2.0`       → `owner/repo`
  * `owner/repo@main/sub`     → `owner/repo/sub` (the subpath is preserved)
@@ -90,7 +90,7 @@ export function isGitHubUrl(source: string): boolean {
   ) {
     // Check if it looks like owner/repo format (alphanumeric, hyphens, underscores, dots).
     // GitHub allows dots in repo names (e.g., WTG.AI.Prompts).
-    // For pinning, the repo segment may carry an @ref suffix — strip it before validating.
+    // The repo segment may carry an @ref suffix — strip it before validating.
     const parts = source.split('/');
     if (parts.length >= 2 && parts[0] && parts[1]) {
       const validOwnerRepo = /^[a-zA-Z0-9_.-]+$/;
@@ -134,7 +134,7 @@ export function parseGitHubUrl(
   }
 
   // Handle shorthand: owner/repo or owner/repo/subpath (no protocol, no github.com)
-  // Also accept an optional @ref suffix on the repo segment for version pinning:
+  // Also accept an optional @ref suffix on the repo segment:
   //   owner/repo@v1.2.0
   //   owner/repo@main/subpath
   // Distinguishing from `name@marketplace`: that form has no slash, so isGitHubUrl

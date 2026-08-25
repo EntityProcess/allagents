@@ -380,11 +380,11 @@ export async function updateCachedPlugins(
 /**
  * Get the plugin name from the directory name.
  *
- * Cache directories for branch/tag-pinned clones use the form
- * `<owner>-<repo>@<sanitized-ref>`. The pin suffix is part of the on-disk
+ * Cache directories for ref-specific clones use the form
+ * `<owner>-<repo>@<sanitized-ref>`. The ref suffix is part of the on-disk
  * layout for collision avoidance, but the logical plugin name is the
  * base — strip the suffix so callers that key workspace.yaml entries by
- * plugin name (e.g., setPluginSkillsMode) match against the unpinned form.
+ * plugin name (e.g., setPluginSkillsMode) match against the base form.
  *
  * @param pluginPath - Resolved path to the plugin directory
  * @returns The plugin name (directory basename, without any `@ref` suffix)

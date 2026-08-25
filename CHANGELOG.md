@@ -8,6 +8,14 @@
 
   **Migration**: Re-run `allagents mcp update` or `allagents update` after upgrading so synced client configs are regenerated with `mcp proxy`.
 
+- **Plugin Git ref terminology**: Renamed workspace plugin `pin` to `ref`, CLI
+  `--pin` to `--ref`, and sync-state `pinnedRef` to `requestedRef`. Inline
+  `owner/repo@ref` sources are unchanged.
+
+  **Migration**: Replace `pin:` with `ref:` in plugin objects and `--pin` with
+  `--ref` in scripts. This is a clean cutover; the old names are not accepted.
+
+
 ## [1.0.0] - 2026-03-13
 
 ### Breaking Changes

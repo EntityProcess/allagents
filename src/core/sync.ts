@@ -1898,12 +1898,12 @@ async function buildSourcesProvenance(
 ): Promise<Record<string, SyncStateSource>> {
   const sources: Record<string, SyncStateSource> = {};
 
-  // Index user-declared pins by their raw source string so we can attach them
-  // to the matching validated plugin (whose `.plugin` may have `@pin` spliced in).
-  const pinByRawSource = new Map<string, string>();
+  // Index user-declared refs by their raw source string so we can attach them
+  // to the matching validated plugin (whose `.plugin` may have `@ref` spliced in).
+  const refByRawSource = new Map<string, string>();
   for (const entry of pluginEntries) {
     if (typeof entry === 'string') continue;
-    if (entry.pin) pinByRawSource.set(entry.source, entry.pin);
+    if (entry.ref) refByRawSource.set(entry.source, entry.ref);
   }
 
   for (const validated of validatedPlugins) {
@@ -1920,13 +1920,13 @@ async function buildSourcesProvenance(
     if (!fetchResult.success || !fetchResult.resolvedSha) continue;
 
     const rawBase = stripGitRef(`${parsed.owner}/${parsed.repo}`);
-    const pinned = pinByRawSource.get(rawBase) ?? parsed.branch;
+    const requestedRef = refByRawSource.get(rawBase) ?? parsed.branch;
 
     sources[rawBase] = {
       pluginSpec: rawBase,
       resolvedRef: fetchResult.resolvedRef ?? parsed.branch ?? 'HEAD',
       resolvedSha: fetchResult.resolvedSha,
-      ...(pinned && { pinnedRef: pinned }),
+      ...(requestedRef && { requestedRef }),
     };
   }
 

@@ -537,7 +537,7 @@ export async function addMarketplace(
 
   // Check if already registered by source location (idempotent)
   // Use the full location including branch — each branch is a separate marketplace.
-  // For branch-pinned registrations, effectiveBranch overrides parsed.location.
+  // For branch-specific registrations, effectiveBranch overrides parsed.location.
   const sourceLocation = (() => {
     if (parsed.type === 'github') {
       const { owner, repo } = parseLocation(parsed.location);
@@ -995,7 +995,7 @@ export async function updateMarketplace(
 
       let targetBranch: string;
       if (storedBranch) {
-        // Branch-pinned marketplace: use stored branch directly
+        // Branch-specific marketplace: use stored branch directly
         targetBranch = storedBranch;
       } else {
         // Default branch marketplace: detect default branch
@@ -1814,10 +1814,11 @@ async function autoRegisterMarketplace(
  *
  * `plugin@marketplace`        → true   (plain marketplace shorthand)
  * `plugin@owner/repo[/sub]`   → true   (marketplace by GitHub repo)
- * `owner/repo@ref[/sub]`      → false  (GitHub plugin with `@ref` version pin)
+ * `owner/repo@ref[/sub]`      → false  (GitHub plugin with an inline ref)
  *
  * The disambiguation: when the segment before the last `@` itself contains a
- * `/`, the spec is an `owner/repo` GitHub URL with a `@ref` pin, not a
+ * `/`, the spec is an `owner/repo` GitHub URL with an inline ref, not a
+ *
  * plugin@marketplace pair. Plugin names in marketplaces are bare identifiers
  * without slashes.
  */
