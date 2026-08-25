@@ -1,0 +1,10 @@
+{
+  "name": "engineering",
+  "description": "Reusable engineering workflow skills for repository maintenance and delivery.",
+  "author": {
+    "name": "AllAgents"
+  },
+  "version": "1.0.0",
+  "category": "development",
+  "homepage": "https://github.com/EntityProcess/allagents/tree/main/plugins/engineering"
+}

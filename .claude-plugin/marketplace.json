@@ -11,6 +11,11 @@
       "name": "deepwiki",
       "description": "AI-generated documentation for GitHub repositories",
       "source": "./plugins/deepwiki"
+    },
+    {
+      "name": "engineering",
+      "description": "Reusable engineering workflow skills",
+      "source": "./plugins/engineering"
     }
   ]
 }
