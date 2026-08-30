@@ -32,7 +32,10 @@ import {
   matchesSkillUpdateFilter,
   resolveCheckoutSubpath,
 } from '../core/skill-update.js';
-import { discoverSkillEntriesFromPluginRoot } from '../core/skills.js';
+import {
+  type DiscoveredSkillEntry,
+  discoverSkillEntriesFromPluginRoot,
+} from '../core/skills.js';
 import { syncUserWorkspace, syncWorkspace } from '../core/sync.js';
 import { getUserWorkspaceConfigPath } from '../core/user-workspace.js';
 import type {
@@ -143,6 +146,12 @@ export interface SkillUpdateInventory {
   installations: SkillUpdateInstallation[];
   skippedLocalSources: string[];
   failures: SkillUpdateInventoryFailure[];
+  /** Direct config entries consuming a cache, including those with no enabled skills. */
+  directRemoteConsumers: Array<{
+    scope: SkillUpdateScope;
+    source: string;
+    nodeId: string;
+  }>;
 }
 
 export interface PrepareSkillUpdateOptions {
@@ -237,7 +246,7 @@ function posixPath(path: string): string {
 }
 
 function enabledSkills(
-  entries: Awaited<ReturnType<typeof discoverSkillEntriesFromPluginRoot>>,
+  entries: DiscoveredSkillEntry[],
   pluginName: string,
   config: WorkspaceConfig,
   pluginSkills: PluginSkillsConfig | undefined,
@@ -289,16 +298,21 @@ function pluginSkillsConfig(
   return typeof plugin === 'string' ? undefined : plugin.skills;
 }
 
-async function isStandaloneSkillRoot(
+function isStandaloneSkillRoot(
   root: string,
-  entries: Awaited<ReturnType<typeof discoverSkillEntriesFromPluginRoot>>,
-): Promise<boolean> {
-  if (!existsSync(join(root, 'SKILL.md')) || entries.length !== 1) return false;
+  entries: DiscoveredSkillEntry[],
+): boolean {
+  if (
+    !existsSync(join(root, 'SKILL.md')) ||
+    entries.length !== 1 ||
+    resolve(entries[0]?.skillPath ?? '') !== resolve(root)
+  ) {
+    return false;
+  }
   return ![
     '.claude-plugin',
     '.github',
     '.mcp.json',
-    'agents',
     'commands',
     'hooks',
     'mcp.json',
@@ -382,7 +396,7 @@ async function inventoryDirect(
     pluginName,
     currentSha: await revision(cachePath),
     skills,
-    standaloneSkillSource: await isStandaloneSkillRoot(root, discovered),
+    standaloneSkillSource: isStandaloneSkillRoot(root, discovered),
   });
 }
 
@@ -499,6 +513,8 @@ export async function buildSkillUpdateInventory(
   const installations: SkillUpdateInstallation[] = [];
   const skippedLocalSources: string[] = [];
   const failures: SkillUpdateInventoryFailure[] = [];
+  const directRemoteConsumers: SkillUpdateInventory['directRemoteConsumers'] =
+    [];
   const deferred: SkillUpdateInstallation[] = [];
   const deferredErrors: Array<
     SkillUpdateInventoryFailure & { errorCause: unknown }
@@ -550,6 +566,16 @@ export async function buildSkillUpdateInventory(
     for (const [configIndex, plugin] of config.plugins.entries()) {
       const rawSource = getPluginSource(plugin);
       const effectiveSource = getEffectivePluginSource(plugin);
+      const direct = isGitHubUrl(effectiveSource)
+        ? parseGitHubUrl(effectiveSource)
+        : null;
+      if (direct) {
+        directRemoteConsumers.push({
+          scope,
+          source: rawSource,
+          nodeId: getPluginCachePath(direct.owner, direct.repo, direct.branch),
+        });
+      }
       let installation: SkillUpdateInstallation | null | 'local';
       try {
         // Inline Git refs also use `@` (owner/repo@ref). Direct GitHub
@@ -631,7 +657,12 @@ export async function buildSkillUpdateInventory(
       error: `Could not safely inventory shared source: ${sharedFailure.errorCause instanceof Error ? sharedFailure.errorCause.message : String(sharedFailure.errorCause)}`,
     });
   }
-  return { installations, skippedLocalSources, failures };
+  return {
+    installations,
+    skippedLocalSources,
+    failures,
+    directRemoteConsumers,
+  };
 }
 
 async function inspectInstallation(

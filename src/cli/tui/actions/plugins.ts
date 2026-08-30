@@ -293,6 +293,14 @@ export async function runUpdateAllPlugins(
     for (const failure of failures) {
       handledPlugins.add(`${failure.scope}:${failure.source}`);
     }
+    for (const consumer of inventory.directRemoteConsumers) {
+      if (
+        scopes.includes(consumer.scope) &&
+        nodeIds.has(consumer.nodeId)
+      ) {
+        handledPlugins.add(`${consumer.scope}:${consumer.source}`);
+      }
+    }
   }
 
   resetFetchCache();
@@ -352,7 +360,8 @@ export async function runUpdateAllPlugins(
     }
   }
 
-  // Sync generic updates not already materialized by standalone execution.
+  // Generic sources have already refreshed above. Materialize from those cache
+  // revisions without letting a retained or failed standalone unit advance.
   if (
     (needsProjectSync && !standaloneSyncedScopes.has('project')) ||
     (needsUserSync && !standaloneSyncedScopes.has('user'))
@@ -363,10 +372,10 @@ export async function runUpdateAllPlugins(
       !standaloneSyncedScopes.has('project') &&
       context.workspacePath
     ) {
-      await syncWorkspace(context.workspacePath);
+      await syncWorkspace(context.workspacePath, { offline: true });
     }
     if (needsUserSync && !standaloneSyncedScopes.has('user')) {
-      await syncUserWorkspace();
+      await syncUserWorkspace({ offline: true });
     }
     cache?.invalidate();
   }

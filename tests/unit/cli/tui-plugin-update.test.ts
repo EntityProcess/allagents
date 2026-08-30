@@ -30,7 +30,14 @@ const { runUpdateAllPlugins } = await import(
 
 const SOURCE =
   'https://github.com/mattpocock/skills/tree/main/skills/engineering/setup-matt-pocock-skills';
+const EMPTY_SOURCE =
+  'https://github.com/mattpocock/skills/tree/main/skills/empty';
 const GENERIC_SOURCE = 'https://github.com/example/plugins';
+const SKILL_ROOT = 'skills/engineering/setup-matt-pocock-skills';
+const SKILL_PATH = `${SKILL_ROOT}/SKILL.md`;
+const SKILL_AGENT_PATH = `${SKILL_ROOT}/agents/openai.yaml`;
+const EMPTY_SKILL_PATH = 'skills/empty/SKILL.md';
+const GENERIC_SKILL_PATH = 'skills/generic/SKILL.md';
 const originalEnvironment = {
   ALLAGENTS_TEST_HOME: process.env.ALLAGENTS_TEST_HOME,
   GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
@@ -53,6 +60,7 @@ function runGit(path: string, args: string[]): string {
   }
   return result.stdout.toString().trim();
 }
+
 async function createRemote(
   root: string,
   name: string,
@@ -80,6 +88,7 @@ async function createRemote(
   runGit(upstream, ['push', 'origin', 'main']);
   return { remote, upstream };
 }
+
 async function advanceRemote(
   upstream: string,
   path: string,
@@ -87,10 +96,109 @@ async function advanceRemote(
   version: string,
 ): Promise<string> {
   await writeFile(join(upstream, path), content);
-  runGit(upstream, ['add', '.']);
+  runGit(upstream, ['add', '--all']);
   runGit(upstream, ['commit', '-m', `fixture ${version}`]);
   runGit(upstream, ['push', 'origin', 'main']);
   return runGit(upstream, ['rev-parse', 'HEAD']);
+}
+
+async function removeRemotePath(
+  upstream: string,
+  path: string,
+  version: string,
+): Promise<void> {
+  await rm(join(upstream, path), { recursive: true, force: true });
+  runGit(upstream, ['add', '--all']);
+  runGit(upstream, ['commit', '-m', `fixture ${version}`]);
+  runGit(upstream, ['push', 'origin', 'main']);
+}
+
+async function createUpdateFixture(
+  options: { includeGeneric?: boolean; includeEmptyConsumer?: boolean } = {},
+) {
+  const { includeGeneric = true, includeEmptyConsumer = false } = options;
+  const root = await mkdtemp(join(tmpdir(), 'allagents-tui-skill-update-'));
+  const home = join(root, 'home');
+  const workspace = join(root, 'workspace');
+  const gitConfig = join(root, 'gitconfig');
+  await mkdir(home, { recursive: true });
+  await mkdir(workspace, { recursive: true });
+
+  const skillRepository = await createRemote(root, 'skills', {
+    [SKILL_PATH]:
+      '---\nname: setup-matt-pocock-skills\ndescription: test skill\n---\n# standalone v1\n',
+    [SKILL_AGENT_PATH]:
+      'interface:\n  display_name: Setup Matt Pocock Skills\n  short_description: Set up repository skills\n',
+    [EMPTY_SKILL_PATH]:
+      '---\nname: empty\ndescription: disabled skill\n---\n# empty v1\n',
+  });
+  const genericRepository = await createRemote(root, 'plugins', {
+    [GENERIC_SKILL_PATH]:
+      '---\nname: generic\ndescription: generic skill\n---\n# generic v1\n',
+  });
+
+  await writeFile(
+    gitConfig,
+    `[url "file://${skillRepository.remote}"]\n\tinsteadOf = https://github.com/mattpocock/skills.git\n[url "file://${genericRepository.remote}"]\n\tinsteadOf = https://github.com/example/plugins.git\n`,
+  );
+  process.env.ALLAGENTS_TEST_HOME = home;
+  process.env.HOME = home;
+  process.env.XDG_CACHE_HOME = join(home, '.cache');
+  process.env.XDG_CONFIG_HOME = join(home, '.config');
+  process.env.XDG_DATA_HOME = join(home, '.local/share');
+  process.env.GIT_CONFIG_GLOBAL = gitConfig;
+
+  const cache = getPluginCachePath('mattpocock', 'skills', 'main');
+  const genericCache = getPluginCachePath('example', 'plugins');
+  await mkdir(dirname(cache), { recursive: true });
+  runGit(root, [
+    'clone',
+    '--branch',
+    'main',
+    'https://github.com/mattpocock/skills.git',
+    cache,
+  ]);
+  runGit(root, [
+    'clone',
+    'https://github.com/example/plugins.git',
+    genericCache,
+  ]);
+
+  const plugins: Array<string | { source: string; skills: string[] }> = [
+    SOURCE,
+  ];
+  if (includeGeneric) plugins.push(GENERIC_SOURCE);
+  if (includeEmptyConsumer) {
+    plugins.push({ source: EMPTY_SOURCE, skills: [] });
+  }
+  await mkdir(join(workspace, '.allagents'), { recursive: true });
+  await writeFile(
+    join(workspace, '.allagents/workspace.yaml'),
+    dump({
+      version: 2,
+      repositories: [],
+      clients: ['claude'],
+      plugins,
+    }),
+  );
+
+  return {
+    root,
+    workspace,
+    cache,
+    genericCache,
+    skillRepository,
+    genericRepository,
+    context: {
+      hasWorkspace: true,
+      workspacePath: workspace,
+      projectPluginCount: plugins.length,
+      userPluginCount: 0,
+      needsSync: false,
+      hasUserConfig: false,
+      marketplaceCount: 0,
+    },
+  };
 }
 
 function restoreEnvironment(): void {
@@ -110,89 +218,24 @@ afterEach(() => {
 
 describe('interactive plugin updates', () => {
   test(
-    'updates a GitHub tree-path standalone skill with its semantic name',
+    'updates a root standalone skill with support agents using its semantic name',
     async () => {
-      const root = await mkdtemp(join(tmpdir(), 'allagents-tui-skill-update-'));
-      const home = join(root, 'home');
-      const workspace = join(root, 'workspace');
-      const gitConfig = join(root, 'gitconfig');
-      const skillPath =
-        'skills/engineering/setup-matt-pocock-skills/SKILL.md';
-      const genericSkillPath = 'skills/generic/SKILL.md';
-
+      const fixture = await createUpdateFixture();
       try {
-        await mkdir(home, { recursive: true });
-        await mkdir(workspace, { recursive: true });
-        const skillRepository = await createRemote(root, 'skills', {
-          [skillPath]:
-            '---\nname: setup-matt-pocock-skills\ndescription: test skill\n---\n# standalone v1\n',
-        });
-        const genericRepository = await createRemote(root, 'plugins', {
-          [genericSkillPath]:
-            '---\nname: generic\ndescription: generic skill\n---\n# generic v1\n',
-        });
-
-        await writeFile(
-          gitConfig,
-          `[url "file://${skillRepository.remote}"]\n\tinsteadOf = https://github.com/mattpocock/skills.git\n[url "file://${genericRepository.remote}"]\n\tinsteadOf = https://github.com/example/plugins.git\n`,
-        );
-        process.env.ALLAGENTS_TEST_HOME = home;
-        process.env.HOME = home;
-        process.env.XDG_CACHE_HOME = join(home, '.cache');
-        process.env.XDG_CONFIG_HOME = join(home, '.config');
-        process.env.XDG_DATA_HOME = join(home, '.local/share');
-        process.env.GIT_CONFIG_GLOBAL = gitConfig;
-
-        const cache = getPluginCachePath('mattpocock', 'skills', 'main');
-        const genericCache = getPluginCachePath('example', 'plugins');
-        await mkdir(dirname(cache), { recursive: true });
-        runGit(root, [
-          'clone',
-          '--branch',
-          'main',
-          'https://github.com/mattpocock/skills.git',
-          cache,
-        ]);
-        runGit(root, [
-          'clone',
-          'https://github.com/example/plugins.git',
-          genericCache,
-        ]);
-
         const skillShaV2 = await advanceRemote(
-          skillRepository.upstream,
-          skillPath,
+          fixture.skillRepository.upstream,
+          SKILL_PATH,
           '---\nname: setup-matt-pocock-skills\ndescription: test skill\n---\n# standalone v2\n',
           'v2',
         );
         const genericShaV2 = await advanceRemote(
-          genericRepository.upstream,
-          genericSkillPath,
+          fixture.genericRepository.upstream,
+          GENERIC_SKILL_PATH,
           '---\nname: generic\ndescription: generic skill\n---\n# generic v2\n',
           'v2',
         );
 
-        await mkdir(join(workspace, '.allagents'), { recursive: true });
-        await writeFile(
-          join(workspace, '.allagents/workspace.yaml'),
-          dump({
-            version: 2,
-            repositories: [],
-            clients: ['claude'],
-            plugins: [SOURCE, GENERIC_SOURCE],
-          }),
-        );
-
-        const context = {
-          hasWorkspace: true,
-          workspacePath: workspace,
-          projectPluginCount: 2,
-          userPluginCount: 0,
-          needsSync: false,
-          hasUserConfig: false,
-          marketplaceCount: 0,
-        };
-        await runUpdateAllPlugins(context);
+        await runUpdateAllPlugins(fixture.context);
 
         expect(noteMock).toHaveBeenCalledTimes(1);
         expect(noteMock).toHaveBeenCalledWith(
@@ -200,18 +243,25 @@ describe('interactive plugin updates', () => {
           'Update Results',
         );
         expect(noteMock.mock.calls[0]?.[0]).not.toContain(SOURCE);
-        expect(runGit(cache, ['rev-parse', 'HEAD'])).toBe(skillShaV2);
-        expect(runGit(genericCache, ['rev-parse', 'HEAD'])).toBe(genericShaV2);
-        expect(await readFile(join(cache, skillPath), 'utf-8')).toContain(
-          '# standalone v2',
+        expect(runGit(fixture.cache, ['rev-parse', 'HEAD'])).toBe(
+          skillShaV2,
+        );
+        expect(runGit(fixture.genericCache, ['rev-parse', 'HEAD'])).toBe(
+          genericShaV2,
         );
         expect(
-          await readFile(join(genericCache, genericSkillPath), 'utf-8'),
+          await readFile(join(fixture.cache, SKILL_PATH), 'utf-8'),
+        ).toContain('# standalone v2');
+        expect(
+          await readFile(
+            join(fixture.genericCache, GENERIC_SKILL_PATH),
+            'utf-8',
+          ),
         ).toContain('# generic v2');
         expect(
           await readFile(
             join(
-              workspace,
+              fixture.workspace,
               '.claude/skills/setup-matt-pocock-skills/SKILL.md',
             ),
             'utf-8',
@@ -219,56 +269,137 @@ describe('interactive plugin updates', () => {
         ).toContain('# standalone v2');
         expect(
           await readFile(
-            join(workspace, '.claude/skills/generic/SKILL.md'),
+            join(fixture.workspace, '.claude/skills/generic/SKILL.md'),
+            'utf-8',
+          ),
+        ).toContain('# generic v2');
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+
+  test(
+    'materializes unrelated generic updates without advancing retained or failed standalone checkout',
+    async () => {
+      const fixture = await createUpdateFixture();
+      try {
+        const initialSkillSha = runGit(fixture.cache, ['rev-parse', 'HEAD']);
+        await removeRemotePath(
+          fixture.skillRepository.upstream,
+          SKILL_PATH,
+          'v2',
+        );
+        const genericShaV2 = await advanceRemote(
+          fixture.genericRepository.upstream,
+          GENERIC_SKILL_PATH,
+          '---\nname: generic\ndescription: generic skill\n---\n# generic v2\n',
+          'v2',
+        );
+
+        await runUpdateAllPlugins(fixture.context);
+
+        expect(noteMock).toHaveBeenCalledWith(
+          `✓ ${GENERIC_SOURCE} (updated)\n- setup-matt-pocock-skills (skipped)\n\nUpdated: 1  Skipped: 1  Failed: 0`,
+          'Update Results',
+        );
+        expect(runGit(fixture.cache, ['rev-parse', 'HEAD'])).toBe(
+          initialSkillSha,
+        );
+        expect(runGit(fixture.genericCache, ['rev-parse', 'HEAD'])).toBe(
+          genericShaV2,
+        );
+        expect(
+          await readFile(join(fixture.cache, SKILL_PATH), 'utf-8'),
+        ).toContain('# standalone v1');
+        expect(
+          await readFile(
+            join(
+              fixture.workspace,
+              '.claude/skills/setup-matt-pocock-skills/SKILL.md',
+            ),
+            'utf-8',
+          ),
+        ).toContain('# standalone v1');
+        expect(
+          await readFile(
+            join(fixture.workspace, '.claude/skills/generic/SKILL.md'),
             'utf-8',
           ),
         ).toContain('# generic v2');
 
         noteMock.mockClear();
-        const skillShaV3 = await advanceRemote(
-          skillRepository.upstream,
-          skillPath,
-          '---\nname: setup-matt-pocock-skills\ndescription: test skill\n---\n# standalone v3\n',
+        await removeRemotePath(
+          fixture.skillRepository.upstream,
+          SKILL_ROOT,
           'v3',
         );
         const genericShaV3 = await advanceRemote(
-          genericRepository.upstream,
-          genericSkillPath,
+          fixture.genericRepository.upstream,
+          GENERIC_SKILL_PATH,
           '---\nname: generic\ndescription: generic skill\n---\n# generic v3\n',
           'v3',
         );
 
-        await runUpdateAllPlugins(context);
+        await runUpdateAllPlugins(fixture.context);
 
         expect(noteMock).toHaveBeenCalledWith(
-          `✓ ${GENERIC_SOURCE} (updated)\n✓ setup-matt-pocock-skills (updated)\n\nUpdated: 2  Skipped: 0  Failed: 0`,
+          `✓ ${GENERIC_SOURCE} (updated)\n✗ setup-matt-pocock-skills (failed) - Declared plugin root no longer exists for ${SOURCE}\n\nUpdated: 1  Skipped: 0  Failed: 1`,
           'Update Results',
         );
-        expect(runGit(cache, ['rev-parse', 'HEAD'])).toBe(skillShaV3);
-        expect(runGit(genericCache, ['rev-parse', 'HEAD'])).toBe(genericShaV3);
-        expect(await readFile(join(cache, skillPath), 'utf-8')).toContain(
-          '# standalone v3',
+        expect(runGit(fixture.cache, ['rev-parse', 'HEAD'])).toBe(
+          initialSkillSha,
+        );
+        expect(runGit(fixture.genericCache, ['rev-parse', 'HEAD'])).toBe(
+          genericShaV3,
         );
         expect(
-          await readFile(join(genericCache, genericSkillPath), 'utf-8'),
-        ).toContain('# generic v3');
+          await readFile(join(fixture.cache, SKILL_PATH), 'utf-8'),
+        ).toContain('# standalone v1');
         expect(
           await readFile(
-            join(
-              workspace,
-              '.claude/skills/setup-matt-pocock-skills/SKILL.md',
-            ),
-            'utf-8',
-          ),
-        ).toContain('# standalone v3');
-        expect(
-          await readFile(
-            join(workspace, '.claude/skills/generic/SKILL.md'),
+            join(fixture.workspace, '.claude/skills/generic/SKILL.md'),
             'utf-8',
           ),
         ).toContain('# generic v3');
       } finally {
-        await rm(root, { recursive: true, force: true });
+        await rm(fixture.root, { recursive: true, force: true });
+      }
+    },
+    25_000,
+  );
+
+  test(
+    'does not refresh an empty direct install sharing a standalone cache',
+    async () => {
+      const fixture = await createUpdateFixture({
+        includeGeneric: false,
+        includeEmptyConsumer: true,
+      });
+      try {
+        const initialSkillSha = runGit(fixture.cache, ['rev-parse', 'HEAD']);
+        await removeRemotePath(
+          fixture.skillRepository.upstream,
+          SKILL_PATH,
+          'v2',
+        );
+
+        await runUpdateAllPlugins(fixture.context);
+
+        expect(noteMock).toHaveBeenCalledWith(
+          '- setup-matt-pocock-skills (skipped)\n\nUpdated: 0  Skipped: 1  Failed: 0',
+          'Update Results',
+        );
+        expect(noteMock.mock.calls[0]?.[0]).not.toContain(EMPTY_SOURCE);
+        expect(runGit(fixture.cache, ['rev-parse', 'HEAD'])).toBe(
+          initialSkillSha,
+        );
+        expect(
+          await readFile(join(fixture.cache, SKILL_PATH), 'utf-8'),
+        ).toContain('# standalone v1');
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
       }
     },
     15_000,
