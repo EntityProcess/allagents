@@ -6,10 +6,9 @@ import { ClientTypeSchema } from './workspace-config.js';
  *
  * Identity for git-based plugins is `url + ref`. `resolvedSha` is the commit
  * SHA returned by `git rev-parse HEAD` after the fetch and is what actually
- * uniquely identifies the installed content; `resolvedRef` is the symbolic
- * name (branch/tag) that was asked for. `pinnedRef` records the user's
- * explicit pin (via `@<ref>` or `--pin`), distinct from whatever the resolver
- * settled on.
+ * uniquely identifies the installed content; `resolvedRef` is what the Git
+ * resolver settled on. `requestedRef` records the user's explicit ref selector
+ * (via object-form `ref`, inline `@<ref>`, or `--ref`).
  *
  * Per-skill content hashing was removed in #388 — `git rev-parse HEAD`
  * already gives content identity for free, and recomputing per-skill
@@ -19,7 +18,7 @@ export const SyncStateSourceSchema = z.object({
   pluginSpec: z.string(),
   resolvedRef: z.string(),
   resolvedSha: z.string(),
-  pinnedRef: z.string().optional(),
+  requestedRef: z.string().optional(),
 });
 
 export type SyncStateSource = z.infer<typeof SyncStateSourceSchema>;
@@ -49,7 +48,7 @@ export const SyncStateSchema = z.object({
   vscodeWorkspaceRepos: z.array(z.string()).optional(),
   // Skills-index files tracked for cleanup (relative to .allagents/)
   skillsIndex: z.array(z.string()).optional(),
-  // Per-source resolved ref + SHA + optional pin.
+  // Per-source resolved ref + SHA + optional requested ref.
   sources: z.record(z.string(), SyncStateSourceSchema).optional(),
 });
 

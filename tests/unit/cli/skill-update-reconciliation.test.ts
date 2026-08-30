@@ -97,7 +97,7 @@ describe('createSkillUpdateReconciler', () => {
           clients: ['copilot'],
           install: 'file',
           exclude: ['commands/**'],
-          pin: 'v2',
+          ref: 'v2',
           skills: ['nested/one/review', 'nested/two/review', 'keep'],
         },
       ],
@@ -135,7 +135,7 @@ describe('createSkillUpdateReconciler', () => {
         clients: ['copilot'],
         install: 'file',
         exclude: ['commands/**'],
-        pin: 'v2',
+        ref: 'v2',
         skills: ['nested/two/review'],
       },
     ]);

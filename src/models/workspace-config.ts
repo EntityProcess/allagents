@@ -189,12 +189,13 @@ export const PluginEntrySchema = z.union([
     exclude: z.array(z.string()).optional(),
     skills: PluginSkillsConfigSchema.optional(),
     /**
-     * Optional Git ref (tag/branch/SHA) to pin the plugin to. Equivalent to
-     * passing the `owner/repo@<ref>` shorthand on install. When set, every
-     * sync resolves the plugin at this ref instead of the default branch.
+     * Optional Git ref (tag or branch). Equivalent to passing the
+     * `owner/repo@<ref>` shorthand on install. When set, every sync resolves
+     * the plugin at this ref instead of the default branch.
      */
-    pin: z.string().optional(),
-  }),
+    ref: z.string().optional(),
+  }).strict(),
+
 ]);
 
 export type PluginEntry = z.infer<typeof PluginEntrySchema>;
@@ -207,13 +208,13 @@ export function getPluginSource(plugin: PluginEntry): string {
 }
 
 /**
- * Resolve the source exactly as sync will fetch it, including object-form pins.
+ * Resolve the source exactly as sync will fetch it, including object-form refs.
  * An inline ref remains authoritative when both forms are present.
  */
 export function getEffectivePluginSource(plugin: PluginEntry): string {
   const source = getPluginSource(plugin);
-  const pin = getPluginPin(plugin);
-  if (!pin) return source;
+  const ref = getPluginRef(plugin);
+  if (!ref) return source;
   if (
     source.startsWith('.') ||
     source.startsWith('/') ||
@@ -235,7 +236,7 @@ export function getEffectivePluginSource(plugin: PluginEntry): string {
   const repoSegment = parts[1];
   if (!repoSegment || repoSegment.includes('@')) return source;
 
-  parts[1] = `${repoSegment}@${pin}`;
+  parts[1] = `${repoSegment}@${ref}`;
   return parts.join('/');
 }
 
@@ -266,11 +267,11 @@ export function getPluginExclude(plugin: PluginEntry): string[] | undefined {
 }
 
 /**
- * Get the pinned Git ref for a plugin entry (if any). Returns undefined for
- * both the string-shorthand form and object entries without `pin:`.
+ * Get the requested Git ref for a plugin entry (if any). Returns undefined for
+ * both the string-shorthand form and object entries without `ref:`.
  */
-export function getPluginPin(plugin: PluginEntry): string | undefined {
-  return typeof plugin === 'string' ? undefined : plugin.pin;
+export function getPluginRef(plugin: PluginEntry): string | undefined {
+  return typeof plugin === 'string' ? undefined : plugin.ref;
 }
 
 /**

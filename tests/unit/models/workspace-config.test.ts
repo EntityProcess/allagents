@@ -49,6 +49,26 @@ describe('WorkspaceConfigSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts an object-form Git ref', () => {
+    const result = WorkspaceConfigSchema.safeParse({
+      repositories: [],
+      plugins: [{ source: 'owner/repo', ref: 'v2' }],
+      clients: ['claude'],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects the removed pin field instead of silently following the default branch', () => {
+    const result = WorkspaceConfigSchema.safeParse({
+      repositories: [],
+      plugins: [{ source: 'owner/repo', pin: 'v2' }],
+      clients: ['claude'],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
 });
 
 describe('ClientTypeSchema', () => {

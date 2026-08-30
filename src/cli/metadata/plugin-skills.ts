@@ -200,6 +200,7 @@ export const skillsAddMeta: AgentCommandMeta = {
   examples: [
     'allagents skill add ReScienceLab/opc-skills',
     'allagents skill add reddit --from ReScienceLab/opc-skills',
+    'allagents skill add reddit --from ReScienceLab/opc-skills --ref v2',
     'allagents skill add NousResearch/hermes-agent --skill llm-wiki',
     'allagents skill add NousResearch/hermes-agent --skill llm-wiki,dogfood',
     'allagents skill add NousResearch/hermes-agent --list',
@@ -250,6 +251,12 @@ export const skillsAddMeta: AgentCommandMeta = {
         'Comma-separated skill names to install when the positional is a plugin source (e.g., `skill add owner/repo --skill foo,bar`).',
     },
     {
+      flag: '--ref',
+      type: 'string',
+      description:
+        'Git tag or branch to use for the source. Mutually exclusive with an inline @ref.',
+    },
+    {
       flag: '--list',
       short: '-l',
       type: 'boolean',
@@ -265,5 +272,6 @@ export const skillsAddMeta: AgentCommandMeta = {
     skill: 'string',
     plugin: 'string',
     syncResult: { copied: 'number', failed: 'number' },
+    requestedRef: 'string?',
   },
 };

@@ -92,6 +92,26 @@ allagents plugin install superpowers@marketplace --skill brainstorming
 The top-level `disabledSkills` and `enabledSkills` arrays are deprecated (v1 format). They still work as a fallback for configs that haven't migrated, but new configs should use the inline `skills` field on plugin entries instead.
 :::
 
+### Plugin Git Refs
+
+GitHub plugin entries can select a release tag or branch with `ref`:
+
+```yaml
+plugins:
+  - source: https://github.com/EveryInc/compound-engineering-plugin
+    ref: compound-engineering-v3.23.3
+```
+
+This is equivalent to the inline `owner/repo@<ref>` source form. An inline ref
+takes precedence, so do not configure both forms on the same entry. Local paths,
+marketplace plugin selectors, and GitHub `/tree/` or `/blob/` URLs already carry
+their own location and ignore object-form `ref`.
+
+`ref` selects a symbolic Git ref; it is not a content-integrity lock. Sync state
+records the resolved commit SHA for provenance, but AllAgents does not currently
+reject a tag or branch that later resolves to a different commit.
+
+
 ### Workspace File Sync
 
 The `workspace` section enables syncing files from external sources to your workspace root.

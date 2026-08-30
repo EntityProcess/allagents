@@ -97,24 +97,24 @@ function resolveScope(cwd: string): 'user' | 'project' {
 }
 
 /**
- * Record per-source provenance (resolvedRef + resolvedSha + optional pin)
+ * Record per-source provenance (resolvedRef + resolvedSha + optional requested ref)
  * into sync-state for the given install. Identity for git-based plugins is
  * `url + ref`; `resolvedSha` (from `git rev-parse HEAD` after fetch) gives
  * content identity, so per-skill content hashing is unnecessary.
  *
  * The source key is the spec with any `@<ref>` suffix stripped so all installs
- * of `owner/repo` map to one entry regardless of pin.
+ * of `owner/repo` map to one entry regardless of requested ref.
  *
  * No-op for non-GitHub sources (local paths, marketplace shorthand) since we
  * can't resolve a SHA from them.
  */
 async function recordSourceProvenance(opts: {
   from: string;
-  pinnedRef?: string | undefined;
+  requestedRef?: string | undefined;
   workspacePath: string;
   isUser: boolean;
 }): Promise<void> {
-  const { from, pinnedRef, workspacePath, isUser } = opts;
+  const { from, requestedRef, workspacePath, isUser } = opts;
   if (!isGitHubUrl(from)) return;
   const parsed = parseGitHubUrl(from);
   if (!parsed) return;
@@ -131,7 +131,7 @@ async function recordSourceProvenance(opts: {
     pluginSpec: key,
     resolvedRef: fetchResult.resolvedRef ?? parsed.branch ?? 'HEAD',
     resolvedSha: fetchResult.resolvedSha,
-    ...(pinnedRef && { pinnedRef }),
+    ...(requestedRef && { requestedRef }),
   });
 }
 
@@ -1699,11 +1699,11 @@ const addCmd = command({
       description:
         'Comma-separated skill names to install when the positional argument is a plugin source (e.g., owner/repo --skill foo,bar)',
     }),
-    pin: option({
+    ref: option({
       type: optional(string),
-      long: 'pin',
+      long: 'ref',
       description:
-        'Pin the plugin to a specific Git ref (tag, branch, or SHA). Mutually exclusive with inline @ref in --from.',
+        'Git ref to use for the plugin (tag or branch). Mutually exclusive with inline @ref in --from.',
     }),
     list: flag({
       long: 'list',
@@ -1721,7 +1721,7 @@ const addCmd = command({
     plugin,
     from: fromArg,
     skillFlag,
-    pin,
+    ref,
     list,
     all,
   }) => {
@@ -1766,17 +1766,17 @@ const addCmd = command({
         process.exit(1);
       }
 
-      // Resolve --pin together with inline @ref. Three legal states:
-      //   • --pin only  → splice into fromArg
-      //   • inline @ref → leave fromArg alone, remember pinnedRef
-      //   • neither     → no pin
-      // Mutex: --pin combined with inline @ref is rejected.
-      let pinnedRef: string | undefined;
-      if (pin || fromArg) {
+      // Resolve --ref together with inline @ref. Three legal states:
+      //   • --ref only  → splice into fromArg
+      //   • inline @ref → leave fromArg alone, remember requestedRef
+      //   • neither     → use the source's default branch
+      // Mutex: --ref combined with inline @ref is rejected.
+      let requestedRef: string | undefined;
+      if (ref || fromArg) {
         const inlineRef = fromArg ? extractInlineRef(fromArg) : undefined;
-        if (pin && inlineRef) {
+        if (ref && inlineRef) {
           const error =
-            'Cannot combine inline @version in --from with --pin. Use one or the other.';
+            'Cannot combine inline @ref in --from with --ref. Use one or the other.';
           if (isJsonMode()) {
             jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
@@ -1784,15 +1784,15 @@ const addCmd = command({
           console.error(`Error: ${error}`);
           process.exit(1);
         }
-        if (pin && fromArg) {
-          // Splice the pin into the source string so downstream parseGitHubUrl
+        if (ref && fromArg) {
+          // Splice the ref into the source string so downstream parseGitHubUrl
           // picks it up as the branch/tag.
-          fromArg = `${fromArg}@${pin}`;
-          pinnedRef = pin;
+          fromArg = `${fromArg}@${ref}`;
+          requestedRef = ref;
         } else if (inlineRef) {
-          pinnedRef = inlineRef;
-        } else if (pin && !fromArg) {
-          const error = '--pin requires --from to specify a plugin source.';
+          requestedRef = inlineRef;
+        } else if (ref && !fromArg) {
+          const error = '--ref requires --from to specify a plugin source.';
           if (isJsonMode()) {
             jsonOutput({ success: false, command: 'skill add', error });
             process.exit(1);
@@ -1938,10 +1938,10 @@ const addCmd = command({
           process.exit(1);
         }
 
-        // Record per-source ref/SHA + optional pin for the --all install path.
+        // Record per-source ref/SHA provenance for the --all install path.
         await recordSourceProvenance({
           from: fromArg,
-          pinnedRef,
+          requestedRef,
           workspacePath: workspacePathAll,
           isUser: isUserAll,
         });
@@ -1957,7 +1957,7 @@ const addCmd = command({
                 copied: installResult.syncResult.totalCopied,
                 failed: installResult.syncResult.totalFailed,
               },
-              ...(pinnedRef && { pinnedRef }),
+              ...(requestedRef && { requestedRef }),
             },
           });
           return;
@@ -2023,7 +2023,7 @@ const addCmd = command({
         if (succeeded.length > 0) {
           await recordSourceProvenance({
             from: fromArg,
-            pinnedRef,
+            requestedRef,
             workspacePath: workspacePathSel,
             isUser: isUserSel,
           });
@@ -2038,7 +2038,7 @@ const addCmd = command({
               source: fromArg,
               installed: succeeded,
               failed: failures,
-              ...(pinnedRef && { pinnedRef }),
+              ...(requestedRef && { requestedRef }),
             },
             ...(allFailed && {
               error: failures.map((f) => `${f.skill}: ${f.error}`).join('; '),
@@ -2051,8 +2051,8 @@ const addCmd = command({
         for (const f of failures) {
           console.error(`Error installing '${f.skill}': ${f.error}`);
         }
-        if (pinnedRef && succeeded.length > 0) {
-          console.log(`Pinned to ${pinnedRef}.`);
+        if (requestedRef && succeeded.length > 0) {
+          console.log(`Using ref ${requestedRef}.`);
         }
         if (allFailed) process.exit(1);
         return;
@@ -2133,10 +2133,10 @@ const addCmd = command({
             process.exit(1);
           }
 
-          // Record per-source ref/SHA + optional pin in sync-state.
+          // Record per-source ref/SHA provenance in sync-state.
           await recordSourceProvenance({
             from,
-            pinnedRef,
+            requestedRef,
             workspacePath,
             isUser,
           });
@@ -2149,14 +2149,14 @@ const addCmd = command({
                 skill,
                 plugin: installFromResult.pluginName,
                 syncResult: installFromResult.syncResult,
-                ...(pinnedRef && { pinnedRef }),
+                ...(requestedRef && { requestedRef }),
               },
             });
             return;
           }
 
-          if (pinnedRef) {
-            console.log(`Pinned to ${pinnedRef}.`);
+          if (requestedRef) {
+            console.log(`Using ref ${requestedRef}.`);
           }
           return;
         }

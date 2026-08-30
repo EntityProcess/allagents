@@ -65,33 +65,33 @@ function resolved(
 }
 
 describe('getEffectivePluginSource', () => {
-  it('applies object pins while preserving inline refs', () => {
+  it('applies object refs while preserving inline refs', () => {
     expect(
-      getEffectivePluginSource({ source: 'acme/skills', pin: 'v2' }),
+      getEffectivePluginSource({ source: 'acme/skills', ref: 'v2' }),
     ).toBe('acme/skills@v2');
     expect(
-      getEffectivePluginSource({ source: 'acme/skills@v1', pin: 'v2' }),
+      getEffectivePluginSource({ source: 'acme/skills@v1', ref: 'v2' }),
     ).toBe('acme/skills@v1');
     expect(
       getEffectivePluginSource({
         source: 'https://github.com/acme/skills',
-        pin: 'v2',
+        ref: 'v2',
       }),
     ).toBe('acme/skills@v2');
     expect(
-      getEffectivePluginSource({ source: './local/plugin', pin: 'v2' }),
+      getEffectivePluginSource({ source: './local/plugin', ref: 'v2' }),
     ).toBe('./local/plugin');
     expect(
       getEffectivePluginSource({
         source: 'plugin@acme/marketplace',
-        pin: 'v2',
+        ref: 'v2',
       }),
     ).toBe('plugin@acme/marketplace');
   });
 });
 
 describe('createGitHubSkillUpdateInstallation', () => {
-  it('canonicalizes aliases to one cache node and separates pinned refs', () => {
+  it('canonicalizes aliases to one cache node and separates requested refs', () => {
     const shorthand = createGitHubSkillUpdateInstallation({
       scope: 'project',
       configIndex: 0,
@@ -108,10 +108,10 @@ describe('createGitHubSkillUpdateInstallation', () => {
       currentSha: 'old',
       skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
     });
-    const pinned = createGitHubSkillUpdateInstallation({
+    const requestedRef = createGitHubSkillUpdateInstallation({
       scope: 'project',
       configIndex: 1,
-      plugin: { source: 'acme/skills', pin: 'v2' },
+      plugin: { source: 'acme/skills', ref: 'v2' },
       pluginName: 'skills',
       currentSha: 'v2-old',
       skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
@@ -119,8 +119,8 @@ describe('createGitHubSkillUpdateInstallation', () => {
 
     expect(shorthand?.nodes[0]?.id).toBe(url?.nodes[0]?.id);
     expect(shorthand?.rootSubpath).toBe('');
-    expect(pinned?.nodes[0]?.ref).toBe('v2');
-    expect(pinned?.nodes[0]?.id).not.toBe(shorthand?.nodes[0]?.id);
+    expect(requestedRef?.nodes[0]?.ref).toBe('v2');
+    expect(requestedRef?.nodes[0]?.id).not.toBe(shorthand?.nodes[0]?.id);
   });
 
   it('groups direct-source siblings by physical checkout while keeping refs separate', () => {
@@ -131,25 +131,25 @@ describe('createGitHubSkillUpdateInstallation', () => {
       effectiveSource: 'acme/skills/plugins/sibling',
       rootSubpath: 'plugins/sibling',
     });
-    const pinnedNode: CheckoutNode = {
+    const refNode: CheckoutNode = {
       ...projectNode,
       id: '/cache/acme-skills-v2',
       cachePath: '/cache/acme-skills-v2',
       ref: 'v2',
     };
-    const pinned = installation({
+    const refSpecific = installation({
       id: 'project:2',
       configIndex: 2,
       rawSource: 'acme/skills@v2',
       effectiveSource: 'acme/skills@v2',
-      rootNodeId: pinnedNode.id,
-      nodes: [pinnedNode],
+      rootNodeId: refNode.id,
+      nodes: [refNode],
     });
 
     const units = buildPhysicalRefreshUnits([
       installation(),
       sibling,
-      pinned,
+      refSpecific,
     ]);
 
     expect(units).toHaveLength(2);
