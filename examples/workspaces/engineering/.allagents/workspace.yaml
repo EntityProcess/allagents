@@ -1,0 +1,31 @@
+version: 2
+
+repositories: []
+
+plugins:
+  # Intentionally enable the complete Compound Engineering plugin at a reviewed
+  # release ref instead of following its default branch.
+  - source: https://github.com/EveryInc/compound-engineering-plugin
+    ref: compound-engineering-v3.23.3
+
+  # Preserve Matt's upstream composition by installing the selected capabilities
+  # with every helper skill they invoke. The explicit closure prevents unrelated
+  # additions from auto-enabling while keeping each selected workflow complete.
+  - source: https://github.com/mattpocock/skills
+    skills:
+      - engineering/wayfinder
+      - engineering/grill-with-docs
+      - engineering/improve-codebase-architecture
+      - engineering/domain-modeling
+      - engineering/research
+      - engineering/prototype
+      - engineering/codebase-design
+      - engineering/setup-matt-pocock-skills
+      - productivity/grilling
+
+  - source: https://github.com/NousResearch/hermes-agent
+    skills:
+      - research/llm-wiki
+
+clients:
+  - universal
