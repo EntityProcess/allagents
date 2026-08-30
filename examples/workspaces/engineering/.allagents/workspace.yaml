@@ -3,10 +3,10 @@ version: 2
 repositories: []
 
 plugins:
-  # Intentionally enable the complete Compound Engineering plugin. The release
-  # pin keeps every included skill and asset reproducible across updates.
+  # Intentionally enable the complete Compound Engineering plugin at a reviewed
+  # release ref instead of following its default branch.
   - source: https://github.com/EveryInc/compound-engineering-plugin
-    pin: compound-engineering-v3.23.3
+    ref: compound-engineering-v3.23.3
 
   # Preserve Matt's upstream composition by installing the selected capabilities
   # with every helper skill they invoke. The explicit closure prevents unrelated
