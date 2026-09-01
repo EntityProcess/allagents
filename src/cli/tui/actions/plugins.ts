@@ -23,7 +23,7 @@ import {
   type MarketplaceEntry,
   type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
-import { updatePlugin } from '../../../core/plugin.js';
+import { resetFetchCache, updatePlugin } from '../../../core/plugin.js';
 import { formatVerboseSyncLines } from '../../format-sync.js';
 import { parseMarketplaceManifest } from '../../../utils/marketplace-manifest-parser.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
@@ -32,6 +32,19 @@ import { getHomeDir } from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 import { removeInstalledSkill } from '../../skill-removal.js';
+import {
+  buildSkillUpdateInventory,
+  executePreparedSkillUpdate,
+  inspectSkillUpdateUnit,
+  resolveNonInteractiveSkillUpdateDecisions,
+  unitDisplayName,
+} from '../../skill-update.js';
+import {
+  buildPhysicalRefreshUnits,
+  buildSkillUpdatePreflight,
+  type SkillUpdatePreflight,
+  type SkillUpdateScope,
+} from '../../../core/skill-update.js';
 
 const { select, text, confirm, multiselect, autocomplete } = p;
 
@@ -229,16 +242,81 @@ export async function runUpdateAllPlugins(
   const results: Array<{ plugin: string; action: string; error?: string }> = [];
   let needsProjectSync = false;
   let needsUserSync = false;
+  const scopes = [
+    ...new Set(pluginsToUpdate.map(({ scope }) => scope)),
+  ] as SkillUpdateScope[];
+  const workspacePath = context.workspacePath ?? process.cwd();
+  const inventory = await buildSkillUpdateInventory(workspacePath, scopes);
+  const standaloneIds = new Set(
+    inventory.installations
+      .filter(
+        (installation) =>
+          installation.standaloneSkillSource &&
+          scopes.includes(installation.scope),
+      )
+      .map((installation) => installation.id),
+  );
+  const standaloneUnits = buildPhysicalRefreshUnits(
+    inventory.installations,
+  ).filter((unit) =>
+    unit.installations.some((installation) =>
+      standaloneIds.has(installation.id),
+    ),
+  );
+  const handledPlugins = new Set<string>();
+  let standalonePlan: SkillUpdatePreflight | undefined;
 
+  if (standaloneUnits.length > 0) {
+    const installations = standaloneUnits.flatMap(
+      (unit) => unit.installations,
+    );
+    const nodeIds = new Set(
+      standaloneUnits.flatMap((unit) => unit.nodes.map((node) => node.id)),
+    );
+    const failures = inventory.failures.filter((failure) =>
+      failure.nodeIds.some((nodeId) => nodeIds.has(nodeId)),
+    );
+    standalonePlan = await buildSkillUpdatePreflight(
+      {
+        installations,
+        selectedScopes: scopes,
+        failures,
+      },
+      { inspectUnit: inspectSkillUpdateUnit },
+    );
+
+    for (const installation of installations) {
+      if (scopes.includes(installation.scope)) {
+        handledPlugins.add(`${installation.scope}:${installation.rawSource}`);
+      }
+    }
+    for (const failure of failures) {
+      handledPlugins.add(`${failure.scope}:${failure.source}`);
+    }
+    for (const consumer of inventory.directRemoteConsumers) {
+      if (
+        scopes.includes(consumer.scope) &&
+        nodeIds.has(consumer.nodeId)
+      ) {
+        handledPlugins.add(`${consumer.scope}:${consumer.source}`);
+      }
+    }
+  }
+
+  resetFetchCache();
+  // Refresh generic sources before standalone execution performs its offline
+  // scope sync, otherwise that sync's fetch-cache entries can mask updates.
   for (const { spec, scope } of pluginsToUpdate) {
-    const result = await updatePlugin(spec, scope === 'project' ? projectDeps : userDeps);
+    if (handledPlugins.has(`${scope}:${spec}`)) continue;
+    const result = await updatePlugin(
+      spec,
+      scope === 'project' ? projectDeps : userDeps,
+    );
     const entry: { plugin: string; action: string; error?: string } = {
       plugin: spec,
       action: result.action,
     };
-    if (result.error) {
-      entry.error = result.error;
-    }
+    if (result.error) entry.error = result.error;
     results.push(entry);
     if (result.action === 'updated') {
       if (scope === 'project') needsProjectSync = true;
@@ -246,14 +324,58 @@ export async function runUpdateAllPlugins(
     }
   }
 
-  // Sync if any plugins were updated
-  if (needsProjectSync || needsUserSync) {
-    s.message('Updating...');
-    if (needsProjectSync && context.workspacePath) {
-      await syncWorkspace(context.workspacePath);
+  const standaloneSyncedScopes = new Set<SkillUpdateScope>();
+  if (standalonePlan) {
+    const prepared = { inventory, plan: standalonePlan };
+    const execution = await executePreparedSkillUpdate(
+      prepared,
+      resolveNonInteractiveSkillUpdateDecisions(standalonePlan),
+      workspacePath,
+    );
+    const planById = new Map(
+      standalonePlan.units.map((unit) => [unit.id, unit]),
+    );
+
+    for (const scope of execution.syncedScopes) {
+      standaloneSyncedScopes.add(scope);
     }
-    if (needsUserSync) {
-      await syncUserWorkspace();
+    for (const result of execution.units) {
+      const unit = planById.get(result.id);
+      const action =
+        result.status === 'updated' || result.status === 'removed'
+          ? 'updated'
+          : result.status === 'failed'
+            ? 'failed'
+            : 'skipped';
+      results.push({
+        plugin: unit ? unitDisplayName(unit) : result.id,
+        action,
+        ...(result.error && { error: result.error }),
+      });
+    }
+    if (execution.units.some((result) =>
+      result.status === 'updated' || result.status === 'removed'
+    )) {
+      cache?.invalidate();
+    }
+  }
+
+  // Generic sources have already refreshed above. Materialize from those cache
+  // revisions without letting a retained or failed standalone unit advance.
+  if (
+    (needsProjectSync && !standaloneSyncedScopes.has('project')) ||
+    (needsUserSync && !standaloneSyncedScopes.has('user'))
+  ) {
+    s.message('Updating...');
+    if (
+      needsProjectSync &&
+      !standaloneSyncedScopes.has('project') &&
+      context.workspacePath
+    ) {
+      await syncWorkspace(context.workspacePath, { offline: true });
+    }
+    if (needsUserSync && !standaloneSyncedScopes.has('user')) {
+      await syncUserWorkspace({ offline: true });
     }
     cache?.invalidate();
   }
