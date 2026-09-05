@@ -1234,7 +1234,7 @@ export async function main(
     return;
   }
   throw new Error(
-    'Usage: review-site.ts prepare --review-json <CE review.json> --scenarios <scenario-sidecar.json> --pr <number-or-url> [--spec <text> | --requirements <repo-relative-file>] [--base-commit <sha>]\n       review-site.ts serve --workspace <path> [--host 127.0.0.1] [--port 0] [--expose]',
+    'Usage: review-site.ts prepare --review-json <structured-review.json> --scenarios <scenario-sidecar.json> --pr <number-or-url> [--spec <text> | --requirements <repo-relative-file>] [--base-commit <sha>]\n       review-site.ts serve --workspace <path> [--host 127.0.0.1] [--port 0] [--expose]',
   );
 }
 

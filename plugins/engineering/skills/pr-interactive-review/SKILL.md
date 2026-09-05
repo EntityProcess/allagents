@@ -1,34 +1,30 @@
 ---
 name: pr-interactive-review
-description: Review a GitHub pull request with Compound Engineering's structured code-review engine, then host a local interactive site for business context, findings, and local reviewer comments. Use when a reviewer needs to triage a PR interactively without posting to GitHub.
+description: Turn a structured GitHub pull request review into a local interactive site for business context, findings, and reviewer comments. Use when a reviewer needs to triage a PR interactively without posting to GitHub.
 ---
 
 # Interactive Pull Request Review
 
-Use the existing `ce-code-review` workflow as the review engine. This skill only consumes its structured artifact and presents it locally. It does not select reviewer personas, assign severity, discover review scope, validate findings, or deduplicate findings.
+Use an existing review skill when one is available, and prefer its structured JSON output. This skill consumes structured findings and presents them locally; it does not select reviewer personas, assign severity, discover review scope, validate findings, or deduplicate findings.
 
 ## Safety boundaries
 
 - Accept a GitHub PR number or `https://github.com/<owner>/<repo>/pull/<number>` URL.
-- Run the review engine in `mode:agent`. Do not parse its markdown output.
+- Prefer the installed review skill's structured or agent output when it supports one. Do not parse markdown output.
 - Store generated review data and comments outside the repository. The default workspace is `$XDG_STATE_HOME/allagents/pr-interactive-review/` (or `~/.local/state/allagents/pr-interactive-review/`).
 - Never put tokens, cookies, GitHub authentication, comments, or generated review data in the repository.
 - The server binds to `127.0.0.1` by default. Non-loopback binding requires the explicit `--expose` option and emits a warning because findings and comments become network-visible.
 - Comments are local only. Do not post them to GitHub. This skill does not implement GitHub posting.
 
-## Run the review engine
+## Obtain a structured review
 
-From the repository that owns the PR, run the installed Compound Engineering skill in structured mode. Pass the PR target directly; do not add `base:` for a PR review.
+From the repository that owns the PR, use an existing review skill when one is available. Ask it for structured JSON and pass the PR target directly. If no review skill is installed, use the host's available code-review capability and produce the same structured review artifact without inventing findings.
 
-```text
-/ce-code-review mode:agent 123
-```
-
-The engine returns one JSON value and writes the same structured artifact to `<artifact_path>/review.json`. Require `status: complete`; stop on `failed`, `degraded`, or `skipped`. Capture `artifact_path` from the JSON response and use that `review.json` directly. Do not scrape, transform, or infer findings from the human markdown report.
+The review artifact must contain `status`, `verdict`, `intent`, `scope.head_sha`, and the validated `findings` array. Require `status: complete`; stop on `failed`, `degraded`, or `skipped`. Save the artifact outside the repository as `review.json` and consume that JSON directly. Do not scrape, transform, or infer findings from a human markdown report.
 
 ### Concrete finding scenarios
 
-After CE completes, actively enrich every finding without modifying CE's `review.json`. For each stable `#`, inspect only its structured `evidence` and `first_evidence` plus the exact cited path at the CE-reviewed commit. Write a separate JSON sidecar at `<artifact_path>/interactive-scenarios.json` (or the external review workspace) keyed by the CE stable IDs:
+After the review completes, actively enrich every finding without modifying `review.json`. For each stable `#`, inspect only its structured `evidence` and `first_evidence` plus the exact cited path at the reviewed commit. Write a separate JSON sidecar beside the review artifact (or in the external review workspace) as `interactive-scenarios.json`, keyed by the stable finding IDs:
 
 ```json
 {
@@ -39,7 +35,7 @@ After CE completes, actively enrich every finding without modifying CE's `review
 }
 ```
 
-`what_actually_happens` must state a triggering setup/action and observable failure. `expected_suggested` must state the expected resulting behavior and correction. This sidecar is presentation context only: it must not change CE scope, personas, severity, validation, deduplication, or required response. If direct evidence cannot support either statement, omit that field; the site labels the gap instead of inventing a scenario. `prepare` rejects malformed sidecars and IDs that are not CE findings.
+`what_actually_happens` must state a triggering setup/action and observable failure. `expected_suggested` must state the expected resulting behavior and correction. This sidecar is presentation context only: it must not change review scope, personas, severity, validation, deduplication, or required response. If direct evidence cannot support either statement, omit that field; the site labels the gap instead of inventing a scenario. `prepare` rejects malformed sidecars and IDs that are not review findings.
 
 Specifications may be private when the user authorizes access. Use the appropriate host tool to read or extract an authorized local file, document, or URL. Derive only concise labeled primer fields from that material, then pass the derived text with `--spec`; never put the original source content in this public repository.
 
@@ -57,7 +53,7 @@ Non-goals: Redesigning permission roles
 
 ## Create a reusable workspace
 
-Resolve this skill directory, then prepare the site from the CE `review.json`.
+Resolve this skill directory, then prepare the site from the structured `review.json`.
 
 ```bash
 SKILL_DIR="<directory containing this SKILL.md>"
@@ -84,9 +80,9 @@ bun "$SKILL_DIR/scripts/review-site.ts" prepare \
   --requirements docs/requirements.md
 ```
 
-`prepare` prints the per-repository, per-PR workspace path. It validates the CE artifact, scenario sidecar, PR identifier, finding file paths, sizes, and requirements reference. It generates GitHub source links only when the runtime `origin` remote is GitHub. Links pin the CE-reviewed commit and exact cited line range. Non-GitHub remotes receive no external link.
+`prepare` prints the per-repository, per-PR workspace path. It validates the review artifact, scenario sidecar, PR identifier, finding file paths, sizes, and requirements reference. It generates GitHub source links only when the runtime `origin` remote is GitHub. Links pin the reviewed commit and exact cited line range. Non-GitHub remotes receive no external link.
 
-For focused code context, `prepare` reads only the cited relative paths at the reviewed commit. Pass `--base-commit <sha>` only when the existing CE run has already supplied a verified exact base SHA; the helper does not rediscover PR scope. When no base or reviewed object is locally readable, the site labels that gap instead of substituting current-worktree content.
+For focused code context, `prepare` reads only the cited relative paths at the reviewed commit. Pass `--base-commit <sha>` only when the review already supplied a verified exact base SHA; the helper does not rediscover PR scope. When no base or reviewed object is locally readable, the site labels that gap instead of substituting current-worktree content.
 
 ## Host the site
 
@@ -117,7 +113,7 @@ To respond as the assistant, first inspect only unanswered local comments:
 curl -sS "http://127.0.0.1:<port>/api/comments?status=unanswered"
 ```
 
-Use the returned comment `id`, formulate an evidence-based response from the CE artifact and reviewed code, then save it locally:
+Use the returned comment `id`, formulate an evidence-based response from the review artifact and reviewed code, then save it locally:
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:<port>/api/comments/<comment-id>/replies" \
@@ -128,6 +124,6 @@ curl -sS -X POST "http://127.0.0.1:<port>/api/comments/<comment-id>/replies" \
 The page renders replies with an Assistant label. Refresh unanswered comments until the queue is empty. Never treat this local operation as authority to post a GitHub comment; GitHub posting requires a separate explicit, user-confirmed feature.
 
 ## Completion
-1. Confirm the CE artifact was consumed as JSON, not markdown.
+1. Confirm the review artifact was consumed as JSON, not markdown.
 2. Browser-check the local site: business context comes first; every finding shows `What actually happens` and `Expected / suggested` (or an explicit evidence gap); severity filters and search work; the responsive layout works; a local comment and assistant reply render; a GitHub remote produces a reviewed-commit line link.
 3. State the workspace path and loopback URL. Do not include comment text, credentials, or source contents in the report.
