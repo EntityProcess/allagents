@@ -36,6 +36,14 @@ Worktrees default to `<repo>__worktrees/<branch-with-slashes-as-dashes>`. Set `W
 <skill-directory>/scripts/worktree.sh -C <repo> remove --force <branch-or-path>
 ```
 
-Normal removal preserves Git's dirty-worktree protection. Use `--force` only when discarding the worktree's uncommitted files is intended. Removal unregisters and deletes the worktree directory; it leaves the branch intact.
+Normal removal preserves Git's dirty-worktree protection and leaves the local branch intact. Use `--force` only when discarding the worktree's uncommitted files is intended.
 
-An add is complete when the script prints the new path and `git -C <repo> worktree list` contains it. A removal is complete when that path is absent.
+After a branch's merge is confirmed, remove both the worktree and its local branch:
+
+```bash
+<skill-directory>/scripts/worktree.sh -C <repo> remove --merged <branch-or-path>
+```
+
+`--merged` records the caller's merge confirmation and force-deletes the branch, including after a squash merge. Combine it with `--force` only when the merged worktree is dirty.
+
+An add is complete when the script prints the new path and `git -C <repo> worktree list` contains it. Normal removal is complete when that path is absent. Merged cleanup is complete when the path is absent and `git -C <repo> branch --list <branch>` prints nothing.

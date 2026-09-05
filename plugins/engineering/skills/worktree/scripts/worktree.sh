@@ -5,11 +5,13 @@ usage() {
   cat <<'EOF'
 Usage:
   worktree.sh [-C <repo>] add <branch> [start-point]
-  worktree.sh [-C <repo>] remove [--force] <branch-or-path>
+  worktree.sh [-C <repo>] remove [--force] [--merged] <branch-or-path>
 
 Worktrees are created under <repo>__worktrees by default. Override the
 location with WORKTREE_ROOT and the default remote with WORKTREE_REMOTE.
 Branch slashes become dashes in directory names.
+Pass --merged only after the branch's merge is confirmed. It removes the
+worktree and deletes its checked-out local branch.
 EOF
 }
 
@@ -83,10 +85,18 @@ case "$command" in
   remove)
     shift
     force=()
-    if [[ "${1:-}" == "--force" ]]; then
-      force=(--force)
+    merged=false
+    while [[ "${1:-}" == --* ]]; do
+      case "$1" in
+        --force) force=(--force) ;;
+        --merged) merged=true ;;
+        *)
+          usage >&2
+          exit 2
+          ;;
+      esac
       shift
-    fi
+    done
     [[ $# -eq 1 ]] || {
       usage >&2
       exit 2
@@ -114,7 +124,21 @@ case "$command" in
     esac
 
     [[ -d "$path" ]] || fail "worktree does not exist: $path"
+
+    branch=""
+    if [[ "$merged" == true ]]; then
+      branch="$(git -C "$path" symbolic-ref --quiet --short HEAD 2>/dev/null)" ||
+        fail "cannot delete the branch for a detached worktree: $path"
+      git_common_dir="$(git -C "$repo_root" rev-parse --git-common-dir)"
+      if [[ "$git_common_dir" != /* ]]; then
+        git_common_dir="$repo_root/$git_common_dir"
+      fi
+      git_common_dir="$(cd "$git_common_dir" && pwd -P)"
+    fi
     git -C "$repo_root" worktree remove "${force[@]}" "$path"
+    if [[ "$merged" == true ]]; then
+      git --git-dir="$git_common_dir" branch -D "$branch"
+    fi
     ;;
 
   -h|--help|help)
