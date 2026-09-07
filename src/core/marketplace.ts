@@ -885,6 +885,15 @@ export async function findMarketplace(
     await findMarketplaceRegistration(name, sourceLocation, workspacePath)
   )?.entry ?? null;
 }
+interface MarketplaceUpdateGitClient {
+  raw(args: string[]): Promise<string>;
+  checkout(branch: string): Promise<unknown>;
+}
+
+interface MarketplaceUpdateDeps {
+  createGit(path: string): MarketplaceUpdateGitClient;
+  pull(path: string): Promise<void>;
+}
 
 /**
  * Update marketplace(s) by pulling latest changes
@@ -893,6 +902,7 @@ export async function findMarketplace(
 export async function updateMarketplace(
   name?: string,
   workspacePath?: string,
+  deps: Partial<MarketplaceUpdateDeps> = {},
 ): Promise<Array<{ name: string; success: boolean; error?: string }>> {
   const userRegistry = await loadRegistry();
   let projectRegistry: MarketplaceRegistry | undefined;
@@ -991,7 +1001,7 @@ export async function updateMarketplace(
       const storedBranch = marketplace.source.type === 'github'
         ? parseLocation(marketplace.source.location).branch
         : undefined;
-      const git = simpleGit(marketplace.path);
+      const git = (deps.createGit ?? simpleGit)(marketplace.path);
 
       let targetBranch: string;
       if (storedBranch) {
@@ -1024,7 +1034,7 @@ export async function updateMarketplace(
       }
 
       await git.checkout(targetBranch);
-      await pull(marketplace.path);
+      await (deps.pull ?? pull)(marketplace.path);
 
       // Update lastUpdated in the entry (mutates in place for scope tracking)
       marketplace.lastUpdated = new Date().toISOString();

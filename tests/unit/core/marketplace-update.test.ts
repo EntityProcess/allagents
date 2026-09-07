@@ -1,29 +1,33 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { updateMarketplace } from '../../../src/core/marketplace.js';
 import { stubHomeDir } from '../../helpers/env.js';
 
 // Track calls for assertions
 const simpleGitCalls: Array<{ method: string; args: unknown[] }> = [];
 const pullCalls: Array<{ path: string }> = [];
 
-// Create a mock simple-git instance
-function createMockGit(overrides: Record<string, (...args: unknown[]) => unknown> = {}) {
+function createMockGit(
+  overrides: {
+    raw?: (args: string[]) => Promise<string>;
+    checkout?: (branch: string) => Promise<void>;
+  } = {},
+) {
   return {
-    raw: mock((...args: unknown[]) => {
-      simpleGitCalls.push({ method: 'raw', args });
-      if (overrides.raw) return overrides.raw(...args);
+    raw: mock((args: string[]) => {
+      simpleGitCalls.push({ method: 'raw', args: [args] });
+      if (overrides.raw) return overrides.raw(args);
       // Default: symbolic-ref returns origin/main
-      const rawArgs = args[0] as string[];
-      if (rawArgs?.[0] === 'symbolic-ref') {
+      if (args[0] === 'symbolic-ref') {
         return Promise.resolve('origin/main');
       }
       return Promise.resolve('');
     }),
-    checkout: mock((...args: unknown[]) => {
-      simpleGitCalls.push({ method: 'checkout', args });
-      if (overrides.checkout) return overrides.checkout(...args);
+    checkout: mock((branch: string) => {
+      simpleGitCalls.push({ method: 'checkout', args: [branch] });
+      if (overrides.checkout) return overrides.checkout(branch);
       return Promise.resolve();
     }),
   };
@@ -31,33 +35,14 @@ function createMockGit(overrides: Record<string, (...args: unknown[]) => unknown
 
 let currentMockGit = createMockGit();
 
-mock.module('simple-git', () => ({
-  default: () => currentMockGit,
-}));
-
-// Mock the git module's pull function
-mock.module('../../../src/core/git.js', () => ({
-  createGitEnv: () => ({
-    ...process.env,
-    GIT_TERMINAL_PROMPT: '0',
-    GIT_LFS_SKIP_SMUDGE: '1',
-  }),
-  pull: mock((path: string) => {
-    pullCalls.push({ path });
-    return Promise.resolve();
-  }),
-  cloneToTemp: mock(() => Promise.resolve('/tmp/fake')),
-  cloneTo: mock(() => Promise.resolve()),
-  repoExists: mock(() => Promise.resolve(true)),
-  refExists: mock(() => Promise.resolve(true)),
-  cleanupTempDir: mock(() => Promise.resolve()),
-  classifyError: (error: Error) => error,
-  gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
-  GitCloneError: class extends Error {},
-}));
-
-// Must import after mock.module
-const { updateMarketplace } = await import('../../../src/core/marketplace.js');
+function marketplaceUpdateDeps() {
+  return {
+    createGit: () => currentMockGit,
+    pull: async (path: string) => {
+      pullCalls.push({ path });
+    },
+  };
+}
 
 describe('updateMarketplace', () => {
   let restoreHomeDir: () => void;
@@ -102,7 +87,11 @@ describe('updateMarketplace', () => {
   });
 
   it('should checkout default branch before pulling', async () => {
-    const results = await updateMarketplace('test-mp');
+    const results = await updateMarketplace(
+      'test-mp',
+      undefined,
+      marketplaceUpdateDeps(),
+    );
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
@@ -122,19 +111,22 @@ describe('updateMarketplace', () => {
 
   it('should use remote show origin to detect master branch when symbolic-ref fails', async () => {
     currentMockGit = createMockGit({
-      raw: (...args: unknown[]) => {
-        const rawArgs = args[0] as string[];
-        if (rawArgs?.[0] === 'symbolic-ref') {
+      raw: (args: string[]) => {
+        if (args[0] === 'symbolic-ref') {
           return Promise.reject(new Error('fatal: ref not found'));
         }
-        if (rawArgs?.[0] === 'remote' && rawArgs?.[1] === 'show') {
+        if (args[0] === 'remote' && args[1] === 'show') {
           return Promise.resolve('  HEAD branch: master\n  Remote branches:\n');
         }
         return Promise.resolve('');
       },
     });
 
-    const results = await updateMarketplace('test-mp');
+    const results = await updateMarketplace(
+      'test-mp',
+      undefined,
+      marketplaceUpdateDeps(),
+    );
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
@@ -146,19 +138,22 @@ describe('updateMarketplace', () => {
 
   it('should fallback to main when both symbolic-ref and remote show fail', async () => {
     currentMockGit = createMockGit({
-      raw: (...args: unknown[]) => {
-        const rawArgs = args[0] as string[];
-        if (rawArgs?.[0] === 'symbolic-ref') {
+      raw: (args: string[]) => {
+        if (args[0] === 'symbolic-ref') {
           return Promise.reject(new Error('fatal: ref not found'));
         }
-        if (rawArgs?.[0] === 'remote') {
+        if (args[0] === 'remote') {
           return Promise.reject(new Error('fatal: unable to access'));
         }
         return Promise.resolve('');
       },
     });
 
-    const results = await updateMarketplace('test-mp');
+    const results = await updateMarketplace(
+      'test-mp',
+      undefined,
+      marketplaceUpdateDeps(),
+    );
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
@@ -189,7 +184,11 @@ describe('updateMarketplace', () => {
 
     simpleGitCalls.length = 0;
 
-    const results = await updateMarketplace('test-mp-branch');
+    const results = await updateMarketplace(
+      'test-mp-branch',
+      undefined,
+      marketplaceUpdateDeps(),
+    );
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
@@ -227,7 +226,11 @@ describe('updateMarketplace', () => {
       }),
     );
 
-    const results = await updateMarketplace('unsafe');
+    const results = await updateMarketplace(
+      'unsafe',
+      undefined,
+      marketplaceUpdateDeps(),
+    );
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(false);
@@ -264,7 +267,11 @@ describe('updateMarketplace', () => {
       }),
     );
 
-    const results = await updateMarketplace();
+    const results = await updateMarketplace(
+      undefined,
+      undefined,
+      marketplaceUpdateDeps(),
+    );
 
     expect(results).toHaveLength(2);
     const registry = JSON.parse(readFileSync(registryPath, 'utf-8'));

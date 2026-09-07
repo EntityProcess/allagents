@@ -54,6 +54,50 @@ Non-goals: Redesigning permission roles
 ```
 
 `--requirements` remains a direct file-read option only for a repository-relative path. The helper rejects paths outside the repository and `.git`; use host extraction plus `--spec` for any external specification reference.
+### Reproducible presentation
+
+Create `interactive-presentation.json` beside the scenario sidecar for every review. This is a constrained content model for the shared renderer, not a per-PR template: never generate custom HTML, CSS, or JavaScript. Ground every sentence in the structured review, supplied requirements, or reviewed repository evidence.
+
+```json
+{
+  "eyebrow": "Runtime seam review",
+  "headline": "One queue connects two services.",
+  "summary": "The change establishes the first validated Dispatcher-to-Runner workflow handoff.",
+  "context_cards": [
+    {
+      "label": "System boundary",
+      "title": "Dispatcher to Runner",
+      "body": "The Dispatcher starts resolved work; the Runner validates and completes the workflow.",
+      "tone": "neutral"
+    },
+    {
+      "label": "Operational risk",
+      "title": "A false-ready worker hides the broken seam",
+      "body": "The smoke must prove polling, not merely observe a startup log.",
+      "tone": "problem"
+    }
+  ],
+  "mental_model": {
+    "title": "The execution path",
+    "summary": "Each stage owns one boundary and hands a single contract forward.",
+    "steps": [
+      {
+        "label": "01 / Dispatch",
+        "title": "Start workflow",
+        "body": "Create a workflow on the configured Runner queue."
+      },
+      {
+        "label": "02 / Validate",
+        "title": "Reject malformed input",
+        "body": "Validate the shared payload before any execution work."
+      }
+    ]
+  }
+}
+```
+
+`eyebrow`, `headline`, and `summary` are required. Use at most six context cards and six mental-model steps. Card `tone` is `neutral`, `problem`, or `outcome`. Keep labels short, make the headline state the review's central conclusion, and use the mental model only when a real sequence or system boundary helps the reviewer decide. Omit `mental_model` rather than inventing decorative steps. The renderer supplies the navigation rail, verdict, metrics, cards, disclosures, finding layout, and responsive behavior; the sidecar supplies only grounded copy.
+
 
 ## Create a reusable workspace
 
@@ -64,6 +108,7 @@ SKILL_DIR="<directory containing this SKILL.md>"
 bun "$SKILL_DIR/scripts/review-site.ts" prepare \
   --review-json "<artifact_path>/review.json" \
   --scenarios "<artifact_path>/interactive-scenarios.json" \
+  --presentation "<artifact_path>/interactive-presentation.json" \
   --pr 123 \
   --spec "Who configures: Release managers
 Operational problem: Manual approval queues delay configuration changes
@@ -80,11 +125,13 @@ For a repository-relative requirements reference, use:
 bun "$SKILL_DIR/scripts/review-site.ts" prepare \
   --review-json "<artifact_path>/review.json" \
   --scenarios "<artifact_path>/interactive-scenarios.json" \
+  --presentation "<artifact_path>/interactive-presentation.json" \
   --pr https://github.com/example-org/sample-service/pull/123 \
   --requirements docs/requirements.md
 ```
 
-`prepare` prints the per-repository, per-PR workspace path. It validates the review artifact, scenario sidecar, PR identifier, finding file paths, sizes, and requirements reference. It generates GitHub source links only when the runtime `origin` remote is GitHub. Links pin the reviewed commit and exact cited line range. Non-GitHub remotes receive no external link.
+`prepare` prints the per-repository, per-PR workspace path. It validates the review artifact, scenario and presentation sidecars, PR identifier, finding file paths, sizes, and requirements reference. It generates GitHub source links only when the runtime `origin` remote is GitHub. Links pin the reviewed commit and exact cited line range. Non-GitHub remotes receive no external link. Existing workspaces without presentation metadata still render through the same shell using the review title, intent, and primer fields as safe fallbacks.
+
 
 For focused code context, `prepare` reads only the cited relative paths at the reviewed commit. Pass `--base-commit <sha>` only when the review already supplied a verified exact base SHA; the helper does not rediscover PR scope. When no base or reviewed object is locally readable, the site labels that gap instead of substituting current-worktree content.
 
@@ -94,7 +141,8 @@ For focused code context, `prepare` reads only the cited relative paths at the r
 bun "$SKILL_DIR/scripts/review-site.ts" serve --workspace "<printed workspace>"
 ```
 
-Open the printed loopback URL. The page places **Business context** before findings, includes severity navigation and search, exact reviewed-commit links, required response, reviewers, confidence, structured evidence, available focused excerpts, and comments.
+Open the printed loopback URL. The shared page renders a sticky review map, current verdict, headline and metrics, business context, an optional mental model, status-grouped findings, search and filters, exact reviewed-commit links, paired actual/expected scenarios, required responses, and local comments. Supplied requirements, referenced evidence, lifecycle history, code excerpts, and per-finding discussion use collapsed disclosures so large reviews remain scannable.
+
 
 LAN or public exposure is opt-in and must be deliberate:
 
@@ -135,5 +183,5 @@ Refresh the site and unanswered queue until the queue is empty. Never treat this
 
 ## Completion
 1. Confirm the review artifact was consumed as JSON, not markdown.
-2. Browser-check the local site: business context comes first; active findings, open questions, and withdrawn findings are visibly separate; verdict/counts exclude withdrawn findings; every finding shows `What actually happens` and `Expected / suggested` (or an explicit evidence gap); severity/status filters and search work; the responsive layout works; a local comment, assistant reply, and lifecycle revision render; a GitHub remote produces a reviewed-commit line link.
+2. Browser-check the local site with representative review data, not an empty fixture: the desktop view has the navigation rail, verdict, hero metrics, business context, and indexed finding links; the narrow view stacks cleanly with no document-level horizontal overflow; raw requirements, evidence, and code are closed by default; active findings, open questions, and withdrawn findings are visibly separate; verdict/counts exclude withdrawn findings; every finding shows paired `What actually happens` and `Expected / suggested` content (or an explicit evidence gap); severity/status filters and search work; a local comment, assistant reply, and lifecycle revision render; and a GitHub remote produces a reviewed-commit line link.
 3. State the workspace path and loopback URL. Do not include comment text, credentials, or source contents in the report.

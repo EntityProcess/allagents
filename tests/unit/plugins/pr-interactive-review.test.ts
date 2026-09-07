@@ -317,6 +317,137 @@ describe('pr-interactive-review', () => {
       (await readdir(prepared.workspace)).some((name) => name.endsWith('.tmp')),
     ).toBe(false);
   });
+  it('stores a bounded presentation sidecar for reusable editorial context', async () => {
+    const prepared = await fixture();
+    const presentation = join(prepared.repository, 'interactive-presentation.json');
+    await writeFile(
+      presentation,
+      JSON.stringify({
+        eyebrow: 'Runtime seam review',
+        headline: 'One queue connects two services.',
+        summary: 'Review the handoff before implementation detail.',
+        context_cards: [
+          {
+            label: 'System boundary',
+            title: 'Dispatcher to Runner',
+            body: 'The Dispatcher starts work and the Runner owns execution.',
+            tone: 'problem',
+          },
+        ],
+        mental_model: {
+          title: 'The execution path',
+          summary: 'One shared contract crosses the Temporal boundary.',
+          steps: [
+            {
+              label: '01 / Dispatch',
+              title: 'Start workflow',
+              body: 'Create the workflow with the configured task queue.',
+            },
+          ],
+        },
+      }),
+    );
+    const refreshed = await prepareReview({
+      reviewJsonPath: prepared.artifact,
+      pr: '123',
+      repoPath: prepared.repository,
+      dataDir: prepared.state,
+      scenariosPath: prepared.scenarios,
+      presentationPath: presentation,
+    });
+    expect(refreshed.review.presentation).toEqual({
+      eyebrow: 'Runtime seam review',
+      headline: 'One queue connects two services.',
+      summary: 'Review the handoff before implementation detail.',
+      contextCards: [
+        {
+          label: 'System boundary',
+          title: 'Dispatcher to Runner',
+          body: 'The Dispatcher starts work and the Runner owns execution.',
+          tone: 'problem',
+        },
+      ],
+      mentalModel: {
+        title: 'The execution path',
+        summary: 'One shared contract crosses the Temporal boundary.',
+        steps: [
+          {
+            label: '01 / Dispatch',
+            title: 'Start workflow',
+            body: 'Create the workflow with the configured task queue.',
+          },
+        ],
+      },
+    });
+    const preserved = await prepareReview({
+      reviewJsonPath: prepared.artifact,
+      pr: '123',
+      repoPath: prepared.repository,
+      dataDir: prepared.state,
+      scenariosPath: prepared.scenarios,
+    });
+    expect(preserved.review.presentation).toEqual(refreshed.review.presentation);
+    await writeFile(
+      presentation,
+      JSON.stringify({
+        eyebrow: 'Review',
+        headline: 'Too many cards',
+        summary: 'Reject unbounded presentation content.',
+        context_cards: Array.from({ length: 7 }, (_, index) => ({
+          label: `Card ${index}`,
+          title: 'Title',
+          body: 'Body',
+        })),
+      }),
+    );
+    await expect(
+      prepareReview({
+        reviewJsonPath: prepared.artifact,
+        pr: '123',
+        repoPath: prepared.repository,
+        dataDir: prepared.state,
+        presentationPath: presentation,
+      }),
+    ).rejects.toThrow('array of at most 6 objects');
+    await writeFile(presentation, 'null');
+    await expect(
+      prepareReview({
+        reviewJsonPath: prepared.artifact,
+        pr: '123',
+        repoPath: prepared.repository,
+        dataDir: prepared.state,
+        presentationPath: presentation,
+      }),
+    ).rejects.toThrow('presentation must be an object');
+    const changedArtifact = JSON.parse(
+      await readFile(prepared.artifact, 'utf8'),
+    ) as { scope: { head_sha: string } };
+    changedArtifact.scope.head_sha =
+      'fedcba9876543210fedcba9876543210fedcba98';
+    await writeFile(prepared.artifact, JSON.stringify(changedArtifact));
+    const changedCommit = await prepareReview({
+      reviewJsonPath: prepared.artifact,
+      pr: '123',
+      repoPath: prepared.repository,
+      dataDir: prepared.state,
+    });
+    expect(changedCommit.review.presentation).toBeNull();
+  });
+  it('rejects invalid persisted presentation metadata before browser rendering', async () => {
+    const prepared = await fixture();
+    const reviewPath = join(prepared.workspace, 'review.json');
+    const stored = JSON.parse(await readFile(reviewPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    stored.presentation = { contextCards: {} };
+    await writeFile(reviewPath, JSON.stringify(stored));
+    await expect(loadStoredReview(prepared.workspace)).rejects.toThrow(
+      'presentation.context_cards must be an array',
+    );
+  });
+
+
 
   it('escapes untrusted page values and keeps business context before findings', async () => {
     const prepared = await fixture();
@@ -331,6 +462,26 @@ describe('pr-interactive-review', () => {
     );
     expect(page).not.toContain('Assistant reply');
   });
+  it('renders a navigable review shell with heavy detail collapsed by default', async () => {
+    const prepared = await fixture();
+    const page = renderReviewPage(prepared.review);
+    expect(page).toContain('class="review-shell"');
+    expect(page).toContain('id="review-nav"');
+    expect(page).toContain('class="hero-metrics"');
+    expect(page).toContain("disclosure('Supplied requirements'");
+    expect(page).toContain("disclosure('Referenced evidence");
+    expect(page).toContain("disclosure('Focused code context'");
+    expect(page).toContain('@media (max-width: 900px)');
+    expect(page).toContain(
+      '<a class="skip-link" href="#findings-section">Skip to findings</a>',
+    );
+    expect(page).toContain('renderFindingNav(visible);');
+    const renderFindings = page.indexOf('function renderFindings()');
+    expect(
+      page.indexOf('state.observer.disconnect()', renderFindings),
+    ).toBeLessThan(page.indexOf('root.replaceChildren()', renderFindings));
+  });
+
 
   it('contains long prose fields and reviewed lines without breaking narrow cards', async () => {
     const prepared = await fixture();
@@ -354,13 +505,13 @@ describe('pr-interactive-review', () => {
     expect(page).toContain('.finding { min-width: 0;');
     expect(page).toContain('aria-label="Finding status filters"');
     expect(page).toContain("withdrawn: 'Withdrawn findings'");
-    expect(page).toContain("el('h3', 'Lifecycle history')");
+    expect(page).toContain("disclosure('Lifecycle history'");
     expect(page).toContain(
-      '.finding-top, .finding-top > *, .excerpt-grid, .excerpt-grid > * { min-width: 0; }',
+      '.context-grid, .model-grid, .scenario-grid, .excerpt-grid { grid-template-columns: 1fr; }',
     );
-    expect(page).toContain('p, li, label, strong, .meta, .gap { overflow-wrap: anywhere; word-break: break-word; }');
+    expect(page).toContain('h1, h2, h3, h4, p, li, label, strong, .meta, .gap, .rail-link-label { overflow-wrap: anywhere; word-break: break-word; }');
     expect(page).toContain(
-      'pre { max-width: 100%; min-width: 0; overflow-x: auto; white-space: pre;',
+      'pre { max-width: 100%; min-width: 0; margin: 0; overflow-x: auto; white-space: pre;',
     );
   });
 
