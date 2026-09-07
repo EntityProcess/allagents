@@ -15,6 +15,7 @@ import {
   buildBusinessPrimer,
   buildGitHubLineLink,
   createReviewServer,
+  loadStoredReview,
   prepareReview,
   readBoundedRequestBody,
   renderReviewPage,
@@ -84,6 +85,12 @@ async function fixture(withScenario = true) {
         '#1': {
           what_actually_happens:
             'When an operator submits a label containing markup, the page renders the markup and the browser executes it.',
+          what_actually_happens_evidence: {
+            triggering_setup:
+              'tests/config-label.test.ts saves a label containing markup.',
+            observable_outcome:
+              'tests/config-label.test.ts observes the label rendered as markup.',
+          },
           expected_suggested:
             'When an operator submits that label, the page displays the characters as text after encoding the value at the rendering boundary.',
         },
@@ -186,9 +193,63 @@ describe('pr-interactive-review', () => {
     const scenario = prepared.review.findings[0]?.scenario;
     expect(scenario?.actualHappens).toBeNull();
     expect(scenario?.expectedSuggested).toBeNull();
-    expect(scenario?.actualEvidenceGap).toContain('triggering setup/action');
+    expect(scenario?.actualEvidenceGap).toContain('triggering setup/reachability');
     expect(scenario?.expectedEvidenceGap).toContain(
       'expected behavior and correction',
+    );
+  });
+  it('downgrades sidecar scenarios without reachability and outcome evidence', async () => {
+    const prepared = await fixture();
+    await writeFile(
+      prepared.scenarios,
+      JSON.stringify({
+        '#1': {
+          what_actually_happens:
+            'A polished but unsupported configuration path fails.',
+          expected_suggested: 'The configuration path succeeds.',
+        },
+      }),
+    );
+    const refreshed = await prepareReview({
+      reviewJsonPath: prepared.artifact,
+      pr: '123',
+      repoPath: prepared.repository,
+      dataDir: prepared.state,
+      scenariosPath: prepared.scenarios,
+    });
+    expect(refreshed.review.findings[0]?.scenario).toEqual(
+      expect.objectContaining({
+        actualHappens: null,
+        actualEvidenceGap: expect.stringContaining('asserted scenario lacks'),
+        expectedSuggested: 'The configuration path succeeds.',
+      }),
+    );
+  });
+  it('labels an evidence-only scenario as a gap without an actual claim', async () => {
+    const prepared = await fixture();
+    await writeFile(
+      prepared.scenarios,
+      JSON.stringify({
+        '#1': {
+          what_actually_happens_evidence: {
+            triggering_setup: 'A reachable test fixture.',
+            observable_outcome: 'An observed test result.',
+          },
+        },
+      }),
+    );
+    const refreshed = await prepareReview({
+      reviewJsonPath: prepared.artifact,
+      pr: '123',
+      repoPath: prepared.repository,
+      dataDir: prepared.state,
+      scenariosPath: prepared.scenarios,
+    });
+    expect(refreshed.review.findings[0]?.scenario).toEqual(
+      expect.objectContaining({
+        actualHappens: null,
+        actualEvidenceGap: expect.stringContaining('specific triggering'),
+      }),
     );
   });
 
@@ -240,6 +301,10 @@ describe('pr-interactive-review', () => {
         'When an operator submits a label containing markup, the page renders the markup and the browser executes it.',
       expectedSuggested:
         'When an operator submits that label, the page displays the characters as text after encoding the value at the rendering boundary.',
+      actualTriggerEvidence:
+        'tests/config-label.test.ts saves a label containing markup.',
+      actualOutcomeEvidence:
+        'tests/config-label.test.ts observes the label rendered as markup.',
       actualEvidenceGap: null,
       expectedEvidenceGap: null,
     });
@@ -267,16 +332,19 @@ describe('pr-interactive-review', () => {
     expect(page).not.toContain('Assistant reply');
   });
 
-  it('contains long reviewed lines within finding cards and scrollable code blocks', async () => {
+  it('contains long prose fields and reviewed lines without breaking narrow cards', async () => {
     const prepared = await fixture();
-    const longSourceLine = 'x'.repeat(4096);
+    const longText = 'x'.repeat(4096);
     const review: StoredReview = {
       ...prepared.review,
+      title: longText,
       findings: prepared.review.findings.map((finding) => ({
         ...finding,
+        title: longText,
+        scenario: { ...finding.scenario, actualHappens: longText },
         excerpts: {
           before: null,
-          after: { startLine: 1, endLine: 1, content: longSourceLine },
+          after: { startLine: 1, endLine: 1, content: longText },
         },
       })),
     };
@@ -284,14 +352,56 @@ describe('pr-interactive-review', () => {
     expect(review.findings[0]?.excerpts.after?.content).toHaveLength(4096);
     expect(page).toContain('#findings { display: grid; min-width: 0;');
     expect(page).toContain('.finding { min-width: 0;');
+    expect(page).toContain('aria-label="Finding status filters"');
+    expect(page).toContain("withdrawn: 'Withdrawn findings'");
+    expect(page).toContain("el('h3', 'Lifecycle history')");
     expect(page).toContain(
       '.finding-top, .finding-top > *, .excerpt-grid, .excerpt-grid > * { min-width: 0; }',
     );
+    expect(page).toContain('p, li, label, strong, .meta, .gap { overflow-wrap: anywhere; word-break: break-word; }');
     expect(page).toContain(
       'pre { max-width: 100%; min-width: 0; overflow-x: auto; white-space: pre;',
     );
   });
 
+  it('migrates version-1 reviews to lifecycle records without asserting unproven scenarios', async () => {
+    const prepared = await fixture();
+    const legacy = JSON.parse(
+      await readFile(join(prepared.workspace, 'review.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    legacy.version = 1;
+    delete legacy.originalVerdict;
+    const finding = (legacy.findings as Array<Record<string, unknown>>)[0];
+    delete finding.status;
+    delete finding.original;
+    delete finding.revisions;
+    delete finding.scenario;
+    finding.scenario = {
+      actualHappens: 'An unproven path currently fails.',
+      expectedSuggested: 'The path succeeds.',
+      actualEvidenceGap: null,
+      expectedEvidenceGap: null,
+    };
+    legacy.verdict = 'Ready with fixes';
+    await writeFile(join(prepared.workspace, 'review.json'), JSON.stringify(legacy));
+    const migrated = await loadStoredReview(prepared.workspace);
+    expect(migrated.version).toBe(2);
+    expect(migrated.originalVerdict).toBe('Ready with fixes');
+    expect(migrated.verdict).toBe('1 active finding (P1: 1)');
+    expect(migrated.findings[0]).toEqual(
+      expect.objectContaining({ status: 'active', revisions: [] }),
+    );
+    expect(migrated.findings[0]?.scenario.actualHappens).toBeNull();
+    expect(migrated.findings[0]?.scenario.actualEvidenceGap).toContain(
+      'asserted scenario lacks',
+    );
+    expect(migrated.findings[0]?.original.scenario.actualHappens).toBe(
+      'An unproven path currently fails.',
+    );
+    expect(
+      JSON.parse(await readFile(join(prepared.workspace, 'review.json'), 'utf8')),
+    ).toEqual(migrated);
+  });
   it('validates routes, atomically saves comments, and renders assistant replies', async () => {
     const prepared = await fixture();
     const server = createReviewServer(prepared.workspace, '127.0.0.1', 0);
@@ -421,6 +531,137 @@ describe('pr-interactive-review', () => {
           name.endsWith('.tmp'),
         ),
       ).toBe(false);
+    } finally {
+      server.stop(true);
+    }
+  });
+  it('reclassifies and withdraws findings through comment-linked atomic revisions', async () => {
+    const prepared = await fixture();
+    const server = createReviewServer(prepared.workspace, '127.0.0.1', 0);
+    try {
+      const base = `http://127.0.0.1:${server.port}`;
+      const createComment = async (body: string) => {
+        const response = await fetch(`${base}/api/comments`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ findingId: '#1', body }),
+        });
+        expect(response.status).toBe(201);
+        return (await response.json()) as { comment: { id: string } };
+      };
+      const first = await createComment(
+        'The repository has no saved configuration that reaches this path.',
+      );
+      const route = `${base}/api/findings/${encodeURIComponent('#1')}/revisions`;
+      expect(
+        (
+          await fetch(route, {
+            method: 'POST',
+            headers: { 'content-type': 'text/plain' },
+            body: '{}',
+          })
+        ).status,
+      ).toBe(415);
+      expect(
+        (
+          await fetch(route, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              origin: 'https://untrusted.example',
+            },
+            body: JSON.stringify({}),
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await fetch(route, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              commentId: '00000000-0000-0000-0000-000000000000',
+              status: 'withdrawn',
+              rationale: 'Not linked.',
+            }),
+          })
+        ).status,
+      ).toBe(400);
+      const question = await fetch(route, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          commentId: first.comment.id,
+          status: 'question',
+          rationale: 'Reachability remains unproven after reviewing the correction.',
+          severity: 'P3',
+          scenario: {
+            actualHappens: null,
+            actualTriggerEvidence: null,
+            actualOutcomeEvidence: null,
+          },
+        }),
+      });
+      expect(question.status).toBe(201);
+      const questioned = (await (await fetch(`${base}/api/review`)).json()) as StoredReview;
+      expect(questioned.verdict).toBe('No active findings; 1 open question');
+      expect(questioned.findings[0]).toEqual(
+        expect.objectContaining({ status: 'question', severity: 'P3' }),
+      );
+      const second = await createComment(
+        'The fixture and production registry confirm the path is unreachable.',
+      );
+      const withdrawn = await fetch(route, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          commentId: second.comment.id,
+          status: 'withdrawn',
+          rationale: 'The correction disproves the affected configuration path.',
+        }),
+      });
+      expect(withdrawn.status).toBe(201);
+      const revised = (await (await fetch(`${base}/api/review`)).json()) as StoredReview;
+      expect(revised.verdict).toBe('No active findings');
+      expect(revised.findings[0]).toEqual(
+        expect.objectContaining({
+          status: 'withdrawn',
+          original: expect.objectContaining({
+            title: 'Escape untrusted label',
+            severity: 'P1',
+          }),
+          revisions: [
+            expect.objectContaining({ status: 'question', commentId: first.comment.id }),
+            expect.objectContaining({ status: 'withdrawn', commentId: second.comment.id }),
+          ],
+        }),
+      );
+      const comments = (await (await fetch(`${base}/api/comments`)).json()) as {
+        comments: Array<{ body: string }>;
+      };
+      expect(comments.comments.map((comment) => comment.body)).toEqual([
+        'The repository has no saved configuration that reaches this path.',
+        'The fixture and production registry confirm the path is unreachable.',
+      ]);
+      expect(
+        (await readdir(prepared.workspace)).some((name) => name.endsWith('.tmp')),
+      ).toBe(false);
+      const reprepared = await prepareReview({
+        reviewJsonPath: prepared.artifact,
+        pr: '123',
+        repoPath: prepared.repository,
+        dataDir: prepared.state,
+        scenariosPath: prepared.scenarios,
+      });
+      expect(reprepared.review.findings[0]).toEqual(
+        expect.objectContaining({
+          status: 'withdrawn',
+          severity: 'P3',
+          revisions: expect.arrayContaining([
+            expect.objectContaining({ status: 'withdrawn' }),
+          ]),
+        }),
+      );
     } finally {
       server.stop(true);
     }

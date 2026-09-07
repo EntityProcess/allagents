@@ -12,31 +12,50 @@ const SEVERITIES = new Set(['P0', 'P1', 'P2', 'P3']);
 
 type JsonObject = Record<string, unknown>;
 
-export interface ReviewFinding {
-  id: string;
-  title: string;
-  severity: 'P0' | 'P1' | 'P2' | 'P3';
-  file: string;
-  line: number;
-  endLine: number;
-  confidence: number | string;
-  requiredResponse: string;
-  reviewers: string[];
-  evidence: string[];
-  firstEvidence: string | null;
-  sourceLink: string | null;
-  scenario: FindingScenario;
-  excerpts: {
-    before: CodeExcerpt | null;
-    after: CodeExcerpt | null;
-  };
-}
+export type FindingStatus = 'active' | 'question' | 'withdrawn';
 
 export interface FindingScenario {
   actualHappens: string | null;
   expectedSuggested: string | null;
+  actualTriggerEvidence: string | null;
+  actualOutcomeEvidence: string | null;
   actualEvidenceGap: string | null;
   expectedEvidenceGap: string | null;
+}
+
+export interface FindingClaim {
+  title: string;
+  severity: 'P0' | 'P1' | 'P2' | 'P3';
+  requiredResponse: string;
+  scenario: FindingScenario;
+}
+
+export interface FindingRevision {
+  id: string;
+  commentId: string;
+  status: FindingStatus;
+  rationale: string;
+  changes: Partial<FindingClaim>;
+  createdAt: string;
+}
+
+export interface ReviewFinding extends FindingClaim {
+  id: string;
+  status: FindingStatus;
+  original: FindingClaim;
+  revisions: FindingRevision[];
+  file: string;
+  line: number;
+  endLine: number;
+  confidence: number | string;
+  reviewers: string[];
+  evidence: string[];
+  firstEvidence: string | null;
+  sourceLink: string | null;
+  excerpts: {
+    before: CodeExcerpt | null;
+    after: CodeExcerpt | null;
+  };
 }
 
 export interface CodeExcerpt {
@@ -62,12 +81,13 @@ export interface PrimerField {
 }
 
 export interface StoredReview {
-  version: 1;
+  version: 2;
   repository: string;
   githubRepository: string | null;
   prNumber: number;
   reviewedCommit: string;
   title: string;
+  originalVerdict: string;
   verdict: string;
   intent: string;
   primer: BusinessPrimer;
@@ -216,12 +236,15 @@ function readReviewInput(value: unknown): ReviewInput {
   };
 }
 
-function missingScenario(): FindingScenario {
+function missingScenario(
+  actualEvidenceGap = 'Evidence gap: the scenario sidecar does not provide a specific triggering setup/reachability and observable outcome.',
+): FindingScenario {
   return {
     actualHappens: null,
     expectedSuggested: null,
-    actualEvidenceGap:
-      'Evidence gap: the scenario sidecar does not provide a specific triggering setup/action and observable failure.',
+    actualTriggerEvidence: null,
+    actualOutcomeEvidence: null,
+    actualEvidenceGap,
     expectedEvidenceGap:
       'Evidence gap: the scenario sidecar does not provide a specific expected behavior and correction.',
   };
@@ -241,11 +264,39 @@ function normalizeScenario(value: unknown, field: string): FindingScenario {
     8000,
     false,
   );
-  const missing = missingScenario();
+  const rawEvidence = value.what_actually_happens_evidence;
+  if (rawEvidence !== undefined && !isRecord(rawEvidence))
+    throw new Error(`${field}.what_actually_happens_evidence must be an object`);
+  const triggerEvidence = rawEvidence
+    ? boundedString(
+        rawEvidence.triggering_setup,
+        `${field}.what_actually_happens_evidence.triggering_setup`,
+        8000,
+        false,
+      )
+    : null;
+  const outcomeEvidence = rawEvidence
+    ? boundedString(
+        rawEvidence.observable_outcome,
+        `${field}.what_actually_happens_evidence.observable_outcome`,
+        8000,
+        false,
+      )
+    : null;
+  const hasActualEvidence = Boolean(
+    actualHappens && triggerEvidence && outcomeEvidence,
+  );
+  const missing = missingScenario(
+    actualHappens
+      ? 'Evidence gap: the asserted scenario lacks both a cited triggering setup/reachability and observable outcome; treat it as an open question, not an active defect.'
+      : undefined,
+  );
   return {
-    actualHappens,
+    actualHappens: hasActualEvidence ? actualHappens : null,
     expectedSuggested,
-    actualEvidenceGap: actualHappens ? null : missing.actualEvidenceGap,
+    actualTriggerEvidence: hasActualEvidence ? triggerEvidence : null,
+    actualOutcomeEvidence: hasActualEvidence ? outcomeEvidence : null,
+    actualEvidenceGap: hasActualEvidence ? null : missing.actualEvidenceGap,
     expectedEvidenceGap: expectedSuggested ? null : missing.expectedEvidenceGap,
   };
 }
@@ -298,15 +349,19 @@ function normalizeFinding(value: unknown): ReviewFinding {
   ) {
     throw new Error('finding.confidence must be a string or number');
   }
+  const title = boundedString(value.title, 'finding.title', 1000) as string;
+  const scenario = missingScenario();
+  const claim: FindingClaim = { title, severity, requiredResponse, scenario };
   return {
     id: findingId(value['#']),
-    title: boundedString(value.title, 'finding.title', 1000) as string,
-    severity,
+    ...claim,
+    status: 'active',
+    original: { ...claim, scenario: { ...scenario } },
+    revisions: [],
     file: safeRelativePath(value.file, 'finding.file'),
     line,
     endLine,
     confidence,
-    requiredResponse,
     reviewers: stringArray(value.reviewers, 'finding.reviewers'),
     evidence: stringArray(value.evidence, 'finding.evidence', 64),
     firstEvidence: boundedString(
@@ -317,7 +372,6 @@ function normalizeFinding(value: unknown): ReviewFinding {
     ),
     sourceLink: null,
     excerpts: { before: null, after: null },
-    scenario: missingScenario(),
   };
 }
 
@@ -547,13 +601,14 @@ function validBaseCommit(value: string | undefined): string | null {
 async function writeJsonAtomically(
   path: string,
   value: unknown,
+  maximumBytes = MAX_REQUIREMENTS_BYTES,
 ): Promise<void> {
+  const serialized = `${JSON.stringify(value, null, 2)}\n`;
+  if (Buffer.byteLength(serialized, 'utf8') > maximumBytes)
+    throw new Error(`${basename(path)} exceeds ${maximumBytes} bytes`);
   await mkdir(resolve(path, '..'), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
+  await writeFile(temporary, serialized, { encoding: 'utf8', mode: 0o600 });
   await rename(temporary, path);
 }
 
@@ -582,6 +637,26 @@ async function readScenarioSidecar(
     scenarios.set(id, normalizeScenario(scenario, `scenario ${id}`));
   }
   return scenarios;
+}
+
+function preserveFindingLifecycle(
+  fresh: ReviewFinding,
+  previous: ReviewFinding | undefined,
+): ReviewFinding {
+  if (!previous?.revisions.length) return fresh;
+  return {
+    ...fresh,
+    title: previous.title,
+    severity: previous.severity,
+    requiredResponse: previous.requiredResponse,
+    scenario: { ...previous.scenario },
+    status: previous.status,
+    original: {
+      ...previous.original,
+      scenario: { ...previous.original.scenario },
+    },
+    revisions: [...previous.revisions],
+  };
 }
 
 export async function prepareReview(
@@ -628,47 +703,90 @@ export async function prepareReview(
         new Set(rawFindings.map((finding) => finding.id)),
       )
     : new Map<string, FindingScenario>();
-  const findings = rawFindings.map((finding) => ({
-    ...finding,
-    scenario: scenarios.get(finding.id) ?? finding.scenario,
-    sourceLink: buildGitHubLineLink(
-      githubRepository,
-      artifact.scope.head_sha,
-      finding.file,
-      finding.line,
-      finding.endLine,
-    ),
-    excerpts: {
-      before: baseCommit
-        ? codeExcerpt(repoPath, baseCommit, finding.file, finding.line)
-        : null,
-      after: codeExcerpt(
-        repoPath,
+  const findings = rawFindings.map((finding) => {
+    const scenario = scenarios.get(finding.id) ?? finding.scenario;
+    return {
+      ...finding,
+      scenario,
+      original: { ...finding.original, scenario: { ...scenario } },
+      sourceLink: buildGitHubLineLink(
+        githubRepository,
         artifact.scope.head_sha,
         finding.file,
         finding.line,
+        finding.endLine,
       ),
-    },
-  }));
+      excerpts: {
+        before: baseCommit
+          ? codeExcerpt(repoPath, baseCommit, finding.file, finding.line)
+          : null,
+        after: codeExcerpt(
+          repoPath,
+          artifact.scope.head_sha,
+          finding.file,
+          finding.line,
+        ),
+      },
+    };
+  });
   const workspace = workspaceFor(
     stateRoot(options.dataDir),
     repositoryStorageKey(remote, githubRepository),
     target.number,
   );
-  const review: StoredReview = {
-    version: 1,
-    repository: githubRepository ?? repositoryStorageKey(remote, null),
-    githubRepository,
-    prNumber: target.number,
-    reviewedCommit: artifact.scope.head_sha,
-    title: artifact.title ?? `Pull request #${target.number}`,
-    verdict: artifact.verdict,
-    intent: artifact.intent,
-    primer: buildBusinessPrimer(specification, artifact.intent),
-    findings,
-    generatedAt: (options.now ?? new Date()).toISOString(),
-  };
-  await writeJsonAtomically(join(workspace, 'review.json'), review);
+  const review = await withLock(join(workspace, 'review.json'), async () => {
+    let previousReview: StoredReview | null = null;
+    try {
+      previousReview = await loadStoredReview(workspace);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (
+      previousReview?.reviewedCommit !== artifact.scope.head_sha &&
+      previousReview?.findings.some((finding) => finding.revisions.length)
+    ) {
+      throw new Error(
+        'Refusing to replace lifecycle history from a different reviewed commit',
+      );
+    }
+    if (
+      previousReview?.findings.some(
+        (finding) =>
+          finding.revisions.length &&
+          !findings.some((candidate) => candidate.id === finding.id),
+      )
+    ) {
+      throw new Error(
+        'Refusing to discard lifecycle history for a finding missing from the review artifact',
+      );
+    }
+    const previousFindings = new Map(
+      previousReview?.findings.map((finding) => [finding.id, finding]) ?? [],
+    );
+    const lifecycleFindings = findings.map((finding) =>
+      preserveFindingLifecycle(finding, previousFindings.get(finding.id)),
+    );
+    const next: StoredReview = {
+      version: 2,
+      repository: githubRepository ?? repositoryStorageKey(remote, null),
+      githubRepository,
+      prNumber: target.number,
+      reviewedCommit: artifact.scope.head_sha,
+      title: artifact.title ?? `Pull request #${target.number}`,
+      originalVerdict: previousReview?.findings.some(
+        (finding) => finding.revisions.length,
+      )
+        ? previousReview.originalVerdict
+        : artifact.verdict,
+      verdict: currentVerdict(lifecycleFindings),
+      intent: artifact.intent,
+      primer: buildBusinessPrimer(specification, artifact.intent),
+      findings: lifecycleFindings,
+      generatedAt: (options.now ?? new Date()).toISOString(),
+    };
+    await writeJsonAtomically(join(workspace, 'review.json'), next);
+    return next;
+  });
   const commentsPath = join(workspace, 'comments.json');
   try {
     await readFile(commentsPath, 'utf8');
@@ -682,15 +800,116 @@ export async function prepareReview(
   return { workspace, review };
 }
 
+function storedScenario(value: unknown, field: string): FindingScenario {
+  if (!isRecord(value)) return missingScenario();
+  return normalizeScenario(
+    {
+      what_actually_happens: value.actualHappens,
+      expected_suggested: value.expectedSuggested,
+      what_actually_happens_evidence: {
+        triggering_setup: value.actualTriggerEvidence,
+        observable_outcome: value.actualOutcomeEvidence,
+      },
+    },
+    field,
+  );
+}
+
+function legacyScenario(value: unknown, field: string): FindingScenario {
+  const normalized = storedScenario(value, field);
+  if (!isRecord(value)) return normalized;
+  const actualHappens = boundedString(
+    value.actualHappens,
+    `${field}.actualHappens`,
+    8000,
+    false,
+  );
+  return actualHappens
+    ? {
+        ...normalized,
+        actualHappens,
+        actualEvidenceGap:
+          'Legacy scenario retained for audit: it lacks separate reachability and observable-outcome provenance.',
+      }
+    : normalized;
+}
+function currentVerdict(findings: ReviewFinding[]): string {
+  const active = findings.filter((finding) => finding.status === 'active');
+  const questions = findings.filter((finding) => finding.status === 'question');
+  if (!active.length)
+    return questions.length
+      ? `No active findings; ${questions.length} open question${questions.length === 1 ? '' : 's'}`
+      : 'No active findings';
+  const bySeverity = [...SEVERITIES]
+    .filter((severity) => active.some((finding) => finding.severity === severity))
+    .map(
+      (severity) =>
+        `${severity}: ${active.filter((finding) => finding.severity === severity).length}`,
+    );
+  return `${active.length} active finding${active.length === 1 ? '' : 's'} (${bySeverity.join(', ')})${questions.length ? `; ${questions.length} open question${questions.length === 1 ? '' : 's'}` : ''}`;
+}
+
+function migrateStoredReview(value: unknown): StoredReview {
+  if (!isRecord(value) || !Array.isArray(value.findings))
+    throw new Error('Invalid stored review');
+  if (value.version === 2) return value as unknown as StoredReview;
+  if (value.version !== 1) throw new Error('Unsupported stored review version');
+  const originalVerdict = boundedString(value.verdict, 'review.verdict', 200) as string;
+  const findings = value.findings.map((rawFinding, index) => {
+    const scenario = storedScenario(rawFinding.scenario, `review.findings[${index}].scenario`);
+    const originalScenario = legacyScenario(
+      rawFinding.scenario,
+      `review.findings[${index}].scenario`,
+    );
+    const title = boundedString(
+      rawFinding.title,
+      `review.findings[${index}].title`,
+      1000,
+    ) as string;
+    const severity = boundedString(
+      rawFinding.severity,
+      `review.findings[${index}].severity`,
+      2,
+    ) as ReviewFinding['severity'];
+    if (!SEVERITIES.has(severity))
+      throw new Error(`review.findings[${index}].severity is invalid`);
+    const requiredResponse = boundedString(
+      rawFinding.requiredResponse,
+      `review.findings[${index}].requiredResponse`,
+      8000,
+    ) as string;
+    const claim: FindingClaim = { title, severity, requiredResponse, scenario };
+    const original: FindingClaim = {
+      ...claim,
+      scenario: originalScenario,
+    };
+    return {
+      ...(rawFinding as unknown as Omit<ReviewFinding, keyof FindingClaim | 'status' | 'original' | 'revisions'>),
+      ...claim,
+      status: 'active' as const,
+      original,
+      revisions: [],
+    };
+  });
+  return {
+    ...(value as unknown as Omit<StoredReview, 'version' | 'originalVerdict' | 'verdict' | 'findings'>),
+    version: 2,
+    originalVerdict,
+    verdict: currentVerdict(findings),
+    findings,
+  };
+}
+
 export async function loadStoredReview(
   workspace: string,
 ): Promise<StoredReview> {
-  return JSON.parse(
-    await readBoundedFile(
-      join(resolve(workspace), 'review.json'),
-      MAX_REQUIREMENTS_BYTES,
-    ),
-  ) as StoredReview;
+  const path = join(resolve(workspace), 'review.json');
+  const raw = JSON.parse(
+    await readBoundedFile(path, MAX_REQUIREMENTS_BYTES),
+  ) as unknown;
+  const review = migrateStoredReview(raw);
+  if (raw !== review) await writeJsonAtomically(path, review);
+  return review;
 }
 
 async function readCommentStore(workspace: string): Promise<CommentStore> {
@@ -715,6 +934,7 @@ async function withLock<T>(
   path: string,
   operation: () => Promise<T>,
 ): Promise<T> {
+  await mkdir(resolve(path, '..'), { recursive: true, mode: 0o700 });
   const lock = `${path}.lock`;
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
@@ -741,6 +961,73 @@ function commentAuthor(value: unknown): string {
   return author ? author.replace(/[\r\n]/g, ' ') : 'Reviewer';
 }
 
+function revisedScenario(
+  value: unknown,
+  current: FindingScenario,
+): FindingScenario {
+  if (!isRecord(value)) throw new Error('revision.scenario must be an object');
+  return normalizeScenario(
+    {
+      what_actually_happens:
+        value.actualHappens === undefined
+          ? current.actualHappens
+          : value.actualHappens,
+      expected_suggested:
+        value.expectedSuggested === undefined
+          ? current.expectedSuggested
+          : value.expectedSuggested,
+      what_actually_happens_evidence: {
+        triggering_setup:
+          value.actualTriggerEvidence === undefined
+            ? current.actualTriggerEvidence
+            : value.actualTriggerEvidence,
+        observable_outcome:
+          value.actualOutcomeEvidence === undefined
+            ? current.actualOutcomeEvidence
+            : value.actualOutcomeEvidence,
+      },
+    },
+    'revision.scenario',
+  );
+}
+
+function revisionFor(
+  body: JsonObject,
+  finding: ReviewFinding,
+): Omit<FindingRevision, 'id' | 'createdAt'> {
+  const status = boundedString(body.status, 'status', 16) as FindingStatus;
+  if (!['active', 'question', 'withdrawn'].includes(status))
+    throw new Error('status must be active, question, or withdrawn');
+  const commentId = boundedString(body.commentId, 'commentId', 36) as string;
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(commentId))
+    throw new Error('commentId must be a UUID');
+  const rationale = boundedString(body.rationale, 'rationale', 8000) as string;
+  const changes: Partial<FindingClaim> = {};
+  if (body.title !== undefined)
+    changes.title = boundedString(body.title, 'title', 1000) as string;
+  if (body.severity !== undefined) {
+    const severity = boundedString(body.severity, 'severity', 2) as ReviewFinding['severity'];
+    if (!SEVERITIES.has(severity))
+      throw new Error('severity must be P0, P1, P2, or P3');
+    changes.severity = severity;
+  }
+  if (body.requiredResponse !== undefined)
+    changes.requiredResponse = boundedString(
+      body.requiredResponse,
+      'requiredResponse',
+      8000,
+    ) as string;
+  if (body.scenario !== undefined)
+    changes.scenario = revisedScenario(body.scenario, finding.scenario);
+  return { commentId, status, rationale, changes };
+}
+
+function requestContentLength(request: Request): Response | null {
+  const contentLength = Number(request.headers.get('content-length') ?? '0');
+  return contentLength > MAX_REQUEST_BYTES
+    ? textResponse('Request body is too large', 413)
+    : null;
+}
 export async function readBoundedRequestBody(
   request: Request,
 ): Promise<string> {
@@ -835,12 +1122,12 @@ export function renderReviewPage(review: StoredReview): string {
 * { box-sizing: border-box; } body { margin: 0; } a { color: #164ea6; } button, input, textarea { font: inherit; }
 header { background: #13233f; color: #fff; padding: 1.25rem max(1rem, calc((100vw - 1200px) / 2)); } header p { margin: .35rem 0 0; color: #d8e4fa; overflow-wrap: anywhere; }
 .shell { width: min(1200px, calc(100% - 2rem)); min-width: 0; margin: 1.25rem auto 3rem; } .panel, article { min-width: 0; background: #fff; border: 1px solid #d9e0eb; border-radius: .75rem; box-shadow: 0 1px 2px #13233f0d; }
-.panel { padding: 1.25rem; margin-bottom: 1rem; } h1,h2,h3 { margin-top: 0; overflow-wrap: anywhere; } h2 { font-size: 1.2rem; } h3 { font-size: 1rem; margin-bottom: .35rem; }
+.panel { padding: 1.25rem; margin-bottom: 1rem; } h1,h2,h3 { margin-top: 0; overflow-wrap: anywhere; } h2 { font-size: 1.2rem; } h3 { font-size: 1rem; margin-bottom: .35rem; } p, li, label, strong, .meta, .gap { overflow-wrap: anywhere; word-break: break-word; }
 .context-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; } .context-item { min-width: 0; border-left: 3px solid #8aa9d6; padding-left: .7rem; } .context-item pre { white-space: pre-wrap; overflow-wrap: anywhere; } .gap { color: #7a2b17; font-style: italic; }
 .controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: center; } .filters { display: flex; flex-wrap: wrap; gap: .4rem; } button { cursor: pointer; border: 1px solid #9aa9bd; border-radius: .35rem; background: #fff; padding: .4rem .65rem; } button[aria-pressed="true"] { background: #164ea6; color: #fff; border-color: #164ea6; }
 input, textarea { width: 100%; min-width: 0; border: 1px solid #9aa9bd; border-radius: .35rem; padding: .55rem; } textarea { min-height: 5rem; resize: vertical; } #findings { display: grid; min-width: 0; gap: 1rem; }
-.finding { min-width: 0; padding: 1.2rem; } .finding-top, .finding-top > *, .excerpt-grid, .excerpt-grid > * { min-width: 0; } .finding-top { display: flex; align-items: flex-start; gap: .7rem; justify-content: space-between; } .tag { display: inline-block; border-radius: 999px; padding: .15rem .5rem; font-weight: 700; font-size: .78rem; background: #e8edf5; } .P0 { background: #ffe1df; color: #912018; } .P1 { background: #ffefd6; color: #824300; } .P2 { background: #e7f0ff; color: #164ea6; } .P3 { background: #edf0f4; color: #4c596d; }
-.meta { color: #536176; font-size: .9rem; overflow-wrap: anywhere; } pre { max-width: 100%; min-width: 0; overflow-x: auto; white-space: pre; padding: .8rem; background: #101928; color: #e8eef8; border-radius: .35rem; font-size: .82rem; } .excerpt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.finding { min-width: 0; padding: 1.2rem; } .finding-top, .finding-top > *, .excerpt-grid, .excerpt-grid > * { min-width: 0; } .finding-top { display: flex; align-items: flex-start; gap: .7rem; justify-content: space-between; } .tag { display: inline-block; border-radius: 999px; padding: .15rem .5rem; font-weight: 700; font-size: .78rem; background: #e8edf5; } .P0 { background: #ffe1df; color: #912018; } .P1 { background: #ffefd6; color: #824300; } .P2 { background: #e7f0ff; color: #164ea6; } .P3 { background: #edf0f4; color: #4c596d; } .active { background: #ffe1df; color: #912018; } .question { background: #e7f0ff; color: #164ea6; } .withdrawn { background: #edf0f4; color: #4c596d; }
+.meta { color: #536176; font-size: .9rem; } pre { max-width: 100%; min-width: 0; overflow-x: auto; white-space: pre; padding: .8rem; background: #101928; color: #e8eef8; border-radius: .35rem; font-size: .82rem; } .excerpt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 .comment { margin-top: .65rem; padding: .7rem; border-left: 3px solid #c5d0e0; background: #f8fafc; } .assistant { border-left-color: #38966a; } .comment p { white-space: pre-wrap; } .reply-form { margin-top: .6rem; }
 .hidden { display: none; } .empty { color: #536176; } .small { font-size: .85rem; } .warning { color: #7a2b17; }
 @media (max-width: 720px) { .shell { width: calc(100% - 1rem); margin-top: .5rem; } .context-grid, .excerpt-grid, .controls { grid-template-columns: 1fr; } .finding-top { display: block; } .finding-top .tag { margin-top: .5rem; } }
@@ -850,13 +1137,13 @@ input, textarea { width: 100%; min-width: 0; border: 1px solid #9aa9bd; border-r
 <header><strong>Interactive PR review</strong><p id="review-summary">Loading structured review...</p></header>
 <main class="shell">
 <section id="business-context" class="panel" aria-labelledby="business-context-title"><h1 id="business-context-title">Business context</h1><p class="small">Context precedes architecture and findings. Missing evidence is explicit.</p><div id="primer" class="context-grid"></div></section>
-<section class="panel" aria-labelledby="review-controls-title"><h2 id="review-controls-title">Findings</h2><div class="controls"><input id="search" type="search" placeholder="Search findings, files, or reviewers" aria-label="Search findings"><nav class="filters" aria-label="Severity filters"><button type="button" data-severity="all" aria-pressed="true">All</button><button type="button" data-severity="P0" aria-pressed="false">P0</button><button type="button" data-severity="P1" aria-pressed="false">P1</button><button type="button" data-severity="P2" aria-pressed="false">P2</button><button type="button" data-severity="P3" aria-pressed="false">P3</button></nav></div></section>
+<section class="panel" aria-labelledby="review-controls-title"><h2 id="review-controls-title">Findings</h2><div class="controls"><input id="search" type="search" placeholder="Search findings, files, or reviewers" aria-label="Search findings"><nav class="filters" aria-label="Severity filters"><button type="button" data-severity="all" aria-pressed="true">All severities</button><button type="button" data-severity="P0" aria-pressed="false">P0</button><button type="button" data-severity="P1" aria-pressed="false">P1</button><button type="button" data-severity="P2" aria-pressed="false">P2</button><button type="button" data-severity="P3" aria-pressed="false">P3</button></nav></div><nav class="filters" aria-label="Finding status filters"><button type="button" data-status="all" aria-pressed="true">All statuses</button><button type="button" data-status="active" aria-pressed="false">Active findings</button><button type="button" data-status="question" aria-pressed="false">Open questions</button><button type="button" data-status="withdrawn" aria-pressed="false">Withdrawn</button></nav></section>
 <section id="findings" aria-live="polite"></section>
 <section class="panel" aria-labelledby="general-comments-title"><h2 id="general-comments-title">General comments</h2><form data-comment-form="general"><label>Comment <textarea name="body" required maxlength="${MAX_COMMENT_LENGTH}"></textarea></label><label class="small">Name (optional) <input name="author" maxlength="120"></label><button type="submit">Save local comment</button></form><div id="general-comments"></div></section>
 </main>
 <script>
 (() => {
-  const state = { review: null, comments: [], severity: 'all', search: '' };
+  const state = { review: null, comments: [], severity: 'all', status: 'all', search: '' };
   const primerLabels = [['whoConfigures', 'Who configures this?'], ['operationalProblem', 'Operational problem'], ['intendedOutcome', 'Intended before/after outcome'], ['businessImportance', 'Why the business cares'], ['successCriteria', 'Success criteria'], ['scope', 'Scope'], ['nonGoals', 'Non-goals']];
   const el = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined && text !== null) node.textContent = String(text); if (className) node.className = className; return node; };
   const request = async (path, options) => { const response = await fetch(path, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
@@ -895,72 +1182,80 @@ input, textarea { width: 100%; min-width: 0; border: 1px solid #9aa9bd; border-r
       root.append(card);
     }
   }
+  const statusLabels = { active: 'Active findings', question: 'Open questions', withdrawn: 'Withdrawn findings' };
+  function renderFinding(finding) {
+    const article = el('article', undefined, 'finding');
+    article.dataset.findingSeverity = finding.severity;
+    article.dataset.findingStatus = finding.status;
+    const top = el('div', undefined, 'finding-top');
+    const heading = el('div');
+    heading.append(el('h2', finding.id + ' ' + finding.title), el('p', finding.file + ':' + finding.line + '-' + finding.endLine, 'meta'));
+    const sourceLink = (() => {
+      if (typeof finding.sourceLink !== 'string') return null;
+      try {
+        const url = new URL(finding.sourceLink);
+        const [startLine, endLine] = url.hash.slice(2).split('-L').map(Number);
+        return url.protocol === 'https:' && url.hostname === 'github.com' && url.pathname.includes('/blob/') && url.hash.startsWith('#L') && Number.isInteger(startLine) && Number.isInteger(endLine) && startLine > 0 && endLine >= startLine ? url.toString() : null;
+      } catch { return null; }
+    })();
+    if (sourceLink) {
+      const link = el('a', 'Open exact reviewed lines on GitHub');
+      link.href = sourceLink;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      heading.append(link);
+    }
+    const tags = el('div');
+    tags.append(el('span', finding.severity, 'tag ' + finding.severity), el('span', finding.status, 'tag ' + finding.status));
+    top.append(heading, tags);
+    article.append(top, el('h3', 'What actually happens'));
+    const scenario = finding.scenario || { actualHappens: null, expectedSuggested: null, actualEvidenceGap: 'Evidence gap: no scenario is available.', expectedEvidenceGap: 'Evidence gap: no expected behavior is available.' };
+    article.append(el('p', scenario.actualHappens || scenario.actualEvidenceGap, scenario.actualHappens ? '' : 'gap'));
+    if (scenario.actualHappens) {
+      const evidence = el('ul');
+      evidence.append(el('li', 'Trigger/reachability: ' + scenario.actualTriggerEvidence), el('li', 'Observable outcome: ' + scenario.actualOutcomeEvidence));
+      article.append(el('h3', 'Scenario provenance'), evidence);
+    }
+    article.append(el('h3', 'Expected / suggested'), el('p', scenario.expectedSuggested || scenario.expectedEvidenceGap, scenario.expectedSuggested ? '' : 'gap'));
+    article.append(el('h3', 'Required response'), el('p', finding.requiredResponse), el('p', 'Confidence: ' + finding.confidence + ' | Reviewers: ' + (finding.reviewers.join(', ') || 'not recorded'), 'meta'));
+    if (finding.evidence.length || finding.firstEvidence) {
+      article.append(el('h3', 'Referenced evidence'));
+      const list = el('ul');
+      for (const evidence of [...finding.evidence, ...(finding.firstEvidence ? [finding.firstEvidence] : [])]) list.append(el('li', evidence));
+      article.append(list);
+    }
+    if (finding.revisions.length) {
+      article.append(el('h3', 'Lifecycle history'));
+      const history = el('ul');
+      for (const revision of finding.revisions) history.append(el('li', new Date(revision.createdAt).toLocaleString() + ': ' + revision.status + ' — ' + revision.rationale));
+      article.append(history, el('h3', 'Original claim'), el('p', finding.original.title + ' | ' + finding.original.severity));
+    }
+    const excerpts = el('div', undefined, 'excerpt-grid');
+    if (finding.excerpts.before) { const before = el('div'); before.append(el('h3', 'Before excerpt'), el('pre', finding.excerpts.before.content)); excerpts.append(before); }
+    if (finding.excerpts.after) { const after = el('div'); after.append(el('h3', 'Reviewed commit excerpt'), el('pre', finding.excerpts.after.content)); excerpts.append(after); }
+    if (excerpts.childElementCount) article.append(el('h3', 'Focused code context'), excerpts);
+    else article.append(el('p', 'Evidence gap: no exact-commit code excerpt was available locally.', 'gap small'));
+    article.append(commentForm(finding.id));
+    const comments = el('div');
+    comments.dataset.commentsFor = finding.id;
+    article.append(comments);
+    renderComments(comments, finding.id);
+    return article;
+  }
   function renderFindings() {
     const root = document.querySelector('#findings');
     root.replaceChildren();
     const query = state.search.toLowerCase();
-    const visible = state.review.findings.filter((finding) => (state.severity === 'all' || finding.severity === state.severity) && [finding.id, finding.title, finding.file, finding.reviewers.join(' '), finding.requiredResponse].join(' ').toLowerCase().includes(query));
-    if (!visible.length) {
-      root.append(el('p', 'No findings match the current filters.', 'panel empty'));
-      return;
-    }
-    for (const finding of visible) {
-      const article = el('article', undefined, 'finding');
-      article.dataset.findingSeverity = finding.severity;
-      const top = el('div', undefined, 'finding-top');
-      const heading = el('div');
-      heading.append(el('h2', finding.id + ' ' + finding.title), el('p', finding.file + ':' + finding.line + '-' + finding.endLine, 'meta'));
-      const sourceLink = (() => {
-        if (typeof finding.sourceLink !== 'string') return null;
-        try {
-          const url = new URL(finding.sourceLink);
-          const [startLine, endLine] = url.hash.slice(2).split('-L').map(Number);
-          return url.protocol === 'https:' && url.hostname === 'github.com' && url.pathname.includes('/blob/') && url.hash.startsWith('#L') && Number.isInteger(startLine) && Number.isInteger(endLine) && startLine > 0 && endLine >= startLine ? url.toString() : null;
-        } catch {
-          return null;
-        }
-      })();
-      if (sourceLink) {
-        const link = el('a', 'Open exact reviewed lines on GitHub');
-        link.href = sourceLink;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        heading.append(link);
-      }
-      top.append(heading, el('span', finding.severity, 'tag ' + finding.severity));
-      article.append(top, el('h3', 'What actually happens'));
-      const scenario = finding.scenario || { actualHappens: null, expectedSuggested: null, actualEvidenceGap: 'Evidence gap: the scenario sidecar does not provide a specific triggering setup/action and observable failure.', expectedEvidenceGap: 'Evidence gap: the scenario sidecar does not provide a specific expected behavior and correction.' };
-      article.append(el('p', scenario.actualHappens || scenario.actualEvidenceGap, scenario.actualHappens ? '' : 'gap'));
-      article.append(el('h3', 'Expected / suggested'), el('p', scenario.expectedSuggested || scenario.expectedEvidenceGap, scenario.expectedSuggested ? '' : 'gap'));
-      article.append(el('h3', 'Required response'), el('p', finding.requiredResponse), el('p', 'Confidence: ' + finding.confidence + ' | Reviewers: ' + (finding.reviewers.join(', ') || 'not recorded'), 'meta'));
-      if (finding.evidence.length || finding.firstEvidence) {
-        article.append(el('h3', 'Referenced evidence'));
-        const list = el('ul');
-        for (const evidence of [...finding.evidence, ...(finding.firstEvidence ? [finding.firstEvidence] : [])]) list.append(el('li', evidence));
-        article.append(list);
-      }
-      const excerpts = el('div', undefined, 'excerpt-grid');
-      if (finding.excerpts.before) {
-        const before = el('div');
-        before.append(el('h3', 'Before excerpt'), el('pre', finding.excerpts.before.content));
-        excerpts.append(before);
-      }
-      if (finding.excerpts.after) {
-        const after = el('div');
-        after.append(el('h3', 'Reviewed commit excerpt'), el('pre', finding.excerpts.after.content));
-        excerpts.append(after);
-      }
-      if (excerpts.childElementCount) article.append(el('h3', 'Focused code context'), excerpts);
-      else article.append(el('p', 'Evidence gap: no exact-commit code excerpt was available locally.', 'gap small'));
-      article.append(commentForm(finding.id));
-      const comments = el('div');
-      comments.dataset.commentsFor = finding.id;
-      article.append(comments);
-      root.append(article);
-      renderComments(comments, finding.id);
+    const visible = state.review.findings.filter((finding) => (state.severity === 'all' || finding.severity === state.severity) && (state.status === 'all' || finding.status === state.status) && [finding.id, finding.title, finding.file, finding.status, finding.reviewers.join(' '), finding.requiredResponse, finding.scenario.actualHappens || '', finding.scenario.expectedSuggested || '', ...finding.revisions.map((revision) => revision.rationale)].join(' ').toLowerCase().includes(query));
+    if (!visible.length) { root.append(el('p', 'No findings match the current filters.', 'panel empty')); return; }
+    for (const status of ['active', 'question', 'withdrawn']) {
+      const group = visible.filter((finding) => finding.status === status);
+      if (!group.length) continue;
+      root.append(el('h2', statusLabels[status] + ' (' + group.length + ')'));
+      for (const finding of group) root.append(renderFinding(finding));
     }
   }
-  function render() { document.querySelector('#review-summary').textContent = state.review.title + ' | ' + state.review.verdict + ' | reviewed commit ' + state.review.reviewedCommit; renderPrimer(); renderFindings(); renderComments(document.querySelector('#general-comments'), null); }
+  function render() { const counts = state.review.findings.reduce((total, finding) => ({ ...total, [finding.status]: total[finding.status] + 1 }), { active: 0, question: 0, withdrawn: 0 }); document.querySelector('#review-summary').textContent = state.review.title + ' | ' + state.review.verdict + ' | active: ' + counts.active + ', open questions: ' + counts.question + ', withdrawn: ' + counts.withdrawn + ' | reviewed commit ' + state.review.reviewedCommit; renderPrimer(); renderFindings(); renderComments(document.querySelector('#general-comments'), null); }
   async function refreshComments() { state.comments = (await request('/api/comments')).comments; }
   document.addEventListener('submit', async (event) => {
     const form = event.target;
@@ -982,6 +1277,7 @@ input, textarea { width: 100%; min-width: 0; border: 1px solid #9aa9bd; border-r
   });
   document.querySelector('#search').addEventListener('input', (event) => { state.search = event.target.value; renderFindings(); });
   document.querySelectorAll('[data-severity]').forEach((button) => button.addEventListener('click', () => { state.severity = button.dataset.severity; document.querySelectorAll('[data-severity]').forEach((item) => item.setAttribute('aria-pressed', String(item === button))); renderFindings(); }));
+  document.querySelectorAll('[data-status]').forEach((button) => button.addEventListener('click', () => { state.status = button.dataset.status; document.querySelectorAll('[data-status]').forEach((item) => item.setAttribute('aria-pressed', String(item === button))); renderFindings(); }));
   Promise.all([request('/api/review'), refreshComments()]).then(([review]) => { state.review = review; render(); }).catch((error) => { document.querySelector('#review-summary').textContent = 'Unable to load review: ' + error.message; });
 })();
 </script>
@@ -998,7 +1294,7 @@ function validateWriteRequest(request: Request, url: URL): Response | null {
   }
   const origin = request.headers.get('origin');
   if (origin && origin !== url.origin) {
-    return textResponse('Cross-origin comment writes are not allowed', 403);
+    return textResponse('Cross-origin writes are not allowed', 403);
   }
   return null;
 }
@@ -1009,18 +1305,15 @@ export function createReviewServer(
   port = 0,
 ) {
   const resolvedWorkspace = resolve(workspace);
-  let reviewPromise: Promise<StoredReview> | null = null;
-  const review = async (): Promise<StoredReview> => {
-    reviewPromise ??= loadStoredReview(resolvedWorkspace);
-    return reviewPromise;
-  };
+  const review = (): Promise<StoredReview> => loadStoredReview(resolvedWorkspace);
   return Bun.serve({
     hostname: host,
     port,
     async fetch(request) {
       const url = new URL(request.url);
       try {
-        if (request.method === 'GET' && url.pathname === '/')
+        const pathname = decodeURIComponent(url.pathname);
+        if (request.method === 'GET' && pathname === '/')
           return new Response(renderReviewPage(await review()), {
             headers: {
               'content-type': 'text/html; charset=utf-8',
@@ -1029,9 +1322,9 @@ export function createReviewServer(
                 "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'",
             },
           });
-        if (request.method === 'GET' && url.pathname === '/api/review')
+        if (request.method === 'GET' && pathname === '/api/review')
           return json(await review());
-        if (request.method === 'GET' && url.pathname === '/api/comments') {
+        if (request.method === 'GET' && pathname === '/api/comments') {
           const comments = (await readCommentStore(resolvedWorkspace)).comments;
           const unanswered = url.searchParams.get('status') === 'unanswered';
           return json({
@@ -1045,14 +1338,11 @@ export function createReviewServer(
               : comments,
           });
         }
-        if (request.method === 'POST' && url.pathname === '/api/comments') {
+        if (request.method === 'POST' && pathname === '/api/comments') {
           const writeError = validateWriteRequest(request, url);
           if (writeError) return writeError;
-          const contentLength = Number(
-            request.headers.get('content-length') ?? '0',
-          );
-          if (contentLength > MAX_REQUEST_BYTES)
-            return textResponse('Request body is too large', 413);
+          const lengthError = requestContentLength(request);
+          if (lengthError) return lengthError;
           const body = parseJsonRequest(await readBoundedRequestBody(request));
           const finding =
             body.findingId === null || body.findingId === undefined
@@ -1088,16 +1378,13 @@ export function createReviewServer(
           return json({ comment }, 201);
         }
         const replyMatch = /^\/api\/comments\/([0-9a-f-]{36})\/replies$/.exec(
-          url.pathname,
+          pathname,
         );
         if (request.method === 'POST' && replyMatch?.[1]) {
           const writeError = validateWriteRequest(request, url);
           if (writeError) return writeError;
-          const contentLength = Number(
-            request.headers.get('content-length') ?? '0',
-          );
-          if (contentLength > MAX_REQUEST_BYTES)
-            return textResponse('Request body is too large', 413);
+          const lengthError = requestContentLength(request);
+          if (lengthError) return lengthError;
           const body = parseJsonRequest(await readBoundedRequestBody(request));
           if (body.role !== 'assistant')
             return textResponse('Replies must declare assistant role', 400);
@@ -1125,6 +1412,49 @@ export function createReviewServer(
             },
           );
           return json({ comment }, 201);
+        }
+        const revisionMatch = /^\/api\/findings\/(#[1-9]\d*)\/revisions$/.exec(
+          pathname,
+        );
+        if (request.method === 'POST' && revisionMatch?.[1]) {
+          const writeError = validateWriteRequest(request, url);
+          if (writeError) return writeError;
+          const lengthError = requestContentLength(request);
+          if (lengthError) return lengthError;
+          const body = parseJsonRequest(await readBoundedRequestBody(request));
+          const result = await withLock(
+            join(resolvedWorkspace, 'review.json'),
+            async () => {
+              const current = await loadStoredReview(resolvedWorkspace);
+              const target = current.findings.find(
+                (item) => item.id === revisionMatch[1],
+              );
+              if (!target) throw new Error('Finding not found');
+              const revision = revisionFor(body, target);
+              const comment = (
+                await readCommentStore(resolvedWorkspace)
+              ).comments.find((item) => item.id === revision.commentId);
+              if (!comment || comment.findingId !== target.id)
+                throw new Error(
+                  'commentId must identify a comment on this finding',
+                );
+              const applied: FindingRevision = {
+                ...revision,
+                id: randomUUID(),
+                createdAt: new Date().toISOString(),
+              };
+              Object.assign(target, applied.changes);
+              target.status = applied.status;
+              target.revisions.push(applied);
+              current.verdict = currentVerdict(current.findings);
+              await writeJsonAtomically(
+                join(resolvedWorkspace, 'review.json'),
+                current,
+              );
+              return { finding: target, verdict: current.verdict };
+            },
+          );
+          return json(result, 201);
         }
         return textResponse('Not found', 404);
       } catch (error) {
@@ -1221,7 +1551,7 @@ export async function main(
       );
     if (!LOOPBACK_HOSTS.has(host))
       process.stderr.write(
-        'WARNING: review site is exposed beyond loopback; anyone who can reach this host can read review data and submit local comments.\n',
+        'WARNING: review site is exposed beyond loopback; anyone who can reach this host can read review data and submit local comments or lifecycle revisions.\n',
       );
     const portText = option(values, 'port');
     const port = portText === undefined ? 0 : Number(portText);
