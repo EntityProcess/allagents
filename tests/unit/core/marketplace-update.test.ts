@@ -111,12 +111,11 @@ describe('updateMarketplace', () => {
 
   it('should use remote show origin to detect master branch when symbolic-ref fails', async () => {
     currentMockGit = createMockGit({
-      raw: (...args: unknown[]) => {
-        const rawArgs = args[0] as string[];
-        if (rawArgs?.[0] === 'symbolic-ref') {
+      raw: (args: string[]) => {
+        if (args[0] === 'symbolic-ref') {
           return Promise.reject(new Error('fatal: ref not found'));
         }
-        if (rawArgs?.[0] === 'remote' && rawArgs?.[1] === 'show') {
+        if (args[0] === 'remote' && args[1] === 'show') {
           return Promise.resolve('  HEAD branch: master\n  Remote branches:\n');
         }
         return Promise.resolve('');
@@ -139,12 +138,11 @@ describe('updateMarketplace', () => {
 
   it('should fallback to main when both symbolic-ref and remote show fail', async () => {
     currentMockGit = createMockGit({
-      raw: (...args: unknown[]) => {
-        const rawArgs = args[0] as string[];
-        if (rawArgs?.[0] === 'symbolic-ref') {
+      raw: (args: string[]) => {
+        if (args[0] === 'symbolic-ref') {
           return Promise.reject(new Error('fatal: ref not found'));
         }
-        if (rawArgs?.[0] === 'remote') {
+        if (args[0] === 'remote') {
           return Promise.reject(new Error('fatal: unable to access'));
         }
         return Promise.resolve('');

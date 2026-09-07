@@ -895,7 +895,6 @@ interface MarketplaceUpdateDeps {
   pull(path: string): Promise<void>;
 }
 
-
 /**
  * Update marketplace(s) by pulling latest changes
  * @param name - Optional marketplace name (updates all if not specified)
