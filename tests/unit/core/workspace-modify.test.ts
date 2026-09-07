@@ -5,12 +5,32 @@ import { tmpdir } from 'node:os';
 import { dump, load } from 'js-yaml';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
 
+// Bun module mocks update live bindings and persist across test files. Keep the
+// unrelated pull export functional so this verification stub cannot disable
+// later integration tests that exercise real cached repositories.
+async function pullWithGit(path: string): Promise<void> {
+  const result = Bun.spawnSync(['git', '-C', path, 'pull'], {
+    env: {
+      ...process.env,
+      GIT_LFS_SKIP_SMUDGE: '1',
+      GIT_TERMINAL_PROMPT: '0',
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `git pull failed in ${path}: ${result.stderr.toString().trim()}`,
+    );
+  }
+}
+
 // Mock git module to avoid network calls in verifyGitHubUrlExists
 mock.module('../../../src/core/git.js', () => ({
   repoExists: async () => true,
   cloneToTemp: async () => '',
   cloneTo: async () => {},
-  pull: async () => {},
+  pull: pullWithGit,
   refExists: async () => false,
   cleanupTempDir: async () => {},
   gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
