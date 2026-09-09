@@ -1,29 +1,35 @@
 import type { AgentCommandMeta } from './help.js';
 import { normalizeSkillHelpArgs } from './skill-arg-normalizer.js';
 
-import { initMeta, syncMeta, statusMeta } from './metadata/workspace.js';
 import {
-  marketplaceListMeta,
-  marketplaceAddMeta,
-  marketplaceRemoveMeta,
-  marketplaceUpdateMeta,
-  marketplaceBrowseMeta,
-  pluginListMeta,
-  pluginValidateMeta,
-  pluginInstallMeta,
-  pluginUninstallMeta,
-} from './metadata/plugin.js';
-import { updateMeta } from './metadata/self.js';
-import {
-  skillsListMeta,
   skillsAddMeta,
+  skillsListMeta,
   skillsRemoveMeta,
   skillsSearchMeta,
   skillsUpdateMeta,
 } from './metadata/plugin-skills.js';
+import {
+  marketplaceAddMeta,
+  marketplaceBrowseMeta,
+  marketplaceListMeta,
+  marketplaceRemoveMeta,
+  marketplaceUpdateMeta,
+  pluginInstallMeta,
+  pluginListMeta,
+  pluginUninstallMeta,
+  pluginValidateMeta,
+} from './metadata/plugin.js';
+import { updateMeta } from './metadata/self.js';
+import {
+  initMeta,
+  setupMeta,
+  statusMeta,
+  syncMeta,
+} from './metadata/workspace.js';
 
 const allCommands: AgentCommandMeta[] = [
   initMeta,
+  setupMeta,
   syncMeta,
   statusMeta,
   pluginInstallMeta,

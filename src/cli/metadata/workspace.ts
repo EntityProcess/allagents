@@ -31,6 +31,25 @@ export const initMeta: AgentCommandMeta = {
   },
 };
 
+export const setupMeta: AgentCommandMeta = {
+  command: 'workspace setup',
+  description: 'Run workspace setup commands',
+  whenToUse:
+    'After reviewing the setup commands in workspace.yaml and explicitly deciding to run them',
+  examples: ['allagents workspace setup'],
+  expectedOutput:
+    'Shows and runs setup commands sequentially from the workspace root. Exit 0 when every command succeeds, exit 1 on the first nonzero exit or signal.',
+  outputSchema: {
+    commands: [
+      {
+        command: 'string',
+        exitCode: 'number | null',
+        signal: 'string | null',
+      },
+    ],
+  },
+};
+
 export const syncMeta: AgentCommandMeta = {
   command: 'update',
   description: 'Update plugins in workspace',

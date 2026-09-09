@@ -62,6 +62,7 @@ With `--json`, each entry in the `plugins` array includes a `kind` field (`"plug
 
 ```bash
 allagents workspace init <path> [--from <source>]
+allagents workspace setup
 allagents workspace status  # alias for `allagents status`
 allagents workspace plugin install <plugin@marketplace> [--scope <scope>]
 allagents workspace plugin remove <plugin> [--scope <scope>]
@@ -81,6 +82,27 @@ Initialize a new workspace from a template:
 - GitHub shorthand: `owner/repo/path` or `owner/repo`
 
 When using a GitHub source, AllAgents fetches `workspace.yaml` from `.allagents/workspace.yaml` or `workspace.yaml` in the target path.
+
+### workspace setup
+
+Run the top-level `setup` command list from `.allagents/workspace.yaml`:
+
+```bash
+allagents workspace setup
+```
+
+This explicit action is the only path that executes setup commands. `workspace
+init`, `update`, and `workspace sync` never run them because workspace templates
+may come from untrusted remote sources. Review every command before running
+setup.
+
+Each command is shown immediately before it runs. Commands execute sequentially
+from the workspace root with inherited terminal I/O. Execution stops on the
+first nonzero exit or terminating signal and returns exit status 1.
+
+With `--json`, stdout contains one deterministic result document listing each
+attempted command, its nullable exit code, and its nullable terminating signal.
+Command announcements and command output are forwarded to stderr.
 
 ### workspace plugin install / remove
 

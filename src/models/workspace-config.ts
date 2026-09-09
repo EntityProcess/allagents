@@ -396,6 +396,12 @@ export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
  */
 export const WorkspaceConfigSchema = z.object({
   version: z.number().optional(),
+  /**
+   * Shell commands run only by the explicit `allagents workspace setup` action.
+   * Remote workspace templates are untrusted, so sync and init must never run
+   * these commands automatically.
+   */
+  setup: z.array(z.string()).optional(),
   workspace: WorkspaceSchema.optional(),
   repositories: z.array(RepositorySchema),
   plugins: z.array(PluginEntrySchema),

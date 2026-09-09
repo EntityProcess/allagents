@@ -24,6 +24,31 @@ describe('WorkspaceConfigSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts a top-level list of setup shell commands', () => {
+    const result = WorkspaceConfigSchema.safeParse({
+      repositories: [],
+      plugins: [],
+      clients: [],
+      setup: ['bun install', 'bun run build'],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.setup).toEqual(['bun install', 'bun run build']);
+    }
+  });
+
+  it('rejects non-string setup commands', () => {
+    const result = WorkspaceConfigSchema.safeParse({
+      repositories: [],
+      plugins: [],
+      clients: [],
+      setup: ['bun install', { command: 'bun run build' }],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it('should reject invalid client types', () => {
     const invalidConfig = {
       repositories: [],

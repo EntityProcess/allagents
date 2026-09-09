@@ -8,6 +8,10 @@ description: Configuration file reference.
 The workspace configuration file defines repositories, plugins, workspace file sync, and target clients.
 
 ```yaml
+setup:
+  - bun install
+  - bun run build
+
 # Workspace file sync (optional)
 workspace:
   source: ../shared-config              # Default base for relative file paths
@@ -48,6 +52,26 @@ clients:
   - copilot
   - cursor
 ```
+
+### Setup Commands
+
+The optional top-level `setup` field is an ordered list of shell command strings:
+
+```yaml
+setup:
+  - bun install
+  - bun run build
+```
+
+Run these commands only with the explicit `allagents workspace setup` action.
+AllAgents never runs them during `init`, `update`, or `sync`. This is a trust
+boundary: remote workspace templates are untrusted until you review their setup
+commands and explicitly choose to execute them.
+
+Each command is shown immediately before it runs. Commands execute sequentially
+from the workspace root, inherit terminal I/O, and stop after the first nonzero
+exit or terminating signal. In `--json` mode, command announcements and output
+are forwarded to stderr so stdout remains one deterministic JSON document.
 
 ### Plugin Skills
 

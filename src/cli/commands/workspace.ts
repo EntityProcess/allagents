@@ -20,6 +20,7 @@ import {
   removeRepository,
   updateAgentFiles,
 } from '../../core/workspace-repo.js';
+import { runWorkspaceSetup } from '../../core/workspace-setup.js';
 import { initWorkspace } from '../../core/workspace.js';
 import {
   type ClientEntry,
@@ -48,6 +49,7 @@ import {
 import {
   initMeta,
   pruneMeta,
+  setupMeta,
   statusMeta,
   syncMeta,
 } from '../metadata/workspace.js';
@@ -187,6 +189,75 @@ const initCmd = command({
           process.exit(1);
         }
         console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  },
+});
+
+// =============================================================================
+// workspace setup
+// =============================================================================
+
+const setupCmd = command({
+  name: 'setup',
+  description: buildDescription(setupMeta),
+  args: {},
+  handler: async () => {
+    try {
+      const result = await runWorkspaceSetup(process.cwd(), {
+        jsonMode: isJsonMode(),
+      });
+      const failed = result.commands.find(
+        ({ exitCode, signal }) => exitCode !== 0 || signal !== null,
+      );
+
+      if (failed) {
+        const error =
+          failed.signal !== null
+            ? `Setup command terminated by signal ${failed.signal}: ${failed.command}`
+            : `Setup command failed with exit code ${failed.exitCode}: ${failed.command}`;
+        if (isJsonMode()) {
+          jsonOutput({
+            success: false,
+            command: 'workspace setup',
+            data: result,
+            error,
+          });
+        } else {
+          console.error(`Error: ${error}`);
+        }
+        process.exit(1);
+      }
+
+      if (isJsonMode()) {
+        jsonOutput({
+          success: true,
+          command: 'workspace setup',
+          data: result,
+        });
+        return;
+      }
+
+      if (result.commands.length === 0) {
+        console.log('No setup commands configured.');
+      } else {
+        console.log(
+          `Setup complete. ${result.commands.length} command(s) ran.`,
+        );
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        if (isJsonMode()) {
+          jsonOutput({
+            success: false,
+            command: 'workspace setup',
+            error: error.message,
+          });
+        } else {
+          console.error(`Error: ${error.message}`);
+        }
         process.exit(1);
       }
       throw error;
@@ -846,6 +917,7 @@ export const workspaceCmd = conciseSubcommands({
     'Manage AI agent workspaces - initialize, sync, and configure plugins',
   cmds: {
     init: initCmd,
+    setup: setupCmd,
     sync: syncCmd,
     status: statusCmd,
     prune: pruneCmd,

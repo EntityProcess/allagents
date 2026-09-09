@@ -1,6 +1,11 @@
 import { describe, test, expect } from 'bun:test';
 import { extractAgentHelpFlag, findMetaByCommand } from '../../../src/cli/agent-help.js';
-import { initMeta, syncMeta, statusMeta } from '../../../src/cli/metadata/workspace.js';
+import {
+  initMeta,
+  setupMeta,
+  syncMeta,
+  statusMeta,
+} from '../../../src/cli/metadata/workspace.js';
 import {
   marketplaceListMeta,
   marketplaceAddMeta,
@@ -24,6 +29,7 @@ import type { AgentCommandMeta } from '../../../src/cli/help.js';
 
 const allCommands: AgentCommandMeta[] = [
   initMeta,
+  setupMeta,
   syncMeta,
   statusMeta,
   pluginInstallMeta,
@@ -70,8 +76,8 @@ describe('extractAgentHelpFlag', () => {
 });
 
 describe('agent command metadata', () => {
-  test('contains exactly 18 commands', () => {
-    expect(allCommands.length).toBe(18);
+  test('contains exactly 19 commands', () => {
+    expect(allCommands.length).toBe(19);
   });
 
   test('all expected commands are present', () => {
@@ -95,6 +101,7 @@ describe('agent command metadata', () => {
       'skill update',
       'status',
       'update',
+      'workspace setup',
     ]);
   });
 

@@ -1,5 +1,8 @@
 version: 2
 
+setup:
+  - curl -fsSL https://herdr.dev/install.sh | sh
+
 repositories: []
 
 plugins:
@@ -26,6 +29,10 @@ plugins:
   - source: https://github.com/NousResearch/hermes-agent
     skills:
       - research/llm-wiki
+
+  - source: https://github.com/herdrdev/herdr
+    skills:
+      - herdr
 
 clients:
   - universal
