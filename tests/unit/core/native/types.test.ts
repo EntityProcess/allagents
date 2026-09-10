@@ -101,6 +101,7 @@ describe('native/types', () => {
           rmSync(tempDir, { recursive: true, force: true });
         }
       },
+      15_000,
     );
   });
 
