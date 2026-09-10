@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -71,6 +71,7 @@ function writeWorkspace(root: string, setup: SetupFixture[]): void {
 
 describe('workspace setup command', () => {
   let testDir: string;
+  const testDirs: string[] = [];
 
   beforeEach(() => {
     testDir = join(
@@ -78,10 +79,18 @@ describe('workspace setup command', () => {
       `allagents-workspace-setup-${process.pid}-${Date.now()}`,
     );
     mkdirSync(testDir, { recursive: true });
+    testDirs.push(testDir);
   });
 
-  afterEach(() => {
-    rmSync(testDir, { recursive: true, force: true });
+  afterAll(() => {
+    for (const directory of testDirs) {
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
   });
 
   test('runs commands sequentially from the workspace root', () => {
@@ -221,54 +230,57 @@ describe('workspace setup command', () => {
     expect(readFileSync(join(testDir, 'setup.log'), 'utf8')).toBe('first');
   });
 
-  test('preserves partial results when a command is terminated by a signal', () => {
-    const commands = [
-      fixtureCommand(
-        testDir,
-        'write-first',
-        "require('node:fs').writeFileSync('setup.log', 'first');",
-      ),
-      fixtureCommand(
-        testDir,
-        'terminate-shell',
-        "process.kill(process.ppid, 'SIGTERM');",
-      ),
-      fixtureCommand(
-        testDir,
-        'write-third',
-        "require('node:fs').appendFileSync('setup.log', '-third');",
-      ),
-    ];
-    writeWorkspace(testDir, commands);
+  test.skipIf(process.platform === 'win32')(
+    'preserves partial results when a command is terminated by a signal',
+    () => {
+      const commands = [
+        fixtureCommand(
+          testDir,
+          'write-first',
+          "require('node:fs').writeFileSync('setup.log', 'first');",
+        ),
+        fixtureCommand(
+          testDir,
+          'terminate-shell',
+          "process.kill(process.ppid, 'SIGTERM');",
+        ),
+        fixtureCommand(
+          testDir,
+          'write-third',
+          "require('node:fs').appendFileSync('setup.log', '-third');",
+        ),
+      ];
+      writeWorkspace(testDir, commands);
 
-    const proc = runCli(testDir, ['workspace', 'setup'], testDir);
+      const proc = runCli(testDir, ['workspace', 'setup'], testDir);
 
-    expect(proc.exitCode).toBe(1);
-    expect(JSON.parse(proc.stdout.toString())).toEqual({
-      success: false,
-      command: 'workspace setup',
-      data: {
-        commands: [
-          {
-            command: commands[0],
-            status: 'succeeded',
-            exitCode: 0,
-            signal: null,
-            reason: null,
-          },
-          {
-            command: commands[1],
-            status: 'failed',
-            exitCode: null,
-            signal: 'SIGTERM',
-            reason: null,
-          },
-        ],
-      },
-      error: `Setup command terminated by signal SIGTERM: ${commands[1]}`,
-    });
-    expect(readFileSync(join(testDir, 'setup.log'), 'utf8')).toBe('first');
-  });
+      expect(proc.exitCode).toBe(1);
+      expect(JSON.parse(proc.stdout.toString())).toEqual({
+        success: false,
+        command: 'workspace setup',
+        data: {
+          commands: [
+            {
+              command: commands[0],
+              status: 'succeeded',
+              exitCode: 0,
+              signal: null,
+              reason: null,
+            },
+            {
+              command: commands[1],
+              status: 'failed',
+              exitCode: null,
+              signal: 'SIGTERM',
+              reason: null,
+            },
+          ],
+        },
+        error: `Setup command terminated by signal SIGTERM: ${commands[1]}`,
+      });
+      expect(readFileSync(join(testDir, 'setup.log'), 'utf8')).toBe('first');
+    },
+  );
 
   test('runs only commands matching the current platform and architecture', () => {
     const otherPlatform: NodeJS.Platform =
