@@ -182,20 +182,21 @@ export type PluginSkillsConfig = z.infer<typeof PluginSkillsConfigSchema>;
  */
 export const PluginEntrySchema = z.union([
   PluginSourceSchema,
-  z.object({
-    source: PluginSourceSchema,
-    clients: z.array(ClientTypeSchema).optional(),
-    install: InstallModeSchema.optional(),
-    exclude: z.array(z.string()).optional(),
-    skills: PluginSkillsConfigSchema.optional(),
-    /**
-     * Optional Git ref (tag or branch). Equivalent to passing the
-     * `owner/repo@<ref>` shorthand on install. When set, every sync resolves
-     * the plugin at this ref instead of the default branch.
-     */
-    ref: z.string().optional(),
-  }).strict(),
-
+  z
+    .object({
+      source: PluginSourceSchema,
+      clients: z.array(ClientTypeSchema).optional(),
+      install: InstallModeSchema.optional(),
+      exclude: z.array(z.string()).optional(),
+      skills: PluginSkillsConfigSchema.optional(),
+      /**
+       * Optional Git ref (tag or branch). Equivalent to passing the
+       * `owner/repo@<ref>` shorthand on install. When set, every sync resolves
+       * the plugin at this ref instead of the default branch.
+       */
+      ref: z.string().optional(),
+    })
+    .strict(),
 ]);
 
 export type PluginEntry = z.infer<typeof PluginEntrySchema>;
@@ -391,11 +392,66 @@ export const McpServerConfigSchema = z.union([
 
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
+const SetupCommandTextSchema = z
+  .string()
+  .refine(
+    (command) => command.trim().length > 0,
+    'Setup command cannot be blank',
+  );
+
+export const SetupPlatformSchema = z.enum([
+  'aix',
+  'android',
+  'darwin',
+  'freebsd',
+  'haiku',
+  'linux',
+  'openbsd',
+  'sunos',
+  'win32',
+  'cygwin',
+  'netbsd',
+]);
+
+export const SetupArchitectureSchema = z.enum([
+  'arm',
+  'arm64',
+  'ia32',
+  'loong64',
+  'mips',
+  'mipsel',
+  'ppc',
+  'ppc64',
+  'riscv64',
+  's390',
+  's390x',
+  'x64',
+]);
+
+export const SetupCommandSchema = z.union([
+  SetupCommandTextSchema,
+  z
+    .object({
+      run: SetupCommandTextSchema,
+      platforms: z.array(SetupPlatformSchema).min(1).optional(),
+      architectures: z.array(SetupArchitectureSchema).min(1).optional(),
+    })
+    .strict(),
+]);
+
+export type SetupCommand = z.infer<typeof SetupCommandSchema>;
+
 /**
  * Complete workspace configuration (workspace.yaml)
  */
 export const WorkspaceConfigSchema = z.object({
   version: z.number().optional(),
+  /**
+   * Shell commands run only by the explicit `allagents workspace setup` action.
+   * String entries run everywhere; object entries can select Node platforms and
+   * architectures. Sync and init must never run these commands automatically.
+   */
+  setup: z.array(SetupCommandSchema).optional(),
   workspace: WorkspaceSchema.optional(),
   repositories: z.array(RepositorySchema),
   plugins: z.array(PluginEntrySchema),

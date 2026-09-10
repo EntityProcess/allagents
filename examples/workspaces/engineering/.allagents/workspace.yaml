@@ -1,5 +1,11 @@
 version: 2
 
+setup:
+  - run: curl -fsSL https://herdr.dev/install.sh | sh
+    platforms: [linux, darwin]
+  - run: 'powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"'
+    platforms: [win32]
+
 repositories: []
 
 plugins:
@@ -26,6 +32,10 @@ plugins:
   - source: https://github.com/NousResearch/hermes-agent
     skills:
       - research/llm-wiki
+
+  - source: https://github.com/herdrdev/herdr
+    skills:
+      - herdr
 
 clients:
   - universal

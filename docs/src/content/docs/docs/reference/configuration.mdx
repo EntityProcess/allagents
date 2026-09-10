@@ -8,6 +8,10 @@ description: Configuration file reference.
 The workspace configuration file defines repositories, plugins, workspace file sync, and target clients.
 
 ```yaml
+setup:
+  - bun install
+  - bun run build
+
 # Workspace file sync (optional)
 workspace:
   source: ../shared-config              # Default base for relative file paths
@@ -48,6 +52,41 @@ clients:
   - copilot
   - cursor
 ```
+
+### Setup Commands
+
+The optional top-level `setup` field is an ordered list. A string runs on every
+platform. Use an object to select operating systems or CPU architectures:
+
+```yaml
+setup:
+  - bun install
+  - run: curl -fsSL https://example.com/install.sh | sh
+    platforms: [linux, darwin]
+    architectures: [x64, arm64]
+  - run: 'powershell -ExecutionPolicy Bypass -c "irm https://example.com/install.ps1 | iex"'
+    platforms: [win32]
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `run` | Yes for object entries | Shell command to execute |
+| `platforms` | No | Allowed Node platform names, such as `linux`, `darwin`, or `win32` |
+| `architectures` | No | Allowed Node architecture names, such as `x64` or `arm64` |
+
+When both selectors are present, the current platform and architecture must
+match. Nonmatching entries are reported as skipped without executing.
+
+Run setup only with the explicit `allagents workspace setup` action. AllAgents
+never runs it during `init`, `update`, or `sync`. This is a trust boundary:
+remote workspace templates are untrusted until you review their setup commands
+and explicitly choose to execute them.
+
+AllAgents reports entries in declaration order. Matching commands are shown
+immediately before they run, execute sequentially from the workspace root,
+inherit terminal I/O, and stop after the first nonzero exit or terminating
+signal. In `--json` mode, command announcements and output are forwarded to
+stderr so stdout remains one deterministic JSON document.
 
 ### Plugin Skills
 
