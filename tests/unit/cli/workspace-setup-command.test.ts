@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -71,6 +71,7 @@ function writeWorkspace(root: string, setup: SetupFixture[]): void {
 
 describe('workspace setup command', () => {
   let testDir: string;
+  const testDirs: string[] = [];
 
   beforeEach(() => {
     testDir = join(
@@ -78,15 +79,18 @@ describe('workspace setup command', () => {
       `allagents-workspace-setup-${process.pid}-${Date.now()}`,
     );
     mkdirSync(testDir, { recursive: true });
+    testDirs.push(testDir);
   });
 
-  afterEach(() => {
-    rmSync(testDir, {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    });
+  afterAll(() => {
+    for (const directory of testDirs) {
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
   });
 
   test('runs commands sequentially from the workspace root', () => {
