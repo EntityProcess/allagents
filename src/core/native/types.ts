@@ -60,7 +60,9 @@ async function resolveWindowsBinary(binary: string): Promise<string> {
     : (process.env.PATH ?? '').split(delimiter);
   const configuredExtensions = (
     process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD'
-  ).split(delimiter);
+  )
+    .split(delimiter)
+    .map((extension) => extension.toLowerCase());
   const extensions = extname(binary)
     ? ['', ...configuredExtensions]
     : configuredExtensions;
