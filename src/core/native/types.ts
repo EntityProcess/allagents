@@ -1,4 +1,8 @@
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { access, open } from 'node:fs/promises';
+import { delimiter, dirname, extname, join, resolve } from 'node:path';
+import readCmdShim from 'read-cmd-shim';
 
 export interface NativeCommandResult {
   success: boolean;
@@ -50,55 +54,144 @@ export interface NativeClient {
   syncPlugins(plugins: string[], scope: 'user' | 'project', options?: { cwd?: string; dryRun?: boolean }): Promise<NativeSyncResult>;
 }
 
+async function resolveWindowsBinary(binary: string): Promise<string> {
+  const pathEntries = /[\\/]/.test(binary)
+    ? ['']
+    : (process.env.PATH ?? '').split(delimiter);
+  const configuredExtensions = (
+    process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD'
+  ).split(delimiter);
+  const extensions = extname(binary)
+    ? ['', ...configuredExtensions]
+    : configuredExtensions;
+
+  for (const pathEntry of pathEntries) {
+    const directory =
+      pathEntry.startsWith('"') && pathEntry.endsWith('"')
+        ? pathEntry.slice(1, -1)
+        : pathEntry;
+    for (const extension of extensions) {
+      const candidate = resolve(
+        directory
+          ? join(directory, `${binary}${extension}`)
+          : `${binary}${extension}`,
+      );
+      try {
+        await access(candidate);
+        return candidate;
+      } catch {
+        // Continue through PATH.
+      }
+    }
+  }
+
+  throw new Error(`command not found on PATH: ${binary}`);
+}
+
+async function resolveWindowsCommand(
+  binary: string,
+  args: string[],
+): Promise<{ binary: string; args: string[] }> {
+  const resolvedBinary = await resolveWindowsBinary(binary);
+  const extension = extname(resolvedBinary).toLowerCase();
+  if (extension === '.bat') {
+    throw new Error(
+      `cannot safely execute Windows batch file '${resolvedBinary}'`,
+    );
+  }
+  if (extension !== '.cmd') {
+    return { binary: resolvedBinary, args };
+  }
+
+  const target = resolve(
+    dirname(resolvedBinary),
+    await readCmdShim(resolvedBinary),
+  );
+  const file = await open(target, 'r');
+  const buffer = Buffer.alloc(256);
+  let bytesRead = 0;
+  try {
+    ({ bytesRead } = await file.read(buffer, 0, buffer.length, 0));
+  } finally {
+    await file.close();
+  }
+  const [firstLine = ''] = buffer
+    .toString('utf8', 0, bytesRead)
+    .split(/\r?\n/, 1);
+  const shebang = firstLine.match(/^#!\s*(?:\/usr\/bin\/env\s+)?([^ \t]+)\s*$/);
+  if (!shebang) {
+    if (firstLine.startsWith('#!')) {
+      throw new Error(
+        `unsupported command shim shebang in '${resolvedBinary}'`,
+      );
+    }
+    return { binary: target, args };
+  }
+
+  const interpreter = shebang[1];
+  if (!interpreter) {
+    throw new Error(`missing command shim interpreter in '${resolvedBinary}'`);
+  }
+
+  return {
+    binary: await resolveWindowsBinary(interpreter),
+    args: [target, ...args],
+  };
+}
+
 /**
  * Execute a CLI command and capture output.
  * Shared helper for all native client implementations.
  */
-export function executeCommand(
+export async function executeCommand(
   binary: string,
   args: string[],
   options: { cwd?: string } = {},
 ): Promise<NativeCommandResult> {
-  return new Promise((resolve) => {
-    const proc = spawn(binary, args, {
-      cwd: options.cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
-      env: { ...process.env },
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
-    });
-    proc.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    let resolved = false;
-    proc.on('close', (code: number | null) => {
-      if (resolved) return;
-      resolved = true;
-      const trimmedStderr = stderr.trim();
-      resolve({
-        success: code === 0,
-        output: stdout.trim(),
-        ...(trimmedStderr && { error: trimmedStderr }),
-      });
-    });
-
-    proc.on('error', (err: Error) => {
-      if (resolved) return;
-      resolved = true;
-      resolve({
+  let command = { binary, args };
+  if (process.platform === 'win32') {
+    try {
+      command = await resolveWindowsCommand(binary, args);
+    } catch (err) {
+      return {
         success: false,
         output: '',
-        error: `Failed to execute ${binary} CLI: ${err.message}`,
-      });
-    });
+        error: `Failed to execute ${binary} CLI: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  const proc = spawn(command.binary, command.args, {
+    cwd: options.cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env },
   });
+
+  let stdout = '';
+  let stderr = '';
+
+  proc.stdout.on('data', (data: Buffer) => {
+    stdout += data.toString();
+  });
+  proc.stderr.on('data', (data: Buffer) => {
+    stderr += data.toString();
+  });
+
+  try {
+    const [code] = (await once(proc, 'close')) as [number | null];
+    const trimmedStderr = stderr.trim();
+    return {
+      success: code === 0,
+      output: stdout.trim(),
+      ...(trimmedStderr && { error: trimmedStderr }),
+    };
+  } catch (err) {
+    return {
+      success: false,
+      output: '',
+      error: `Failed to execute ${binary} CLI: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 /**

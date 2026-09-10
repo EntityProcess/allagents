@@ -1,8 +1,103 @@
 import { describe, expect, test } from 'bun:test';
-import { mergeNativeSyncResults } from '../../../../src/core/native/types.js';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
+import { executeCommand, mergeNativeSyncResults } from '../../../../src/core/native/types.js';
 import type { NativeSyncResult } from '../../../../src/core/native/types.js';
 
 describe('native/types', () => {
+  describe('executeCommand', () => {
+    test.skipIf(process.platform !== 'win32')(
+      'preserves npm shim behavior without DEP0190 on Windows',
+      async () => {
+        const tempDir = mkdtempSync(
+          join(tmpdir(), 'allagents-execute-command-'),
+        );
+        const scriptDir = join(tempDir, 'node_modules', 'test-cli');
+        const scriptPath = join(scriptDir, 'print-argv.cjs');
+        const shimPath = join(tempDir, 'argv-recorder.cmd');
+        const runnerPath = join(tempDir, 'run-execute-command.mjs');
+        const args = [
+          'value with spaces',
+          'literal&operator',
+          'literal|pipe',
+          'literal;separator',
+          'literal^caret',
+          'literal%PATH%',
+          'literal"quote',
+          '',
+          'trailing\\',
+          'backslash\\"quote',
+          'literal\r\nnewline',
+        ];
+
+        try {
+          mkdirSync(scriptDir, { recursive: true });
+          writeFileSync(
+            scriptPath,
+            [
+              '#!/usr/bin/env node',
+              "const runtime = typeof Bun === 'undefined' ? 'node' : 'bun';",
+              'const args = process.argv.slice(2);',
+              'process.stdout.write(JSON.stringify({ runtime, args }));',
+            ].join('\n'),
+          );
+          writeFileSync(
+            shimPath,
+            '@ECHO off\r\nnode "%~dp0\\node_modules\\test-cli\\print-argv.cjs" %*\r\n',
+          );
+
+          const bundle = await Bun.build({
+            entrypoints: [
+              join(import.meta.dir, '../../../../src/core/native/types.ts'),
+            ],
+            outdir: tempDir,
+            target: 'node',
+            format: 'esm',
+          });
+          expect(bundle.success).toBe(true);
+          writeFileSync(
+            runnerPath,
+            [
+              "import { executeCommand } from './types.js';",
+              "const args = JSON.parse(process.env.ALLAGENTS_TEST_ARGS ?? '[]');",
+              "const result = await executeCommand('argv-recorder', args);",
+              'process.stdout.write(JSON.stringify(result));',
+            ].join('\n'),
+          );
+
+          const runtimes = [
+            ['node', '--trace-deprecation'],
+            [process.execPath],
+          ];
+          for (const runtime of runtimes) {
+            const proc = Bun.spawnSync([...runtime, runnerPath], {
+              cwd: tempDir,
+              env: {
+                ...process.env,
+                PATH: `${tempDir}${delimiter}${process.env.PATH ?? ''}`,
+                ALLAGENTS_TEST_ARGS: JSON.stringify(args),
+              },
+              stdout: 'pipe',
+              stderr: 'pipe',
+            });
+            const stdout = new TextDecoder().decode(proc.stdout);
+            const stderr = new TextDecoder().decode(proc.stderr);
+
+            expect(proc.exitCode).toBe(0);
+            expect(stderr).toBe('');
+            expect(JSON.parse(stdout)).toEqual({
+              success: true,
+              output: JSON.stringify({ runtime: 'node', args }),
+            });
+          }
+        } finally {
+          rmSync(tempDir, { recursive: true, force: true });
+        }
+      },
+    );
+  });
+
   describe('mergeNativeSyncResults', () => {
     test('merges two results', () => {
       const a: NativeSyncResult = {
