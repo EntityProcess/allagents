@@ -7,8 +7,16 @@ import type { NativeSyncResult } from '../../../../src/core/native/types.js';
 
 describe('native/types', () => {
   describe('executeCommand', () => {
+    test('returns process creation errors instead of rejecting', async () => {
+      const result = await executeCommand(process.execPath, ['invalid\0argument']);
+
+      expect(result.success).toBe(false);
+      expect(result.output).toBe('');
+      expect(result.error).toContain(`Failed to execute ${process.execPath} CLI`);
+    });
+
     test.skipIf(process.platform !== 'win32')(
-      'preserves npm shim behavior without DEP0190 on Windows',
+      'executes supported npm shims safely without DEP0190 on Windows',
       async () => {
         const tempDir = mkdtempSync(
           join(tmpdir(), 'allagents-execute-command-'),
@@ -16,6 +24,8 @@ describe('native/types', () => {
         const scriptDir = join(tempDir, 'node_modules', 'test-cli');
         const scriptPath = join(scriptDir, 'print-argv.cjs');
         const shimPath = join(tempDir, 'argv-recorder.cmd');
+        const nestedTargetPath = join(tempDir, 'nested-target.cmd');
+        const nestedShimPath = join(tempDir, 'nested-wrapper.cmd');
         const runnerPath = join(tempDir, 'run-execute-command.mjs');
         const args = [
           'value with spaces',
@@ -46,6 +56,15 @@ describe('native/types', () => {
             shimPath,
             '@ECHO off\r\nnode "%~dp0\\node_modules\\test-cli\\print-argv.cjs" %*\r\n',
           );
+          writeFileSync(
+            join(tempDir, 'node.cmd'),
+            '@ECHO off\r\nECHO unsafe interpreter selected\r\n',
+          );
+          writeFileSync(nestedTargetPath, '@ECHO off\r\nECHO nested batch ran\r\n');
+          writeFileSync(
+            nestedShimPath,
+            '@ECHO off\r\n"%~dp0\\nested-target.cmd" %*\r\n',
+          );
 
           const bundle = await Bun.build({
             entrypoints: [
@@ -60,8 +79,9 @@ describe('native/types', () => {
             runnerPath,
             [
               "import { executeCommand } from './types.js';",
+              "const command = process.env.ALLAGENTS_TEST_COMMAND ?? 'argv-recorder';",
               "const args = JSON.parse(process.env.ALLAGENTS_TEST_ARGS ?? '[]');",
-              "const result = await executeCommand('argv-recorder', args);",
+              'const result = await executeCommand(command, args);',
               'process.stdout.write(JSON.stringify(result));',
             ].join('\n'),
           );
@@ -74,8 +94,11 @@ describe('native/types', () => {
           const pathKey =
             Object.keys(env).find((key) => key.toLowerCase() === 'path') ??
             'PATH';
-          env[pathKey] =
-            `${tempDir}${delimiter}${env[pathKey] ?? ''}`;
+          const pathExtKey =
+            Object.keys(env).find((key) => key.toLowerCase() === 'pathext') ??
+            'PATHEXT';
+          const originalPath = env[pathKey] ?? '';
+          env[pathKey] = `${tempDir}${delimiter}${originalPath}`;
 
           for (const runtime of runtimes) {
             const proc = Bun.spawnSync([...runtime, runnerPath], {
@@ -97,6 +120,83 @@ describe('native/types', () => {
               output: JSON.stringify({ runtime: 'node', args }),
             });
           }
+
+          const nestedProc = Bun.spawnSync(['node', runnerPath], {
+            cwd: tempDir,
+            env: {
+              ...env,
+              ALLAGENTS_TEST_COMMAND: 'nested-wrapper',
+              ALLAGENTS_TEST_ARGS: JSON.stringify(args),
+            },
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const nestedResult = JSON.parse(
+            new TextDecoder().decode(nestedProc.stdout),
+          );
+          expect(nestedProc.exitCode).toBe(0);
+          expect(new TextDecoder().decode(nestedProc.stderr)).toBe('');
+          expect(nestedResult).toMatchObject({
+            success: false,
+            output: '',
+          });
+          expect(nestedResult.error).toContain(
+            `cannot safely execute command shim target '${nestedTargetPath}'`,
+          );
+
+          writeFileSync(
+            join(tempDir, 'node.com'),
+            'This must not run when PATHEXT excludes .COM',
+          );
+          const filteredPathExtProc = Bun.spawnSync(
+            [process.execPath, runnerPath],
+            {
+              cwd: tempDir,
+              env: {
+                ...env,
+                [pathExtKey]: '.CMD;.EXE',
+                ALLAGENTS_TEST_ARGS: JSON.stringify(args),
+              },
+              stdout: 'pipe',
+              stderr: 'pipe',
+            },
+          );
+          expect(filteredPathExtProc.exitCode).toBe(0);
+          expect(
+            new TextDecoder().decode(filteredPathExtProc.stderr),
+          ).toBe('');
+          expect(
+            JSON.parse(new TextDecoder().decode(filteredPathExtProc.stdout)),
+          ).toEqual({
+            success: true,
+            output: JSON.stringify({ runtime: 'node', args }),
+          });
+
+          const cwdFallbackProc = Bun.spawnSync(
+            [process.execPath, runnerPath],
+            {
+              cwd: tempDir,
+              env: {
+                ...env,
+                [pathKey]: `${originalPath}${delimiter}`,
+                ALLAGENTS_TEST_COMMAND: 'nested-wrapper',
+              },
+              stdout: 'pipe',
+              stderr: 'pipe',
+            },
+          );
+          const cwdFallbackResult = JSON.parse(
+            new TextDecoder().decode(cwdFallbackProc.stdout),
+          );
+          expect(cwdFallbackProc.exitCode).toBe(0);
+          expect(new TextDecoder().decode(cwdFallbackProc.stderr)).toBe('');
+          expect(cwdFallbackResult).toMatchObject({
+            success: false,
+            output: '',
+          });
+          expect(cwdFallbackResult.error).toContain(
+            'command not found on PATH: nested-wrapper',
+          );
         } finally {
           rmSync(tempDir, { recursive: true, force: true });
         }

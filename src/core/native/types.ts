@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { access, open } from 'node:fs/promises';
-import { delimiter, dirname, extname, join, resolve } from 'node:path';
+import { delimiter, dirname, extname, resolve } from 'node:path';
 import readCmdShim from 'read-cmd-shim';
 
 export interface NativeCommandResult {
@@ -54,30 +54,43 @@ export interface NativeClient {
   syncPlugins(plugins: string[], scope: 'user' | 'project', options?: { cwd?: string; dryRun?: boolean }): Promise<NativeSyncResult>;
 }
 
-async function resolveWindowsBinary(binary: string): Promise<string> {
+async function resolveWindowsBinary(
+  binary: string,
+  nativeOnly = false,
+): Promise<string> {
   const pathEntries = /[\\/]/.test(binary)
     ? ['']
-    : (process.env.PATH ?? '').split(delimiter);
-  const configuredExtensions = (
-    process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD'
-  )
+    : (process.env.PATH ?? '')
+        .split(delimiter)
+        .map((pathEntry) => {
+          const trimmed = pathEntry.trim();
+          return trimmed.startsWith('"') && trimmed.endsWith('"')
+            ? trimmed.slice(1, -1)
+            : trimmed;
+        })
+        // Empty Windows PATH entries mean cwd, but client binaries must come
+        // from an explicit PATH directory rather than the workspace.
+        .filter((pathEntry) => pathEntry.length > 0);
+  const configuredExtensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
     .split(delimiter)
-    .map((extension) => extension.toLowerCase());
+    .map((extension) => {
+      const normalized = extension.trim().toLowerCase();
+      return normalized && !normalized.startsWith('.')
+        ? `.${normalized}`
+        : normalized;
+    })
+    .filter((extension) => extension.length > 0);
   const extensions = extname(binary)
-    ? ['', ...configuredExtensions]
-    : configuredExtensions;
+    ? ['']
+    : nativeOnly
+      ? configuredExtensions.filter(
+          (extension) => extension === '.com' || extension === '.exe',
+        )
+      : configuredExtensions;
 
-  for (const pathEntry of pathEntries) {
-    const directory =
-      pathEntry.startsWith('"') && pathEntry.endsWith('"')
-        ? pathEntry.slice(1, -1)
-        : pathEntry;
+  for (const directory of pathEntries) {
     for (const extension of extensions) {
-      const candidate = resolve(
-        directory
-          ? join(directory, `${binary}${extension}`)
-          : `${binary}${extension}`,
-      );
+      const candidate = resolve(directory, `${binary}${extension}`);
       try {
         await access(candidate);
         return candidate;
@@ -90,18 +103,47 @@ async function resolveWindowsBinary(binary: string): Promise<string> {
   throw new Error(`command not found on PATH: ${binary}`);
 }
 
+async function resolveWindowsNativeBinary(binary: string): Promise<string> {
+  const extension = extname(binary).toLowerCase();
+  if (extension && extension !== '.com' && extension !== '.exe') {
+    throw new Error(`unsafe Windows interpreter '${binary}'`);
+  }
+  return resolveWindowsBinary(binary, true);
+}
+
+async function resolveWindowsShimInterpreter(
+  interpreter: string,
+  shimDirectory: string,
+): Promise<string> {
+  const normalizedInterpreter = interpreter.toLowerCase();
+  if (
+    normalizedInterpreter !== 'node' &&
+    normalizedInterpreter !== 'node.exe'
+  ) {
+    throw new Error(`unsupported command shim interpreter '${interpreter}'`);
+  }
+
+  const siblingNode = resolve(shimDirectory, 'node.exe');
+  try {
+    await access(siblingNode);
+    return siblingNode;
+  } catch {
+    return resolveWindowsNativeBinary(interpreter);
+  }
+}
+
 async function resolveWindowsCommand(
   binary: string,
   args: string[],
 ): Promise<{ binary: string; args: string[] }> {
   const resolvedBinary = await resolveWindowsBinary(binary);
   const extension = extname(resolvedBinary).toLowerCase();
-  if (extension === '.bat') {
-    throw new Error(
-      `cannot safely execute Windows batch file '${resolvedBinary}'`,
-    );
-  }
   if (extension !== '.cmd') {
+    if (extension !== '.com' && extension !== '.exe') {
+      throw new Error(
+        `cannot safely execute Windows command '${resolvedBinary}'`,
+      );
+    }
     return { binary: resolvedBinary, args };
   }
 
@@ -109,6 +151,14 @@ async function resolveWindowsCommand(
     dirname(resolvedBinary),
     await readCmdShim(resolvedBinary),
   );
+  const targetExtension = extname(target).toLowerCase();
+  if (
+    targetExtension === '.bat' ||
+    targetExtension === '.cmd' ||
+    targetExtension === '.ps1'
+  ) {
+    throw new Error(`cannot safely execute command shim target '${target}'`);
+  }
   const file = await open(target, 'r');
   const buffer = Buffer.alloc(256);
   let bytesRead = 0;
@@ -120,12 +170,17 @@ async function resolveWindowsCommand(
   const [firstLine = ''] = buffer
     .toString('utf8', 0, bytesRead)
     .split(/\r?\n/, 1);
-  const shebang = firstLine.match(/^#!\s*(?:\/usr\/bin\/env\s+)?([^ \t]+)\s*$/);
+  const shebang = firstLine.match(
+    /^#!\s*(?:\/usr\/bin\/env\s+(?:-S\s+)?)?([^ \t]+)\s*$/,
+  );
   if (!shebang) {
     if (firstLine.startsWith('#!')) {
       throw new Error(
         `unsupported command shim shebang in '${resolvedBinary}'`,
       );
+    }
+    if (targetExtension !== '.com' && targetExtension !== '.exe') {
+      throw new Error(`unsupported command shim target '${target}'`);
     }
     return { binary: target, args };
   }
@@ -136,7 +191,10 @@ async function resolveWindowsCommand(
   }
 
   return {
-    binary: await resolveWindowsBinary(interpreter),
+    binary: await resolveWindowsShimInterpreter(
+      interpreter,
+      dirname(resolvedBinary),
+    ),
     args: [target, ...args],
   };
 }
@@ -163,23 +221,23 @@ export async function executeCommand(
     }
   }
 
-  const proc = spawn(command.binary, command.args, {
-    cwd: options.cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
-  });
-
-  let stdout = '';
-  let stderr = '';
-
-  proc.stdout.on('data', (data: Buffer) => {
-    stdout += data.toString();
-  });
-  proc.stderr.on('data', (data: Buffer) => {
-    stderr += data.toString();
-  });
-
   try {
+    const proc = spawn(command.binary, command.args, {
+      cwd: options.cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
     const [code] = (await once(proc, 'close')) as [number | null];
     const trimmedStderr = stderr.trim();
     return {
