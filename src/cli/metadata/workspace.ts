@@ -3,7 +3,8 @@ import type { AgentCommandMeta } from '../help.js';
 export const initMeta: AgentCommandMeta = {
   command: 'init',
   description: 'Create new workspace and sync plugins',
-  whenToUse: 'When starting a new project or adding allagents to an existing repo for the first time',
+  whenToUse:
+    'When starting a new project or adding allagents to an existing repo for the first time',
   examples: [
     'allagents init',
     'allagents init ./my-project',
@@ -13,11 +14,26 @@ export const initMeta: AgentCommandMeta = {
   expectedOutput:
     'Creates .allagents/workspace.yaml and syncs plugins. Shows sync results per plugin. Exit 0 on success, exit 1 on failure.',
   positionals: [
-    { name: 'path', type: 'string', required: false, description: 'Target directory for the workspace (defaults to current directory)' },
+    {
+      name: 'path',
+      type: 'string',
+      required: false,
+      description:
+        'Target directory for the workspace (defaults to current directory)',
+    },
   ],
   options: [
-    { flag: '--from', type: 'string', description: 'Copy workspace.yaml from existing template/workspace' },
-    { flag: '--client', type: 'string', description: 'Comma-separated list of clients (e.g., claude,copilot,cursor)' },
+    {
+      flag: '--from',
+      type: 'string',
+      description: 'Copy workspace.yaml from existing template/workspace',
+    },
+    {
+      flag: '--client',
+      type: 'string',
+      description:
+        'Comma-separated list of clients (e.g., claude,copilot,cursor)',
+    },
   ],
   outputSchema: {
     path: 'string',
@@ -26,25 +42,35 @@ export const initMeta: AgentCommandMeta = {
       generated: 'number',
       failed: 'number',
       skipped: 'number',
-      plugins: [{ plugin: 'string', success: 'boolean', copied: 'number', generated: 'number', failed: 'number' }],
+      plugins: [
+        {
+          plugin: 'string',
+          success: 'boolean',
+          copied: 'number',
+          generated: 'number',
+          failed: 'number',
+        },
+      ],
     },
   },
 };
 
 export const setupMeta: AgentCommandMeta = {
   command: 'workspace setup',
-  description: 'Run workspace setup commands',
+  description: 'Run workspace setup commands for this platform',
   whenToUse:
-    'After reviewing the setup commands in workspace.yaml and explicitly deciding to run them',
+    'After reviewing the setup commands in workspace.yaml and explicitly deciding to run commands matching this platform and architecture',
   examples: ['allagents workspace setup'],
   expectedOutput:
-    'Shows and runs setup commands sequentially from the workspace root. Exit 0 when every command succeeds, exit 1 on the first nonzero exit or signal.',
+    'Shows matching and skipped setup commands in declaration order. Exit 0 when every matching command succeeds, exit 1 on the first nonzero exit or signal.',
   outputSchema: {
     commands: [
       {
         command: 'string',
+        status: 'succeeded | failed | skipped',
         exitCode: 'number | null',
         signal: 'string | null',
+        reason: 'string | null',
       },
     ],
   },
@@ -63,26 +89,47 @@ export const syncMeta: AgentCommandMeta = {
   expectedOutput:
     'Lists synced files with status per plugin. Exit 0 on success, exit 1 if any files failed.',
   options: [
-    { flag: '--offline', type: 'boolean', description: 'Use cached plugins without fetching latest from remote' },
-    { flag: '--dry-run', short: '-n', type: 'boolean', description: 'Simulate sync without making changes' },
-    { flag: '--verbose', short: '-v', type: 'boolean', description: 'Show informational sync messages' },
+    {
+      flag: '--offline',
+      type: 'boolean',
+      description: 'Use cached plugins without fetching latest from remote',
+    },
+    {
+      flag: '--dry-run',
+      short: '-n',
+      type: 'boolean',
+      description: 'Simulate sync without making changes',
+    },
+    {
+      flag: '--verbose',
+      short: '-v',
+      type: 'boolean',
+      description: 'Show informational sync messages',
+    },
   ],
   outputSchema: {
     copied: 'number',
     generated: 'number',
     failed: 'number',
     skipped: 'number',
-    plugins: [{ plugin: 'string', success: 'boolean', copied: 'number', generated: 'number', failed: 'number' }],
+    plugins: [
+      {
+        plugin: 'string',
+        success: 'boolean',
+        copied: 'number',
+        generated: 'number',
+        failed: 'number',
+      },
+    ],
   },
 };
 
 export const pruneMeta: AgentCommandMeta = {
   command: 'workspace prune',
   description: 'Remove orphaned plugin references',
-  whenToUse: 'After removing a marketplace to clean up stale plugin references in workspace configs',
-  examples: [
-    'allagents workspace prune',
-  ],
+  whenToUse:
+    'After removing a marketplace to clean up stale plugin references in workspace configs',
+  examples: ['allagents workspace prune'],
   expectedOutput:
     'Lists removed orphaned plugins from both project and user scopes. Exit 0 on success, exit 1 on error.',
   outputSchema: {
@@ -94,15 +141,20 @@ export const pruneMeta: AgentCommandMeta = {
 export const statusMeta: AgentCommandMeta = {
   command: 'status',
   description: 'Show sync status of plugins',
-  whenToUse: 'To check which plugins and skills are configured and whether they are available locally',
-  examples: [
-    'allagents status',
-    'allagents workspace status',
-  ],
+  whenToUse:
+    'To check which plugins and skills are configured and whether they are available locally',
+  examples: ['allagents status', 'allagents workspace status'],
   expectedOutput:
     'Lists all configured plugins/skills with availability status and configured clients. Exit 0 on success, exit 1 if workspace is not initialized.',
   outputSchema: {
-    plugins: [{ source: 'string', type: 'string', kind: 'string', available: 'boolean' }],
+    plugins: [
+      {
+        source: 'string',
+        type: 'string',
+        kind: 'string',
+        available: 'boolean',
+      },
+    ],
     clients: ['string'],
   },
 };

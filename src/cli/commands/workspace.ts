@@ -209,9 +209,7 @@ const setupCmd = command({
       const result = await runWorkspaceSetup(process.cwd(), {
         jsonMode: isJsonMode(),
       });
-      const failed = result.commands.find(
-        ({ exitCode, signal }) => exitCode !== 0 || signal !== null,
-      );
+      const failed = result.commands.find(({ status }) => status === 'failed');
 
       if (failed) {
         const error =
@@ -243,8 +241,12 @@ const setupCmd = command({
       if (result.commands.length === 0) {
         console.log('No setup commands configured.');
       } else {
+        const ran = result.commands.filter(
+          ({ status }) => status !== 'skipped',
+        ).length;
+        const skipped = result.commands.length - ran;
         console.log(
-          `Setup complete. ${result.commands.length} command(s) ran.`,
+          `Setup complete. ${ran} command(s) ran; ${skipped} skipped.`,
         );
       }
     } catch (error) {

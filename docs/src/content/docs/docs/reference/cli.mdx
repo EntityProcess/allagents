@@ -85,7 +85,8 @@ When using a GitHub source, AllAgents fetches `workspace.yaml` from `.allagents/
 
 ### workspace setup
 
-Run the top-level `setup` command list from `.allagents/workspace.yaml`:
+Run setup entries from `.allagents/workspace.yaml` that match the current
+platform and architecture:
 
 ```bash
 allagents workspace setup
@@ -96,13 +97,19 @@ init`, `update`, and `workspace sync` never run them because workspace templates
 may come from untrusted remote sources. Review every command before running
 setup.
 
-Each command is shown immediately before it runs. Commands execute sequentially
-from the workspace root with inherited terminal I/O. Execution stops on the
-first nonzero exit or terminating signal and returns exit status 1.
+String entries run everywhere. Object entries may restrict execution with
+`platforms` using Node platform names such as `linux`, `darwin`, and `win32`,
+and with `architectures` using names such as `x64` and `arm64`. When both are
+present, both must match. Nonmatching commands are reported as skipped.
 
-With `--json`, stdout contains one deterministic result document listing each
-attempted command, its nullable exit code, and its nullable terminating signal.
-Command announcements and command output are forwarded to stderr.
+Matching commands are shown immediately before they run, execute sequentially
+from the workspace root with inherited terminal I/O, and stop on the first
+nonzero exit or terminating signal.
+
+With `--json`, stdout contains one deterministic result document preserving
+declaration order. Each entry reports `succeeded`, `failed`, or `skipped`, its
+nullable exit code and signal, and a skip reason when applicable. Command
+announcements and command output are forwarded to stderr.
 
 ### workspace plugin install / remove
 

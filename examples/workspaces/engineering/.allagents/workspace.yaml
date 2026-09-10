@@ -1,7 +1,10 @@
 version: 2
 
 setup:
-  - curl -fsSL https://herdr.dev/install.sh | sh
+  - run: curl -fsSL https://herdr.dev/install.sh | sh
+    platforms: [linux, darwin]
+  - run: 'powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"'
+    platforms: [win32]
 
 repositories: []
 

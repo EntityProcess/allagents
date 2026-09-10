@@ -24,7 +24,7 @@ describe('WorkspaceConfigSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('accepts a top-level list of setup shell commands', () => {
+  it('accepts unconditional setup command shorthand', () => {
     const result = WorkspaceConfigSchema.safeParse({
       repositories: [],
       plugins: [],
@@ -38,7 +38,52 @@ describe('WorkspaceConfigSchema', () => {
     }
   });
 
-  it('rejects non-string setup commands', () => {
+  it('accepts platform and architecture selectors for setup commands', () => {
+    const result = WorkspaceConfigSchema.safeParse({
+      repositories: [],
+      plugins: [],
+      clients: [],
+      setup: [
+        {
+          run: 'install-tool',
+          platforms: ['linux', 'darwin'],
+          architectures: ['x64', 'arm64'],
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects unknown setup platforms and architectures', () => {
+    const result = WorkspaceConfigSchema.safeParse({
+      repositories: [],
+      plugins: [],
+      clients: [],
+      setup: [
+        {
+          run: 'install-tool',
+          platforms: ['windows'],
+          architectures: ['amd64'],
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects blank setup commands', () => {
+    const result = WorkspaceConfigSchema.safeParse({
+      repositories: [],
+      plugins: [],
+      clients: [],
+      setup: ['   '],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects malformed setup command objects', () => {
     const result = WorkspaceConfigSchema.safeParse({
       repositories: [],
       plugins: [],
