@@ -1,6 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import { getHomeDir } from '../constants.js';
@@ -304,15 +313,19 @@ export function getProjectRegistryPath(workspacePath: string): string {
 export async function loadRegistryFromPath(
   registryPath: string,
 ): Promise<MarketplaceRegistry> {
-  if (!existsSync(registryPath)) {
-    return { version: 1, marketplaces: {} };
-  }
-
   try {
     const content = await readFile(registryPath, 'utf-8');
     return JSON.parse(content) as MarketplaceRegistry;
-  } catch {
-    return { version: 1, marketplaces: {} };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { version: 1, marketplaces: {} };
+    }
+
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Marketplace registry at ${registryPath} is unreadable: ${detail}. Refusing to overwrite it; fix or delete the file to continue.`,
+      { cause: error },
+    );
   }
 }
 
@@ -324,12 +337,32 @@ export async function saveRegistryToPath(
   registryPath: string,
 ): Promise<void> {
   const dir = dirname(registryPath);
+  await mkdir(dir, { recursive: true });
 
-  if (!existsSync(dir)) {
-    await mkdir(dir, { recursive: true });
+  let mode: number | undefined;
+  try {
+    mode = (await stat(registryPath)).mode;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 
-  await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+  const temporaryPath = join(
+    dir,
+    `.${basename(registryPath)}.${randomUUID()}.tmp`,
+  );
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(registry, null, 2)}\n`, {
+      encoding: 'utf-8',
+      flag: 'wx',
+      ...(mode !== undefined && { mode }),
+    });
+    if (mode !== undefined) {
+      await chmod(temporaryPath, mode);
+    }
+    await rename(temporaryPath, registryPath);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+  }
 }
 
 /**
