@@ -70,12 +70,18 @@ describe('native/types', () => {
             ['node', '--trace-deprecation'],
             [process.execPath],
           ];
+          const env = { ...process.env };
+          const pathKey =
+            Object.keys(env).find((key) => key.toLowerCase() === 'path') ??
+            'PATH';
+          env[pathKey] =
+            `${tempDir}${delimiter}${env[pathKey] ?? ''}`;
+
           for (const runtime of runtimes) {
             const proc = Bun.spawnSync([...runtime, runnerPath], {
               cwd: tempDir,
               env: {
-                ...process.env,
-                PATH: `${tempDir}${delimiter}${process.env.PATH ?? ''}`,
+                ...env,
                 ALLAGENTS_TEST_ARGS: JSON.stringify(args),
               },
               stdout: 'pipe',
