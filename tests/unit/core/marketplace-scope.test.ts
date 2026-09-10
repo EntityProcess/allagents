@@ -1,5 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { stubHomeDir } from '../../helpers/env.js';
@@ -91,18 +102,36 @@ describe('scope-aware registry loading and saving', () => {
       expect(loaded).toEqual({ version: 1, marketplaces: {} });
     });
 
-    it('returns empty registry for invalid JSON', async () => {
+    it('rejects invalid JSON instead of treating the registry as empty', async () => {
       const registryPath = join(tmpDir, 'bad.json');
       writeFileSync(registryPath, 'not valid json {{{');
 
-      const loaded = await loadRegistryFromPath(registryPath);
-      expect(loaded).toEqual({ version: 1, marketplaces: {} });
+      await expect(loadRegistryFromPath(registryPath)).rejects.toThrow(
+        `Marketplace registry at ${registryPath} is unreadable`,
+      );
+    });
+
+    it('rejects filesystem read errors instead of treating the registry as absent', async () => {
+      const registryPath = join(tmpDir, 'directory-registry');
+      mkdirSync(registryPath);
+
+      await expect(loadRegistryFromPath(registryPath)).rejects.toThrow(
+        `Marketplace registry at ${registryPath} is unreadable`,
+      );
     });
   });
 
   describe('saveRegistryToPath', () => {
-    it('writes registry to specified path and creates parent dirs', async () => {
-      const nestedPath = join(tmpDir, 'deep', 'nested', 'dir', 'marketplaces.json');
+    it('atomically replaces an existing registry without leaving temporary files', async () => {
+      const registryPath = join(tmpDir, 'marketplaces.json');
+      const originalContent = JSON.stringify({
+        version: 1,
+        marketplaces: { stale: {} },
+      });
+      writeFileSync(registryPath, originalContent);
+      chmodSync(registryPath, 0o660);
+      const originalMode = statSync(registryPath).mode;
+      const originalDescriptor = openSync(registryPath, 'r');
       const registry: MarketplaceRegistry = {
         version: 1,
         marketplaces: {
@@ -114,13 +143,31 @@ describe('scope-aware registry loading and saving', () => {
         },
       };
 
-      await saveRegistryToPath(registry, nestedPath);
+      try {
+        await saveRegistryToPath(registry, registryPath);
 
-      expect(existsSync(nestedPath)).toBe(true);
-      const content = readFileSync(nestedPath, 'utf-8');
-      expect(JSON.parse(content)).toEqual(registry);
-      // Verify trailing newline
-      expect(content.endsWith('\n')).toBe(true);
+        const content = readFileSync(registryPath, 'utf-8');
+        expect(JSON.parse(content)).toEqual(registry);
+        expect(content.endsWith('\n')).toBe(true);
+        expect(readFileSync(originalDescriptor, 'utf-8')).toBe(originalContent);
+        expect(statSync(registryPath).mode).toBe(originalMode);
+        expect(readdirSync(tmpDir)).toEqual(['marketplaces.json']);
+      } finally {
+        closeSync(originalDescriptor);
+      }
+    });
+
+    it('cleans up the temporary file when replacement fails', async () => {
+      const registryPath = join(tmpDir, 'marketplaces.json');
+      mkdirSync(registryPath);
+      writeFileSync(join(registryPath, 'keep'), 'original');
+
+      await expect(
+        saveRegistryToPath({ version: 1, marketplaces: {} }, registryPath),
+      ).rejects.toThrow();
+
+      expect(readFileSync(join(registryPath, 'keep'), 'utf-8')).toBe('original');
+      expect(readdirSync(tmpDir)).toEqual(['marketplaces.json']);
     });
   });
 
@@ -419,6 +466,23 @@ describe('addMarketplace with scope', () => {
     // Verify user registry was NOT written to
     const userRegistryPath = getRegistryPath();
     expect(existsSync(userRegistryPath)).toBe(false);
+  });
+
+  it('refuses to overwrite a corrupt project registry', async () => {
+    const localMarketplace = join(tmpProject, 'replacement-marketplace');
+    const projectRegistryPath = getProjectRegistryPath(tmpProject);
+    const corruptContent = '{"version":1,"marketplaces":';
+    mkdirSync(localMarketplace);
+    writeFileSync(projectRegistryPath, corruptContent);
+
+    await expect(
+      addMarketplace(localMarketplace, undefined, undefined, false, {
+        scope: 'project',
+        workspacePath: tmpProject,
+      }),
+    ).rejects.toThrow(`Marketplace registry at ${projectRegistryPath} is unreadable`);
+
+    expect(readFileSync(projectRegistryPath, 'utf-8')).toBe(corruptContent);
   });
 
   it('should default to user scope when no scope provided', async () => {
