@@ -5,9 +5,11 @@ import {
   mkdir,
   readFile,
   readdir,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
+import matter from 'gray-matter';
 import micromatch from 'micromatch';
 import {
   type SkillsIndexRef,
@@ -735,6 +737,100 @@ export async function copyAgents(
     });
 
   return Promise.all(copyPromises);
+}
+
+/**
+ * One agent that was collapsed by {@link dedupeAgentFilesByName}: a `.md` file
+ * removed in favor of a `.agent.md` file declaring the same frontmatter `name`.
+ */
+export interface AgentDedupeRecord {
+  /** Value of the shared `name:` frontmatter field. */
+  name: string;
+  /** Workspace-relative path of the file that was removed (or would be, in dry-run). */
+  removedPath: string;
+  /** Workspace-relative path of the `.agent.md` file that was kept. */
+  keptPath: string;
+}
+
+/**
+ * Collapse agent definitions that ship under two filenames for the same
+ * logical agent: a portable `<name>.md` (copied from a plugin's root
+ * `agents/` directory) and a GitHub Copilot native `<name>.agent.md` (copied
+ * from a plugin's own `.github/agents/` directory). Both can land in the same
+ * `agentsPath` directory when a plugin provides both, because each copy step
+ * matches on the full destination filename, not on the agent's identity.
+ *
+ * GitHub Copilot's documented custom-agent convention is `.github/agents/*.agent.md`.
+ * Older Copilot Chat builds also load plain `.md` files there, so shipping
+ * both produces two entries for one agent in the picker until every client
+ * catches up to the stricter convention. Keeping `.agent.md` and removing the
+ * `.md` twin works everywhere.
+ *
+ * Agents are matched by their `name:` frontmatter field (not by filename
+ * stem), so a plain `.md` file only gets removed when a `.agent.md` file in
+ * the same directory declares the identical name. A file with no readable
+ * `name:` frontmatter is left alone.
+ *
+ * @param workspacePath - Path to workspace directory (or home directory for user scope)
+ * @param agentsPath - Client's agents directory, relative to workspacePath (e.g. `.github/agents/`)
+ * @param options - `dryRun` reports what would be removed without deleting anything
+ * @returns One record per `.md` file removed (or that would be removed)
+ */
+export async function dedupeAgentFilesByName(
+  workspacePath: string,
+  agentsPath: string,
+  options: { dryRun?: boolean } = {},
+): Promise<AgentDedupeRecord[]> {
+  const { dryRun = false } = options;
+  const dir = join(workspacePath, agentsPath);
+  if (!existsSync(dir)) {
+    return [];
+  }
+
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.md'));
+
+  interface NameGroup {
+    agentMdFile?: string;
+    plainMdFiles: string[];
+  }
+  const groups = new Map<string, NameGroup>();
+
+  for (const file of files) {
+    let name: unknown;
+    try {
+      const content = await readFile(join(dir, file), 'utf-8');
+      name = matter(content).data?.name;
+    } catch {
+      continue; // Unreadable or unparsable — leave it alone.
+    }
+    if (typeof name !== 'string' || name.length === 0) continue;
+
+    const group = groups.get(name) ?? { plainMdFiles: [] };
+    if (file.endsWith('.agent.md')) {
+      group.agentMdFile = file;
+    } else {
+      group.plainMdFiles.push(file);
+    }
+    groups.set(name, group);
+  }
+
+  const records: AgentDedupeRecord[] = [];
+  for (const [name, group] of groups) {
+    if (!group.agentMdFile || group.plainMdFiles.length === 0) continue;
+
+    for (const file of group.plainMdFiles) {
+      if (!dryRun) {
+        await unlink(join(dir, file));
+      }
+      records.push({
+        name,
+        removedPath: `${agentsPath}${file}`,
+        keptPath: `${agentsPath}${group.agentMdFile}`,
+      });
+    }
+  }
+
+  return records;
 }
 
 /**

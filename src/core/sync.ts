@@ -39,6 +39,8 @@ import {
   collectPluginSkills,
   type CopyResult,
   findRelocatedGitHubHooks,
+  dedupeAgentFilesByName,
+  type AgentDedupeRecord,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
 import {
@@ -949,6 +951,7 @@ export function collectSyncedPaths(
   workspacePath: string,
   clients: ClientType[],
   clientMappings?: Record<string, ClientMapping>,
+  agentDedupeRecords?: AgentDedupeRecord[],
 ): Partial<Record<ClientType, string[]>> {
   const result: Partial<Record<ClientType, string[]>> = {};
   const mappings = clientMappings ?? CLIENT_MAPPINGS;
@@ -999,6 +1002,26 @@ export function collectSyncedPaths(
       ) {
         result[client]?.push(relativePath);
         // Don't break - continue checking other clients that might share this path
+      }
+    }
+  }
+
+  // Reconcile agent files collapsed by dedupeAgentFilesByName. The .md twin
+  // it removed was reported as 'copied' above (the copy happened before
+  // dedup ran), so drop it from tracking and track the .agent.md survivor
+  // instead — it's the one now on disk representing this agent.
+  if (agentDedupeRecords && agentDedupeRecords.length > 0) {
+    for (const client of clients) {
+      const mapping = mappings[client];
+      if (!mapping.agentsPath) continue;
+      const tracked = result[client];
+      if (!tracked) continue;
+
+      for (const record of agentDedupeRecords) {
+        if (!record.removedPath.startsWith(mapping.agentsPath)) continue;
+        const removedIndex = tracked.indexOf(record.removedPath);
+        if (removedIndex !== -1) tracked.splice(removedIndex, 1);
+        if (!tracked.includes(record.keptPath)) tracked.push(record.keptPath);
       }
     }
   }
@@ -1892,6 +1915,41 @@ async function syncVscodeWorkspaceFile(
  * the `@<ref>` suffix). Local plugins and marketplace specs are skipped since
  * they have no remote ref to record.
  */
+/**
+ * Run dedupeAgentFilesByName once per distinct agentsPath among the given
+ * clients — copilot and vscode commonly resolve to the same `.github/agents/`
+ * directory after resolveClientMappings, so dedupe that directory once rather
+ * than once per client sharing it. Emits one sync message per file removed.
+ */
+async function dedupeAgentFilesForClients(
+  basePath: string,
+  syncClients: ClientType[],
+  resolvedMappings: Record<ClientType, ClientMapping>,
+  dryRun: boolean,
+  messages: string[],
+): Promise<AgentDedupeRecord[]> {
+  const seenAgentsPaths = new Set<string>();
+  const records: AgentDedupeRecord[] = [];
+
+  for (const client of syncClients) {
+    const agentsPath = resolvedMappings[client]?.agentsPath;
+    if (!agentsPath || seenAgentsPaths.has(agentsPath)) continue;
+    seenAgentsPaths.add(agentsPath);
+
+    records.push(
+      ...(await dedupeAgentFilesByName(basePath, agentsPath, { dryRun })),
+    );
+  }
+
+  for (const record of records) {
+    messages.push(
+      `${dryRun ? 'Would dedupe' : 'Deduped'} agent '${record.name}': removed ${record.removedPath} (kept ${record.keptPath})`,
+    );
+  }
+
+  return records;
+}
+
 async function buildSourcesProvenance(
   validatedPlugins: ValidatedPlugin[],
   pluginEntries: PluginEntry[],
@@ -1947,6 +2005,7 @@ async function persistSyncState(
     clientMappings?: Record<ClientType, ClientMapping>;
     skillsIndex?: string[];
     sources?: Record<string, SyncStateSource>;
+    agentDedupeRecords?: AgentDedupeRecord[];
   },
 ): Promise<void> {
   const allCopyResults: CopyResult[] = [
@@ -1961,6 +2020,7 @@ async function persistSyncState(
     workspacePath,
     syncClients,
     resolvedMappings,
+    extra?.agentDedupeRecords,
   );
 
   // Build native plugin tracking per-client
@@ -2436,11 +2496,24 @@ export async function syncWorkspace(
     ...workspaceFileResults,
   ];
   const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
+
+  // Step: collapse agent files that plugins ship twice for the same logical
+  // agent — a portable `<name>.md` and a GitHub Copilot native
+  // `<name>.agent.md`. See dedupeAgentFilesByName for why this happens.
+  const agentDedupeRecords = await dedupeAgentFilesForClients(
+    workspacePath,
+    syncClients,
+    resolvedMappings,
+    dryRun,
+    messages,
+  );
+
   const newStatePaths = collectSyncedPaths(
     allCopyResultsForState,
     workspacePath,
     syncClients,
     resolvedMappings,
+    agentDedupeRecords,
   );
   const deletedArtifacts = computeDeletedArtifacts(
     previousState,
@@ -2480,6 +2553,7 @@ export async function syncWorkspace(
             skillsIndex: writtenSkillsIndexFiles,
           }),
           ...(Object.keys(sources).length > 0 && { sources }),
+          ...(agentDedupeRecords.length > 0 && { agentDedupeRecords }),
         },
       ),
     );
@@ -2846,11 +2920,24 @@ export async function syncUserWorkspace(
     syncClients,
     USER_CLIENT_MAPPINGS,
   );
+
+  // Step: collapse agent files that plugins ship twice for the same logical
+  // agent — a portable `<name>.md` and a GitHub Copilot native
+  // `<name>.agent.md`. See dedupeAgentFilesByName for why this happens.
+  const agentDedupeRecords = await dedupeAgentFilesForClients(
+    homeDir,
+    syncClients,
+    resolvedUserMappings,
+    dryRun,
+    messages,
+  );
+
   const newStatePaths = collectSyncedPaths(
     allCopyResultsForState,
     homeDir,
     syncClients,
     resolvedUserMappings,
+    agentDedupeRecords,
   );
   const deletedArtifacts = computeDeletedArtifacts(
     previousState,
@@ -2882,6 +2969,7 @@ export async function syncUserWorkspace(
               ]),
             ),
           }),
+          ...(agentDedupeRecords.length > 0 && { agentDedupeRecords }),
         },
       ),
     );
