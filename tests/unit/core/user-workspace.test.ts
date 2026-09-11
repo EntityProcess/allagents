@@ -337,6 +337,42 @@ describe('user-workspace', () => {
       expect(plugins[2].marketplace).toBe('');
     });
 
+    test('preserves raw sources while deriving names and effective refs', async () => {
+      const workspaceDir = join(tempHome, 'project');
+      const configDir = join(workspaceDir, '.allagents');
+      await mkdir(configDir, { recursive: true });
+      await writeFile(
+        join(configDir, 'workspace.yaml'),
+        `plugins:
+  - source: acme/toolbox/plugins/research
+    ref: v1
+  - source: acme/toolbox/plugins/research
+    ref: v2
+clients:
+  - codex
+`,
+        'utf-8',
+      );
+
+      const plugins = await getInstalledProjectPlugins(workspaceDir);
+      expect(plugins).toEqual([
+        {
+          spec: 'acme/toolbox/plugins/research',
+          effectiveSpec: 'acme/toolbox@v1/plugins/research',
+          name: 'research',
+          marketplace: '',
+          scope: 'project',
+        },
+        {
+          spec: 'acme/toolbox/plugins/research',
+          effectiveSpec: 'acme/toolbox@v2/plugins/research',
+          name: 'research',
+          marketplace: '',
+          scope: 'project',
+        },
+      ]);
+    });
+
     test('returns empty when workspace path is home directory', async () => {
       // Write a config directly to ~/.allagents/workspace.yaml (the user config)
       const configDir = join(tempHome, '.allagents');

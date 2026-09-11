@@ -18,7 +18,11 @@ import {
   getMarketplaceOverrides,
   getMarketplaceAccessError,
 } from '../../core/marketplace.js';
-import { syncWorkspace, syncUserWorkspace } from '../../core/sync.js';
+import {
+  buildPluginSyncPlans,
+  syncWorkspace,
+  syncUserWorkspace,
+} from '../../core/sync.js';
 import { loadSyncState } from '../../core/sync-state.js';
 import { addPlugin, removePlugin, hasPlugin, ensureWorkspace, addEnabledSkill, extractPluginNames } from '../../core/workspace-modify.js';
 import {
@@ -56,16 +60,16 @@ import { skillsCmd } from './plugin-skills.js';
 import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatPluginHeader } from '../format-sync.js';
 import {
   getPluginSource,
-  getPluginClients,
-  getClientTypes,
   type PluginEntry,
-  type WorkspaceConfig,
 } from '../../models/workspace-config.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, getHomeDir } from '../../constants.js';
-import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { load } from 'js-yaml';
+import {
+  formatPluginSource,
+  getPluginDisplayName,
+} from '../../utils/plugin-path.js';
+import { parseWorkspaceConfig } from '../../utils/workspace-parser.js';
 
 
 /**
@@ -744,14 +748,22 @@ const pluginListCmd = command({
   args: {},
   handler: async () => {
     try {
-      // Build per-plugin client map from workspace configs
-      // key = "spec:scope" → file-sync client types
+
       const pluginClients = new Map<string, string[]>();
 
-      // Canonical key for deduplication: uses parsed name+marketplace so different
-      // spec formats (e.g., "plugin@owner/repo" vs "plugin@repo") resolve to the same key
-      function canonicalKey(name: string, marketplace: string, scope: string): string {
-        return `${name}:${marketplace}:${scope}`;
+      function sourceKey(
+        source: string,
+        scope: 'user' | 'project',
+      ): string {
+        return `source:${scope}:${source}`;
+      }
+
+      function marketplaceKey(
+        name: string,
+        marketplace: string,
+        scope: 'user' | 'project',
+      ): string {
+        return `marketplace:${scope}:${name}@${marketplace}`;
       }
 
       async function loadConfigClients(
@@ -760,36 +772,36 @@ const pluginListCmd = command({
       ): Promise<void> {
         if (!existsSync(configPath)) return;
         try {
-          const content = await readFile(configPath, 'utf-8');
-          const config = load(content) as WorkspaceConfig;
-          if (!config?.plugins || !config?.clients) return;
-          const defaultClients = getClientTypes(config.clients);
-          for (const entry of config.plugins) {
-            const spec = getPluginSource(entry);
-            const clients = getPluginClients(entry) ?? defaultClients;
-            pluginClients.set(`${spec}:${scope}`, clients);
+          const config = await parseWorkspaceConfig(configPath);
+          const { plans } = buildPluginSyncPlans(
+            config.plugins,
+            config.clients,
+            scope,
+          );
+          for (const plan of plans) {
+            pluginClients.set(sourceKey(plan.source, scope), plan.clients);
           }
-        } catch { /* ignore read/parse errors */ }
+        } catch {
+          // Invalid configs are handled by commands that modify or sync them.
+        }
       }
 
       const userConfigPath = join(getAllagentsDir(), WORKSPACE_CONFIG_FILE);
-      const projectConfigPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+      const projectConfigPath = join(
+        process.cwd(),
+        CONFIG_DIR,
+        WORKSPACE_CONFIG_FILE,
+      );
       const cwdIsHome = isUserConfigPath(process.cwd());
       await loadConfigClients(userConfigPath, 'user');
       if (!cwdIsHome) {
         await loadConfigClients(projectConfigPath, 'project');
       }
 
-      // Get installed marketplace plugins
       const userPlugins = await getInstalledUserPlugins();
       const projectPlugins = await getInstalledProjectPlugins(process.cwd());
       const allInstalled = [...userPlugins, ...projectPlugins];
 
-      // Build a source→kind map so each listed entry can be labelled
-      // 'skill' (root SKILL.md, no skills/ subdir) or 'plugin' (everything
-      // else, including not-yet-resolved sources).
-      // getWorkspaceStatus resolves marketplace specs with { offline: true },
-      // so this is filesystem-only and adds ~2ms per plugin — no network I/O.
       const kindBySource = new Map<string, 'skill' | 'plugin'>();
       try {
         const status = await getWorkspaceStatus(process.cwd());
@@ -800,17 +812,17 @@ const pluginListCmd = command({
           kindBySource.set(p.source, p.kind);
         }
       } catch {
-        // Best-effort: if status lookup fails, fall back to labelling
-        // everything as 'plugin' below.
+        // Best-effort: unresolved sources are plugins.
       }
 
-      // Load native plugins from sync state
-      const userSyncState = await loadSyncState(getAllagentsDir());
-      const projectSyncState = cwdIsHome ? null : await loadSyncState(process.cwd());
+      const userSyncState = await loadSyncState(getHomeDir());
+      const projectSyncState = cwdIsHome
+        ? null
+        : await loadSyncState(process.cwd());
 
-      // Build merged map: key = "name:marketplace:scope" for format-independent dedup
       interface MergedPlugin {
         spec: string;
+        effectiveSpec: string;
         name: string;
         marketplace: string;
         scope: 'user' | 'project';
@@ -820,46 +832,62 @@ const pluginListCmd = command({
       }
       const merged = new Map<string, MergedPlugin>();
 
-      for (const p of allInstalled) {
-        const key = canonicalKey(p.name, p.marketplace, p.scope);
+      for (const plugin of allInstalled) {
+        const key = plugin.marketplace
+          ? marketplaceKey(plugin.name, plugin.marketplace, plugin.scope)
+          : sourceKey(plugin.effectiveSpec, plugin.scope);
+        const clients =
+          pluginClients.get(sourceKey(plugin.effectiveSpec, plugin.scope)) ?? [];
+        const existing = merged.get(key);
+        if (existing) {
+          for (const client of clients) {
+            if (!existing.fileClients.includes(client)) {
+              existing.fileClients.push(client);
+            }
+          }
+          continue;
+        }
         merged.set(key, {
-          spec: p.spec,
-          name: p.name,
-          marketplace: p.marketplace,
-          scope: p.scope,
-          kind: kindBySource.get(p.spec) ?? 'plugin',
-          fileClients: pluginClients.get(`${p.spec}:${p.scope}`) ?? [],
+          spec: plugin.spec,
+          effectiveSpec: plugin.effectiveSpec,
+          name: plugin.name,
+          marketplace: plugin.marketplace,
+          scope: plugin.scope,
+          kind: kindBySource.get(plugin.spec) ?? 'plugin',
+          fileClients: [...clients],
           nativeClients: [],
         });
       }
 
-      // Merge native plugins using the same canonical key
       for (const [state, scope] of [
         [userSyncState, 'user'],
         [projectSyncState, 'project'],
       ] as const) {
-        for (const [client, specs] of Object.entries(state?.nativePlugins ?? {})) {
+        for (const [client, specs] of Object.entries(
+          state?.nativePlugins ?? {},
+        )) {
           for (const spec of specs) {
             const parsed = parsePluginSpec(spec);
             const key = parsed
-              ? canonicalKey(parsed.plugin, parsed.marketplaceName, scope)
-              : `${spec}::${scope}`;
+              ? marketplaceKey(parsed.plugin, parsed.marketplaceName, scope)
+              : sourceKey(spec, scope);
             const existing = merged.get(key);
             if (existing) {
               if (!existing.nativeClients.includes(client)) {
                 existing.nativeClients.push(client);
               }
-            } else {
-              merged.set(key, {
-                spec,
-                name: parsed?.plugin ?? spec,
-                marketplace: parsed?.marketplaceName ?? '',
-                scope,
-                kind: kindBySource.get(spec) ?? 'plugin',
-                fileClients: [],
-                nativeClients: [client],
-              });
+              continue;
             }
+            merged.set(key, {
+              spec,
+              effectiveSpec: spec,
+              name: parsed?.plugin ?? getPluginDisplayName(spec),
+              marketplace: parsed?.marketplaceName ?? '',
+              scope,
+              kind: kindBySource.get(spec) ?? 'plugin',
+              fileClients: [],
+              nativeClients: [client],
+            });
           }
         }
       }
@@ -873,6 +901,7 @@ const pluginListCmd = command({
           data: {
             plugins: plugins.map((p) => ({
               name: p.name,
+              spec: p.spec,
               marketplace: p.marketplace,
               scope: p.scope,
               kind: p.kind,
@@ -899,9 +928,12 @@ const pluginListCmd = command({
 
       console.log('Installed plugins:\n');
       for (const p of plugins) {
-        console.log(`  ❯ ${p.spec}`);
+        console.log(`  ❯ ${p.marketplace ? p.spec : p.name}`);
         console.log(`    Type: ${p.kind}`);
         console.log(`    Scope: ${p.scope}`);
+        if (!p.marketplace) {
+          console.log(`    Source: ${formatPluginSource(p.effectiveSpec)}`);
+        }
 
         const hasClients = p.fileClients.length > 0 || p.nativeClients.length > 0;
         if (hasClients) {
