@@ -753,6 +753,70 @@ export interface AgentDedupeRecord {
 }
 
 /**
+ * A plugin whose agent files should be considered for {@link dedupeAgentFilesByName}.
+ * Mirrors the same source directories and exclude/fileArtifacts gating that
+ * `copyAgents` and `copyGitHubContent` themselves use, so dedup only ever
+ * reasons about files this sync actually asked those two functions to write —
+ * never a file a user created by hand in the destination directory.
+ */
+export interface AgentDedupeSource {
+  pluginPath: string;
+  exclude?: string[];
+  /** Same flags copyPluginToWorkspace checks before calling copyAgents/copyGitHubContent. */
+  fileArtifacts?: MarketplaceFileArtifacts;
+}
+
+interface AgentFileCandidate {
+  fileName: string;
+  /** Absolute path to the plugin's source file, read for its `name:` frontmatter. */
+  sourcePath: string;
+}
+
+/**
+ * Enumerate the destination filenames dedupeAgentFilesByName is allowed to
+ * touch for one agentsPath: the union, across the given plugins, of their
+ * root `agents/*.md` (copyAgents' source) and `.github/agents/*.md` (part of
+ * copyGitHubContent's source), filtered the same way those copy functions
+ * filter them. Later plugins win a filename collision, matching copy order.
+ */
+async function collectAgentFileCandidates(
+  sources: AgentDedupeSource[],
+): Promise<Map<string, AgentFileCandidate>> {
+  const candidates = new Map<string, AgentFileCandidate>();
+
+  for (const { pluginPath, exclude, fileArtifacts } of sources) {
+    const includeAgents = fileArtifacts?.agents ?? true;
+    const includeGithub = fileArtifacts?.github ?? true;
+
+    if (includeAgents) {
+      const rootDir = join(pluginPath, 'agents');
+      if (existsSync(rootDir)) {
+        for (const file of await readdir(rootDir)) {
+          if (!file.endsWith('.md')) continue;
+          const sourcePath = join(rootDir, file);
+          if (isExcluded(pluginPath, sourcePath, exclude)) continue;
+          candidates.set(file, { fileName: file, sourcePath });
+        }
+      }
+    }
+
+    if (includeGithub) {
+      const githubAgentsDir = join(pluginPath, '.github', 'agents');
+      if (existsSync(githubAgentsDir)) {
+        for (const file of await readdir(githubAgentsDir)) {
+          if (!file.endsWith('.md')) continue;
+          const sourcePath = join(githubAgentsDir, file);
+          if (isExcluded(pluginPath, sourcePath, exclude)) continue;
+          candidates.set(file, { fileName: file, sourcePath });
+        }
+      }
+    }
+  }
+
+  return candidates;
+}
+
+/**
  * Collapse agent definitions that ship under two filenames for the same
  * logical agent: a portable `<name>.md` (copied from a plugin's root
  * `agents/` directory) and a GitHub Copilot native `<name>.agent.md` (copied
@@ -771,23 +835,29 @@ export interface AgentDedupeRecord {
  * the same directory declares the identical name. A file with no readable
  * `name:` frontmatter is left alone.
  *
+ * Only filenames that `sources` actually ship this sync are ever considered —
+ * frontmatter is read from each plugin's own source file, not the destination
+ * directory — so a file a user created by hand in `agentsPath` is never
+ * touched, and dry-run reports exactly what a real sync would do even before
+ * any destination file exists on disk.
+ *
  * @param workspacePath - Path to workspace directory (or home directory for user scope)
  * @param agentsPath - Client's agents directory, relative to workspacePath (e.g. `.github/agents/`)
+ * @param sources - Plugins whose agent files are eligible for this agentsPath
  * @param options - `dryRun` reports what would be removed without deleting anything
  * @returns One record per `.md` file removed (or that would be removed)
  */
 export async function dedupeAgentFilesByName(
   workspacePath: string,
   agentsPath: string,
+  sources: AgentDedupeSource[],
   options: { dryRun?: boolean } = {},
 ): Promise<AgentDedupeRecord[]> {
   const { dryRun = false } = options;
-  const dir = join(workspacePath, agentsPath);
-  if (!existsSync(dir)) {
+  const candidates = await collectAgentFileCandidates(sources);
+  if (candidates.size === 0) {
     return [];
   }
-
-  const files = (await readdir(dir)).filter((f) => f.endsWith('.md'));
 
   interface NameGroup {
     agentMdFile?: string;
@@ -795,10 +865,10 @@ export async function dedupeAgentFilesByName(
   }
   const groups = new Map<string, NameGroup>();
 
-  for (const file of files) {
+  for (const { fileName, sourcePath } of candidates.values()) {
     let name: unknown;
     try {
-      const content = await readFile(join(dir, file), 'utf-8');
+      const content = await readFile(sourcePath, 'utf-8');
       name = matter(content).data?.name;
     } catch {
       continue; // Unreadable or unparsable — leave it alone.
@@ -806,21 +876,23 @@ export async function dedupeAgentFilesByName(
     if (typeof name !== 'string' || name.length === 0) continue;
 
     const group = groups.get(name) ?? { plainMdFiles: [] };
-    if (file.endsWith('.agent.md')) {
-      group.agentMdFile = file;
+    if (fileName.endsWith('.agent.md')) {
+      group.agentMdFile = fileName;
     } else {
-      group.plainMdFiles.push(file);
+      group.plainMdFiles.push(fileName);
     }
     groups.set(name, group);
   }
 
+  const dir = join(workspacePath, agentsPath);
   const records: AgentDedupeRecord[] = [];
   for (const [name, group] of groups) {
     if (!group.agentMdFile || group.plainMdFiles.length === 0) continue;
 
     for (const file of group.plainMdFiles) {
-      if (!dryRun) {
-        await unlink(join(dir, file));
+      const destPath = join(dir, file);
+      if (!dryRun && existsSync(destPath)) {
+        await unlink(destPath);
       }
       records.push({
         name,

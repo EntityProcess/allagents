@@ -41,6 +41,7 @@ import {
   findRelocatedGitHubHooks,
   dedupeAgentFilesByName,
   type AgentDedupeRecord,
+  type AgentDedupeSource,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
 import {
@@ -1920,24 +1921,51 @@ async function syncVscodeWorkspaceFile(
  * clients — copilot and vscode commonly resolve to the same `.github/agents/`
  * directory after resolveClientMappings, so dedupe that directory once rather
  * than once per client sharing it. Emits one sync message per file removed.
+ *
+ * Only plugins that actually file-copy to a client sharing that agentsPath
+ * this sync contribute candidate agent files — see dedupeAgentFilesByName
+ * and AgentDedupeSource for why that matters (never touch a file this tool
+ * didn't ship).
  */
 async function dedupeAgentFilesForClients(
   basePath: string,
   syncClients: ClientType[],
   resolvedMappings: Record<ClientType, ClientMapping>,
+  validPlugins: ValidatedPlugin[],
   dryRun: boolean,
   messages: string[],
 ): Promise<AgentDedupeRecord[]> {
-  const seenAgentsPaths = new Set<string>();
-  const records: AgentDedupeRecord[] = [];
-
+  const clientsByAgentsPath = new Map<string, ClientType[]>();
   for (const client of syncClients) {
     const agentsPath = resolvedMappings[client]?.agentsPath;
-    if (!agentsPath || seenAgentsPaths.has(agentsPath)) continue;
-    seenAgentsPaths.add(agentsPath);
+    if (!agentsPath) continue;
+    const group = clientsByAgentsPath.get(agentsPath) ?? [];
+    group.push(client);
+    clientsByAgentsPath.set(agentsPath, group);
+  }
+
+  const records: AgentDedupeRecord[] = [];
+
+  for (const [agentsPath, clientsInGroup] of clientsByAgentsPath) {
+    const sourcesByPluginPath = new Map<string, AgentDedupeSource>();
+    for (const plugin of validPlugins) {
+      if (!plugin.success) continue;
+      if (!plugin.clients.some((c) => clientsInGroup.includes(c))) continue;
+      sourcesByPluginPath.set(plugin.resolved, {
+        pluginPath: plugin.resolved,
+        ...(plugin.exclude && { exclude: plugin.exclude }),
+        ...(plugin.fileArtifacts && { fileArtifacts: plugin.fileArtifacts }),
+      });
+    }
+    if (sourcesByPluginPath.size === 0) continue;
 
     records.push(
-      ...(await dedupeAgentFilesByName(basePath, agentsPath, { dryRun })),
+      ...(await dedupeAgentFilesByName(
+        basePath,
+        agentsPath,
+        [...sourcesByPluginPath.values()],
+        { dryRun },
+      )),
     );
   }
 
@@ -2504,6 +2532,7 @@ export async function syncWorkspace(
     workspacePath,
     syncClients,
     resolvedMappings,
+    validPlugins,
     dryRun,
     messages,
   );
@@ -2928,6 +2957,7 @@ export async function syncUserWorkspace(
     homeDir,
     syncClients,
     resolvedUserMappings,
+    validPlugins,
     dryRun,
     messages,
   );
