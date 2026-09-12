@@ -76,6 +76,43 @@ describe('computeDeletedArtifacts', () => {
     expect(result).toEqual([{ client: 'copilot', type: 'agent', name: 'reviewer' }]);
   });
 
+  it('normalizes the GitHub .agent.md suffix in deleted agent names', () => {
+    const previousState = makeState({
+      copilot: ['.github/agents/reviewer.agent.md'],
+    });
+
+    expect(
+      computeDeletedArtifacts(
+        previousState,
+        { copilot: [] },
+        ['copilot'],
+        CLIENT_MAPPINGS,
+      ),
+    ).toEqual([{ client: 'copilot', type: 'agent', name: 'reviewer' }]);
+  });
+
+  it('treats a successful dedupe replacement as the same agent representation', () => {
+    const previousState = makeState({
+      copilot: ['.github/agents/reviewer.md'],
+    });
+    const replacement = {
+      name: 'reviewer',
+      removedPath: '.github/agents/reviewer.md',
+      keptPath: '.github/agents/reviewer.agent.md',
+    };
+
+    expect(
+      computeDeletedArtifacts(
+        previousState,
+        { copilot: ['.github/agents/reviewer.agent.md'] },
+        ['copilot'],
+        CLIENT_MAPPINGS,
+        undefined,
+        [replacement],
+      ),
+    ).toEqual([]);
+  });
+
   it('only reports artifacts not re-provided by new sync', () => {
     const previousState = makeState({
       claude: [

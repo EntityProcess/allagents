@@ -5,9 +5,11 @@ import {
   mkdir,
   readFile,
   readdir,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
+import matter from 'gray-matter';
 import micromatch from 'micromatch';
 import {
   type SkillsIndexRef,
@@ -17,6 +19,7 @@ import {
 import {
   CLIENT_MAPPINGS,
   isUniversalClient,
+  resolveClientMappings,
 } from '../models/client-mapping.js';
 import type { ClientMapping } from '../models/client-mapping.js';
 import type { MarketplaceFileArtifacts } from '../models/marketplace-manifest.js';
@@ -82,7 +85,7 @@ export async function ensureWorkspaceRules(
 export interface CopyResult {
   source: string;
   destination: string;
-  action: 'copied' | 'skipped' | 'failed' | 'generated';
+  action: 'copied' | 'deduped' | 'skipped' | 'failed' | 'generated';
   error?: string;
 }
 
@@ -737,6 +740,391 @@ export async function copyAgents(
   return Promise.all(copyPromises);
 }
 
+export type AgentOutputRoute = 'portable' | 'github';
+
+/**
+ * One immutable copy decision for an agent file. The destination and logical
+ * ownership recorded here are reused by copying, dedupe, warnings, and state.
+ */
+export interface AgentOutput {
+  readonly configurationIndex: number;
+  readonly plugin: string;
+  readonly pluginPath: string;
+  readonly source: string;
+  readonly destination: string;
+  readonly workspaceRelativeDestination: string;
+  readonly route: AgentOutputRoute;
+  readonly logicalName?: string;
+  readonly clients: readonly ClientType[];
+}
+
+export interface AgentOutputConflict {
+  readonly reason: 'destination' | 'logical-name';
+  readonly winner: AgentOutput;
+  readonly loser: AgentOutput;
+}
+
+export interface AgentOutputFailure {
+  readonly configurationIndex: number;
+  readonly plugin: string;
+  readonly source: string;
+  readonly destination: string;
+  readonly error: string;
+}
+
+export interface AgentOutputPlan {
+  readonly outputs: readonly AgentOutput[];
+  readonly conflicts: readonly AgentOutputConflict[];
+  readonly failures: readonly AgentOutputFailure[];
+}
+
+export interface AgentOutputPlugin {
+  readonly configurationIndex: number;
+  readonly plugin: string;
+  readonly pluginPath: string;
+  readonly clients: readonly ClientType[];
+  readonly exclude?: string[];
+  readonly fileArtifacts?: MarketplaceFileArtifacts;
+}
+
+/**
+ * One agent representation removed after both planned representations copied
+ * successfully.
+ */
+export interface AgentDedupeRecord {
+  name: string;
+  removedPath: string;
+  keptPath: string;
+}
+
+function workspaceRelativePath(
+  workspacePath: string,
+  destination: string,
+): string {
+  return relative(workspacePath, destination).replaceAll('\\', '/');
+}
+
+async function readAgentLogicalName(
+  source: string,
+  cache: Map<string, string | undefined>,
+): Promise<string | undefined> {
+  if (cache.has(source)) return cache.get(source);
+
+  let name: string | undefined;
+  try {
+    const parsed = matter(await readFile(source, 'utf-8')).data?.name;
+    if (typeof parsed === 'string' && parsed.length > 0) name = parsed;
+  } catch {
+    // An unreadable name cannot participate in logical-name ownership.
+  }
+  cache.set(source, name);
+  return name;
+}
+
+function mergeAgentOutputConsumer(
+  candidates: Map<string, AgentOutput>,
+  candidate: AgentOutput,
+): void {
+  const key = `${candidate.route}\0${candidate.source}\0${candidate.destination}`;
+  const existing = candidates.get(key);
+  if (existing) {
+    const additionalClients = candidate.clients.filter(
+      (client) => !existing.clients.includes(client),
+    );
+    if (additionalClients.length > 0) {
+      candidates.set(key, {
+        ...existing,
+        clients: [...existing.clients, ...additionalClients],
+      });
+    }
+    return;
+  }
+  candidates.set(key, candidate);
+}
+
+async function readAgentSourceEntries(
+  sourceDir: string,
+): Promise<{ files: Dirent[]; error?: string }> {
+  if (!existsSync(sourceDir)) return { files: [] };
+  try {
+    return {
+      files: (await readdir(sourceDir, { withFileTypes: true }))
+        .filter((entry) => !entry.isDirectory() && entry.name.endsWith('.md'))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  } catch (error) {
+    return {
+      files: [],
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Discover agent sources once and choose their owners before plugin copying
+ * starts. Plugins are considered in configuration order; an earlier valid
+ * plugin owns both exact destinations and logical names within a physical
+ * agents directory. Within one plugin, a GitHub-route source owns an exact
+ * destination over its portable counterpart.
+ */
+export async function planAgentOutputs(
+  plugins: readonly AgentOutputPlugin[],
+  workspacePath: string,
+  clientMappings: Record<string, ClientMapping> = CLIENT_MAPPINGS,
+): Promise<AgentOutputPlan> {
+  const outputs: AgentOutput[] = [];
+  const conflicts: AgentOutputConflict[] = [];
+  const failures: AgentOutputFailure[] = [];
+  const destinationOwners = new Map<string, AgentOutput>();
+  const logicalNameOwners = new Map<string, AgentOutput>();
+  const logicalNames = new Map<string, string | undefined>();
+
+  const orderedPlugins = plugins
+    .map((plugin, order) => ({ plugin, order }))
+    .sort(
+      (a, b) =>
+        a.plugin.configurationIndex - b.plugin.configurationIndex ||
+        a.order - b.order,
+    );
+
+  for (const { plugin } of orderedPlugins) {
+    const resolvedPluginMappings = resolveClientMappings(
+      [...plugin.clients],
+      clientMappings,
+    );
+    const candidates = new Map<string, AgentOutput>();
+    const includePortable = plugin.fileArtifacts?.agents ?? true;
+    const includeGithub = plugin.fileArtifacts?.github ?? true;
+
+    const portableDestination = plugin.clients
+      .map((client) => resolvedPluginMappings[client]?.agentsPath)
+      .find((path): path is string => path !== undefined);
+    if (includePortable && portableDestination) {
+      const sourceDir = join(plugin.pluginPath, 'agents');
+      const sourceEntries = await readAgentSourceEntries(sourceDir);
+      if (sourceEntries.error) {
+        failures.push({
+          configurationIndex: plugin.configurationIndex,
+          plugin: plugin.plugin,
+          source: sourceDir,
+          destination: join(workspacePath, portableDestination),
+          error: sourceEntries.error,
+        });
+      }
+      for (const entry of sourceEntries.files) {
+        const source = join(sourceDir, entry.name);
+        if (isExcluded(plugin.pluginPath, source, plugin.exclude)) continue;
+        const logicalName = await readAgentLogicalName(source, logicalNames);
+        for (const client of plugin.clients) {
+          const agentsPath = resolvedPluginMappings[client]?.agentsPath;
+          if (!agentsPath) continue;
+          const destination = join(workspacePath, agentsPath, entry.name);
+          mergeAgentOutputConsumer(candidates, {
+            configurationIndex: plugin.configurationIndex,
+            plugin: plugin.plugin,
+            pluginPath: plugin.pluginPath,
+            source,
+            destination,
+            workspaceRelativeDestination: workspaceRelativePath(
+              workspacePath,
+              destination,
+            ),
+            route: 'portable',
+            ...(logicalName && { logicalName }),
+            clients: [client],
+          });
+        }
+      }
+    }
+
+    const githubDestination = plugin.clients
+      .map((client) => resolvedPluginMappings[client]?.githubPath)
+      .find((path): path is string => path !== undefined);
+    if (includeGithub && githubDestination) {
+      const sourceDir = join(plugin.pluginPath, '.github', 'agents');
+      const sourceEntries = await readAgentSourceEntries(sourceDir);
+      if (sourceEntries.error) {
+        failures.push({
+          configurationIndex: plugin.configurationIndex,
+          plugin: plugin.plugin,
+          source: sourceDir,
+          destination: join(workspacePath, githubDestination, 'agents'),
+          error: sourceEntries.error,
+        });
+      }
+      for (const entry of sourceEntries.files) {
+        const source = join(sourceDir, entry.name);
+        if (isExcluded(plugin.pluginPath, source, plugin.exclude)) continue;
+        const logicalName = await readAgentLogicalName(source, logicalNames);
+        for (const client of plugin.clients) {
+          const githubPath = resolvedPluginMappings[client]?.githubPath;
+          if (!githubPath) continue;
+          const destination = join(
+            workspacePath,
+            githubPath,
+            'agents',
+            entry.name,
+          );
+          mergeAgentOutputConsumer(candidates, {
+            configurationIndex: plugin.configurationIndex,
+            plugin: plugin.plugin,
+            pluginPath: plugin.pluginPath,
+            source,
+            destination,
+            workspaceRelativeDestination: workspaceRelativePath(
+              workspacePath,
+              destination,
+            ),
+            route: 'github',
+            ...(logicalName && { logicalName }),
+            clients: [client],
+          });
+        }
+      }
+    }
+
+    const candidatesByDestination = new Map<string, AgentOutput[]>();
+    for (const candidate of candidates.values()) {
+      const grouped = candidatesByDestination.get(candidate.destination) ?? [];
+      grouped.push(candidate);
+      candidatesByDestination.set(candidate.destination, grouped);
+    }
+
+    const pluginWinners: AgentOutput[] = [];
+    for (const sameDestination of candidatesByDestination.values()) {
+      const preferred =
+        sameDestination.find((candidate) => candidate.route === 'github') ??
+        sameDestination[0];
+      if (!preferred) continue;
+      const consumingClients = [
+        ...new Set(sameDestination.flatMap((candidate) => candidate.clients)),
+      ];
+      const winner: AgentOutput = {
+        ...preferred,
+        clients: consumingClients,
+      };
+      pluginWinners.push(winner);
+      for (const loser of sameDestination) {
+        if (loser !== preferred) {
+          conflicts.push({ reason: 'destination', winner, loser });
+        }
+      }
+    }
+
+    for (const candidate of pluginWinners) {
+      const destinationWinner = destinationOwners.get(candidate.destination);
+      const logicalKey = candidate.logicalName
+        ? `${dirname(candidate.destination)}\0${candidate.logicalName}`
+        : undefined;
+      const logicalWinner = logicalKey
+        ? logicalNameOwners.get(logicalKey)
+        : undefined;
+      const destinationConflict =
+        destinationWinner &&
+        destinationWinner.configurationIndex !== candidate.configurationIndex
+          ? destinationWinner
+          : undefined;
+      const logicalConflict =
+        logicalWinner &&
+        logicalWinner.configurationIndex !== candidate.configurationIndex
+          ? logicalWinner
+          : undefined;
+      const winner = destinationConflict ?? logicalConflict;
+
+      if (winner) {
+        conflicts.push({
+          reason: destinationWinner === winner ? 'destination' : 'logical-name',
+          winner,
+          loser: candidate,
+        });
+        continue;
+      }
+
+      outputs.push(candidate);
+      if (!destinationWinner) {
+        destinationOwners.set(candidate.destination, candidate);
+      }
+      if (logicalKey && !logicalWinner) {
+        logicalNameOwners.set(logicalKey, candidate);
+      }
+    }
+  }
+
+  return { outputs, conflicts, failures };
+}
+
+/**
+ * Collapse a same-plugin portable/GitHub pair only when both exact planned
+ * copies succeeded. No source or destination discovery occurs here.
+ */
+export async function dedupeAgentFilesByName(
+  plan: AgentOutputPlan,
+  copyResults: readonly CopyResult[],
+  options: { dryRun?: boolean; onWarning?: (warning: string) => void } = {},
+): Promise<AgentDedupeRecord[]> {
+  const copiedOutputs = new Map(
+    copyResults
+      .filter((result) => result.action === 'copied')
+      .map((result) => [`${result.source}\0${result.destination}`, result]),
+  );
+  const groups = new Map<
+    string,
+    { portable: AgentOutput[]; github: AgentOutput[] }
+  >();
+  for (const output of plan.outputs) {
+    if (!output.logicalName) continue;
+    const key = `${dirname(output.destination)}\0${output.logicalName}`;
+    const group = groups.get(key) ?? { portable: [], github: [] };
+    group[output.route].push(output);
+    groups.set(key, group);
+  }
+
+  const records: AgentDedupeRecord[] = [];
+  for (const group of groups.values()) {
+    const github = group.github.find(
+      (output) =>
+        output.destination.endsWith('.agent.md') &&
+        copiedOutputs.has(`${output.source}\0${output.destination}`),
+    );
+    if (!github) continue;
+
+    for (const portable of group.portable) {
+      const name = portable.logicalName;
+      const portableResult = copiedOutputs.get(
+        `${portable.source}\0${portable.destination}`,
+      );
+      if (portable.destination.endsWith('.agent.md')) continue;
+      if (
+        !name ||
+        portable.configurationIndex !== github.configurationIndex ||
+        !portableResult
+      ) {
+        continue;
+      }
+      if (!options.dryRun) {
+        try {
+          await unlink(portable.destination);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : 'Unknown error';
+          options.onWarning?.(
+            `Could not dedupe agent '${name}': failed to remove ${portable.workspaceRelativeDestination}: ${message}`,
+          );
+          continue;
+        }
+      }
+      portableResult.action = 'deduped';
+      records.push({
+        name,
+        removedPath: portable.workspaceRelativeDestination,
+        keptPath: github.workspaceRelativeDestination,
+      });
+    }
+  }
+
+  return records;
+}
+
 /**
  * Options for copying GitHub content
  */
@@ -746,6 +1134,11 @@ export interface GitHubCopyOptions extends CopyOptions {
    * Used when skills are renamed due to conflicts, so links can be adjusted accordingly.
    */
   skillNameMap?: Map<string, string>;
+  /**
+   * Preselected GitHub-route agent files. When omitted, this direct caller gets
+   * a one-plugin plan so aggregate GitHub copying still cannot bypass planning.
+   */
+  agentOutputs?: readonly AgentOutput[];
 }
 
 function relocatesGitHubContent(mapping: ClientMapping): boolean {
@@ -757,6 +1150,9 @@ function githubContentExcludes(
   exclude?: string[],
 ): string[] | undefined {
   const effectiveExclude = [...(exclude ?? [])];
+  // Top-level Markdown definitions use the per-file ownership plan. Nested
+  // files and companion assets retain the aggregate copy behavior.
+  effectiveExclude.push('.github/agents/*.md', '.github/agents/.*.md');
 
   // Copilot plugin package metadata is used to discover a native plugin, but
   // it has no runtime role after file-mode content is overlaid into a project.
@@ -863,6 +1259,17 @@ export async function findRelocatedGitHubHooks(
  * Recursively process a directory, copying files and adjusting links in markdown.
  * Single-pass approach: read source → transform if markdown → write to dest.
  */
+function isMalformedGitHubAgentsEntry(
+  pluginPath: string,
+  sourcePath: string,
+  entry: Dirent,
+): boolean {
+  return (
+    !entry.isDirectory() &&
+    relative(pluginPath, sourcePath).replaceAll('\\', '/') === '.github/agents'
+  );
+}
+
 async function copyAndAdjustDirectory(
   sourceDir: string,
   destDir: string,
@@ -878,6 +1285,7 @@ async function copyAndAdjustDirectory(
   for (const entry of entries) {
     const sourcePath = join(sourceDir, entry.name);
     const destPath = join(destDir, entry.name);
+    if (isMalformedGitHubAgentsEntry(pluginPath, sourcePath, entry)) continue;
 
     if (isExcluded(pluginPath, sourcePath, exclude)) {
       continue;
@@ -917,15 +1325,82 @@ async function copyAndAdjustDirectory(
   }
 }
 
+async function hasIncludedFiles(
+  sourceDir: string,
+  pluginPath: string,
+  exclude?: string[],
+): Promise<boolean> {
+  for (const entry of await readdir(sourceDir, { withFileTypes: true })) {
+    const sourcePath = join(sourceDir, entry.name);
+    if (isMalformedGitHubAgentsEntry(pluginPath, sourcePath, entry)) continue;
+    if (isExcluded(pluginPath, sourcePath, exclude)) continue;
+    if (!entry.isDirectory()) return true;
+    if (await hasIncludedFiles(sourcePath, pluginPath, exclude)) return true;
+  }
+  return false;
+}
+
+interface PlannedAgentCopyOptions {
+  dryRun: boolean;
+  clientMappings: Record<string, ClientMapping>;
+  skillNameMap?: Map<string, string>;
+}
+
+async function copyPlannedAgentOutputs(
+  outputs: readonly AgentOutput[],
+  options: PlannedAgentCopyOptions,
+): Promise<CopyResult[]> {
+  return Promise.all(
+    outputs.map(async (output): Promise<CopyResult> => {
+      if (options.dryRun) {
+        return {
+          source: output.source,
+          destination: output.destination,
+          action: 'copied',
+        };
+      }
+
+      try {
+        await mkdir(dirname(output.destination), { recursive: true });
+        let content = await readFile(output.source, 'utf-8');
+        if (output.route === 'github') {
+          const sourceRelativeToGithub = relative(
+            join(output.pluginPath, '.github'),
+            output.source,
+          ).replaceAll('\\', '/');
+          const firstClient = output.clients[0];
+          const skillsPath = firstClient
+            ? (options.clientMappings[firstClient]?.skillsPath ?? '')
+            : '';
+          content = adjustLinksInContent(content, sourceRelativeToGithub, {
+            ...(options.skillNameMap && {
+              skillNameMap: options.skillNameMap,
+            }),
+            workspaceSkillsPath: skillsPath,
+          });
+        }
+        await writeFile(output.destination, content, 'utf-8');
+        return {
+          source: output.source,
+          destination: output.destination,
+          action: 'copied',
+        };
+      } catch (error) {
+        return {
+          source: output.source,
+          destination: output.destination,
+          action: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    }),
+  );
+}
+
 /**
- * Copy GitHub-specific content from plugin to workspace
- * This includes prompts (.github/prompts/), copilot-instructions.md, and other GitHub Copilot files.
- * Adjusts relative links in markdown files to point to correct workspace locations.
- * @param pluginPath - Path to plugin directory
- * @param workspacePath - Path to workspace directory
- * @param client - Target client type
- * @param options - Copy options (dryRun, skillNameMap)
- * @returns Array of copy results
+ * Copy GitHub-specific content from plugin to workspace. Agent files always
+ * use the immutable per-file ownership plan and are excluded from aggregate
+ * traversal.
  */
 export async function copyGitHubContent(
   pluginPath: string,
@@ -935,46 +1410,52 @@ export async function copyGitHubContent(
 ): Promise<CopyResult[]> {
   const { dryRun = false, skillNameMap } = options;
   const mapping = getMapping(client, options);
+  const mappings = options.clientMappings ?? CLIENT_MAPPINGS;
   const results: CopyResult[] = [];
-
-  // Skip if client doesn't support GitHub content
   if (!mapping.githubPath) {
-    return results;
+    return options.agentOutputs
+      ? copyPlannedAgentOutputs(options.agentOutputs, {
+          dryRun,
+          clientMappings: mappings,
+          ...(skillNameMap && { skillNameMap }),
+        })
+      : results;
   }
 
   const sourceDir = join(pluginPath, '.github');
-  if (!existsSync(sourceDir)) {
-    return results;
+  if (!existsSync(sourceDir)) return results;
+
+  let agentOutputs = options.agentOutputs;
+  let planningFailures: readonly AgentOutputFailure[] = [];
+  if (agentOutputs === undefined) {
+    const directPlan = await planAgentOutputs(
+      [
+        {
+          configurationIndex: 0,
+          plugin: basename(pluginPath),
+          pluginPath,
+          clients: [client],
+          ...(options.exclude && { exclude: options.exclude }),
+        },
+      ],
+      workspacePath,
+      mappings,
+    );
+    agentOutputs = directPlan.outputs.filter(
+      (output) => output.route === 'github',
+    );
+    planningFailures = directPlan.failures;
   }
 
   const destDir = join(workspacePath, mapping.githubPath);
   const effectiveExclude = githubContentExcludes(mapping, options.exclude);
-
-  if (dryRun) {
-    results.push({ source: sourceDir, destination: destDir, action: 'copied' });
-    return results;
-  }
-
+  let hasAggregateContent = false;
   try {
-    // Single-pass: copy files and adjust markdown links in one traversal
-    if (
-      mapping.skillsPath ||
-      (effectiveExclude && effectiveExclude.length > 0)
-    ) {
-      await copyAndAdjustDirectory(
-        sourceDir,
-        destDir,
-        sourceDir,
-        pluginPath,
-        mapping.skillsPath ?? '',
-        skillNameMap,
-        effectiveExclude,
-      );
-    } else {
-      // No skills path and no excludes - just copy without adjustment
-      await cp(sourceDir, destDir, { recursive: true });
-    }
-    results.push({ source: sourceDir, destination: destDir, action: 'copied' });
+    hasAggregateContent = await hasIncludedFiles(
+      sourceDir,
+      pluginPath,
+      effectiveExclude,
+    );
   } catch (error) {
     results.push({
       source: sourceDir,
@@ -983,7 +1464,55 @@ export async function copyGitHubContent(
       error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
+  if (hasAggregateContent) {
+    if (dryRun) {
+      results.push({
+        source: sourceDir,
+        destination: destDir,
+        action: 'copied',
+      });
+    } else {
+      try {
+        await copyAndAdjustDirectory(
+          sourceDir,
+          destDir,
+          sourceDir,
+          pluginPath,
+          mapping.skillsPath,
+          skillNameMap,
+          effectiveExclude,
+        );
+        results.push({
+          source: sourceDir,
+          destination: destDir,
+          action: 'copied',
+        });
+      } catch (error) {
+        results.push({
+          source: sourceDir,
+          destination: destDir,
+          action: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+  }
 
+  results.push(
+    ...(await copyPlannedAgentOutputs(agentOutputs, {
+      dryRun,
+      clientMappings: mappings,
+      ...(skillNameMap && { skillNameMap }),
+    })),
+  );
+  results.push(
+    ...planningFailures.map((failure) => ({
+      source: failure.source,
+      destination: failure.destination,
+      action: 'failed' as const,
+      error: failure.error,
+    })),
+  );
   return results;
 }
 
@@ -1012,6 +1541,12 @@ export interface PluginCopyOptions extends CopyOptions {
    * Required when syncMode is 'symlink' and client is non-universal.
    */
   canonicalSkillsPath?: string;
+  /**
+   * Agent files already selected by a scope-level plan. Undefined creates a
+   * one-plugin plan for direct callers; an empty array intentionally copies no
+   * agent files.
+   */
+  agentOutputs?: readonly AgentOutput[];
 }
 
 /**
@@ -1034,13 +1569,37 @@ export async function copyPluginToWorkspace(
     syncMode,
     canonicalSkillsPath,
     fileArtifacts,
+    agentOutputs: providedAgentOutputs,
     ...baseOptions
   } = options;
   const shouldCopy = (artifact: keyof MarketplaceFileArtifacts): boolean =>
     fileArtifacts?.[artifact] ?? true;
+  const mappings = options.clientMappings ?? CLIENT_MAPPINGS;
 
-  // Phase 1: Copy root-level artifacts in parallel
-  const [commandResults, skillResults, hookResults, agentResults] =
+  let agentOutputs = providedAgentOutputs;
+  let directConflicts: readonly AgentOutputConflict[] = [];
+  let directFailures: readonly AgentOutputFailure[] = [];
+  if (agentOutputs === undefined) {
+    const directPlan = await planAgentOutputs(
+      [
+        {
+          configurationIndex: 0,
+          plugin: basename(pluginPath),
+          pluginPath,
+          clients: [client],
+          ...(baseOptions.exclude && { exclude: baseOptions.exclude }),
+          ...(fileArtifacts && { fileArtifacts }),
+        },
+      ],
+      workspacePath,
+      mappings,
+    );
+    agentOutputs = directPlan.outputs;
+    directConflicts = directPlan.conflicts;
+    directFailures = directPlan.failures;
+  }
+
+  const [commandResults, skillResults, hookResults, portableAgentResults] =
     await Promise.all([
       shouldCopy('commands')
         ? copyCommands(pluginPath, workspacePath, client, baseOptions)
@@ -1056,25 +1615,47 @@ export async function copyPluginToWorkspace(
       shouldCopy('hooks')
         ? copyHooks(pluginPath, workspacePath, client, baseOptions)
         : [],
-      shouldCopy('agents')
-        ? copyAgents(pluginPath, workspacePath, client, baseOptions)
-        : [],
+      copyPlannedAgentOutputs(
+        agentOutputs.filter((output) => output.route === 'portable'),
+        {
+          dryRun: baseOptions.dryRun ?? false,
+          clientMappings: mappings,
+          ...(skillNameMap && { skillNameMap }),
+        },
+      ),
     ]);
 
-  // Phase 2: Copy .github/ content — overrides root-level on name conflicts
   const githubResults = shouldCopy('github')
     ? await copyGitHubContent(pluginPath, workspacePath, client, {
         ...baseOptions,
         ...(skillNameMap && { skillNameMap }),
+        agentOutputs: agentOutputs.filter(
+          (output) => output.route === 'github',
+        ),
       })
     : [];
+  const skippedAgentResults: CopyResult[] = directConflicts.map(
+    ({ loser }) => ({
+      source: loser.source,
+      destination: loser.destination,
+      action: 'skipped',
+    }),
+  );
+  const failedAgentResults: CopyResult[] = directFailures.map((failure) => ({
+    source: failure.source,
+    destination: failure.destination,
+    action: 'failed',
+    error: failure.error,
+  }));
 
   return [
     ...commandResults,
     ...skillResults,
     ...hookResults,
-    ...agentResults,
+    ...portableAgentResults,
     ...githubResults,
+    ...skippedAgentResults,
+    ...failedAgentResults,
   ];
 }
 
