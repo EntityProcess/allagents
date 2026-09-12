@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { isAbsolute, join, parse, resolve } from 'node:path';
+import { basename, isAbsolute, join, parse, resolve } from 'node:path';
 import { getHomeDir } from '../constants.js';
 import {
   GitCloneError,
@@ -335,6 +335,26 @@ export function formatPluginSource(source: string): string {
     ? `${owner}/${repo}`
     : `${owner}/${repo}@${branch}`;
   return subpath ? `${base}/${subpath}` : base;
+}
+
+/**
+ * Derive a friendly plugin name from its source without filesystem or network
+ * access. Marketplace specs remain intact for their caller to parse.
+ */
+export function getPluginDisplayName(source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed) return source;
+  const atIndex = trimmed.lastIndexOf('@');
+  if (atIndex > 0 && !trimmed.slice(0, atIndex).includes('/')) return trimmed;
+
+  if (isGitHubUrl(trimmed)) {
+    const parsed = parseGitHubUrl(trimmed);
+    if (parsed) {
+      return parsed.subpath ? basename(parsed.subpath) : parsed.repo;
+    }
+  }
+
+  return basename(trimmed);
 }
 
 /**

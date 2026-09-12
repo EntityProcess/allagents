@@ -108,9 +108,17 @@ export const pluginListMeta: AgentCommandMeta = {
     'allagents plugin list',
   ],
   expectedOutput:
-    'Lists installed items with type (plugin or skill), marketplace, and scope. If none installed, suggests using marketplace browse.',
+    'Lists marketplace specs and friendly direct-plugin names with type, scope, clients, and a compact direct source. JSON preserves each raw spec. If none are installed, suggests marketplace browse.',
   outputSchema: {
-    plugins: [{ name: 'string', marketplace: 'string', scope: 'string', kind: 'string' }],
+    plugins: [{
+      name: 'string',
+      spec: 'string',
+      marketplace: 'string',
+      scope: 'string',
+      kind: 'string',
+      clients: 'string[] | undefined',
+      nativeClients: 'string[] | undefined',
+    }],
     total: 'number',
   },
 };

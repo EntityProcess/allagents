@@ -37,6 +37,7 @@ const {
   validatePluginSource,
   verifyGitHubUrlExists,
   formatPluginSource,
+  getPluginDisplayName,
   isFilesystemRoot,
 } = await import('../../../src/utils/plugin-path.js');
 
@@ -407,6 +408,43 @@ describe('formatPluginSource', () => {
 
   it('passes empty input through', () => {
     expect(formatPluginSource('')).toBe('');
+  });
+});
+
+describe('getPluginDisplayName', () => {
+  it('keeps marketplace specs unchanged', () => {
+    expect(getPluginDisplayName('superpowers@official')).toBe(
+      'superpowers@official',
+    );
+    expect(getPluginDisplayName('demo@acme/official')).toBe(
+      'demo@acme/official',
+    );
+    expect(getPluginDisplayName('demo@acme/official/plugins')).toBe(
+      'demo@acme/official/plugins',
+    );
+  });
+
+  it('uses the final segment for a GitHub subpath', () => {
+    expect(
+      getPluginDisplayName(
+        'https://github.com/acme/toolbox/tree/main/plugins/research',
+      ),
+    ).toBe('research');
+    expect(getPluginDisplayName('acme/toolbox/plugins/review')).toBe('review');
+  });
+
+  it('uses the repository name for a GitHub repository root', () => {
+    expect(getPluginDisplayName('https://github.com/acme/toolbox')).toBe(
+      'toolbox',
+    );
+    expect(getPluginDisplayName('acme/toolbox')).toBe('toolbox');
+  });
+
+  it('uses the basename for a local path', () => {
+    expect(getPluginDisplayName('./plugins/local-tool')).toBe('local-tool');
+    expect(getPluginDisplayName('/opt/plugins/absolute-tool')).toBe(
+      'absolute-tool',
+    );
   });
 });
 

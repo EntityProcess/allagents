@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
@@ -8,11 +8,14 @@ import type {
   PluginEntry,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
-import { getPluginSource } from '../models/workspace-config.js';
 import {
+  getEffectivePluginSource,
+  getPluginSource,
+} from '../models/workspace-config.js';
+import {
+  getPluginDisplayName,
   isFilesystemRoot,
   isGitHubUrl,
-  parseGitHubUrl,
   validatePluginSource,
   verifyGitHubUrlExists,
 } from '../utils/plugin-path.js';
@@ -799,8 +802,10 @@ export type PluginScope = 'user' | 'project';
  * Information about an installed plugin
  */
 export interface InstalledPluginInfo {
-  /** Full plugin spec (e.g., "plugin@marketplace") */
+  /** Raw plugin spec as written in workspace.yaml */
   spec: string;
+  /** Effective spec used internally for list identity and client lookup */
+  effectiveSpec: string;
   /** Plugin name */
   name: string;
   /** Marketplace name */
@@ -814,35 +819,26 @@ export interface InstalledPluginInfo {
  * Handles plugin@marketplace, GitHub URLs, and local paths.
  */
 function pluginSourceToInfo(
-  plugin: string,
+  pluginEntry: PluginEntry,
   scope: PluginScope,
 ): InstalledPluginInfo {
-  // plugin@marketplace format
-  const parsed = parsePluginSpec(plugin);
+  const spec = getPluginSource(pluginEntry);
+  const effectiveSpec = getEffectivePluginSource(pluginEntry);
+  const parsed = isPluginSpec(spec) ? parsePluginSpec(spec) : null;
   if (parsed) {
     return {
-      spec: plugin,
+      spec,
+      effectiveSpec,
       name: parsed.plugin,
       marketplace: parsed.marketplaceName,
       scope,
     };
   }
 
-  // GitHub URL format
-  if (isGitHubUrl(plugin)) {
-    const ghParsed = parseGitHubUrl(plugin);
-    return {
-      spec: plugin,
-      name: ghParsed?.repo ?? basename(plugin),
-      marketplace: '',
-      scope,
-    };
-  }
-
-  // Local path or other format
   return {
-    spec: plugin,
-    name: basename(plugin),
+    spec,
+    effectiveSpec,
+    name: getPluginDisplayName(spec),
     marketplace: '',
     scope,
   };
@@ -859,8 +855,7 @@ export async function getInstalledUserPlugins(): Promise<
 
   const result: InstalledPluginInfo[] = [];
   for (const pluginEntry of config.plugins) {
-    const plugin = getPluginSource(pluginEntry);
-    result.push(pluginSourceToInfo(plugin, 'user'));
+    result.push(pluginSourceToInfo(pluginEntry, 'user'));
   }
   return result;
 }
@@ -885,8 +880,7 @@ export async function getInstalledProjectPlugins(
 
     const result: InstalledPluginInfo[] = [];
     for (const pluginEntry of config.plugins) {
-      const plugin = getPluginSource(pluginEntry);
-      result.push(pluginSourceToInfo(plugin, 'project'));
+      result.push(pluginSourceToInfo(pluginEntry, 'project'));
     }
     return result;
   } catch {
