@@ -40,8 +40,12 @@ import {
   type CopyResult,
   findRelocatedGitHubHooks,
   dedupeAgentFilesByName,
+  planAgentOutputs,
   type AgentDedupeRecord,
-  type AgentDedupeSource,
+  type AgentOutput,
+  type AgentOutputConflict,
+  type AgentOutputFailure,
+  type AgentOutputPlan,
 } from './transform.js';
 import { updateAgentFiles } from './workspace-repo.js';
 import {
@@ -333,6 +337,8 @@ export interface SyncOptions {
  * Result of validating a plugin (resolving its path without copying)
  */
 export interface ValidatedPlugin {
+  /** Zero-based position of this plugin in the configured plugin list. */
+  configurationIndex?: number;
   plugin: string;
   resolved: string;
   success: boolean;
@@ -355,6 +361,8 @@ export interface ValidatedPlugin {
 }
 
 export interface PluginSyncPlan {
+  /** Zero-based position of this plugin in the configured plugin list. */
+  configurationIndex: number;
   source: string;
   clients: ClientType[];
   /** Clients that should use native install for this plugin */
@@ -1007,10 +1015,9 @@ export function collectSyncedPaths(
     }
   }
 
-  // Reconcile agent files collapsed by dedupeAgentFilesByName. The .md twin
-  // it removed was reported as 'copied' above (the copy happened before
-  // dedup ran), so drop it from tracking and track the .agent.md survivor
-  // instead — it's the one now on disk representing this agent.
+  // A dedupe record is proof that both exact copies succeeded and the
+  // portable representation was removed. The preferred GitHub path is already
+  // tracked by its own CopyResult; never synthesize ownership here.
   if (agentDedupeRecords && agentDedupeRecords.length > 0) {
     for (const client of clients) {
       const mapping = mappings[client];
@@ -1022,7 +1029,6 @@ export function collectSyncedPaths(
         if (!record.removedPath.startsWith(mapping.agentsPath)) continue;
         const removedIndex = tracked.indexOf(record.removedPath);
         if (removedIndex !== -1) tracked.splice(removedIndex, 1);
-        if (!tracked.includes(record.keptPath)) tracked.push(record.keptPath);
       }
     }
   }
@@ -1069,7 +1075,11 @@ function classifyDeletedPath(
     const rest = path.slice(mapping.agentsPath.length);
     const topLevel = rest.split('/')[0];
     if (!topLevel) return null;
-    return { client, type: 'agent', name: topLevel.replace(/\.md$/i, '') };
+    return {
+      client,
+      type: 'agent',
+      name: topLevel.replace(/(?:\.agent)?\.md$/i, ''),
+    };
   }
 
   return null;
@@ -1091,11 +1101,15 @@ export function computeDeletedArtifacts(
   clients: ClientType[],
   clientMappings: Record<string, ClientMapping>,
   availableSkillNames?: Set<string>,
+  agentDedupeRecords: AgentDedupeRecord[] = [],
 ): DeletedArtifact[] {
   if (!previousState) return [];
 
   const deleted: DeletedArtifact[] = [];
   const seen = new Set<string>();
+  const representationAliases = new Map(
+    agentDedupeRecords.map((record) => [record.removedPath, record.keptPath]),
+  );
 
   for (const client of clients) {
     const oldPaths = previousState.files[client] ?? [];
@@ -1104,7 +1118,13 @@ export function computeDeletedArtifacts(
     if (!mapping) continue;
 
     for (const path of oldPaths) {
-      if (newPaths.has(path)) continue;
+      const replacement = representationAliases.get(path);
+      if (
+        newPaths.has(path) ||
+        (replacement !== undefined && newPaths.has(replacement))
+      ) {
+        continue;
+      }
 
       const artifact = classifyDeletedPath(path, client, mapping);
       if (!artifact) continue;
@@ -1271,7 +1291,7 @@ export function buildPluginSyncPlans(
   const warnings: string[] = [];
   const workspaceClientTypes = getClientTypes(clientEntries);
 
-  const plans = plugins.map((plugin) => {
+  const plans = plugins.map((plugin, configurationIndex) => {
     const source = getEffectivePluginSource(plugin);
     const pluginClientTypes = getPluginClients(plugin) ?? workspaceClientTypes;
 
@@ -1315,6 +1335,7 @@ export function buildPluginSyncPlans(
     const pluginSkillsConfig =
       typeof plugin === 'string' ? undefined : plugin.skills;
     return {
+      configurationIndex,
       source,
       clients: fileClients,
       nativeClients,
@@ -1341,6 +1362,7 @@ export async function validateAllPlugins(
   return Promise.all(
     plans.map(
       async ({
+        configurationIndex,
         source,
         clients,
         nativeClients,
@@ -1350,6 +1372,7 @@ export async function validateAllPlugins(
         const validated = await validatePlugin(source, workspacePath, offline);
         const result: ValidatedPlugin = {
           ...validated,
+          configurationIndex,
           clients,
           nativeClients,
         };
@@ -1390,8 +1413,12 @@ async function copyValidatedPlugin(
   skillNameMap?: Map<string, string>,
   clientMappings?: Record<string, ClientMapping>,
   syncMode: SyncMode = 'symlink',
+  agentOutputs: readonly AgentOutput[] = [],
+  agentConflicts: readonly AgentOutputConflict[] = [],
+  agentFailures: readonly AgentOutputFailure[] = [],
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
+  let agentOutputsAssigned = false;
   const mappings = resolveClientMappings(
     clients,
     clientMappings ?? CLIENT_MAPPINGS,
@@ -1425,12 +1452,14 @@ async function copyValidatedPlugin(
             ...(skillNameMap && { skillNameMap }),
             clientMappings: mappings,
             syncMode: 'copy',
+            agentOutputs: agentOutputsAssigned ? [] : agentOutputs,
             ...(exclude && { exclude }),
             ...(validatedPlugin.fileArtifacts && {
               fileArtifacts: validatedPlugin.fileArtifacts,
             }),
           },
         );
+        agentOutputsAssigned = true;
         copyResults.push(...results);
       } else {
         // Non-universal client: create symlinks to canonical
@@ -1444,12 +1473,14 @@ async function copyValidatedPlugin(
             clientMappings: mappings,
             syncMode: 'symlink',
             canonicalSkillsPath: CANONICAL_SKILLS_PATH,
+            agentOutputs: agentOutputsAssigned ? [] : agentOutputs,
             ...(exclude && { exclude }),
             ...(validatedPlugin.fileArtifacts && {
               fileArtifacts: validatedPlugin.fileArtifacts,
             }),
           },
         );
+        agentOutputsAssigned = true;
         copyResults.push(...results);
       }
     }
@@ -1470,14 +1501,31 @@ async function copyValidatedPlugin(
           ...(skillNameMap && { skillNameMap }),
           clientMappings: mappings,
           syncMode: 'copy',
+          agentOutputs: agentOutputsAssigned ? [] : agentOutputs,
           ...(exclude && { exclude }),
           ...(validatedPlugin.fileArtifacts && {
             fileArtifacts: validatedPlugin.fileArtifacts,
           }),
         },
       );
+      agentOutputsAssigned = true;
       copyResults.push(...results);
     }
+  }
+  for (const { loser } of agentConflicts) {
+    copyResults.push({
+      source: loser.source,
+      destination: loser.destination,
+      action: 'skipped',
+    });
+  }
+  for (const failure of agentFailures) {
+    copyResults.push({
+      source: failure.source,
+      destination: failure.destination,
+      action: 'failed',
+      error: failure.error,
+    });
   }
 
   const hasFailures = copyResults.some((r) => r.action === 'failed');
@@ -1910,71 +1958,91 @@ async function syncVscodeWorkspaceFile(
   return { config: updatedConfig, hash, repos };
 }
 
-/**
- * Build the `sources` block for sync-state from validated plugins. Each
- * GitHub-shaped source contributes one entry keyed by `owner/repo` (without
- * the `@<ref>` suffix). Local plugins and marketplace specs are skipped since
- * they have no remote ref to record.
- */
-/**
- * Run dedupeAgentFilesByName once per distinct agentsPath among the given
- * clients — copilot and vscode commonly resolve to the same `.github/agents/`
- * directory after resolveClientMappings, so dedupe that directory once rather
- * than once per client sharing it. Emits one sync message per file removed.
- *
- * Only plugins that actually file-copy to a client sharing that agentsPath
- * this sync contribute candidate agent files — see dedupeAgentFilesByName
- * and AgentDedupeSource for why that matters (never touch a file this tool
- * didn't ship).
- */
-async function dedupeAgentFilesForClients(
-  basePath: string,
-  syncClients: ClientType[],
-  resolvedMappings: Record<ClientType, ClientMapping>,
+async function planValidatedPluginAgentOutputs(
   validPlugins: ValidatedPlugin[],
-  dryRun: boolean,
-  messages: string[],
-): Promise<AgentDedupeRecord[]> {
-  const clientsByAgentsPath = new Map<string, ClientType[]>();
-  for (const client of syncClients) {
-    const agentsPath = resolvedMappings[client]?.agentsPath;
-    if (!agentsPath) continue;
-    const group = clientsByAgentsPath.get(agentsPath) ?? [];
-    group.push(client);
-    clientsByAgentsPath.set(agentsPath, group);
-  }
+  basePath: string,
+  mappings: Record<string, ClientMapping>,
+): Promise<AgentOutputPlan> {
+  return planAgentOutputs(
+    validPlugins.map((plugin, validIndex) => ({
+      configurationIndex: plugin.configurationIndex ?? validIndex,
+      plugin: plugin.plugin,
+      pluginPath: plugin.resolved,
+      clients: plugin.clients,
+      ...(plugin.exclude && { exclude: plugin.exclude }),
+      ...(plugin.fileArtifacts && { fileArtifacts: plugin.fileArtifacts }),
+    })),
+    basePath,
+    mappings,
+  );
+}
 
-  const records: AgentDedupeRecord[] = [];
-
-  for (const [agentsPath, clientsInGroup] of clientsByAgentsPath) {
-    const sourcesByPluginPath = new Map<string, AgentDedupeSource>();
-    for (const plugin of validPlugins) {
-      if (!plugin.success) continue;
-      if (!plugin.clients.some((c) => clientsInGroup.includes(c))) continue;
-      sourcesByPluginPath.set(plugin.resolved, {
-        pluginPath: plugin.resolved,
-        ...(plugin.exclude && { exclude: plugin.exclude }),
-        ...(plugin.fileArtifacts && { fileArtifacts: plugin.fileArtifacts }),
-      });
+function appendAgentOutputConflictWarnings(
+  plan: AgentOutputPlan,
+  warnings: string[],
+): void {
+  for (const conflict of plan.conflicts) {
+    if (
+      conflict.winner.configurationIndex === conflict.loser.configurationIndex
+    ) {
+      continue;
     }
-    if (sourcesByPluginPath.size === 0) continue;
-
-    records.push(
-      ...(await dedupeAgentFilesByName(
-        basePath,
-        agentsPath,
-        [...sourcesByPluginPath.values()],
-        { dryRun },
-      )),
+    const subject =
+      conflict.reason === 'logical-name' && conflict.loser.logicalName
+        ? `logical agent '${conflict.loser.logicalName}' at ${conflict.loser.workspaceRelativeDestination}`
+        : `agent output '${conflict.loser.workspaceRelativeDestination}'`;
+    warnings.push(
+      `${conflict.loser.plugin}: skipped ${subject}; first configured provider ${conflict.winner.plugin} owns it`,
     );
   }
+}
 
+function indexAgentOutputPlan(plan: AgentOutputPlan): {
+  outputs: Map<number, AgentOutput[]>;
+  conflicts: Map<number, AgentOutputConflict[]>;
+  failures: Map<number, AgentOutputFailure[]>;
+} {
+  const outputs = new Map<number, AgentOutput[]>();
+  const conflicts = new Map<number, AgentOutputConflict[]>();
+  const failures = new Map<number, AgentOutputFailure[]>();
+  for (const output of plan.outputs) {
+    const owned = outputs.get(output.configurationIndex) ?? [];
+    owned.push(output);
+    outputs.set(output.configurationIndex, owned);
+  }
+  for (const conflict of plan.conflicts) {
+    const lost = conflicts.get(conflict.loser.configurationIndex) ?? [];
+    lost.push(conflict);
+    conflicts.set(conflict.loser.configurationIndex, lost);
+  }
+  for (const failure of plan.failures) {
+    const pluginFailures = failures.get(failure.configurationIndex) ?? [];
+    pluginFailures.push(failure);
+    failures.set(failure.configurationIndex, pluginFailures);
+  }
+  return { outputs, conflicts, failures };
+}
+
+/**
+ * Correlate the immutable plan with exact copy outcomes. Dedupe never
+ * rediscovers source or destination files.
+ */
+async function dedupePlannedAgentFiles(
+  plan: AgentOutputPlan,
+  copyResults: CopyResult[],
+  dryRun: boolean,
+  messages: string[],
+  warnings: string[],
+): Promise<AgentDedupeRecord[]> {
+  const records = await dedupeAgentFilesByName(plan, copyResults, {
+    dryRun,
+    onWarning: (warning) => warnings.push(warning),
+  });
   for (const record of records) {
     messages.push(
       `${dryRun ? 'Would dedupe' : 'Deduped'} agent '${record.name}': removed ${record.removedPath} (kept ${record.keptPath})`,
     );
   }
-
   return records;
 }
 
@@ -2021,36 +2089,17 @@ async function buildSourcesProvenance(
 
 async function persistSyncState(
   workspacePath: string,
-  pluginResults: PluginSyncResult[],
-  workspaceFileResults: CopyResult[],
-  syncClients: ClientType[],
+  syncedFiles: Partial<Record<ClientType, string[]>>,
   nativePluginsByClient: Map<ClientType, string[]>,
   nativeResult: NativeSyncResult | undefined,
   extra?: {
     vscodeState?: { hash: string; repos: string[] };
     codexHooks?: SyncState['codexHooks'];
     mcpTrackedServers?: Partial<Record<string, string[]>>;
-    clientMappings?: Record<ClientType, ClientMapping>;
     skillsIndex?: string[];
     sources?: Record<string, SyncStateSource>;
-    agentDedupeRecords?: AgentDedupeRecord[];
   },
 ): Promise<void> {
-  const allCopyResults: CopyResult[] = [
-    ...pluginResults.flatMap((r) => r.copyResults),
-    ...workspaceFileResults,
-  ];
-
-  const mappings = extra?.clientMappings ?? CLIENT_MAPPINGS;
-  const resolvedMappings = resolveClientMappings(syncClients, mappings);
-  const syncedFiles = collectSyncedPaths(
-    allCopyResults,
-    workspacePath,
-    syncClients,
-    resolvedMappings,
-    extra?.agentDedupeRecords,
-  );
-
   // Build native plugin tracking per-client
   const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
   const installedSet = new Set(
@@ -2279,11 +2328,26 @@ export async function syncWorkspace(
       ? new Set(config.enabledSkills)
       : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
-    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet, warnings),
+    collectAllSkills(
+      validPlugins,
+      disabledSkillsSet,
+      enabledSkillsSet,
+      warnings,
+    ),
   );
 
   // Build per-plugin skill name maps (handles conflicts automatically)
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
+  const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
+  const agentOutputPlan = await sw.measure('agent-output-planning', () =>
+    planValidatedPluginAgentOutputs(
+      validPlugins,
+      workspacePath,
+      CLIENT_MAPPINGS,
+    ),
+  );
+  appendAgentOutputConflictWarnings(agentOutputPlan, warnings);
+  const indexedAgentOutputPlan = indexAgentOutputPlan(agentOutputPlan);
 
   // Step 4: Copy fresh from all validated plugins
   // Pass 2: Copy skills using resolved names
@@ -2293,16 +2357,27 @@ export async function syncWorkspace(
     'plugin-copy',
     () =>
       Promise.all(
-        validPlugins.map(async (validatedPlugin) => {
+        validPlugins.map(async (validatedPlugin, validIndex) => {
           const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
+          const configurationIndex =
+            validatedPlugin.configurationIndex ?? validIndex;
+          const agentOutputs =
+            indexedAgentOutputPlan.outputs.get(configurationIndex) ?? [];
+          const agentConflicts =
+            indexedAgentOutputPlan.conflicts.get(configurationIndex) ?? [];
+          const agentFailures =
+            indexedAgentOutputPlan.failures.get(configurationIndex) ?? [];
           const result = await copyValidatedPlugin(
             validatedPlugin,
             workspacePath,
             validatedPlugin.clients,
             dryRun,
             skillNameMap,
-            undefined, // clientMappings
+            undefined,
             syncMode,
+            agentOutputs,
+            agentConflicts,
+            agentFailures,
           );
           return { ...result, scope: 'project' as const };
         }),
@@ -2327,9 +2402,14 @@ export async function syncWorkspace(
   // This preserves user-owned hooks and replaces only the allagents-managed
   // subset recorded in sync state.
   const codexHookSync = await sw.measure('codex-hooks-sync', async () =>
-    syncCodexProjectHooks(validPlugins, workspacePath, previousState?.codexHooks, {
-      dryRun,
-    }),
+    syncCodexProjectHooks(
+      validPlugins,
+      workspacePath,
+      previousState?.codexHooks,
+      {
+        dryRun,
+      },
+    ),
   );
   warnings.push(...codexHookSync.warnings);
 
@@ -2427,17 +2507,14 @@ export async function syncWorkspace(
 
     // Step 5d: Copy workspace files with GitHub cache
     // Pass repositories and skillsIndexRefs so conditional links are embedded in WORKSPACE-RULES
-    workspaceFileResults.push(...(await copyWorkspaceFiles(
-      sourcePath,
-      workspacePath,
-      filesToCopy,
-      {
+    workspaceFileResults.push(
+      ...(await copyWorkspaceFiles(sourcePath, workspacePath, filesToCopy, {
         dryRun,
         githubCache,
         repositories: config.repositories,
         skillsIndexRefs,
-      },
-    )));
+      })),
+    );
 
     // If claude is a client and CLAUDE.md doesn't exist, copy AGENTS.md to CLAUDE.md
     // Skip when repositories is empty (no agent files should be created)
@@ -2507,11 +2584,6 @@ export async function syncWorkspace(
   warnings.push(...mcpSyncResult.warnings);
   sw.stop('mcp-sync');
 
-  // Count results
-  const { totalCopied, totalFailed, totalSkipped, totalGenerated } =
-    countCopyResults(pluginResults, workspaceFileResults);
-  const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
-
   // Compute deleted artifacts: compare previous state vs what was just synced
   // Collect all skill names from installed plugins (including disabled) so that
   // skills that are still available but just not synced are not reported as deleted.
@@ -2523,19 +2595,17 @@ export async function syncWorkspace(
     ...pluginResults.flatMap((r) => r.copyResults),
     ...workspaceFileResults,
   ];
-  const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
-
-  // Step: collapse agent files that plugins ship twice for the same logical
-  // agent — a portable `<name>.md` and a GitHub Copilot native
-  // `<name>.agent.md`. See dedupeAgentFilesByName for why this happens.
-  const agentDedupeRecords = await dedupeAgentFilesForClients(
-    workspacePath,
-    syncClients,
-    resolvedMappings,
-    validPlugins,
+  const agentDedupeRecords = await dedupePlannedAgentFiles(
+    agentOutputPlan,
+    allCopyResultsForState,
     dryRun,
     messages,
+    warnings,
   );
+  // Count results
+  const { totalCopied, totalFailed, totalSkipped, totalGenerated } =
+    countCopyResults(pluginResults, workspaceFileResults);
+  const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
 
   const newStatePaths = collectSyncedPaths(
     allCopyResultsForState,
@@ -2550,6 +2620,7 @@ export async function syncWorkspace(
     syncClients,
     resolvedMappings,
     availableSkillNames,
+    agentDedupeRecords,
   );
 
   // Persist sync state (skip in dry-run mode)
@@ -2560,9 +2631,7 @@ export async function syncWorkspace(
     await sw.measure('persist-state', () =>
       persistSyncState(
         workspacePath,
-        pluginResults,
-        workspaceFileResults,
-        syncClients,
+        newStatePaths,
         nativePluginsByClient,
         nativeResult,
         {
@@ -2582,7 +2651,6 @@ export async function syncWorkspace(
             skillsIndex: writtenSkillsIndexFiles,
           }),
           ...(Object.keys(sources).length > 0 && { sources }),
-          ...(agentDedupeRecords.length > 0 && { agentDedupeRecords }),
         },
       ),
     );
@@ -2727,24 +2795,22 @@ export async function syncUserWorkspace(
       selectivePurgeWorkspace(homeDir, previousState, syncClients),
     );
 
-    const relocatedHooks = await sw.measure(
-      'legacy-copilot-hook-scan',
-      () =>
-        findRelocatedGitHubHooks(
-          validPlugins
-            .filter(
-              (plugin) =>
-                plugin.clients.includes('copilot') &&
-                plugin.fileArtifacts?.github !== false,
-            )
-            .map((plugin) => ({
-              pluginPath: plugin.resolved,
-              ...(plugin.exclude && { exclude: plugin.exclude }),
-            })),
-          homeDir,
-          'copilot',
-          { clientMappings: USER_CLIENT_MAPPINGS },
-        ),
+    const relocatedHooks = await sw.measure('legacy-copilot-hook-scan', () =>
+      findRelocatedGitHubHooks(
+        validPlugins
+          .filter(
+            (plugin) =>
+              plugin.clients.includes('copilot') &&
+              plugin.fileArtifacts?.github !== false,
+          )
+          .map((plugin) => ({
+            pluginPath: plugin.resolved,
+            ...(plugin.exclude && { exclude: plugin.exclude }),
+          })),
+        homeDir,
+        'copilot',
+        { clientMappings: USER_CLIENT_MAPPINGS },
+      ),
     );
 
     for (const filePath of relocatedHooks.found) {
@@ -2766,9 +2832,27 @@ export async function syncUserWorkspace(
       ? new Set(config.enabledSkills)
       : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
-    collectAllSkills(validPlugins, disabledSkillsSet, enabledSkillsSet, warnings),
+    collectAllSkills(
+      validPlugins,
+      disabledSkillsSet,
+      enabledSkillsSet,
+      warnings,
+    ),
   );
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
+  const resolvedUserMappings = resolveClientMappings(
+    syncClients,
+    USER_CLIENT_MAPPINGS,
+  );
+  const agentOutputPlan = await sw.measure('agent-output-planning', () =>
+    planValidatedPluginAgentOutputs(
+      validPlugins,
+      homeDir,
+      USER_CLIENT_MAPPINGS,
+    ),
+  );
+  appendAgentOutputConflictWarnings(agentOutputPlan, warnings);
+  const indexedAgentOutputPlan = indexAgentOutputPlan(agentOutputPlan);
 
   // Copy plugins using USER_CLIENT_MAPPINGS
   // Use syncMode from config (defaults to 'symlink')
@@ -2777,9 +2861,16 @@ export async function syncUserWorkspace(
     'plugin-copy',
     () =>
       Promise.all(
-        validPlugins.map(async (vp) => {
+        validPlugins.map(async (vp, validIndex) => {
           const skillNameMap = pluginSkillMaps.get(vp.resolved);
-          const resolvedUserMappings = resolveClientMappings(
+          const configurationIndex = vp.configurationIndex ?? validIndex;
+          const agentOutputs =
+            indexedAgentOutputPlan.outputs.get(configurationIndex) ?? [];
+          const agentConflicts =
+            indexedAgentOutputPlan.conflicts.get(configurationIndex) ?? [];
+          const agentFailures =
+            indexedAgentOutputPlan.failures.get(configurationIndex) ?? [];
+          const pluginMappings = resolveClientMappings(
             vp.clients,
             USER_CLIENT_MAPPINGS,
           );
@@ -2789,18 +2880,17 @@ export async function syncUserWorkspace(
             vp.clients,
             dryRun,
             skillNameMap,
-            resolvedUserMappings,
+            pluginMappings,
             syncMode,
+            agentOutputs,
+            agentConflicts,
+            agentFailures,
           );
           return { ...result, scope: 'user' as const };
         }),
       ),
     `${validPlugins.length} plugin(s)`,
   );
-
-  // Count results
-  const { totalCopied, totalFailed, totalSkipped, totalGenerated } =
-    countCopyResults(pluginResults, []);
 
   // MCP Proxy: prepare transform if configured (user-scoped)
   const userMcpProxyConfig = config.mcpProxy;
@@ -2945,22 +3035,16 @@ export async function syncUserWorkspace(
     warnings,
   );
   const allCopyResultsForState = pluginResults.flatMap((r) => r.copyResults);
-  const resolvedUserMappings = resolveClientMappings(
-    syncClients,
-    USER_CLIENT_MAPPINGS,
-  );
-
-  // Step: collapse agent files that plugins ship twice for the same logical
-  // agent — a portable `<name>.md` and a GitHub Copilot native
-  // `<name>.agent.md`. See dedupeAgentFilesByName for why this happens.
-  const agentDedupeRecords = await dedupeAgentFilesForClients(
-    homeDir,
-    syncClients,
-    resolvedUserMappings,
-    validPlugins,
+  const agentDedupeRecords = await dedupePlannedAgentFiles(
+    agentOutputPlan,
+    allCopyResultsForState,
     dryRun,
     messages,
+    warnings,
   );
+  // Count results
+  const { totalCopied, totalFailed, totalSkipped, totalGenerated } =
+    countCopyResults(pluginResults, []);
 
   const newStatePaths = collectSyncedPaths(
     allCopyResultsForState,
@@ -2975,6 +3059,7 @@ export async function syncUserWorkspace(
     syncClients,
     resolvedUserMappings,
     availableUserSkillNames,
+    agentDedupeRecords,
   );
 
   // Save sync state (including MCP servers and native plugins)
@@ -2984,13 +3069,10 @@ export async function syncUserWorkspace(
     await sw.measure('persist-state', () =>
       persistSyncState(
         homeDir,
-        pluginResults,
-        [],
-        syncClients,
+        newStatePaths,
         nativePluginsByClient,
         nativeResult,
         {
-          clientMappings: USER_CLIENT_MAPPINGS,
           ...(Object.keys(mcpResults).length > 0 && {
             mcpTrackedServers: Object.fromEntries(
               Object.entries(mcpResults).map(([scope, r]) => [
@@ -2999,7 +3081,6 @@ export async function syncUserWorkspace(
               ]),
             ),
           }),
-          ...(agentDedupeRecords.length > 0 && { agentDedupeRecords }),
         },
       ),
     );

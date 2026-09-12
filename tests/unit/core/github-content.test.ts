@@ -42,15 +42,60 @@ describe('copyGitHubContent', () => {
   it('copies .github/agents/ for copilot client', async () => {
     await mkdir(join(pluginDir, '.github', 'agents'), { recursive: true });
     await writeFile(join(pluginDir, '.github', 'agents', 'reviewer.agent.md'), '# Reviewer');
+    await mkdir(join(pluginDir, '.github', 'agents', 'support'), {
+      recursive: true,
+    });
+    await writeFile(
+      join(pluginDir, '.github', 'agents', 'support', 'schema.json'),
+      '{"type":"object"}',
+    );
 
     const results = await copyGitHubContent(pluginDir, workspaceDir, 'copilot');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].action).toBe('copied');
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.action === 'copied')).toBe(true);
     expect(existsSync(join(workspaceDir, '.github', 'agents', 'reviewer.agent.md'))).toBe(true);
+    expect(
+      existsSync(
+        join(
+          workspaceDir,
+          '.github',
+          'agents',
+          'support',
+          'schema.json',
+        ),
+      ),
+    ).toBe(true);
 
     const content = await readFile(join(workspaceDir, '.github', 'agents', 'reviewer.agent.md'), 'utf-8');
     expect(content).toBe('# Reviewer');
+  });
+
+  it('does not let dot-prefixed agent definitions bypass an ownership plan', async () => {
+    await mkdir(join(pluginDir, '.github', 'agents'), { recursive: true });
+    await writeFile(
+      join(pluginDir, '.github', 'agents', '.reviewer.agent.md'),
+      '# Reviewer',
+    );
+
+    const results = await copyGitHubContent(
+      pluginDir,
+      workspaceDir,
+      'copilot',
+      { agentOutputs: [] },
+    );
+
+    expect(results).toEqual([]);
+    expect(
+      existsSync(
+        join(
+          workspaceDir,
+          '.github',
+          'agents',
+          '.reviewer.agent.md',
+        ),
+      ),
+    ).toBe(false);
   });
 
   it('copies .github/hooks/ for copilot client', async () => {
