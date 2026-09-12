@@ -152,7 +152,7 @@ The check runs at most once every 24 hours and never blocks startup. Results are
 ## Plugin Commands
 
 ```bash
-allagents plugin list [marketplace]
+allagents plugin list
 allagents plugin validate <path>
 allagents plugin install <plugin> [--skill <name>] [--scope <scope>]
 allagents plugin uninstall <plugin> [--scope <scope>]
@@ -168,20 +168,33 @@ allagents skill update [skill...] [--scope <scope>] [--yes]
 
 ### plugin list
 
-List all installed plugins and skills.
+List installed plugins and standalone skills from user and project scopes.
 
 ```bash
 allagents plugin list
-allagents plugin list [marketplace]  # filter by marketplace name
 ```
 
-Each entry shows a `Type` label of either `plugin` or `skill` (see [`status`](#status) for the classification rule). With `--json`, each entry includes a `kind` field:
+Human-readable output keeps `plugin@marketplace` as the heading for marketplace entries and uses a friendly final-segment name for direct GitHub and local entries. Every entry retains `Type` and `Scope`; `Clients` appears when at least one configured file target or tracked native installation is present. Direct entries also show a compact effective `Source`, including a configured Git ref; marketplace entries omit that redundant line. Native clients are labeled explicitly, such as `native claude`.
+
+With `--json`, each entry includes the friendly `name`, raw configured `spec`, `marketplace`, `scope`, and `kind`, plus `clients` and `nativeClients` when present. Internal effective sources, refs, versions, and status are not exposed:
 
 ```json
 {
-  "plugins": [
-    { "spec": "owner/repo", "scope": "user", "kind": "skill", "fileClients": ["claude"] }
-  ]
+  "success": true,
+  "command": "plugin list",
+  "data": {
+    "plugins": [
+      {
+        "name": "research",
+        "spec": "https://github.com/acme/toolbox/tree/main/plugins/research",
+        "marketplace": "",
+        "scope": "project",
+        "kind": "plugin",
+        "clients": ["codex"]
+      }
+    ],
+    "total": 1
+  }
 }
 ```
 

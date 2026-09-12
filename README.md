@@ -93,7 +93,7 @@ clients:
 | `allagents update` | Sync all plugins to workspace |
 | `allagents plugin install <spec>` | Install a plugin |
 | `allagents plugin uninstall <spec>` | Remove a plugin |
-| `allagents plugin list` | List available plugins |
+| `allagents plugin list` | List installed plugins and skills with source, scope, and clients |
 | `allagents skill add <name>` | Add a skill from a repo (plural `skills` alias supported) |
 | `allagents skill list` | List skills and status |
 | `allagents mcp add <name> <commandOrUrl>` | Add an MCP server and sync to clients |
