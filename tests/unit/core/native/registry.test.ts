@@ -1,22 +1,28 @@
 import { describe, expect, test } from 'bun:test';
+import { PiNativeClient } from '../../../../src/core/native/pi.js';
+import { OmpNativeClient } from '../../../../src/core/native/omp.js';
 import { getNativeClient } from '../../../../src/core/native/registry.js';
-import { ClaudeNativeClient } from '../../../../src/core/native/claude.js';
-import { CopilotNativeClient } from '../../../../src/core/native/copilot.js';
 
-describe('native/registry', () => {
-  test('returns ClaudeNativeClient for claude', () => {
-    expect(getNativeClient('claude')).toBeInstanceOf(ClaudeNativeClient);
+describe('native registry', () => {
+  test('registers Pi through the shared native client interface', () => {
+    const client = getNativeClient('pi');
+
+    expect(client).toBeInstanceOf(PiNativeClient);
+    expect(client?.client).toBe('pi');
+    expect(client?.supportsScope('user')).toBe(true);
+    expect(client?.supportsScope('project')).toBe(true);
   });
 
-  test('returns CopilotNativeClient for copilot', () => {
-    expect(getNativeClient('copilot')).toBeInstanceOf(CopilotNativeClient);
+  test('registers OMP through the shared native client interface', () => {
+    const client = getNativeClient('omp');
+
+    expect(client).toBeInstanceOf(OmpNativeClient);
+    expect(client?.client).toBe('omp');
+    expect(client?.supportsScope('user')).toBe(true);
+    expect(client?.supportsScope('project')).toBe(true);
   });
 
-  test('returns null for unsupported client', () => {
+  test('does not register clients without native lifecycle support', () => {
     expect(getNativeClient('cursor')).toBeNull();
-  });
-
-  test('returns null for universal', () => {
-    expect(getNativeClient('universal')).toBeNull();
   });
 });

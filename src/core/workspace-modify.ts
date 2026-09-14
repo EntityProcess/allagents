@@ -176,6 +176,20 @@ export async function addPlugin(
   return await addPluginToConfig(plugin, configPath, undefined, force);
 }
 
+export async function addPluginDeclaration(
+  plugin: string,
+  workspacePath: string = process.cwd(),
+  force?: boolean,
+): Promise<ModifyResult> {
+  await ensureWorkspace(workspacePath);
+  return addPluginToConfig(
+    plugin,
+    join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+    undefined,
+    force,
+  );
+}
+
 /**
  * Add plugin to .allagents/workspace.yaml config file
  */

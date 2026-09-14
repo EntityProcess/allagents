@@ -24,7 +24,21 @@ mock.module('../../../../src/core/native/types.js', () => ({
     executeCommandCalls.push({ binary, args });
     // Simulate successful responses
     if (args[0] === '--version') {
-      return { success: true, output: 'claude 1.0.0' };
+      return {
+        success: true,
+        output: binary === 'omp' ? 'omp/18.1.20' : 'claude 1.0.0',
+      };
+    }
+    if (
+      binary === 'omp' &&
+      args[0] === 'plugin' &&
+      args[1] === 'list' &&
+      args[2] === '--json'
+    ) {
+      return {
+        success: true,
+        output: JSON.stringify({ npm: [], marketplace: [] }),
+      };
     }
     if (args.includes('marketplace') && args.includes('add')) {
       return { success: true, output: 'Marketplace added' };
@@ -34,20 +48,21 @@ mock.module('../../../../src/core/native/types.js', () => ({
     }
     return { success: true, output: '' };
   }),
-  mergeNativeSyncResults: (results: Array<{ marketplacesAdded: string[]; pluginsInstalled: Array<{ plugin: string; client?: string }>; pluginsFailed: unknown[]; skipped: string[] }>) =>
-    results.reduce(
-      (acc, r) => ({
-        marketplacesAdded: [...acc.marketplacesAdded, ...r.marketplacesAdded],
-        pluginsInstalled: [...acc.pluginsInstalled, ...r.pluginsInstalled],
-        pluginsFailed: [...acc.pluginsFailed, ...r.pluginsFailed],
-        skipped: [...acc.skipped, ...r.skipped],
-      }),
-      { marketplacesAdded: [] as string[], pluginsInstalled: [] as Array<{ plugin: string; client?: string }>, pluginsFailed: [] as unknown[], skipped: [] as string[] },
-    ),
+  mergeNativeSyncResults: (
+    results: Array<{ success: boolean; effects: unknown[] }>,
+  ) => ({
+    success: results.every((result) => result.success),
+    effects: results.flatMap((result) => result.effects),
+  }),
 }));
 
 // Mock git operations
 mock.module('../../../../src/core/git.js', () => ({
+  createGitEnv: () => ({
+    ...process.env,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_LFS_SKIP_SMUDGE: '1',
+  }),
   pull: mock(() => Promise.resolve()),
   cloneTo: mock((_url: string, path: string) => {
     mkdirSync(path, { recursive: true });
@@ -234,5 +249,47 @@ describe('native marketplace registration during syncWorkspace', () => {
     );
     // No addMarketplace should be called for local sources
     expect(addMarketplaceCalls.length).toBe(0);
+  });
+
+  it('never invokes OMP mutations during AllAgents dry-run', async () => {
+    const mpPath = setupMarketplace('agentv', [
+      { name: 'agentv-dev', source: './plugins/agentv-dev' },
+    ]);
+    setupRegistry({
+      agentv: {
+        name: 'agentv',
+        source: { type: 'github', location: 'EntityProcess/agentv' },
+        path: mpPath,
+        lastUpdated: new Date().toISOString(),
+      },
+    });
+    setupWorkspace([
+      'repositories: []',
+      'plugins:',
+      '  - agentv-dev@agentv',
+      'clients:',
+      '  - name: omp',
+      '    install: native',
+    ].join('\n'));
+
+    const result = await syncWorkspace(testDir, { dryRun: true });
+    const ompCalls = executeCommandCalls.filter((call) => call.binary === 'omp');
+
+    expect(result.success).toBe(true);
+    expect(ompCalls.length).toBeGreaterThan(0);
+    expect(
+      ompCalls.every(
+        (call) =>
+          call.args[0] === '--version' ||
+          (call.args[0] === 'plugin' && call.args[1] === 'list'),
+      ),
+    ).toBe(true);
+    expect(
+      ompCalls.some((call) =>
+        ['install', 'upgrade', 'uninstall', 'marketplace'].includes(
+          call.args[1] ?? '',
+        ),
+      ),
+    ).toBe(false);
   });
 });

@@ -20,15 +20,19 @@ import {
 } from '../../core/marketplace.js';
 import {
   buildPluginSyncPlans,
+  nativeIdentityMatches,
+  preflightNativePluginDeclaration,
   syncWorkspace,
   syncUserWorkspace,
+  type SyncOptions,
 } from '../../core/sync.js';
+import type { NativeEffectData } from '../../core/native/types.js';
 import { loadSyncState } from '../../core/sync-state.js';
-import { addPlugin, removePlugin, hasPlugin, ensureWorkspace, addEnabledSkill, extractPluginNames } from '../../core/workspace-modify.js';
+import { addPlugin, addPluginDeclaration, removePlugin, ensureWorkspace, addEnabledSkill, extractPluginNames } from '../../core/workspace-modify.js';
 import {
   addUserPlugin,
+  addUserPluginDeclaration,
   removeUserPlugin,
-  hasUserPlugin,
   isUserConfigPath,
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
@@ -40,7 +44,10 @@ import {
 } from '../../core/user-workspace.js';
 import { updatePlugin, type InstalledPluginUpdateResult } from '../../core/plugin.js';
 import { getAllSkillsFromPlugins } from '../../core/skills.js';
-import { getWorkspaceStatus } from '../../core/status.js';
+import {
+  getWorkspaceStatus,
+  type NativePluginStatus,
+} from '../../core/status.js';
 import { parseMarketplaceManifest } from '../../utils/marketplace-manifest-parser.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
@@ -57,10 +64,18 @@ import {
   pluginUpdateMeta,
 } from '../metadata/plugin.js';
 import { skillsCmd } from './plugin-skills.js';
-import { formatMcpResult, formatNativeResult, buildSyncData, formatPluginArtifacts, formatPluginHeader } from '../format-sync.js';
+import {
+  formatMcpResult,
+  formatNativeEffectData,
+  formatNativeResult,
+  buildSyncData,
+  formatPluginArtifacts,
+  formatPluginHeader,
+} from '../format-sync.js';
 import {
   getPluginSource,
-  type PluginEntry,
+  type ClientEntry,
+  type WorkspaceConfig,
 } from '../../models/workspace-config.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, getHomeDir } from '../../constants.js';
 import { existsSync } from 'node:fs';
@@ -75,17 +90,14 @@ import { parseWorkspaceConfig } from '../../utils/workspace-parser.js';
 /**
  * Run sync and print results. Returns true if sync succeeded.
  */
-async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<{ ok: boolean; syncData: ReturnType<typeof buildSyncData> | null }> {
+async function runSyncAndPrint(options: SyncOptions = {}) {
   if (!isJsonMode()) {
     console.log('\nUpdating workspace...\n');
   }
   const result = await syncWorkspace(process.cwd(), options);
 
-  if (!result.success && result.error) {
-    if (!isJsonMode()) {
-      console.error(`Sync error: ${result.error}`);
-    }
-    return { ok: false, syncData: null };
+  if (!result.success && result.error && !isJsonMode()) {
+    console.error(`Sync error: ${result.error}`);
   }
 
   const syncData = buildSyncData(result);
@@ -161,14 +173,11 @@ async function runSyncAndPrint(options?: { skipAgentFiles?: boolean }): Promise<
 /**
  * Run user-scope sync and print results. Returns true if sync succeeded.
  */
-async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnType<typeof buildSyncData> | null }> {
-  const result = await syncUserWorkspace();
+async function runUserSyncAndPrint(options: SyncOptions = {}) {
+  const result = await syncUserWorkspace(options);
 
-  if (!result.success && result.error) {
-    if (!isJsonMode()) {
-      console.error(`Sync error: ${result.error}`);
-    }
-    return { ok: false, syncData: null };
+  if (!result.success && result.error && !isJsonMode()) {
+    console.error(`Sync error: ${result.error}`);
   }
 
   const syncData = buildSyncData(result);
@@ -239,6 +248,48 @@ async function runUserSyncAndPrint(): Promise<{ ok: boolean; syncData: ReturnTyp
   }
 
   return { ok: result.success && result.totalFailed === 0, syncData };
+}
+
+
+async function hasTrackedNativeTarget(
+  target: string,
+  scope: 'user' | 'project',
+): Promise<boolean> {
+  const state = await loadSyncState(
+    scope === 'user' ? getHomeDir() : process.cwd(),
+  );
+  return (state?.nativeResources?.resources ?? []).some(
+    (resource) =>
+      resource.scope === scope &&
+      nativeIdentityMatches(
+        target,
+        resource.requestedIdentity,
+        resource.resolvedIdentity,
+      ),
+  );
+}
+
+async function configuredPluginTarget(
+  target: string,
+  scope: 'user' | 'project',
+): Promise<string | undefined> {
+  const config =
+    scope === 'user'
+      ? await getUserWorkspaceConfig()
+      : existsSync(join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE))
+        ? await parseWorkspaceConfig(
+            join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+          )
+        : null;
+  const matches = (config?.plugins ?? [])
+    .map(getPluginSource)
+    .filter((source) => nativeIdentityMatches(target, source, source));
+  if (matches.length > 1) {
+    throw new Error(
+      `Plugin target '${target}' is ambiguous: ${matches.join(', ')}. Use an exact qualified declaration.`,
+    );
+  }
+  return matches[0];
 }
 
 // =============================================================================
@@ -797,28 +848,25 @@ const pluginListCmd = command({
       if (!cwdIsHome) {
         await loadConfigClients(projectConfigPath, 'project');
       }
+      const userSyncState = await loadSyncState(getHomeDir());
+      const projectSyncState = cwdIsHome
+        ? null
+        : await loadSyncState(process.cwd());
 
       const userPlugins = await getInstalledUserPlugins();
       const projectPlugins = await getInstalledProjectPlugins(process.cwd());
       const allInstalled = [...userPlugins, ...projectPlugins];
 
       const kindBySource = new Map<string, 'skill' | 'plugin'>();
-      try {
-        const status = await getWorkspaceStatus(process.cwd());
-        for (const p of [
-          ...status.plugins,
-          ...(status.userPlugins ?? []),
-        ]) {
-          kindBySource.set(p.source, p.kind);
-        }
-      } catch {
-        // Best-effort: unresolved sources are plugins.
+      const workspaceStatus = await getWorkspaceStatus(process.cwd());
+      for (const p of [
+        ...workspaceStatus.plugins,
+        ...(workspaceStatus.userPlugins ?? []),
+      ]) {
+        kindBySource.set(p.source, p.kind);
       }
 
-      const userSyncState = await loadSyncState(getHomeDir());
-      const projectSyncState = cwdIsHome
-        ? null
-        : await loadSyncState(process.cwd());
+
 
       interface MergedPlugin {
         spec: string;
@@ -829,6 +877,7 @@ const pluginListCmd = command({
         kind: 'skill' | 'plugin';
         fileClients: string[];
         nativeClients: string[];
+        nativeResources: NativePluginStatus[];
       }
       const merged = new Map<string, MergedPlugin>();
 
@@ -856,10 +905,13 @@ const pluginListCmd = command({
           kind: kindBySource.get(plugin.spec) ?? 'plugin',
           fileClients: [...clients],
           nativeClients: [],
+          nativeResources: [],
         });
       }
 
-      for (const [state, scope] of [
+      // Use the legacy identity list only when typed state/live status cannot
+      // corroborate the same adapter, scope, and resource.
+      for (const [state, stateScope] of [
         [userSyncState, 'user'],
         [projectSyncState, 'project'],
       ] as const) {
@@ -867,10 +919,25 @@ const pluginListCmd = command({
           state?.nativePlugins ?? {},
         )) {
           for (const spec of specs) {
+            const corroborated = workspaceStatus.nativeResources.some(
+              (resource) =>
+                resource.client === client &&
+                resource.scope === stateScope &&
+                nativeIdentityMatches(
+                  spec,
+                  resource.requestedIdentity,
+                  resource.resolvedIdentity,
+                ),
+            );
+            if (corroborated) continue;
             const parsed = parsePluginSpec(spec);
             const key = parsed
-              ? marketplaceKey(parsed.plugin, parsed.marketplaceName, scope)
-              : sourceKey(spec, scope);
+              ? marketplaceKey(
+                  parsed.plugin,
+                  parsed.marketplaceName,
+                  stateScope,
+                )
+              : sourceKey(spec, stateScope);
             const existing = merged.get(key);
             if (existing) {
               if (!existing.nativeClients.includes(client)) {
@@ -883,20 +950,54 @@ const pluginListCmd = command({
               effectiveSpec: spec,
               name: parsed?.plugin ?? getPluginDisplayName(spec),
               marketplace: parsed?.marketplaceName ?? '',
-              scope,
+              scope: stateScope,
               kind: kindBySource.get(spec) ?? 'plugin',
               fileClients: [],
               nativeClients: [client],
+              nativeResources: [],
             });
           }
         }
+      }
+
+      for (const nativeResource of workspaceStatus.nativeResources) {
+        const spec = nativeResource.requestedIdentity;
+        const parsed =
+          parsePluginSpec(nativeResource.resolvedIdentity) ??
+          parsePluginSpec(spec);
+        const key = parsed
+          ? marketplaceKey(
+              parsed.plugin,
+              parsed.marketplaceName,
+              nativeResource.scope,
+            )
+          : sourceKey(spec, nativeResource.scope);
+        const existing = merged.get(key);
+        if (existing) {
+          if (!existing.nativeClients.includes(nativeResource.client)) {
+            existing.nativeClients.push(nativeResource.client);
+          }
+          existing.nativeResources.push(nativeResource);
+          continue;
+        }
+        merged.set(key, {
+          spec,
+          effectiveSpec: spec,
+          name: parsed?.plugin ?? getPluginDisplayName(spec),
+          marketplace: parsed?.marketplaceName ?? '',
+          scope: nativeResource.scope,
+          kind: kindBySource.get(spec) ?? 'plugin',
+          fileClients: [],
+          nativeClients: [nativeResource.client],
+          nativeResources: [nativeResource],
+        });
       }
 
       const plugins = [...merged.values()];
 
       if (isJsonMode()) {
         jsonOutput({
-          success: true,
+          success: workspaceStatus.success,
           command: 'plugin list',
           data: {
             plugins: plugins.map((p) => ({
@@ -907,10 +1008,17 @@ const pluginListCmd = command({
               kind: p.kind,
               ...(p.fileClients.length > 0 && { clients: p.fileClients }),
               ...(p.nativeClients.length > 0 && { nativeClients: p.nativeClients }),
+              ...(p.nativeResources.length > 0 && {
+                nativeResources: p.nativeResources,
+              }),
             })),
             total: plugins.length,
           },
+          ...(!workspaceStatus.success && {
+            error: workspaceStatus.error ?? 'Native inspection failed',
+          }),
         });
+        if (!workspaceStatus.success) process.exit(1);
         return;
       }
 
@@ -920,13 +1028,17 @@ const pluginListCmd = command({
         console.log('  allagents plugin marketplace browse <name>\n');
         console.log('To see registered marketplaces:');
         console.log('  allagents plugin marketplace list');
+        if (!workspaceStatus.success) {
+          console.error(`Error: ${workspaceStatus.error ?? 'Native inspection failed'}`);
+          process.exit(1);
+        }
         return;
       }
 
       const skillCount = plugins.filter((p) => p.kind === 'skill').length;
       const pluginCount = plugins.length - skillCount;
 
-      console.log('Installed plugins:\n');
+      console.log('Plugins:\n');
       for (const p of plugins) {
         console.log(`  ❯ ${p.marketplace ? p.spec : p.name}`);
         console.log(`    Type: ${p.kind}`);
@@ -943,6 +1055,11 @@ const pluginListCmd = command({
           ];
           console.log(`    Clients: ${parts.join(', ')}`);
         }
+        for (const nativeResource of p.nativeResources) {
+          console.log(
+            `${formatNativeEffectData(nativeResource)} declared=${String(nativeResource.declared)} ownership=${nativeResource.ownership}${nativeResource.transition ? ` transition=${nativeResource.transition}` : ''}`,
+          );
+        }
         console.log('');
       }
 
@@ -950,6 +1067,10 @@ const pluginListCmd = command({
       if (pluginCount > 0) summaryParts.push(`${pluginCount} plugin${pluginCount === 1 ? '' : 's'}`);
       if (skillCount > 0) summaryParts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
       console.log(`Total: ${summaryParts.join(', ')}`);
+      if (!workspaceStatus.success) {
+        console.error(`Error: ${workspaceStatus.error ?? 'Native inspection failed'}`);
+        process.exit(1);
+      }
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
@@ -1007,13 +1128,20 @@ const pluginInstallCmd = command({
   },
   handler: async ({ plugin, scope, skills }) => {
     try {
+      if (scope && scope !== 'user' && scope !== 'project') {
+        throw new Error(
+          `Invalid scope '${scope}'. Must be 'user' or 'project'.`,
+        );
+      }
       // Treat as user scope if explicitly requested or if cwd resolves to user config
       const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
 
-      // If no workspace.yaml exists, prompt for clients first
+      let selectedClients: ClientEntry[] | undefined;
+      let workspaceExists: boolean;
       if (isUser) {
         const userConfigPath = getUserWorkspaceConfigPath();
-        if (!existsSync(userConfigPath)) {
+        workspaceExists = existsSync(userConfigPath);
+        if (!workspaceExists) {
           const { promptForClients } = await import('../tui/prompt-clients.js');
           const clients = await promptForClients();
           if (clients === null) {
@@ -1022,11 +1150,12 @@ const pluginInstallCmd = command({
             }
             return;
           }
-          await ensureUserWorkspace(clients);
+          selectedClients = clients;
         }
       } else {
         const configPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
-        if (!existsSync(configPath)) {
+        workspaceExists = existsSync(configPath);
+        if (!workspaceExists) {
           const { promptForClients } = await import('../tui/prompt-clients.js');
           const clients = await promptForClients();
           if (clients === null) {
@@ -1035,7 +1164,7 @@ const pluginInstallCmd = command({
             }
             return;
           }
-          await ensureWorkspace(process.cwd(), clients);
+          selectedClients = clients;
         }
       }
 
@@ -1050,10 +1179,57 @@ const pluginInstallCmd = command({
         }
       }
 
+      const nativePreflightConfig = workspaceExists
+        ? isUser
+          ? await getUserWorkspaceConfig()
+          : await parseWorkspaceConfig(
+              join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+            )
+        : ({
+            repositories: [],
+            plugins: [],
+            clients: selectedClients ?? [],
+          } as WorkspaceConfig);
+      if (!nativePreflightConfig) {
+        throw new Error('Workspace configuration is unavailable');
+      }
+      const nativePreflightErrors = await preflightNativePluginDeclaration(
+        plugin,
+        nativePreflightConfig.clients,
+        isUser ? 'user' : 'project',
+        process.cwd(),
+      );
+      if (nativePreflightErrors.length > 0) {
+        throw new Error(
+          `Native preflight failed; workspace declaration was not changed: ${nativePreflightErrors.join('; ')}`,
+        );
+      }
+
+      if (!workspaceExists) {
+        if (isUser) {
+          await ensureUserWorkspace(selectedClients);
+        } else {
+          await ensureWorkspace(process.cwd(), selectedClients);
+        }
+      }
+      const installPlan = buildPluginSyncPlans(
+        [plugin],
+        nativePreflightConfig.clients,
+        isUser ? 'user' : 'project',
+      ).plans[0];
+      const nativeOnly =
+        !!installPlan &&
+        installPlan.clients.length === 0 &&
+        installPlan.nativeClients.length > 0;
+
       // Always force-reinstall if the plugin already exists (no error, just overwrite)
       const result = isUser
-        ? await addUserPlugin(plugin, true)
-        : await addPlugin(plugin, process.cwd(), true);
+        ? nativeOnly
+          ? await addUserPluginDeclaration(plugin, true)
+          : await addUserPlugin(plugin, true)
+        : nativeOnly
+          ? await addPluginDeclaration(plugin, process.cwd(), true)
+          : await addPlugin(plugin, process.cwd(), true);
 
       if (!result.success) {
         if (isJsonMode()) {
@@ -1195,50 +1371,86 @@ const pluginUninstallCmd = command({
   },
   handler: async ({ plugin, scope }) => {
     try {
-      // When an explicit scope is given, only uninstall from that scope
-      if (scope) {
-        const isUser = scope === 'user';
-        const result = isUser
-          ? await removeUserPlugin(plugin)
-          : await removePlugin(plugin);
+      if (scope && scope !== 'user' && scope !== 'project') {
+        throw new Error(
+          `Invalid scope '${scope}'. Must be 'user' or 'project'.`,
+        );
+      }
+      const scopes: Array<'project' | 'user'> =
+        scope === 'user'
+          ? ['user']
+          : scope === 'project'
+            ? ['project']
+            : isUserConfigPath(process.cwd())
+              ? ['user']
+              : ['project', 'user'];
+      const declarations: Array<{
+        scope: 'project' | 'user';
+        action: 'removed' | 'absent' | 'failed';
+        error?: string;
+      }> = [];
+      const syncResults: Record<string, unknown> = {};
+      let found = false;
+      let allOk = true;
 
-        if (!result.success) {
-          if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin uninstall', error: result.error ?? 'Unknown error' });
-            process.exit(1);
+      for (const targetScope of scopes) {
+        const configuredTarget = await configuredPluginTarget(
+          plugin,
+          targetScope,
+        );
+        const declared = configuredTarget !== undefined;
+        const nativeTarget = configuredTarget ?? plugin;
+        const tracked = await hasTrackedNativeTarget(nativeTarget, targetScope);
+        if (!declared && !tracked) continue;
+        found = true;
+
+        if (declared) {
+          const removal =
+            targetScope === 'user'
+              ? await removeUserPlugin(nativeTarget)
+              : await removePlugin(nativeTarget);
+          if (!removal.success) {
+            allOk = false;
+            declarations.push({
+              scope: targetScope,
+              action: 'failed',
+              error: removal.error ?? 'Declaration removal failed',
+            });
+            if (!isJsonMode()) {
+              console.error(
+                `\u2717 Declaration removal (${targetScope}): ${removal.error ?? 'Unknown error'}`,
+              );
+            }
+            continue;
           }
-          console.error(`Error: ${result.error}`);
-          process.exit(1);
+          declarations.push({ scope: targetScope, action: 'removed' });
+          if (!isJsonMode()) {
+            console.log(
+              `\u2713 Declaration removed (${targetScope} scope): ${plugin}`,
+            );
+          }
+        } else {
+          declarations.push({ scope: targetScope, action: 'absent' });
+          if (!isJsonMode()) {
+            console.log(
+              `= Declaration already absent (${targetScope} scope): ${plugin}`,
+            );
+          }
         }
 
-        if (isJsonMode()) {
-          const { ok, syncData } = isUser
-            ? await runUserSyncAndPrint()
-            : await runSyncAndPrint();
-          jsonOutput({
-            success: ok,
-            command: 'plugin uninstall',
-            data: { plugin, scope, syncResult: syncData },
-            ...(!ok && { error: 'Sync completed with failures' }),
-          });
-          if (!ok) process.exit(1);
-          return;
-        }
-
-        console.log(`\u2713 Uninstalled plugin (${scope} scope): ${plugin}`);
-        const { ok: syncOk } = isUser
-          ? await runUserSyncAndPrint()
-          : await runSyncAndPrint();
-        if (!syncOk) process.exit(1);
-        return;
+        const nativeSelection = {
+          mode: 'remove' as const,
+          targets: [nativeTarget],
+        };
+        const sync =
+          targetScope === 'user'
+            ? await runUserSyncAndPrint({ nativeSelection })
+            : await runSyncAndPrint({ nativeSelection });
+        syncResults[targetScope] = sync.syncData;
+        if (!sync.ok) allOk = false;
       }
 
-      // No explicit scope: uninstall from all scopes where the plugin exists
-      // Skip project scope if it resolves to the user config (e.g., cwd is ~)
-      const inProject = isUserConfigPath(process.cwd()) ? false : await hasPlugin(plugin);
-      const inUser = await hasUserPlugin(plugin);
-
-      if (!inProject && !inUser) {
+      if (!found) {
         const error = `Plugin not found: ${plugin}`;
         if (isJsonMode()) {
           jsonOutput({ success: false, command: 'plugin uninstall', error });
@@ -1248,70 +1460,22 @@ const pluginUninstallCmd = command({
         process.exit(1);
       }
 
-      const removedScopes: string[] = [];
-
-      if (inProject) {
-        const result = await removePlugin(plugin);
-        if (!result.success) {
-          if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin uninstall', error: result.error ?? 'Unknown error' });
-            process.exit(1);
-          }
-          console.error(`Error: ${result.error}`);
-          process.exit(1);
-        }
-        removedScopes.push('project');
-      }
-
-      if (inUser) {
-        const result = await removeUserPlugin(plugin);
-        if (!result.success) {
-          if (isJsonMode()) {
-            jsonOutput({ success: false, command: 'plugin uninstall', error: result.error ?? 'Unknown error' });
-            process.exit(1);
-          }
-          console.error(`Error: ${result.error}`);
-          process.exit(1);
-        }
-        removedScopes.push('user');
-      }
-
       if (isJsonMode()) {
-        const syncResults: Record<string, ReturnType<typeof buildSyncData> | null> = {};
-        let allOk = true;
-        if (removedScopes.includes('project')) {
-          const { ok, syncData } = await runSyncAndPrint();
-          syncResults.project = syncData;
-          if (!ok) allOk = false;
-        }
-        if (removedScopes.includes('user')) {
-          const { ok, syncData } = await runUserSyncAndPrint();
-          syncResults.user = syncData;
-          if (!ok) allOk = false;
-        }
         jsonOutput({
           success: allOk,
           command: 'plugin uninstall',
-          data: { plugin, scopes: removedScopes, syncResults },
-          ...(!allOk && { error: 'Sync completed with failures' }),
+          data: {
+            plugin,
+            scopes: declarations.map((result) => result.scope),
+            declarations,
+            syncResults,
+          },
+          ...(!allOk && {
+            error: 'Declaration removal or native cleanup failed',
+          }),
         });
-        if (!allOk) process.exit(1);
-        return;
       }
-
-      const scopeLabel = removedScopes.join(' + ');
-      console.log(`\u2713 Uninstalled plugin (${scopeLabel} scope): ${plugin}`);
-
-      let syncOk = true;
-      if (removedScopes.includes('project')) {
-        const { ok } = await runSyncAndPrint();
-        if (!ok) syncOk = false;
-      }
-      if (removedScopes.includes('user')) {
-        const { ok } = await runUserSyncAndPrint();
-        if (!ok) syncOk = false;
-      }
-      if (!syncOk) process.exit(1);
+      if (!allOk) process.exit(1);
     } catch (error) {
       if (error instanceof Error) {
         if (isJsonMode()) {
@@ -1339,6 +1503,16 @@ const pluginUpdateCmd = command({
   },
   handler: async ({ plugin, scope }) => {
     try {
+      if (
+        scope &&
+        scope !== 'user' &&
+        scope !== 'project' &&
+        scope !== 'all'
+      ) {
+        throw new Error(
+          `Invalid scope '${scope}'. Must be 'user', 'project', or 'all'.`,
+        );
+      }
       // Determine which plugins to update based on scope
       const updateAll = scope === 'all';
       const updateUser = scope === 'user' || updateAll;
@@ -1368,20 +1542,23 @@ const pluginUpdateCmd = command({
         }
       }
 
-      // Also include raw plugin entries (GitHub URLs, local paths)
+      const configs: Partial<
+        Record<'project' | 'user', WorkspaceConfig>
+      > = {};
+
+      // Include declarations, including native-only sources that have no
+      // generic installed-plugin cache entry.
       if (updateProject && !isUserConfigPath(process.cwd())) {
-        const { existsSync } = await import('node:fs');
-        const { readFile } = await import('node:fs/promises');
-        const { join } = await import('node:path');
-        const { load } = await import('js-yaml');
-        const { CONFIG_DIR, WORKSPACE_CONFIG_FILE } = await import('../../constants.js');
-        const configPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+        const configPath = join(
+          process.cwd(),
+          CONFIG_DIR,
+          WORKSPACE_CONFIG_FILE,
+        );
         if (existsSync(configPath)) {
-          const content = await readFile(configPath, 'utf-8');
-          const config = load(content) as { plugins?: PluginEntry[] };
-          for (const entry of config.plugins ?? []) {
-            const p = getPluginSource(entry);
-            addPluginToUpdate(p, 'project');
+          const config = await parseWorkspaceConfig(configPath);
+          configs.project = config;
+          for (const entry of config.plugins) {
+            addPluginToUpdate(getPluginSource(entry), 'project');
           }
         }
       }
@@ -1389,21 +1566,17 @@ const pluginUpdateCmd = command({
       if (updateUser) {
         const userConfig = await getUserWorkspaceConfig();
         if (userConfig) {
-          for (const entry of userConfig.plugins ?? []) {
-            const p = getPluginSource(entry);
-            addPluginToUpdate(p, 'user');
+          configs.user = userConfig;
+          for (const entry of userConfig.plugins) {
+            addPluginToUpdate(getPluginSource(entry), 'user');
           }
         }
       }
 
       // Filter to specific plugin if provided
       const toUpdate = plugin
-        ? pluginsToUpdate.filter(({ spec }) => {
-            // Match by full spec or just plugin name
-            if (spec === plugin) return true;
-            const parsed = parsePluginSpec(spec);
-            return parsed?.plugin === plugin || spec.endsWith(`/${plugin}`);
-          })
+        ? pluginsToUpdate.filter(({ spec }) =>
+            nativeIdentityMatches(plugin, spec, spec))
         : pluginsToUpdate;
 
       if (plugin && toUpdate.length === 0) {
@@ -1427,6 +1600,42 @@ const pluginUpdateCmd = command({
         }
         console.log('No plugins to update.');
         return;
+      }
+
+      const nativeTargets = {
+        project: [] as string[],
+        user: [] as string[],
+      };
+      const nativeOnly = new Set<string>();
+      for (const entry of toUpdate) {
+        const config = configs[entry.scope];
+        if (!config) continue;
+        const declaration =
+          config.plugins.find(
+            (candidate) => getPluginSource(candidate) === entry.spec,
+          ) ?? entry.spec;
+        const preflightErrors = await preflightNativePluginDeclaration(
+          declaration,
+          config.clients,
+          entry.scope,
+          process.cwd(),
+        );
+        if (preflightErrors.length > 0) {
+          throw new Error(
+            `Native preflight failed before update: ${preflightErrors.join('; ')}`,
+          );
+        }
+        const plan = buildPluginSyncPlans(
+          [declaration],
+          config.clients,
+          entry.scope,
+        ).plans[0];
+        if ((plan?.nativeClients.length ?? 0) > 0) {
+          nativeTargets[entry.scope].push(entry.spec);
+          if (plan?.clients.length === 0) {
+            nativeOnly.add(`${entry.scope}:${entry.spec}`);
+          }
+        }
       }
 
       if (!isJsonMode()) {
@@ -1468,46 +1677,121 @@ const pluginUpdateCmd = command({
         user: createUpdateDeps('user'),
       };
 
+      const updatedScopes = new Set<'project' | 'user'>();
       for (const { spec: pluginSpec, scope: pluginScope } of toUpdate) {
-        const result = await updatePlugin(pluginSpec, depsByScope[pluginScope]);
+        const result = nativeOnly.has(`${pluginScope}:${pluginSpec}`)
+          ? {
+              plugin: pluginSpec,
+              success: true,
+              action: 'skipped' as const,
+            }
+          : await updatePlugin(pluginSpec, depsByScope[pluginScope]);
+        if (result.action === 'updated') updatedScopes.add(pluginScope);
         results.push(result);
 
-        if (!isJsonMode()) {
-          const icon = result.success
-            ? (result.action === 'updated' ? '\u2713' : '-')
-            : '\u2717';
-          const actionLabel = result.action === 'updated'
-            ? 'updated'
-            : result.action === 'skipped'
-              ? 'skipped'
-              : 'failed';
-          console.log(`${icon} ${pluginSpec} (${actionLabel})`);
-          if (result.error) {
-            console.log(`  Error: ${result.error}`);
-          }
-        }
       }
 
-      const updated = results.filter((r) => r.action === 'updated').length;
-      const skipped = results.filter((r) => r.action === 'skipped').length;
-      const failed = results.filter((r) => r.action === 'failed').length;
 
-      // Sync plugin files only (skip AGENTS.md and other generated files)
+      // Sync each affected scope independently. Native mutation is constrained
+      // to the declarations named by this invocation.
       let syncOk = true;
-      let syncData: ReturnType<typeof buildSyncData> | null = null;
-
-      if (updated > 0) {
-        if (updateProject && !isUserConfigPath(process.cwd())) {
-          const { ok, syncData: data } = await runSyncAndPrint({ skipAgentFiles: true });
-          if (!ok) syncOk = false;
-          syncData = data;
-        }
-        if (updateUser) {
-          const { ok, syncData: data } = await runUserSyncAndPrint();
-          if (!ok) syncOk = false;
-          if (!syncData) syncData = data;
-        }
+      const syncResults: Record<string, unknown> = {};
+      const nativeEffects: Partial<
+        Record<'project' | 'user', NativeEffectData[]>
+      > = {};
+      const targetsByScope = {
+        project: toUpdate
+          .filter((entry) => entry.scope === 'project')
+          .map((entry) => entry.spec),
+        user: toUpdate
+          .filter((entry) => entry.scope === 'user')
+          .map((entry) => entry.spec),
+      };
+      if (
+        targetsByScope.project.length > 0 &&
+        (updatedScopes.has('project') || nativeTargets.project.length > 0)
+      ) {
+        const { ok, syncData } = await runSyncAndPrint({
+          skipAgentFiles: true,
+          nativeSelection: {
+            mode: 'update',
+            targets: targetsByScope.project,
+          },
+        });
+        syncResults.project = syncData;
+        if (!ok) syncOk = false;
+        nativeEffects.project = syncData.nativeResources?.effects ?? [];
       }
+      if (
+        targetsByScope.user.length > 0 &&
+        (updatedScopes.has('user') || nativeTargets.user.length > 0)
+      ) {
+        const { ok, syncData } = await runUserSyncAndPrint({
+          skipAgentFiles: true,
+          nativeSelection: {
+            mode: 'update',
+            targets: targetsByScope.user,
+          },
+        });
+        syncResults.user = syncData;
+        if (!ok) syncOk = false;
+        nativeEffects.user = syncData.nativeResources?.effects ?? [];
+      }
+
+      for (let index = 0; index < toUpdate.length; index++) {
+        const entry = toUpdate[index];
+        if (!entry || !nativeOnly.has(`${entry.scope}:${entry.spec}`)) continue;
+        const effects = (nativeEffects[entry.scope] ?? []).filter((effect) =>
+          nativeIdentityMatches(
+            entry.spec,
+            effect.requestedIdentity,
+            effect.resolvedIdentity,
+          ));
+        const failure = effects.find(
+          (effect) => effect.action === 'failed' || effect.action === 'unknown',
+        );
+        results[index] = failure
+          ? {
+              plugin: entry.spec,
+              success: false,
+              action: 'failed',
+              error:
+                failure.error ??
+                `Native ${failure.phase} did not establish a known result`,
+            }
+          : effects.some((effect) => effect.changed)
+            ? {
+                plugin: entry.spec,
+                success: true,
+                action: 'updated',
+              }
+            : effects.length > 0
+              ? {
+                  plugin: entry.spec,
+                  success: true,
+                  action: 'skipped',
+                }
+              : {
+                  plugin: entry.spec,
+                  success: false,
+                  action: 'failed',
+                  error: 'Native update produced no matching lifecycle effect',
+                };
+      }
+
+      for (const result of results) {
+        if (isJsonMode()) continue;
+        const icon = result.success
+          ? result.action === 'updated'
+            ? '\u2713'
+            : '-'
+          : '\u2717';
+        console.log(`${icon} ${result.plugin} (${result.action})`);
+        if (result.error) console.log(`  Error: ${result.error}`);
+      }
+      const updated = results.filter((result) => result.action === 'updated').length;
+      const skipped = results.filter((result) => result.action === 'skipped').length;
+      const failed = results.filter((result) => result.action === 'failed').length;
 
       if (isJsonMode()) {
         jsonOutput({
@@ -1523,9 +1807,14 @@ const pluginUpdateCmd = command({
             updated,
             skipped,
             failed,
-            ...(syncData && { syncResult: syncData }),
+            ...(Object.keys(syncResults).length > 0 && { syncResults }),
           },
-          ...(failed > 0 && { error: `${failed} plugin(s) failed to update` }),
+          ...((failed > 0 || !syncOk) && {
+            error:
+              failed > 0
+                ? `${failed} plugin(s) failed to update`
+                : 'Native update or sync failed',
+          }),
         });
         if (failed > 0 || !syncOk) {
           process.exit(1);

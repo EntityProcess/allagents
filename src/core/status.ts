@@ -1,19 +1,42 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, getHomeDir } from '../constants.js';
-import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
-import { getPluginSource, getClientTypes } from '../models/workspace-config.js';
+import {
+  getPluginSource,
+  getClientTypes,
+  type ClientEntry,
+  type ClientType,
+  type WorkspaceConfig,
+} from '../models/workspace-config.js';
 import {
   parsePluginSource,
   parseGitHubUrl,
   getPluginCachePath,
   type ParsedPluginSource,
 } from '../utils/plugin-path.js';
-import {
-  isPluginSpec,
-  resolvePluginSpecWithAutoRegister,
-} from './marketplace.js';
+import { parseWorkspaceConfig } from '../utils/workspace-parser.js';
+import { isPluginSpec, resolvePluginSpec } from './marketplace.js';
 import { getUserWorkspaceConfig, isUserConfigPath } from './user-workspace.js';
+import {
+  getNativeStateResources,
+  loadSyncState,
+  nativeStateOwnership,
+} from './sync-state.js';
+import type { NativeStateResource } from '../models/sync-state.js';
+import {
+  getNativeClient,
+  toNativeEffectData,
+  type NativeEffectData,
+  type NativeOperationContext,
+  type NativeResource,
+  type NativeResourceObservation,
+} from './native/index.js';
+import {
+  buildPluginSyncPlans,
+  nativeContextIdentity,
+  nativeOperationContext,
+} from './sync.js';
+import { resolveClientContexts } from './client-context.js';
 
 /**
  * Status of a single plugin
@@ -54,6 +77,12 @@ function classifyKind(path: string): 'skill' | 'plugin' {
   return 'plugin';
 }
 
+export interface NativePluginStatus extends NativeEffectData {
+  declared: boolean;
+  ownership: 'managed' | 'referenced' | 'uncertain' | 'none';
+  transition?: NativeStateResource['transition'];
+}
+
 /**
  * Result of workspace status check
  */
@@ -64,6 +93,229 @@ export interface WorkspaceStatusResult {
   /** User-level plugins from ~/.allagents/workspace.yaml */
   userPlugins?: PluginStatus[];
   clients: string[];
+  nativeResources: NativePluginStatus[];
+}
+
+function nativeOwnership(
+  state: NativeStateResource | undefined,
+): NativePluginStatus['ownership'] {
+  return state ? nativeStateOwnership(state.transition) : 'none';
+}
+
+function stateMatchesResource(
+  state: NativeStateResource,
+  resource: NativeResource,
+): boolean {
+  return (
+    state.kind === resource.kind &&
+    (state.requestedIdentity === resource.requestedIdentity ||
+      state.resolvedIdentity === resource.resolvedIdentity)
+  );
+}
+
+function resourceFromNativeState(
+  state: NativeStateResource,
+  context: NativeOperationContext,
+): NativeResource {
+  return {
+    kind: state.kind,
+    requestedIdentity: state.requestedIdentity,
+    resolvedIdentity: state.resolvedIdentity,
+    context: { ...context, root: state.root ?? context.root },
+    provenance: state.provenance,
+  };
+}
+
+function findExactNativeObservation(
+  resource: NativeResource,
+  observations: readonly NativeResourceObservation[] | undefined,
+  inspectedResources: readonly NativeResource[],
+): NativeResourceObservation | undefined {
+  const observation = observations?.find(
+    (candidate) =>
+      candidate.resource.kind === resource.kind &&
+      candidate.resource.resolvedIdentity === resource.resolvedIdentity,
+  );
+  if (observation) return observation;
+
+  const inspectedResource = inspectedResources.find(
+    (candidate) =>
+      candidate.kind === resource.kind &&
+      candidate.resolvedIdentity === resource.resolvedIdentity,
+  );
+  return inspectedResource
+    ? { resource: inspectedResource, status: 'installed' }
+    : undefined;
+}
+
+function statusFromObservation(
+  resource: NativeResource,
+  observation: NativeResourceObservation | undefined,
+  state: NativeStateResource | undefined,
+  declared: boolean,
+  inspectionError?: string,
+): NativePluginStatus {
+  const action: NativeEffectData['action'] = inspectionError
+    ? 'unknown'
+    : observation?.status ?? 'configured-missing';
+  return {
+    ...toNativeEffectData({
+      action,
+      phase: 'inspection',
+      changed: false,
+      resource,
+      ...(inspectionError && { error: inspectionError }),
+      ...(!inspectionError && observation?.error && {
+        error: observation.error,
+      }),
+    }),
+    declared,
+    ownership: nativeOwnership(state),
+    ...(state && { transition: state.transition }),
+  };
+}
+
+async function getNativeStatusesForScope(
+  config: WorkspaceConfig | null,
+  scope: 'user' | 'project',
+  workspacePath: string,
+): Promise<{ statuses: NativePluginStatus[]; errors: string[] }> {
+  const homeDir = getHomeDir();
+  const stateRoot = scope === 'user' ? homeDir : workspacePath;
+  const state = await loadSyncState(stateRoot);
+  const stateResources = (state?.nativeResources?.resources ?? []).filter(
+    (resource) => resource.scope === scope && !!getNativeClient(resource.client),
+  );
+  const clientEntries: ClientEntry[] = config?.clients ?? [];
+  const { plans, errors: planErrors } = buildPluginSyncPlans(
+    config?.plugins ?? [],
+    clientEntries,
+    scope,
+  );
+  const nativePlans = plans.filter((plan) => plan.nativeClients.length > 0);
+  const clients = [
+    ...new Set<ClientType>([
+      ...nativePlans.flatMap((plan) => plan.nativeClients),
+      ...stateResources.map((resource) => resource.client),
+    ]),
+  ];
+  const contexts = resolveClientContexts(clients, scope, {
+    cwd: workspacePath,
+    homeDir,
+    env: process.env,
+  });
+  const statuses: NativePluginStatus[] = [];
+  const errors = [...planErrors];
+
+  for (const client of clients) {
+    const adapter = getNativeClient(client);
+    const resolvedContext = contexts.get(client);
+    if (!adapter || !resolvedContext) {
+      errors.push(`${client} has no native lifecycle context`);
+      continue;
+    }
+    const context = nativeOperationContext(client, scope, resolvedContext);
+    const desired: NativeResource[] = [];
+    for (const plan of nativePlans) {
+      if (!plan.nativeClients.includes(client)) continue;
+      const resolution = adapter.resolveSource(plan.source, context, {
+        source: plan.source,
+      });
+      if (!resolution.success || !resolution.resource) {
+        errors.push(
+          resolution.error ?? `${client} rejected '${plan.source}'`,
+        );
+        continue;
+      }
+      desired.push(resolution.resource);
+    }
+
+    const contextIdentity = nativeContextIdentity(context);
+    const tracked = getNativeStateResources(
+      state,
+      client,
+      scope,
+      contextIdentity,
+    );
+    const staleContextState = stateResources.filter(
+      (resource) =>
+        resource.client === client && resource.context !== contextIdentity,
+    );
+    const available = await adapter.isAvailable(context);
+    const inspection = available
+      ? await adapter.inspect(context)
+      : {
+          success: false,
+          resources: [],
+          observations: [],
+          error: `${client} CLI is unavailable or unsupported`,
+        };
+    const inspectionError = inspection.success
+      ? undefined
+      : (inspection.error ?? `${client} native inspection failed`);
+    if (inspectionError) errors.push(inspectionError);
+
+    const emittedState = new Set<NativeStateResource>();
+    for (const resource of desired) {
+      const trackedResource = tracked.find((candidate) =>
+        stateMatchesResource(candidate, resource));
+      if (trackedResource) emittedState.add(trackedResource);
+      const observation = inspection.success
+        ? findExactNativeObservation(
+            resource,
+            inspection.observations,
+            inspection.resources,
+          )
+        : undefined;
+      statuses.push(
+        statusFromObservation(
+          resource,
+          observation,
+          trackedResource,
+          true,
+          inspectionError,
+        ),
+      );
+    }
+
+    for (const trackedResource of tracked) {
+      if (emittedState.has(trackedResource)) continue;
+      const resource = resourceFromNativeState(trackedResource, context);
+      const observation = inspection.success
+        ? findExactNativeObservation(
+            resource,
+            inspection.observations,
+            inspection.resources,
+          )
+        : undefined;
+      statuses.push(
+        statusFromObservation(
+          resource,
+          observation,
+          trackedResource,
+          false,
+          inspectionError,
+        ),
+      );
+    }
+
+    for (const trackedResource of staleContextState) {
+      const staleResource = resourceFromNativeState(trackedResource, context);
+      const error = `Recorded native root ${trackedResource.context} differs from selected root ${context.root}`;
+      errors.push(error);
+      statuses.push(
+        statusFromObservation(
+          staleResource,
+          undefined,
+          trackedResource,
+          false,
+          error,
+        ),
+      );
+    }
+  }
+
+  return { statuses, errors: [...new Set(errors)] };
 }
 
 /**
@@ -77,14 +329,22 @@ export async function getWorkspaceStatus(
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
   // If no project workspace.yaml, or project config IS the user config
-  // (i.e. cwd is the home directory), return user-level plugins only
+  // (i.e. cwd is the home directory), return user-level plugins only.
   if (!existsSync(configPath) || isUserConfigPath(workspacePath)) {
+    const userConfig = await getUserWorkspaceConfig();
     const userPlugins = await getUserPluginStatuses();
+    const native = await getNativeStatusesForScope(
+      userConfig,
+      'user',
+      workspacePath,
+    );
     return {
-      success: true,
+      success: native.errors.length === 0,
+      ...(native.errors.length > 0 && { error: native.errors.join('; ') }),
       plugins: [],
       userPlugins,
       clients: [],
+      nativeResources: native.statuses,
     };
   }
 
@@ -95,7 +355,10 @@ export async function getWorkspaceStatus(
     for (const pluginEntry of config.plugins) {
       const pluginSource = getPluginSource(pluginEntry);
       if (isPluginSpec(pluginSource)) {
-        const status = await getMarketplacePluginStatus(pluginSource);
+        const status = await getMarketplacePluginStatus(
+          pluginSource,
+          workspacePath,
+        );
         plugins.push(status);
       } else {
         const parsed = parsePluginSource(pluginSource, workspacePath);
@@ -104,13 +367,32 @@ export async function getWorkspaceStatus(
       }
     }
 
+    const userConfig = await getUserWorkspaceConfig();
     const userPlugins = await getUserPluginStatuses();
+    const userNative = await getNativeStatusesForScope(
+      userConfig,
+      'user',
+      workspacePath,
+    );
+    const projectNative = await getNativeStatusesForScope(
+      config,
+      'project',
+      workspacePath,
+    );
+    const nativeErrors = [...userNative.errors, ...projectNative.errors];
 
     return {
-      success: true,
+      success: nativeErrors.length === 0,
+      ...(nativeErrors.length > 0 && {
+        error: [...new Set(nativeErrors)].join('; '),
+      }),
       plugins,
       userPlugins,
       clients: getClientTypes(config.clients),
+      nativeResources: [
+        ...userNative.statuses,
+        ...projectNative.statuses,
+      ],
     };
   } catch (error) {
     return {
@@ -118,6 +400,7 @@ export async function getWorkspaceStatus(
       error: error instanceof Error ? error.message : String(error),
       plugins: [],
       clients: [],
+      nativeResources: [],
     };
   }
 }
@@ -191,14 +474,21 @@ async function getUserPluginStatuses(): Promise<PluginStatus[]> {
 /**
  * Get status of a plugin@marketplace spec
  */
-async function getMarketplacePluginStatus(spec: string): Promise<PluginStatus> {
-  const resolved = await resolvePluginSpecWithAutoRegister(spec, { offline: true });
+async function getMarketplacePluginStatus(
+  spec: string,
+  workspacePath?: string,
+): Promise<PluginStatus> {
+  const resolved = await resolvePluginSpec(spec, {
+    offline: true,
+    ...(workspacePath && { workspacePath }),
+  });
+  const path = resolved?.path ?? '';
 
   return {
     source: spec,
     type: 'marketplace',
-    kind: classifyKind(resolved.success ? (resolved.path ?? '') : ''),
-    available: resolved.success,
-    path: resolved.path ?? '',
+    kind: classifyKind(path),
+    available: resolved !== null,
+    path,
   };
 }

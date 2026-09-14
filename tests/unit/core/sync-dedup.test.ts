@@ -3,10 +3,24 @@ import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { syncWorkspace, deduplicateClientsByPath, collectSyncedPaths } from '../../../src/core/sync.js';
+import {
+  syncWorkspace,
+  deduplicateClientsByPath,
+  collectSyncedPaths,
+  selectivePurgeWorkspace,
+} from '../../../src/core/sync.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
-import { CLIENT_MAPPINGS, USER_CLIENT_MAPPINGS, resolveClientMappings } from '../../../src/models/client-mapping.js';
+import {
+  CLIENT_MAPPINGS,
+  USER_CLIENT_MAPPINGS,
+  resolveClientMappings,
+} from '../../../src/models/client-mapping.js';
 import type { CopyResult } from '../../../src/core/transform.js';
+import {
+  clientMappingsFromContexts,
+  resolveClientContexts,
+} from '../../../src/core/client-context.js';
+import type { SyncState } from '../../../src/models/sync-state.js';
 
 describe('deduplicateClientsByPath', () => {
   it('should group clients that share the same skillsPath after resolution', () => {
@@ -119,6 +133,17 @@ describe('deduplicateClientsByPath', () => {
   });
 });
 
+  it('keeps Pi and OMP materialization distinct from shared discovery paths', () => {
+    const clients = ['pi', 'omp', 'universal'] as const;
+    const result = deduplicateClientsByPath([...clients], CLIENT_MAPPINGS);
+
+    expect(result.representativeClients).toEqual([
+      'pi',
+      'omp',
+      'universal',
+    ]);
+  });
+
 describe('collectSyncedPaths with shared paths', () => {
   it('should track file for all clients sharing the same skillsPath after resolution', () => {
     // After resolution, copilot and vscode both use .github/skills/
@@ -163,6 +188,80 @@ describe('collectSyncedPaths with shared paths', () => {
     // copilot should only track .github/skills/skill2
     expect(result.copilot).toContain('.github/skills/skill2/');
     expect(result.copilot).not.toContain('.claude/skills/skill1/');
+  });
+});
+
+describe('external resolved path state and purge containment', () => {
+  it('tracks an external Pi root as an absolute path without traversal', () => {
+    const contexts = resolveClientContexts(['pi'], 'user', {
+      homeDir: '/home/tester',
+      cwd: '/work/project',
+      env: { PI_CODING_AGENT_DIR: '/external/pi' },
+    });
+    const mappings = clientMappingsFromContexts(
+      contexts,
+      USER_CLIENT_MAPPINGS,
+    );
+    const destination = '/external/pi/skills/example';
+
+    const result = collectSyncedPaths(
+      [{ source: '/plugin/skills/example', destination, action: 'copied' }],
+      '/home/tester',
+      ['pi'],
+      mappings,
+      undefined,
+      contexts,
+    );
+
+    expect(result.pi).toEqual(['/external/pi/skills/example/']);
+    expect(result.pi?.[0]).not.toContain('../');
+  });
+
+  it('purges only tracked paths inside the resolved external write root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'allagents-purge-boundary-'));
+    const homeDir = join(root, 'home');
+    const externalRoot = join(root, 'selected-pi');
+    const managedSkill = join(externalRoot, 'skills', 'managed');
+    const outsideSkill = join(root, 'outside', 'tampered');
+    await mkdir(managedSkill, { recursive: true });
+    await mkdir(outsideSkill, { recursive: true });
+    await writeFile(join(managedSkill, 'SKILL.md'), 'managed');
+    await writeFile(join(outsideSkill, 'SKILL.md'), 'outside');
+
+    try {
+      const contexts = resolveClientContexts(['pi'], 'user', {
+        homeDir,
+        cwd: root,
+        env: { PI_CODING_AGENT_DIR: externalRoot },
+      });
+      const mappings = clientMappingsFromContexts(
+        contexts,
+        USER_CLIENT_MAPPINGS,
+      );
+      const managedStatePath = `${managedSkill.replaceAll('\\', '/')}/`;
+      const outsideStatePath = `${outsideSkill.replaceAll('\\', '/')}/`;
+      const state = {
+        version: 1,
+        lastSync: new Date().toISOString(),
+        files: { pi: [managedStatePath, outsideStatePath] },
+      } as SyncState;
+
+      const result = await selectivePurgeWorkspace(
+        homeDir,
+        state,
+        ['pi'],
+        mappings,
+        contexts,
+      );
+
+      expect(existsSync(managedSkill)).toBe(false);
+      expect(existsSync(outsideSkill)).toBe(true);
+      expect(result).toEqual([
+        { client: 'pi', paths: [managedStatePath] },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -258,6 +357,34 @@ clients:
     expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(testDir, '.cursor', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(testDir, '.github', 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+  });
+
+  it('materializes Pi native and universal shared skills exactly once each', async () => {
+    const pluginDir = await createPluginWithSkill('my-plugin', 'test-skill');
+    await mkdir(join(testDir, CONFIG_DIR), { recursive: true });
+    await writeFile(
+      join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
+      `
+repositories: []
+plugins:
+  - ${pluginDir}
+clients:
+  - pi
+  - universal
+syncMode: copy
+`,
+    );
+
+    const result = await syncWorkspace(testDir);
+
+    expect(result.success).toBe(true);
+    expect(result.totalCopied).toBe(2);
+    expect(
+      existsSync(join(testDir, '.pi', 'skills', 'test-skill', 'SKILL.md')),
+    ).toBe(true);
+    expect(
+      existsSync(join(testDir, '.agents', 'skills', 'test-skill', 'SKILL.md')),
+    ).toBe(true);
   });
 
   it('should properly purge when a client sharing path is removed', async () => {

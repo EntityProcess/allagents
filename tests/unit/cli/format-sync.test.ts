@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { formatMcpResult, formatNativeResult, classifyCopyResults, formatArtifactLines, formatPluginArtifacts, formatSyncSummary, formatDeletedArtifacts, formatPluginHeader } from '../../../src/cli/format-sync.js';
+import { buildSyncData, formatMcpResult, formatNativeResult, classifyCopyResults, formatArtifactLines, formatPluginArtifacts, formatSyncSummary, formatDeletedArtifacts, formatPluginHeader } from '../../../src/cli/format-sync.js';
 import type { CopyResult } from '../../../src/core/transform.js';
 import type { SyncResult, DeletedArtifact, PluginSyncResult } from '../../../src/core/sync.js';
 import type { McpMergeResult } from '../../../src/core/vscode-mcp.js';
@@ -261,79 +261,86 @@ describe('formatSyncSummary', () => {
 });
 
 describe('formatNativeResult', () => {
-  test('includes provider name when present on failed native installs', () => {
-    const result: NativeSyncResult = {
-      marketplacesAdded: [],
-      pluginsInstalled: [],
-      pluginsFailed: [
-        { client: 'copilot', plugin: 'glow@wtg-ai-prompts', error: 'boom' },
-      ],
-      skipped: [],
-    };
+  const resource = {
+    kind: 'plugin' as const,
+    requestedIdentity: 'glow@wtg-ai-prompts',
+    resolvedIdentity: 'glow@wtg-ai-prompts',
+    context: {
+      client: 'copilot',
+      scope: 'user' as const,
+      nativeScope: 'user',
+      root: '/home/test',
+    },
+    provenance: {},
+  };
 
+  test('formats typed successful lifecycle effects', () => {
+    const result: NativeSyncResult = {
+      success: true,
+      effects: [
+        { action: 'installed', resource },
+        { action: 'unchanged', resource },
+        { action: 'removed', resource },
+      ],
+    };
     expect(formatNativeResult(result)).toEqual([
-      '  ✗ [copilot] glow@wtg-ai-prompts: boom',
+      '  + [copilot:user] kind=plugin requested="glow@wtg-ai-prompts" resolved="glow@wtg-ai-prompts" root="/home/test" action=installed phase=install changed=true',
+      '  = [copilot:user] kind=plugin requested="glow@wtg-ai-prompts" resolved="glow@wtg-ai-prompts" root="/home/test" action=unchanged phase=inspection changed=false',
+      '  - [copilot:user] kind=plugin requested="glow@wtg-ai-prompts" resolved="glow@wtg-ai-prompts" root="/home/test" action=removed phase=remove changed=true',
     ]);
   });
 
-  test('shows claude client name for plugins installed via claude CLI', () => {
+  test('formats failures with exact client and scope', () => {
     const result: NativeSyncResult = {
-      marketplacesAdded: [],
-      pluginsInstalled: [
-        { plugin: 'superpowers@claude-plugins-official', client: 'claude' },
-      ],
-      pluginsFailed: [],
-      skipped: [],
+      success: false,
+      effects: [{ action: 'failed', resource, error: 'boom' }],
     };
-
     expect(formatNativeResult(result)).toEqual([
-      '  + superpowers@claude-plugins-official (installed via claude CLI)',
+      '  ✗ [copilot:user] kind=plugin requested="glow@wtg-ai-prompts" resolved="glow@wtg-ai-prompts" root="/home/test" action=failed phase=inspection changed=false error="boom"',
     ]);
   });
 
-  test('shows copilot client name for plugins installed via copilot CLI', () => {
+  test('uses the same sanitized typed fields for human and JSON output', () => {
     const result: NativeSyncResult = {
-      marketplacesAdded: [],
-      pluginsInstalled: [
-        { plugin: 'glow@wtg-ai-prompts', client: 'copilot' },
-      ],
-      pluginsFailed: [],
-      skipped: [],
+      success: false,
+      effects: [{
+        action: 'failed',
+        phase: 'update',
+        changed: false,
+        resource: {
+          ...resource,
+          requestedIdentity: 'requested@repo',
+        },
+        error: '\u001b[31mboom\u001b[0m\nsecret-free detail',
+      }],
+    };
+    const syncResult: SyncResult = {
+      success: false,
+      pluginResults: [],
+      totalCopied: 0,
+      totalFailed: 1,
+      totalSkipped: 0,
+      totalGenerated: 0,
+      nativeResult: result,
     };
 
     expect(formatNativeResult(result)).toEqual([
-      '  + glow@wtg-ai-prompts (installed via copilot CLI)',
+      '  ✗ [copilot:user] kind=plugin requested="requested@repo" resolved="glow@wtg-ai-prompts" root="/home/test" action=failed phase=update changed=false error="boom secret-free detail"',
     ]);
-  });
-
-  test('shows codex client name for plugins installed via codex CLI', () => {
-    const result: NativeSyncResult = {
-      marketplacesAdded: [],
-      pluginsInstalled: [
-        { plugin: 'my-plugin@marketplace', client: 'codex' },
-      ],
-      pluginsFailed: [],
-      skipped: [],
-    };
-
-    expect(formatNativeResult(result)).toEqual([
-      '  + my-plugin@marketplace (installed via codex CLI)',
-    ]);
-  });
-
-  test('falls back to native CLI when client is not set', () => {
-    const result: NativeSyncResult = {
-      marketplacesAdded: [],
-      pluginsInstalled: [
-        { plugin: 'plugin@repo' },
-      ],
-      pluginsFailed: [],
-      skipped: [],
-    };
-
-    expect(formatNativeResult(result)).toEqual([
-      '  + plugin@repo (installed via native CLI)',
-    ]);
+    expect(buildSyncData(syncResult).nativeResources?.effects).toEqual([{
+      action: 'failed',
+      phase: 'update',
+      changed: false,
+      client: 'copilot',
+      scope: 'user',
+      nativeScope: 'user',
+      kind: 'plugin',
+      requestedIdentity: 'requested@repo',
+      resolvedIdentity: 'glow@wtg-ai-prompts',
+      root: '/home/test',
+      provenance: {},
+      error: 'boom secret-free detail',
+    }]);
   });
 });
 

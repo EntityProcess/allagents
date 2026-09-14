@@ -51,16 +51,19 @@ export async function runManageClients(context: TuiContext, cache?: TuiCache): P
     const allClients = ClientTypeSchema.options;
     const options = buildClientOptions();
 
-    const selectedClients = await autocompleteMultiselect({
+    const selected = await autocompleteMultiselect<string>({
       message: `Select AI clients [${scope}]`,
       options,
-      initialValues: currentClients.filter((c): c is ClientType => (allClients as readonly string[]).includes(c)),
+      initialValues: currentClients.filter((client) =>
+        (allClients as readonly string[]).includes(client),
+      ),
       required: false,
     });
 
-    if (p.isCancel(selectedClients)) {
+    if (p.isCancel(selected)) {
       return;
     }
+    const selectedClients = selected as ClientType[];
 
     // Check if anything changed
     const sortedCurrent = [...currentClients].sort();

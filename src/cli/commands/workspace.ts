@@ -33,6 +33,7 @@ import {
   buildSyncData,
   formatManagedRepoResults,
   formatMcpResult,
+  formatNativeEffectData,
   formatNativeResult,
   formatPluginArtifacts,
   formatPluginHeader,
@@ -563,29 +564,21 @@ const statusCmd = command({
     try {
       const result = await getWorkspaceStatus();
 
-      if (!result.success) {
-        if (isJsonMode()) {
-          jsonOutput({
-            success: false,
-            command: 'workspace status',
-            error: result.error ?? 'Unknown error',
-          });
-          process.exit(1);
-        }
-        console.error(`Error: ${result.error}`);
-        process.exit(1);
-      }
-
       if (isJsonMode()) {
         jsonOutput({
-          success: true,
+          success: result.success,
           command: 'workspace status',
           data: {
             plugins: result.plugins,
             userPlugins: result.userPlugins ?? [],
             clients: result.clients,
+            nativeResources: result.nativeResources,
           },
+          ...(!result.success && {
+            error: result.error ?? 'Native inspection failed',
+          }),
         });
+        if (!result.success) process.exit(1);
         return;
       }
 
@@ -611,12 +604,26 @@ const statusCmd = command({
         }
       }
 
+      if (result.nativeResources.length > 0) {
+        console.log(`\nNative Resources (${result.nativeResources.length}):`);
+        for (const nativeResource of result.nativeResources) {
+          console.log(
+            `${formatNativeEffectData(nativeResource)} declared=${String(nativeResource.declared)} ownership=${nativeResource.ownership}${nativeResource.transition ? ` transition=${nativeResource.transition}` : ''}`,
+          );
+        }
+      }
+
       // Display clients
       console.log(`\nClients (${result.clients.length}):`);
       if (result.clients.length === 0) {
         console.log('  No clients configured');
       } else {
         console.log(`  ${result.clients.join(', ')}`);
+      }
+
+      if (!result.success) {
+        console.error(`Error: ${result.error ?? 'Native inspection failed'}`);
+        process.exit(1);
       }
     } catch (error) {
       if (error instanceof Error) {

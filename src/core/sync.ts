@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, writeFileSync, lstatSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  lstatSync,
+  type Stats,
+} from 'node:fs';
 import { rm, unlink, rmdir, copyFile } from 'node:fs/promises';
 import { join, resolve, dirname, relative } from 'node:path';
 import JSON5 from 'json5';
@@ -83,11 +89,17 @@ import {
 import {
   loadSyncState,
   saveSyncState,
+  saveNativeStateResources,
   getPreviouslySyncedFiles,
   getPreviouslySyncedMcpServers,
-  getPreviouslySyncedNativePlugins,
+  getNativeStateResources,
+  nativeStateOwnership,
 } from './sync-state.js';
-import type { SyncState, SyncStateSource } from '../models/sync-state.js';
+import type {
+  NativeStateResource,
+  SyncState,
+  SyncStateSource,
+} from '../models/sync-state.js';
 import {
   getUserWorkspaceConfig,
   migrateUserWorkspaceSkillsV1toV2,
@@ -121,10 +133,23 @@ import { syncMcpServers as runMcpSync } from './mcp-sync.js';
 import {
   getNativeClient,
   mergeNativeSyncResults,
+  sanitizeNativeProvenance,
+  type NativeEffect,
+  type NativeMutationResult,
+  type NativeOperationContext,
+  type NativeResource,
   type NativeSyncResult,
 } from './native/index.js';
 import { Stopwatch } from '../utils/stopwatch.js';
 import { processManagedRepos } from './managed-repos.js';
+import {
+  assertSafeDestination,
+  clientMappingsFromContexts,
+  pathIsWithin,
+  resolveClientContexts,
+  resolveMappedPath,
+  type ResolvedClientContext,
+} from './client-context.js';
 
 /**
  * Result of deduplicating clients by skillsPath
@@ -236,24 +261,10 @@ export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
     a.mcpResults || b.mcpResults
       ? { ...a.mcpResults, ...b.mcpResults }
       : undefined;
-  // Merge nativeResults when both scopes produce them
+  // Merge native effects in execution order across the two ordinary scopes.
   const nativeResult =
     a.nativeResult && b.nativeResult
-      ? {
-          marketplacesAdded: [
-            ...a.nativeResult.marketplacesAdded,
-            ...b.nativeResult.marketplacesAdded,
-          ],
-          pluginsInstalled: [
-            ...a.nativeResult.pluginsInstalled,
-            ...b.nativeResult.pluginsInstalled,
-          ],
-          pluginsFailed: [
-            ...a.nativeResult.pluginsFailed,
-            ...b.nativeResult.pluginsFailed,
-          ],
-          skipped: [...a.nativeResult.skipped, ...b.nativeResult.skipped],
-        }
+      ? mergeNativeSyncResults([a.nativeResult, b.nativeResult])
       : (a.nativeResult ?? b.nativeResult);
   return {
     success: a.success && b.success,
@@ -321,6 +332,8 @@ export interface SyncOptions {
   offline?: boolean;
   /** Simulate sync without making changes */
   dryRun?: boolean;
+  /** Overwrite differing MCP entries where the scoped sync supports it. */
+  force?: boolean;
   /**
    * Base path for resolving relative workspace.source paths.
    * Used during init to resolve paths relative to the --from source directory
@@ -331,6 +344,14 @@ export interface SyncOptions {
   skipAgentFiles?: boolean;
   /** Skip managed repository clone/pull operations */
   skipManaged?: boolean;
+  /**
+   * Restrict native mutation to explicit declaration/state identities.
+   * Ordinary workspace sync leaves this unset and performs full reconciliation.
+   */
+  nativeSelection?: {
+    mode: 'update' | 'remove';
+    targets: readonly string[];
+  };
 }
 
 /**
@@ -413,50 +434,269 @@ function resolveNativePluginSource(vp: ValidatedPlugin): {
   };
 }
 
-/**
- * Collect native plugin specs and marketplace sources from validated plugins.
- * Resolves canonical marketplace names so native CLI operations use the correct spec.
- */
-export function collectNativePluginSources(validPlugins: ValidatedPlugin[]): {
-  pluginsByClient: Map<ClientType, string[]>;
-  marketplaceSourcesByClient: Map<ClientType, Set<string>>;
-} {
-  const pluginsByClient = new Map<ClientType, string[]>();
-  const marketplaceSourcesByClient = new Map<ClientType, Set<string>>();
+export function nativeOperationContext(
+  client: ClientType,
+  scope: 'user' | 'project',
+  context: ResolvedClientContext,
+): NativeOperationContext {
+  return {
+    client,
+    scope,
+    nativeScope: scope,
+    root: resolve(context.writeRoot),
+    cwd: context.commandCwd,
+    env: context.commandEnv,
+    ...(context.ompRoots && { roots: { ...context.ompRoots } }),
+  };
+}
 
-  for (const vp of validPlugins) {
-    for (const client of vp.nativeClients) {
-      const existing = pluginsByClient.get(client) ?? [];
-      const { spec, marketplaceSource } = resolveNativePluginSource(vp);
-      existing.push(spec);
-      pluginsByClient.set(client, existing);
+export function nativeContextIdentity(context: NativeOperationContext): string {
+  if (context.client !== 'omp') return resolve(context.root);
+  const roots = Object.entries(context.roots ?? {})
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    .map(([name, path]) => [name, resolve(path)]);
+  return JSON.stringify({
+    root: resolve(context.root),
+    roots,
+  });
+}
 
-      if (marketplaceSource) {
-        const sources = marketplaceSourcesByClient.get(client) ?? new Set();
-        sources.add(marketplaceSource);
-        marketplaceSourcesByClient.set(client, sources);
+function nativeLogicalIdentity(
+  client: ClientType,
+  resource: NativeResource,
+): string {
+  if (client === 'pi') {
+    const packageIdentity = resource.provenance.packageIdentity;
+    if (packageIdentity) return `package:${packageIdentity}`;
+  }
+  return `${resource.kind}:${resource.resolvedIdentity}`;
+}
+
+function collectNativeResources(
+  validPlugins: ValidatedPlugin[],
+  scope: 'user' | 'project',
+  contexts: Map<ClientType, ResolvedClientContext>,
+): Map<ClientType, NativeResource[]> {
+  const resources = new Map<ClientType, NativeResource[]>();
+  for (const plugin of validPlugins) {
+    const { spec, marketplaceSource } = resolveNativePluginSource(plugin);
+    for (const client of plugin.nativeClients) {
+      const adapter = getNativeClient(client);
+      const context = contexts.get(client);
+      if (!adapter || !context) continue;
+      const resolution = adapter.resolveSource(
+        spec,
+        nativeOperationContext(client, scope, context),
+        {
+          source: plugin.plugin,
+          ...(marketplaceSource && { marketplaceSource }),
+        },
+      );
+      if (!resolution.success || !resolution.resource) continue;
+      const existing = resources.get(client) ?? [];
+      existing.push({
+        ...resolution.resource,
+        requestedIdentity: plugin.plugin,
+      });
+      resources.set(client, existing);
+    }
+  }
+  return resources;
+}
+export function nativeIdentityMatches(
+  target: string,
+  requestedIdentity: string,
+  resolvedIdentity: string,
+): boolean {
+  if (target === requestedIdentity || target === resolvedIdentity) return true;
+  const targetSpec = parsePluginSpec(target);
+  const requestedSpec = parsePluginSpec(requestedIdentity);
+  const resolvedSpec = parsePluginSpec(resolvedIdentity);
+  if (targetSpec) {
+    return [requestedSpec, resolvedSpec].some(
+      (candidate) =>
+        candidate?.plugin === targetSpec.plugin &&
+        candidate.marketplaceName === targetSpec.marketplaceName,
+    );
+  }
+  if (
+    requestedSpec?.plugin === target ||
+    resolvedSpec?.plugin === target
+  ) {
+    return true;
+  }
+
+  const packageName = (identity: string): string | null => {
+    if (!identity.startsWith('npm:')) return null;
+    const spec = identity.slice(4);
+    const versionSeparator = spec.startsWith('@')
+      ? spec.indexOf('@', spec.indexOf('/') + 1)
+      : spec.lastIndexOf('@');
+    return versionSeparator > 0 ? spec.slice(0, versionSeparator) : spec;
+  };
+  return (
+    packageName(requestedIdentity) === target ||
+    packageName(resolvedIdentity) === target
+  );
+}
+
+function nativeSelectionMatches(
+  selection: SyncOptions['nativeSelection'],
+  requestedIdentity: string,
+  resolvedIdentity: string,
+): boolean {
+  return (
+    !selection ||
+    selection.targets.some((target) =>
+      nativeIdentityMatches(target, requestedIdentity, resolvedIdentity))
+  );
+}
+
+async function preflightNativePlans(
+  plans: PluginSyncPlan[],
+  scope: 'user' | 'project',
+  contexts: Map<ClientType, ResolvedClientContext>,
+  selection?: SyncOptions['nativeSelection'],
+): Promise<string[]> {
+  const desiredIdentities = new Map<ClientType, Map<string, string>>();
+  const errors: string[] = [];
+  const available = new Map<ClientType, boolean>();
+  const inspected = new Map<ClientType, string | null>();
+  for (const plan of plans) {
+    if (
+      selection &&
+      !nativeSelectionMatches(selection, plan.source, plan.source)
+    ) {
+      continue;
+    }
+    for (const client of plan.nativeClients) {
+      const adapter = getNativeClient(client);
+      const context = contexts.get(client);
+      if (!adapter || !context) {
+        errors.push(`${client} has no native lifecycle adapter`);
+        continue;
+      }
+      const operationContext = nativeOperationContext(client, scope, context);
+      const resolution = adapter.resolveSource(plan.source, operationContext, {
+        source: plan.source,
+      });
+      if (!resolution.success || !resolution.resource) {
+        errors.push(resolution.error ?? `${client} rejected '${plan.source}'`);
+        continue;
+      }
+      const logicalIdentity = nativeLogicalIdentity(client, resolution.resource);
+      const clientIdentities = desiredIdentities.get(client) ?? new Map();
+      const duplicate = clientIdentities.get(logicalIdentity);
+      if (duplicate) {
+        errors.push(
+          `${client} native declarations '${duplicate}' and '${plan.source}' both resolve to ${logicalIdentity}`,
+        );
+        continue;
+      }
+      clientIdentities.set(logicalIdentity, plan.source);
+      desiredIdentities.set(client, clientIdentities);
+      let cliAvailable = available.get(client);
+      if (cliAvailable === undefined) {
+        cliAvailable = await adapter.isAvailable(operationContext);
+        available.set(client, cliAvailable);
+      }
+      if (!cliAvailable) {
+        errors.push(`${client} CLI is unavailable for required native install`);
+        continue;
+      }
+      if (!inspected.has(client)) {
+        const inspection = await adapter.inspect(operationContext);
+        inspected.set(
+          client,
+          inspection.success
+            ? null
+            : (inspection.error ?? 'native inspection failed'),
+        );
+      }
+      const inspectionError = inspected.get(client);
+      if (inspectionError) {
+        errors.push(`${client} native inspection failed: ${inspectionError}`);
       }
     }
   }
-
-  return { pluginsByClient, marketplaceSourcesByClient };
+  return [...new Set(errors)];
 }
 
-function attachNativeClientContext(
-  result: NativeSyncResult,
-  clientType: ClientType,
+function nativePreflightFailureResult(
+  plans: PluginSyncPlan[],
+  scope: 'user' | 'project',
+  contexts: Map<ClientType, ResolvedClientContext>,
+  errors: string[],
+  selection?: SyncOptions['nativeSelection'],
 ): NativeSyncResult {
-  return {
-    ...result,
-    pluginsInstalled: result.pluginsInstalled.map((installed) => ({
-      ...installed,
-      client: clientType,
-    })),
-    pluginsFailed: result.pluginsFailed.map((failure) => ({
-      ...failure,
-      client: clientType,
-    })),
-  };
+  const effects: NativeEffect[] = [];
+  for (const plan of plans) {
+    if (
+      selection &&
+      !nativeSelectionMatches(selection, plan.source, plan.source)
+    ) {
+      continue;
+    }
+    for (const client of plan.nativeClients) {
+      const resolvedContext = contexts.get(client);
+      if (!resolvedContext) continue;
+      const context = nativeOperationContext(client, scope, resolvedContext);
+      const adapter = getNativeClient(client);
+      const resolution = adapter?.resolveSource(plan.source, context, {
+        source: plan.source,
+      });
+      const resource: NativeResource =
+        resolution?.resource ?? {
+          kind: client === 'pi' ? 'package' : 'plugin',
+          requestedIdentity: plan.source,
+          resolvedIdentity: plan.source,
+          context,
+          provenance: { source: plan.source },
+        };
+      const error =
+        errors.find(
+          (candidate) =>
+            candidate.startsWith(`${client} `) ||
+            candidate.startsWith(`${client.toUpperCase()} `) ||
+            candidate.includes(`${client} native`),
+        ) ?? errors.join('; ');
+      effects.push({
+        action: 'failed',
+        phase: 'inspection',
+        changed: false,
+        resource,
+        error,
+      });
+    }
+  }
+  return { success: false, effects };
+}
+
+/**
+ * Validate a prospective plugin declaration against every native client before
+ * a CLI handler edits workspace.yaml or triggers generic source fetching.
+ */
+export async function preflightNativePluginDeclaration(
+  plugin: PluginEntry,
+  clientEntries: ClientEntry[],
+  scope: 'user' | 'project',
+  workspacePath: string,
+): Promise<string[]> {
+  const { plans, errors } = buildPluginSyncPlans(
+    [plugin],
+    clientEntries,
+    scope,
+  );
+  if (errors.length > 0) return errors;
+  const nativePlans = plans.filter((plan) => plan.nativeClients.length > 0);
+  if (nativePlans.length === 0) return [];
+  const clients = collectSyncClients(clientEntries, nativePlans);
+  const contexts = resolveClientContexts(clients, scope, {
+    cwd: workspacePath,
+    homeDir: getHomeDir(),
+    env: process.env,
+  });
+  return preflightNativePlans(nativePlans, scope, contexts);
 }
 
 export function collectSyncClients(
@@ -599,6 +839,51 @@ export function getPurgePaths(
   return result;
 }
 
+const MANAGED_DIRECTORY_KEYS = [
+  'commandsPath',
+  'skillsPath',
+  'hooksPath',
+  'agentsPath',
+  'githubPath',
+] as const satisfies readonly (keyof ClientMapping)[];
+
+function resolveTrackedPath(
+  workspacePath: string,
+  filePath: string,
+): string {
+  return resolveMappedPath(workspacePath, filePath.replace(/[\\/]$/, ''));
+}
+
+function trackedPathIsAllowed(
+  workspacePath: string,
+  filePath: string,
+  mapping: ClientMapping,
+  context?: ResolvedClientContext,
+): boolean {
+  const candidate = resolveTrackedPath(workspacePath, filePath);
+  const agentFiles = [mapping.agentFile, mapping.agentFileFallback].filter(
+    (path): path is string => path !== undefined,
+  );
+  if (
+    agentFiles.some(
+      (path) => resolveMappedPath(workspacePath, path) === candidate,
+    )
+  ) {
+    return true;
+  }
+
+  const writeRoot = context?.writeRoot ?? workspacePath;
+  if (!pathIsWithin(writeRoot, candidate)) return false;
+
+  return MANAGED_DIRECTORY_KEYS.some((key) => {
+    const mappedPath = mapping[key];
+    return Boolean(
+      mappedPath &&
+        pathIsWithin(resolveMappedPath(workspacePath, mappedPath), candidate),
+    );
+  });
+}
+
 /**
  * Selectively purge only files that were previously synced
  * Non-destructive: preserves user-created files
@@ -611,6 +896,8 @@ export async function selectivePurgeWorkspace(
   workspacePath: string,
   state: SyncState | null,
   clients: ClientType[],
+  clientMappings: Record<string, ClientMapping> = CLIENT_MAPPINGS,
+  clientContexts?: ReadonlyMap<ClientType, ResolvedClientContext>,
 ): Promise<PurgePaths[]> {
   // First sync - no state, skip purge entirely (safe overlay)
   if (!state) {
@@ -619,28 +906,30 @@ export async function selectivePurgeWorkspace(
 
   const result: PurgePaths[] = [];
 
-  // Get all clients that have files in the previous state
-  const previousClients = Object.keys(state.files) as ClientType[];
-
   // Include both current clients AND clients that were removed from config.
-  // Removed clients must be purged to avoid orphaned files on disk when a user
-  // removes a client from workspace.yaml (e.g., removes 'copilot' from clients list).
+  const previousClients = Object.keys(state.files) as ClientType[];
   const clientsToProcess = [...new Set([...clients, ...previousClients])];
 
   for (const client of clientsToProcess) {
     const previousFiles = getPreviouslySyncedFiles(state, client);
+    const mapping = clientMappings[client];
+    if (!mapping) continue;
+    const context = clientContexts?.get(client);
     const purgedPaths: string[] = [];
 
-    // Delete each previously synced file
     for (const filePath of previousFiles) {
-      const fullPath = join(workspacePath, filePath);
-
-      // Use lstatSync instead of existsSync — existsSync follows symlinks,
-      // so broken symlinks (target already deleted) return false and get skipped.
-      // Since we track synced files in state, if it's tracked we should remove it.
-      // Strip trailing slash so lstatSync checks the symlink entry itself.
-      const cleanPath = fullPath.replace(/\/$/, '');
-      let stats: ReturnType<typeof lstatSync>;
+      if (
+        !trackedPathIsAllowed(
+          workspacePath,
+          filePath,
+          mapping,
+          context,
+        )
+      ) {
+        continue;
+      }
+      const cleanPath = resolveTrackedPath(workspacePath, filePath);
+      let stats: Stats;
       try {
         stats = lstatSync(cleanPath);
       } catch {
@@ -648,22 +937,20 @@ export async function selectivePurgeWorkspace(
       }
 
       try {
-        // Check if it's a symlink - these need special handling
-        // (rm with trailing slash on a symlink fails with ENOTDIR)
+        await assertSafeDestination(
+          context?.writeRoot ?? workspacePath,
+          cleanPath,
+          { allowFinalSymlink: true },
+        );
         if (stats.isSymbolicLink()) {
-          // Remove symlink (works without trailing slash)
           await unlink(cleanPath);
-        } else if (filePath.endsWith('/')) {
-          // Regular directory - remove recursively
-          await rm(fullPath, { recursive: true, force: true });
+        } else if (filePath.endsWith('/') || filePath.endsWith('\\')) {
+          await rm(cleanPath, { recursive: true, force: true });
         } else {
-          // Regular file
-          await unlink(fullPath);
+          await unlink(cleanPath);
         }
         purgedPaths.push(filePath);
-
-        // Clean up empty parent directories
-        await cleanupEmptyParents(workspacePath, filePath);
+        await cleanupEmptyParents(context?.writeRoot ?? workspacePath, cleanPath);
       } catch {
         // Best effort - continue with other files
       }
@@ -678,29 +965,27 @@ export async function selectivePurgeWorkspace(
 }
 
 /**
- * Clean up empty parent directories after file deletion
- * Stops at workspace root
+ * Clean up empty parent directories after file deletion.
+ * The resolved write root itself is never removed.
  */
 async function cleanupEmptyParents(
-  workspacePath: string,
-  filePath: string,
+  writeRoot: string,
+  deletedPath: string,
 ): Promise<void> {
-  let parentPath = dirname(filePath);
+  const root = resolve(writeRoot);
+  let parentPath = dirname(deletedPath);
 
-  while (parentPath && parentPath !== '.' && parentPath !== '/') {
-    const fullParentPath = join(workspacePath, parentPath);
-
-    if (!existsSync(fullParentPath)) {
+  while (parentPath !== root && pathIsWithin(root, parentPath)) {
+    if (!existsSync(parentPath)) {
       parentPath = dirname(parentPath);
       continue;
     }
 
     try {
-      // rmdir only works on empty directories - will throw if not empty
-      await rmdir(fullParentPath);
+      await assertSafeDestination(root, parentPath);
+      await rmdir(parentPath);
       parentPath = dirname(parentPath);
     } catch {
-      // Directory not empty or other error - stop climbing
       break;
     }
   }
@@ -961,11 +1246,12 @@ export function collectSyncedPaths(
   clients: ClientType[],
   clientMappings?: Record<string, ClientMapping>,
   agentDedupeRecords?: AgentDedupeRecord[],
+  clientContexts?: ReadonlyMap<ClientType, ResolvedClientContext>,
 ): Partial<Record<ClientType, string[]>> {
   const result: Partial<Record<ClientType, string[]>> = {};
   const mappings = clientMappings ?? CLIENT_MAPPINGS;
+  const absoluteWorkspace = resolve(workspacePath);
 
-  // Initialize arrays for each client
   for (const client of clients) {
     result[client] = [];
   }
@@ -974,43 +1260,55 @@ export function collectSyncedPaths(
     if (copyResult.action !== 'copied' && copyResult.action !== 'generated') {
       continue;
     }
+    const destination = resolve(copyResult.destination);
 
-    // Get relative path from workspace (normalize to forward slashes for cross-platform consistency)
-    const relativePath = relative(
-      workspacePath,
-      copyResult.destination,
-    ).replace(/\\/g, '/');
-
-    // Track file for ALL clients whose paths match (not just the first one)
-    // This is important when multiple clients share the same skillsPath
     for (const client of clients) {
       const mapping = mappings[client];
+      if (!mapping) continue;
+      const context = clientContexts?.get(client);
+      const agentFileDestinations = [
+        mapping.agentFile,
+        mapping.agentFileFallback,
+      ]
+        .filter((path): path is string => path !== undefined)
+        .map((path) => resolveMappedPath(workspacePath, path));
+      const belongsToAgentFile = agentFileDestinations.includes(destination);
+      if (
+        context &&
+        !pathIsWithin(context.writeRoot, destination) &&
+        !belongsToAgentFile
+      ) {
+        continue;
+      }
 
-      // Check if this is a skill directory (copy results for skills point to the dir)
-      // e.g., relativePath = '.agents/skills/my-skill', skillsPath = '.agents/skills/'
-      if (mapping.skillsPath && relativePath.startsWith(mapping.skillsPath)) {
-        const skillName = relativePath.slice(mapping.skillsPath.length);
-        // If skillName has no '/', this is a skill directory (not a file inside)
-        if (!skillName.includes('/')) {
-          // Track skill directory with trailing / for efficient rm -rf
-          result[client]?.push(`${relativePath}/`);
-          continue; // Don't break - check other clients too
+      const trackedPath = (
+        pathIsWithin(absoluteWorkspace, destination)
+          ? relative(absoluteWorkspace, destination)
+          : destination
+      ).replaceAll('\\', '/');
+      const skillsRoot = resolveMappedPath(workspacePath, mapping.skillsPath);
+      if (pathIsWithin(skillsRoot, destination)) {
+        const skillName = relative(skillsRoot, destination);
+        if (
+          skillName &&
+          !skillName.includes('/') &&
+          !skillName.includes('\\')
+        ) {
+          result[client]?.push(`${trackedPath}/`);
+          continue;
         }
       }
 
-      // Check if file belongs to this client's paths
-      if (
-        (mapping.commandsPath &&
-          relativePath.startsWith(mapping.commandsPath)) ||
-        (mapping.skillsPath && relativePath.startsWith(mapping.skillsPath)) ||
-        (mapping.hooksPath && relativePath.startsWith(mapping.hooksPath)) ||
-        (mapping.agentsPath && relativePath.startsWith(mapping.agentsPath)) ||
-        relativePath === mapping.agentFile ||
-        (mapping.agentFileFallback &&
-          relativePath === mapping.agentFileFallback)
-      ) {
-        result[client]?.push(relativePath);
-        // Don't break - continue checking other clients that might share this path
+      const directoryRoots = MANAGED_DIRECTORY_KEYS
+        .map((key) => mapping[key])
+        .filter((path): path is string => path !== undefined)
+        .map((path) => resolveMappedPath(workspacePath, path));
+      const belongsToDirectory = directoryRoots.some((root) =>
+        pathIsWithin(root, destination),
+      );
+
+      if (belongsToDirectory || belongsToAgentFile) {
+        result[client]?.push(trackedPath);
       }
     }
   }
@@ -1287,8 +1585,9 @@ export function buildPluginSyncPlans(
   plugins: PluginEntry[],
   clientEntries: ClientEntry[],
   scope: 'user' | 'project',
-): { plans: PluginSyncPlan[]; warnings: string[] } {
+): { plans: PluginSyncPlan[]; warnings: string[]; errors: string[] } {
   const warnings: string[] = [];
+  const errors: string[] = [];
   const workspaceClientTypes = getClientTypes(clientEntries);
 
   const plans = plugins.map((plugin, configurationIndex) => {
@@ -1301,34 +1600,46 @@ export function buildPluginSyncPlans(
       );
     }
 
-    const effectiveClients = pluginClientTypes;
-
-    // Split into file and native clients based on resolved install mode
     const fileClients: ClientType[] = [];
     const nativeClients: ClientType[] = [];
-
-    for (const client of effectiveClients) {
+    for (const client of pluginClientTypes) {
       const clientEntry = normalizeClientEntry(
         clientEntries.find(
-          (e) => (typeof e === 'string' ? e : e.name) === client,
+          (entry) => (typeof entry === 'string' ? entry : entry.name) === client,
         ) ?? client,
       );
-      const mode = resolveInstallMode(plugin, clientEntry);
-
-      // Check if this client supports native install AND the plugin is marketplace-based for this client
-      const nativeClient = mode === 'native' ? getNativeClient(client) : null;
-      if (nativeClient && nativeClient.toPluginSpec(source) !== null) {
-        if (nativeClient.supportsScope(scope)) {
-          nativeClients.push(client);
-        } else {
-          fileClients.push(client);
-          warnings.push(
-            `${client} native install only supports user scope, falling back to file copy`,
-          );
-        }
-      } else {
+      if (resolveInstallMode(plugin, clientEntry) === 'file') {
         fileClients.push(client);
+        continue;
       }
+
+      const adapter = getNativeClient(client);
+      if (!adapter) {
+        errors.push(
+          `${client} does not support explicit native install for '${source}'`,
+        );
+        continue;
+      }
+      if (!adapter.supportsScope(scope)) {
+        errors.push(
+          `${client} does not support explicit native install at ${scope} scope for '${source}'`,
+        );
+        continue;
+      }
+      const classification = adapter.resolveSource(source, {
+        client,
+        scope,
+        nativeScope: scope,
+        root: '',
+      });
+      if (!classification.success) {
+        errors.push(
+          classification.error ??
+            `${client} does not support native source '${source}'`,
+        );
+        continue;
+      }
+      nativeClients.push(client);
     }
 
     const exclude = getPluginExclude(plugin);
@@ -1344,7 +1655,7 @@ export function buildPluginSyncPlans(
     };
   });
 
-  return { plans, warnings };
+  return { plans, warnings, errors: [...new Set(errors)] };
 }
 
 /**
@@ -1369,7 +1680,35 @@ export async function validateAllPlugins(
         exclude,
         pluginSkillsConfig,
       }) => {
-        const validated = await validatePlugin(source, workspacePath, offline);
+        let validated: ValidatedPlugin;
+        if (clients.length === 0 && nativeClients.length > 0) {
+          const parsed = parsePluginSpec(source);
+          const marketplace = parsed
+            ? await getMarketplace(parsed.marketplaceName, workspacePath)
+            : null;
+          const declaredMarketplaceSource =
+            parsed?.owner && parsed.repo
+              ? `${parsed.owner}/${parsed.repo}`
+              : undefined;
+          validated = {
+            plugin: source,
+            resolved: '',
+            success: true,
+            clients: [],
+            nativeClients: [],
+            ...(parsed && { pluginName: parsed.plugin }),
+            ...(parsed && {
+              registeredAs: marketplace?.name ?? parsed.marketplaceName,
+            }),
+            ...(declaredMarketplaceSource
+              ? { marketplaceSource: declaredMarketplaceSource }
+              : marketplace?.source.type === 'github'
+                ? { marketplaceSource: marketplace.source.location }
+                : {}),
+          };
+        } else {
+          validated = await validatePlugin(source, workspacePath, offline);
+        }
         const result: ValidatedPlugin = {
           ...validated,
           configurationIndex,
@@ -1377,8 +1716,9 @@ export async function validateAllPlugins(
           nativeClients,
         };
         if (exclude) result.exclude = exclude;
-        if (pluginSkillsConfig !== undefined)
+        if (pluginSkillsConfig !== undefined) {
           result.pluginSkillsConfig = pluginSkillsConfig;
+        }
         return result;
       },
     ),
@@ -1416,6 +1756,7 @@ async function copyValidatedPlugin(
   agentOutputs: readonly AgentOutput[] = [],
   agentConflicts: readonly AgentOutputConflict[] = [],
   agentFailures: readonly AgentOutputFailure[] = [],
+  clientWriteRoots: Partial<Record<ClientType, string>> = {},
 ): Promise<PluginSyncResult> {
   const copyResults: CopyResult[] = [];
   let agentOutputsAssigned = false;
@@ -1451,6 +1792,7 @@ async function copyValidatedPlugin(
             dryRun,
             ...(skillNameMap && { skillNameMap }),
             clientMappings: mappings,
+            writeRoot: clientWriteRoots[representative] ?? workspacePath,
             syncMode: 'copy',
             agentOutputs: agentOutputsAssigned ? [] : agentOutputs,
             ...(exclude && { exclude }),
@@ -1471,6 +1813,7 @@ async function copyValidatedPlugin(
             dryRun,
             ...(skillNameMap && { skillNameMap }),
             clientMappings: mappings,
+            writeRoot: clientWriteRoots[representative] ?? workspacePath,
             syncMode: 'symlink',
             canonicalSkillsPath: CANONICAL_SKILLS_PATH,
             agentOutputs: agentOutputsAssigned ? [] : agentOutputs,
@@ -1500,6 +1843,7 @@ async function copyValidatedPlugin(
           dryRun,
           ...(skillNameMap && { skillNameMap }),
           clientMappings: mappings,
+          writeRoot: clientWriteRoots[client] ?? workspacePath,
           syncMode: 'copy',
           agentOutputs: agentOutputsAssigned ? [] : agentOutputs,
           ...(exclude && { exclude }),
@@ -1740,132 +2084,584 @@ function countCopyResults(
   return { totalCopied, totalFailed, totalSkipped, totalGenerated };
 }
 
+function nativeStateKey(resource: NativeStateResource): string {
+  return JSON.stringify([
+    resource.client,
+    resource.scope,
+    resource.nativeScope,
+    resource.kind,
+    resource.requestedIdentity,
+    resource.resolvedIdentity,
+    resource.context,
+  ]);
+}
+
+function stateFromNativeResource(
+  resource: NativeResource,
+  transition: NativeStateResource['transition'],
+  error?: string,
+): NativeStateResource {
+  return {
+    client: resource.context.client as ClientType,
+    scope: resource.context.scope,
+    nativeScope: resource.context.nativeScope,
+    kind: resource.kind,
+    requestedIdentity: resource.requestedIdentity,
+    resolvedIdentity: resource.resolvedIdentity,
+    context: nativeContextIdentity(resource.context),
+    root: resolve(resource.context.root),
+    provenance: sanitizeNativeProvenance(resource.provenance),
+    transition,
+    ...(error && { error }),
+  };
+}
+
+function nativeResourceFromState(
+  state: NativeStateResource,
+  context: NativeOperationContext,
+): NativeResource {
+  return {
+    kind: state.kind,
+    requestedIdentity: state.requestedIdentity,
+    resolvedIdentity: state.resolvedIdentity,
+    context: { ...context, root: state.root ?? context.root },
+    provenance: state.provenance,
+  };
+}
+
 async function syncNativePlugins(
   validPlugins: ValidatedPlugin[],
   previousState: SyncState | null,
   scope: 'project' | 'user',
   workspacePath: string,
   dryRun: boolean,
-  warnings: string[],
-  messages: string[],
+  contexts: Map<ClientType, ResolvedClientContext>,
+  selection?: SyncOptions['nativeSelection'],
 ): Promise<NativeSyncResult | undefined> {
-  const {
-    pluginsByClient: nativePluginsByClient,
-    marketplaceSourcesByClient: nativeMarketplaceSources,
-  } = collectNativePluginSources(validPlugins);
-
-  const previousNativeClients = previousState?.nativePlugins
-    ? (Object.keys(previousState.nativePlugins) as ClientType[]).filter(
-        (c) => (previousState.nativePlugins?.[c]?.length ?? 0) > 0,
-      )
-    : [];
-  const hasNativeWork =
-    nativePluginsByClient.size > 0 || previousNativeClients.length > 0;
-
-  if (hasNativeWork && !dryRun) {
-    const allClients = new Set([
-      ...nativePluginsByClient.keys(),
-      ...previousNativeClients,
-    ]);
-    const perClientResults: NativeSyncResult[] = [];
-
-    for (const clientType of allClients) {
-      const nativeClient = getNativeClient(clientType);
-      if (!nativeClient) {
-        const sources = nativePluginsByClient.get(clientType);
-        if (sources && sources.length > 0) {
-          warnings.push(
-            `Native install: no native client for ${clientType}, skipping`,
-          );
-        }
-        continue;
-      }
-
-      const cliAvailable = await nativeClient.isAvailable();
-      if (!cliAvailable) {
-        const sources = nativePluginsByClient.get(clientType);
-        if (sources && sources.length > 0) {
-          messages.push(
-            `Native install: ${clientType} CLI not found, skipping native plugin installation`,
-          );
-        }
-        continue;
-      }
-
-      const marketplaceSources = nativeMarketplaceSources.get(clientType);
-      if (marketplaceSources) {
-        for (const source of marketplaceSources) {
-          if (scope === 'project') {
-            await nativeClient.addMarketplace(source, { cwd: workspacePath });
-          } else {
-            await nativeClient.addMarketplace(source);
-          }
-        }
-      }
-
-      const currentSources = nativePluginsByClient.get(clientType) ?? [];
-      const currentSpecs = currentSources
-        .map((s) => nativeClient.toPluginSpec(s))
-        .filter((s): s is string => s !== null);
-      const previousPlugins = getPreviouslySyncedNativePlugins(
+  const allDesiredByClient = collectNativeResources(
+    validPlugins,
+    scope,
+    contexts,
+  );
+  const desiredByClient = new Map<ClientType, NativeResource[]>();
+  if (selection?.mode !== 'remove') {
+    for (const [client, resources] of allDesiredByClient) {
+      const selected = resources.filter((resource) =>
+        nativeSelectionMatches(
+          selection,
+          resource.requestedIdentity,
+          resource.resolvedIdentity,
+        ));
+      if (selected.length > 0) desiredByClient.set(client, selected);
+    }
+  }
+  let stateResources = [...(previousState?.nativeResources?.resources ?? [])];
+  const clients = new Set<ClientType>(desiredByClient.keys());
+  if (selection?.mode !== 'update') {
+    for (const client of contexts.keys()) {
+      const context = contexts.get(client);
+      if (!context) continue;
+      const operationContext = nativeOperationContext(client, scope, context);
+      const tracked = getNativeStateResources(
         previousState,
-        clientType,
+        client,
+        scope,
+        nativeContextIdentity(operationContext),
       );
-      const removed = previousPlugins.filter((p) => !currentSpecs.includes(p));
-      for (const plugin of removed) {
-        try {
-          if (scope === 'project') {
-            await nativeClient.uninstallPlugin(plugin, 'project', {
-              cwd: workspacePath,
+      if (
+        tracked.some((resource) =>
+          nativeSelectionMatches(
+            selection,
+            resource.requestedIdentity,
+            resource.resolvedIdentity,
+          ))
+      ) {
+        clients.add(client);
+      }
+    }
+  }
+  const effects: NativeEffect[] = [];
+  if (selection?.mode !== 'update') {
+    for (const stateResource of stateResources) {
+      if (
+        stateResource.scope !== scope ||
+        !nativeSelectionMatches(
+          selection,
+          stateResource.requestedIdentity,
+          stateResource.resolvedIdentity,
+        )
+      ) {
+        continue;
+      }
+      const resolvedContext = contexts.get(stateResource.client);
+      const currentContext = resolvedContext
+        ? nativeOperationContext(stateResource.client, scope, resolvedContext)
+        : {
+            client: stateResource.client,
+            scope,
+            nativeScope: stateResource.nativeScope,
+            root: stateResource.root ?? stateResource.context,
+          };
+      if (
+        resolvedContext &&
+        nativeContextIdentity(currentContext) === stateResource.context
+      ) {
+        continue;
+      }
+      effects.push({
+        action: 'unknown',
+        phase: 'state',
+        changed: false,
+        resource: nativeResourceFromState(stateResource, currentContext),
+        error: resolvedContext
+          ? `Recorded native context ${stateResource.context} differs from selected context ${nativeContextIdentity(currentContext)}`
+          : 'Recorded native resource has no resolvable client context',
+      });
+    }
+  }
+  if (clients.size === 0 && effects.length === 0) return undefined;
+  const replaceStateRecord = (
+    previous: NativeStateResource | undefined,
+    next: NativeStateResource | undefined,
+  ): void => {
+    if (previous) {
+      const key = nativeStateKey(previous);
+      stateResources = stateResources.filter(
+        (resource) => nativeStateKey(resource) !== key,
+      );
+    }
+    if (next) {
+      const key = nativeStateKey(next);
+      stateResources = stateResources.filter(
+        (resource) => nativeStateKey(resource) !== key,
+      );
+      stateResources.push(next);
+    }
+  };
+  const checkpoint = async (
+    previous: NativeStateResource | undefined,
+    next: NativeStateResource | undefined,
+  ): Promise<void> => {
+    const snapshot = stateResources;
+    replaceStateRecord(previous, next);
+    try {
+      await saveNativeStateResources(workspacePath, stateResources);
+    } catch (error) {
+      stateResources = snapshot;
+      throw error;
+    }
+  };
+
+  for (const client of clients) {
+    const adapter = getNativeClient(client);
+    const resolvedContext = contexts.get(client);
+    if (!adapter || !resolvedContext) continue;
+    const context = nativeOperationContext(client, scope, resolvedContext);
+    const desired = desiredByClient.get(client) ?? [];
+    const allDesired = allDesiredByClient.get(client) ?? [];
+    const tracked = getNativeStateResources(
+      previousState,
+      client,
+      scope,
+      nativeContextIdentity(context),
+    ).filter((resource) =>
+      selection
+        ? nativeSelectionMatches(
+            selection,
+            resource.requestedIdentity,
+            resource.resolvedIdentity,
+          )
+        : true);
+
+    let inspection = await adapter.inspect(context);
+    if (!inspection.success) {
+      const affected = desired.length > 0
+        ? desired
+        : tracked.map((resource) =>
+            nativeResourceFromState(resource, context));
+      for (const resource of affected) {
+        effects.push({
+          action: 'failed',
+          resource,
+          error: inspection.error ?? 'Native inspection failed',
+        });
+      }
+      continue;
+    }
+
+    for (const resource of desired) {
+      const exactObservation = inspection.observations?.find(
+        (candidate) =>
+          candidate.resource.kind === resource.kind &&
+          candidate.resource.resolvedIdentity === resource.resolvedIdentity,
+      );
+      if (
+        exactObservation?.status === 'disabled' ||
+        exactObservation?.status === 'unusable'
+      ) {
+        effects.push({
+          action: 'failed',
+          phase: 'inspection',
+          changed: false,
+          resource,
+          error:
+            exactObservation.error ??
+            `Native resource is ${exactObservation.status}`,
+        });
+        continue;
+      }
+      const exactLive = inspection.resources.find(
+        (candidate) =>
+          candidate.kind === resource.kind &&
+          candidate.resolvedIdentity === resource.resolvedIdentity,
+      );
+      const prior = tracked.find(
+        (candidate) =>
+          candidate.kind === resource.kind &&
+          (candidate.requestedIdentity === resource.requestedIdentity ||
+            candidate.resolvedIdentity === resource.resolvedIdentity),
+      );
+      if (exactLive && selection?.mode !== 'update') {
+        effects.push({
+          action: 'unchanged',
+          phase: 'inspection',
+          changed: false,
+          resource,
+        });
+        if (!dryRun) {
+          const transition =
+            prior && nativeStateOwnership(prior.transition) === 'managed'
+              ? 'managed'
+              : 'referenced';
+          try {
+            await checkpoint(
+              prior,
+              stateFromNativeResource(resource, transition),
+            );
+          } catch (error) {
+            effects.push({
+              action: 'failed',
+              phase: 'state',
+              changed: false,
+              resource,
+              error: `Could not checkpoint native reference: ${error instanceof Error ? error.message : String(error)}`,
             });
-          } else {
-            await nativeClient.uninstallPlugin(plugin, 'user');
           }
-        } catch (err) {
-          warnings.push(
-            `Native uninstall failed for ${plugin}: ${err instanceof Error ? err.message : String(err)}`,
-          );
         }
+        continue;
       }
 
-      if (currentSources.length > 0) {
-        const syncOpts =
-          scope === 'project' ? { cwd: workspacePath } : undefined;
-        perClientResults.push(
-          attachNativeClientContext(
-            await nativeClient.syncPlugins(currentSources, scope, syncOpts),
-            clientType,
-          ),
+      const priorLive =
+        exactLive ??
+        (prior
+          ? inspection.resources.find(
+              (candidate) =>
+                candidate.kind === prior.kind &&
+                candidate.resolvedIdentity === prior.resolvedIdentity,
+            )
+          : undefined);
+      const action = priorLive ? 'update' : 'install';
+      if (dryRun) {
+        if (resource.provenance.marketplaceSource && !priorLive) {
+          effects.push({ action: 'would-register', resource });
+        }
+        effects.push({
+          action: priorLive ? 'would-update' : 'would-install',
+          resource,
+        });
+        continue;
+      }
+
+      const pendingTransition: NativeStateResource['transition'] =
+        priorLive && (!prior || prior.transition === 'referenced')
+          ? 'referenced'
+          : priorLive
+            ? 'pending-update'
+            : 'pending-install';
+      const pending = stateFromNativeResource(resource, pendingTransition);
+      try {
+        await checkpoint(prior, pending);
+      } catch (error) {
+        effects.push({
+          action: 'failed',
+          phase: 'state',
+          changed: false,
+          resource,
+          error: `Could not checkpoint native ${action}: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        continue;
+      }
+
+      let mutation: NativeMutationResult;
+      try {
+        mutation = priorLive
+          ? await adapter.update(resource, priorLive, context)
+          : await adapter.install(resource, context);
+      } catch (error) {
+        mutation = {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+      for (const registration of mutation.registrations ?? []) {
+        effects.push({
+          action: 'registered',
+          resource: {
+            ...resource,
+            provenance: {
+              ...resource.provenance,
+              marketplaceSource: registration,
+            },
+          },
+        });
+      }
+      if (!mutation.success) {
+        const retained = priorLive
+          ? stateFromNativeResource(
+              nativeResourceFromState(prior ?? pending, context),
+              !prior || prior.transition === 'referenced'
+                ? 'referenced'
+                : 'managed',
+            )
+          : stateFromNativeResource(resource, 'unknown', mutation.error);
+        try {
+          await checkpoint(pending, retained);
+        } catch {
+          // The pending checkpoint already preserves retry authority.
+        }
+        effects.push({
+          action: 'failed',
+          resource,
+          error: mutation.error ?? `Native ${action} failed`,
+        });
+        continue;
+      }
+
+      inspection = await adapter.inspect(context);
+      if (!inspection.success) {
+        const unknown = stateFromNativeResource(
+          resource,
+          'unknown',
+          inspection.error,
         );
+        try {
+          await checkpoint(pending, unknown);
+        } catch {
+          // The pending checkpoint still prevents unsafe cleanup.
+        }
+        effects.push({
+          action: 'unknown',
+          resource,
+          error: inspection.error ?? `Could not verify native ${action}`,
+        });
+        continue;
+      }
+      const confirmed = inspection.resources.some(
+        (candidate) =>
+          candidate.kind === resource.kind &&
+          candidate.resolvedIdentity === resource.resolvedIdentity,
+      );
+      if (!confirmed) {
+        const error = `Native ${action} completed but '${resource.resolvedIdentity}' was not present in live inventory`;
+        try {
+          await checkpoint(
+            pending,
+            stateFromNativeResource(resource, 'unknown', error),
+          );
+        } catch {
+          // The pending checkpoint still prevents unsafe cleanup.
+        }
+        effects.push({ action: 'unknown', resource, error });
+        continue;
+      }
+      try {
+        const transition: NativeStateResource['transition'] =
+          priorLive && (!prior || prior.transition === 'referenced')
+            ? 'referenced'
+            : 'managed';
+        await checkpoint(
+          pending,
+          stateFromNativeResource(resource, transition),
+        );
+        effects.push({
+          action: priorLive ? 'updated' : 'installed',
+          resource,
+        });
+      } catch (error) {
+        effects.push({
+          action: 'failed',
+          resource,
+          error: `Native ${action} succeeded but state checkpoint failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
       }
     }
 
-    if (perClientResults.length > 0) {
-      return mergeNativeSyncResults(perClientResults);
-    }
-  } else if (nativePluginsByClient.size > 0 && dryRun) {
-    const perClientResults: NativeSyncResult[] = [];
-    for (const [clientType, sources] of nativePluginsByClient) {
-      const nativeClient = getNativeClient(clientType);
-      if (nativeClient && sources.length > 0) {
-        const syncOpts =
-          scope === 'project'
-            ? { cwd: workspacePath, dryRun: true }
-            : { dryRun: true };
-        perClientResults.push(
-          attachNativeClientContext(
-            await nativeClient.syncPlugins(sources, scope, syncOpts),
-            clientType,
-          ),
-        );
+    for (const prior of tracked) {
+      const desiredMatch = allDesired.some(
+        (resource) =>
+          resource.kind === prior.kind &&
+          (resource.requestedIdentity === prior.requestedIdentity ||
+            resource.resolvedIdentity === prior.resolvedIdentity),
+      );
+      if (desiredMatch) continue;
+      const resource = nativeResourceFromState(prior, context);
+      const liveObservation = inspection.observations?.find(
+        (candidate) =>
+          candidate.resource.kind === prior.kind &&
+          candidate.resource.resolvedIdentity === prior.resolvedIdentity,
+      );
+      const live =
+        inspection.resources.find(
+          (candidate) =>
+            candidate.kind === prior.kind &&
+            candidate.resolvedIdentity === prior.resolvedIdentity,
+        ) ??
+        (liveObservation?.status === 'disabled' ||
+        liveObservation?.status === 'unusable'
+          ? liveObservation.resource
+          : undefined);
+      if (!live) {
+        if (!dryRun) {
+          try {
+            await checkpoint(prior, undefined);
+          } catch (error) {
+            effects.push({
+              action: 'failed',
+              phase: 'state',
+              changed: false,
+              resource,
+              error: `Could not release absent native state: ${error instanceof Error ? error.message : String(error)}`,
+            });
+            continue;
+          }
+        }
+        effects.push({
+          action: dryRun ? 'would-remove' : 'removed',
+          phase: 'state',
+          resource,
+        });
+        continue;
       }
-    }
-    if (perClientResults.length > 0) {
-      return mergeNativeSyncResults(perClientResults);
+      if (prior.transition === 'referenced') {
+        effects.push({
+          action: 'retained',
+          phase: 'state',
+          changed: false,
+          resource,
+          error: 'Native resource predates AllAgents ownership',
+        });
+        continue;
+      }
+      if (nativeStateOwnership(prior.transition) !== 'managed') {
+        effects.push({
+          action: 'unknown',
+          phase: 'state',
+          changed: false,
+          resource,
+          error: 'Native cleanup retained because ownership is unconfirmed',
+        });
+        continue;
+      }
+      if (dryRun) {
+        effects.push({ action: 'would-remove', resource });
+        continue;
+      }
+
+      const pending = { ...prior, transition: 'pending-remove' as const };
+      try {
+        await checkpoint(prior, pending);
+      } catch (error) {
+        effects.push({
+          action: 'failed',
+          resource,
+          error: `Could not checkpoint native removal: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        continue;
+      }
+      let removal: NativeMutationResult;
+      try {
+        removal = await adapter.remove(live, context);
+      } catch (error) {
+        removal = {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+      if (!removal.success) {
+        const failed = {
+          ...prior,
+          transition: 'cleanup-failed' as const,
+          ...(removal.error && { error: removal.error }),
+        };
+        try {
+          await checkpoint(pending, failed);
+        } catch {
+          // Pending removal remains durable and retryable.
+        }
+        effects.push({
+          action: 'failed',
+          resource,
+          error: removal.error ?? 'Native removal failed',
+        });
+        continue;
+      }
+      inspection = await adapter.inspect(context);
+      if (!inspection.success) {
+        const unknown = {
+          ...prior,
+          transition: 'cleanup-failed' as const,
+          error: inspection.error ?? 'Native removal verification failed',
+        };
+        try {
+          await checkpoint(pending, unknown);
+        } catch {
+          // Pending removal remains durable and retryable.
+        }
+        effects.push({
+          action: 'unknown',
+          resource,
+          error: unknown.error,
+        });
+        continue;
+      }
+      const stillPresent = inspection.resources.some(
+        (candidate) =>
+          candidate.kind === prior.kind &&
+          candidate.resolvedIdentity === prior.resolvedIdentity,
+      );
+      if (stillPresent) {
+        const error = `Native remove completed but '${prior.resolvedIdentity}' remains present`;
+        try {
+          await checkpoint(pending, {
+            ...prior,
+            transition: 'cleanup-failed',
+            error,
+          });
+        } catch {
+          // Pending removal remains durable and retryable.
+        }
+        effects.push({ action: 'unknown', resource, error });
+        continue;
+      }
+      try {
+        await checkpoint(pending, undefined);
+        effects.push({ action: 'removed', resource });
+      } catch (error) {
+        effects.push({
+          action: 'failed',
+          resource,
+          error: `Native removal succeeded but state release failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
     }
   }
 
-  return undefined;
+  return {
+    success: effects.every(
+      (effect) => effect.action !== 'failed' && effect.action !== 'unknown',
+    ),
+    effects,
+  };
 }
 
 async function syncVscodeWorkspaceFile(
@@ -2090,8 +2886,6 @@ async function buildSourcesProvenance(
 async function persistSyncState(
   workspacePath: string,
   syncedFiles: Partial<Record<ClientType, string[]>>,
-  nativePluginsByClient: Map<ClientType, string[]>,
-  nativeResult: NativeSyncResult | undefined,
   extra?: {
     vscodeState?: { hash: string; repos: string[] };
     codexHooks?: SyncState['codexHooks'];
@@ -2100,28 +2894,9 @@ async function persistSyncState(
     sources?: Record<string, SyncStateSource>;
   },
 ): Promise<void> {
-  // Build native plugin tracking per-client
-  const nativePluginsState: Partial<Record<ClientType, string[]>> = {};
-  const installedSet = new Set(
-    (nativeResult?.pluginsInstalled ?? []).map((p) => p.plugin),
-  );
-  for (const [client, sources] of nativePluginsByClient) {
-    const nativeClient = getNativeClient(client);
-    if (!nativeClient) continue;
-    const clientSpecs = sources
-      .map((s) => nativeClient.toPluginSpec(s))
-      .filter((s): s is string => s !== null && installedSet.has(s));
-    if (clientSpecs.length > 0) {
-      nativePluginsState[client] = clientSpecs;
-    }
-  }
-
   await saveSyncState(workspacePath, {
     files: syncedFiles,
     ...(extra?.codexHooks && { codexHooks: extra.codexHooks }),
-    ...(Object.keys(nativePluginsState).length > 0 && {
-      nativePlugins: nativePluginsState,
-    }),
     ...(extra?.vscodeState?.hash && {
       vscodeWorkspaceHash: extra.vscodeState.hash,
     }),
@@ -2153,8 +2928,6 @@ export async function syncWorkspace(
   workspacePath: string = process.cwd(),
   options: SyncOptions = {},
 ): Promise<SyncResult> {
-  // MIGRATION: v1→v2 - remove after v3 release
-  await migrateWorkspaceSkillsV1toV2(workspacePath);
 
   const {
     offline = false,
@@ -2162,6 +2935,7 @@ export async function syncWorkspace(
     workspaceSourceBase,
     skipAgentFiles = false,
     skipManaged = false,
+    nativeSelection,
   } = options;
   const sw = new Stopwatch();
   const configDir = join(workspacePath, CONFIG_DIR);
@@ -2197,35 +2971,40 @@ export async function syncWorkspace(
     );
   }
 
-  // Step 0a: Process managed repositories (clone/pull) before anything else
-  const managedRepoResults = await sw.measure('managed-repos', () =>
-    processManagedRepos(config.repositories ?? [], workspacePath, {
-      offline,
-      skipManaged,
-      dryRun,
-    }),
-  );
-  const managedWarnings = managedRepoResults
-    .filter((r) => r.error)
-    .map((r) => `${r.repo}: ${r.error}`);
+  const {
+    plans: pluginPlans,
+    warnings: planWarnings,
+    errors: allPlanErrors,
+  } = buildPluginSyncPlans(config.plugins, config.clients, 'project');
+  const planErrors = nativeSelection
+    ? buildPluginSyncPlans(
+        config.plugins.filter((plugin) => {
+          const source = getEffectivePluginSource(plugin);
+          return nativeSelectionMatches(nativeSelection, source, source);
+        }),
+        config.clients,
+        'project',
+      ).errors
+    : allPlanErrors;
+  if (planErrors.length > 0) {
+    return failedSyncResult(
+      `Native preflight failed (workspace unchanged):\n${planErrors.map((error) => `  - ${error}`).join('\n')}`,
+      { totalFailed: planErrors.length, warnings: planWarnings },
+    );
+  }
 
-  // Check if repositories are configured — when empty/absent, skip agent file
-  // creation and WORKSPACE-RULES injection (same pattern as initWorkspace)
-  const hasRepositories = (config.repositories?.length ?? 0) > 0;
-
-  const { plans: pluginPlans, warnings: planWarnings } = buildPluginSyncPlans(
-    config.plugins,
-    config.clients,
-    'project',
-  );
   const workspaceClients = config.clients;
   const filteredPlans = pluginPlans.filter(
     (plan) => plan.clients.length > 0 || plan.nativeClients.length > 0,
   );
   const syncClients = collectSyncClients(workspaceClients, filteredPlans);
-
-  // Warn when no clients are configured — the sync will succeed but create no artifacts
-  if (syncClients.length === 0) {
+  const staleNativeState =
+    syncClients.length === 0
+      ? (await loadSyncState(workspacePath))?.nativeResources?.resources.some(
+          (resource) => resource.scope === 'project',
+        ) === true
+      : false;
+  if (syncClients.length === 0 && !staleNativeState) {
     return {
       success: true,
       pluginResults: [],
@@ -2239,12 +3018,40 @@ export async function syncWorkspace(
     };
   }
 
-  // Step 0: Pre-register unique marketplaces to avoid race conditions during parallel validation
-  const marketplaceResults = await sw.measure('marketplace-registration', () =>
-    ensureMarketplacesRegistered(filteredPlans.map((plan) => plan.source)),
+  const preflightContexts = resolveClientContexts(syncClients, 'project', {
+    cwd: workspacePath,
+    homeDir: getHomeDir(),
+    env: process.env,
+  });
+  const nativePreflightErrors = await preflightNativePlans(
+    filteredPlans,
+    'project',
+    preflightContexts,
+    nativeSelection,
   );
+  if (nativePreflightErrors.length > 0) {
+    return failedSyncResult(
+      `Native preflight failed (workspace unchanged):\n${nativePreflightErrors.map((error) => `  - ${error}`).join('\n')}`,
+      {
+        totalFailed: nativePreflightErrors.length,
+        warnings: planWarnings,
+        nativeResult: nativePreflightFailureResult(
+          filteredPlans,
+          'project',
+          preflightContexts,
+          nativePreflightErrors,
+          nativeSelection,
+        ),
+      },
+    );
+  }
 
-  // Seed fetchCache with marketplace paths so fetchPlugin skips redundant git pulls
+
+  // Generic marketplace registration/fetch is needed only by file targets.
+  const filePlans = filteredPlans.filter((plan) => plan.clients.length > 0);
+  const marketplaceResults = await sw.measure('marketplace-registration', () =>
+    ensureMarketplacesRegistered(filePlans.map((plan) => plan.source)),
+  );
   await seedFetchCacheFromMarketplaces(marketplaceResults);
 
   // Step 1: Validate all plugins before any destructive action
@@ -2276,27 +3083,136 @@ export async function syncWorkspace(
     sw.stop('workspace-source-validation');
   }
 
-  // Separate valid and failed plugins
-  const failedValidations = validatedPlugins.filter((v) => !v.success);
-  const validPlugins = validatedPlugins.filter((v) => v.success);
-  const warnings = [
-    ...managedWarnings,
+  const failedValidations = validatedPlugins.filter((plugin) => !plugin.success);
+  const requiredNativeFailures = failedValidations.filter((plugin) => {
+    const plan = filteredPlans.find(
+      (candidate) => candidate.configurationIndex === plugin.configurationIndex,
+    );
+    return (
+      (plan?.nativeClients.length ?? 0) > 0 &&
+      nativeSelectionMatches(
+        nativeSelection,
+        plan?.source ?? plugin.plugin,
+        plan?.source ?? plugin.plugin,
+      )
+    );
+  });
+  const validationWarnings = [
     ...planWarnings,
     ...workspaceSourceWarnings,
-    ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
+    ...failedValidations.map(
+      (plugin) => `${plugin.plugin}: ${plugin.error} (skipped)`,
+    ),
   ];
-  const messages: string[] = [];
-
-  // If ALL plugins failed, abort
-  if (validPlugins.length === 0 && filteredPlans.length > 0) {
+  if (requiredNativeFailures.length > 0) {
     return failedSyncResult(
-      `All plugins failed validation (workspace unchanged):\n${failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n')}`,
-      { totalFailed: failedValidations.length, warnings },
+      `Mixed native/file preflight failed (workspace unchanged):\n${requiredNativeFailures.map((plugin) => `  - ${plugin.plugin}: ${plugin.error}`).join('\n')}`,
+      {
+        totalFailed: requiredNativeFailures.length,
+        warnings: validationWarnings,
+      },
     );
   }
 
+  const validPlugins = validatedPlugins.filter((plugin) => plugin.success);
+  const filePlugins = validPlugins.filter((plugin) => plugin.clients.length > 0);
+  if (validPlugins.length === 0 && filteredPlans.length > 0) {
+    return failedSyncResult(
+      `All plugins failed validation (workspace unchanged):\n${failedValidations.map((plugin) => `  - ${plugin.plugin}: ${plugin.error}`).join('\n')}`,
+      { totalFailed: failedValidations.length, warnings: validationWarnings },
+    );
+  }
+
+  const hasRepositories = (config.repositories?.length ?? 0) > 0;
+  const skipWorkspaceFiles =
+    !!config.workspace?.source && !validatedWorkspaceSource;
+  const workspaceFilesSourcePath = validatedWorkspaceSource?.resolved;
+  const workspaceFilesToCopy =
+    config.workspace && !skipWorkspaceFiles
+      ? [...config.workspace.files]
+      : [];
+  let workspaceFilesGithubCache = new Map<string, string>();
+  if (config.workspace && !skipWorkspaceFiles) {
+    if (hasRepositories && workspaceFilesSourcePath) {
+      for (const agentFile of AGENT_FILES) {
+        const agentPath = join(workspaceFilesSourcePath, agentFile);
+        if (
+          existsSync(agentPath) &&
+          !workspaceFilesToCopy.includes(agentFile)
+        ) {
+          workspaceFilesToCopy.push(agentFile);
+        }
+      }
+    }
+    const fileSourceRepos = collectGitHubReposFromFiles(workspaceFilesToCopy);
+    if (fileSourceRepos.length > 0) {
+      const { cache, errors } = await fetchFileSourceRepos(fileSourceRepos);
+      if (errors.length > 0) {
+        return failedSyncResult(
+          `File source fetch failed (workspace unchanged):\n${errors.map((error) => `  - ${error}`).join('\n')}`,
+          { totalFailed: errors.length, warnings: validationWarnings },
+        );
+      }
+      workspaceFilesGithubCache = cache;
+    }
+    const fileValidationErrors = validateFileSources(
+      workspaceFilesToCopy,
+      workspaceFilesSourcePath,
+      workspaceFilesGithubCache,
+    );
+    if (fileValidationErrors.length > 0) {
+      return failedSyncResult(
+        `File source validation failed (workspace unchanged):\n${fileValidationErrors.map((error) => `  - ${error}`).join('\n')}`,
+        {
+          totalFailed: fileValidationErrors.length,
+          warnings: validationWarnings,
+        },
+      );
+    }
+  }
+
+  if (!dryRun) {
+    // MIGRATION: v1→v2 - remove after v3 release.
+    await migrateWorkspaceSkillsV1toV2(workspacePath);
+  }
+
+  const managedRepoResults = await sw.measure('managed-repos', () =>
+    processManagedRepos(config.repositories ?? [], workspacePath, {
+      offline,
+      skipManaged,
+      dryRun,
+    }),
+  );
+  const managedWarnings = managedRepoResults
+    .filter((result) => result.error)
+    .map((result) => `${result.repo}: ${result.error}`);
+  const warnings = [...managedWarnings, ...validationWarnings];
+  const messages: string[] = [];
+
   // Step 2: Load previous sync state for selective purge
   const previousState = await loadSyncState(workspacePath);
+  const contextClients = [
+    ...new Set([
+      ...syncClients,
+      ...(Object.keys(previousState?.files ?? {}) as ClientType[]),
+      ...(previousState?.nativeResources?.resources
+        .filter((resource) => resource.scope === 'project')
+        .map((resource) => resource.client) ?? []),
+    ]),
+  ];
+  const clientContexts = resolveClientContexts(contextClients, 'project', {
+    cwd: workspacePath,
+    homeDir: getHomeDir(),
+    env: process.env,
+  });
+  const contextMappings = clientMappingsFromContexts(
+    clientContexts,
+    CLIENT_MAPPINGS,
+  );
+  const resolvedMappings = resolveClientMappings(
+    syncClients,
+    contextMappings,
+  );
 
   // Step 2b: Get paths that will be purged (for dry-run reporting)
   // In non-destructive mode, only show files from state (or nothing on first sync)
@@ -2304,15 +3220,29 @@ export async function syncWorkspace(
     ? syncClients
         .map((client) => ({
           client,
-          paths: getPreviouslySyncedFiles(previousState, client),
+          paths: getPreviouslySyncedFiles(previousState, client).filter(
+            (path) =>
+              trackedPathIsAllowed(
+                workspacePath,
+                path,
+                resolvedMappings[client],
+                clientContexts.get(client),
+              ),
+          ),
         }))
-        .filter((p) => p.paths.length > 0)
+        .filter((entry) => entry.paths.length > 0)
     : [];
 
   // Step 3: Selective purge - only remove files we previously synced (skip in dry-run mode)
   if (!dryRun) {
     await sw.measure('selective-purge', () =>
-      selectivePurgeWorkspace(workspacePath, previousState, syncClients),
+      selectivePurgeWorkspace(
+        workspacePath,
+        previousState,
+        syncClients,
+        resolvedMappings,
+        clientContexts,
+      ),
     );
   }
 
@@ -2329,7 +3259,7 @@ export async function syncWorkspace(
       : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
     collectAllSkills(
-      validPlugins,
+      filePlugins,
       disabledSkillsSet,
       enabledSkillsSet,
       warnings,
@@ -2338,12 +3268,12 @@ export async function syncWorkspace(
 
   // Build per-plugin skill name maps (handles conflicts automatically)
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
-  const resolvedMappings = resolveClientMappings(syncClients, CLIENT_MAPPINGS);
+  // Context mappings preserve legacy paths and carry Pi/OMP concrete roots.
   const agentOutputPlan = await sw.measure('agent-output-planning', () =>
     planValidatedPluginAgentOutputs(
-      validPlugins,
+      filePlugins,
       workspacePath,
-      CLIENT_MAPPINGS,
+      contextMappings,
     ),
   );
   appendAgentOutputConflictWarnings(agentOutputPlan, warnings);
@@ -2357,7 +3287,7 @@ export async function syncWorkspace(
     'plugin-copy',
     () =>
       Promise.all(
-        validPlugins.map(async (validatedPlugin, validIndex) => {
+        filePlugins.map(async (validatedPlugin, validIndex) => {
           const skillNameMap = pluginSkillMaps.get(validatedPlugin.resolved);
           const configurationIndex =
             validatedPlugin.configurationIndex ?? validIndex;
@@ -2373,16 +3303,22 @@ export async function syncWorkspace(
             validatedPlugin.clients,
             dryRun,
             skillNameMap,
-            undefined,
+            contextMappings,
             syncMode,
             agentOutputs,
             agentConflicts,
             agentFailures,
+            Object.fromEntries(
+              [...clientContexts].map(([client, context]) => [
+                client,
+                context.writeRoot,
+              ]),
+            ),
           );
           return { ...result, scope: 'project' as const };
         }),
       ),
-    `${validPlugins.length} plugin(s)`,
+    `${filePlugins.length} plugin(s)`,
   );
 
   // Step 4b: Native CLI installations
@@ -2393,8 +3329,8 @@ export async function syncWorkspace(
       'project',
       workspacePath,
       dryRun,
-      warnings,
-      messages,
+      clientContexts,
+      nativeSelection,
     ),
   );
 
@@ -2403,7 +3339,7 @@ export async function syncWorkspace(
   // subset recorded in sync state.
   const codexHookSync = await sw.measure('codex-hooks-sync', async () =>
     syncCodexProjectHooks(
-      validPlugins,
+      filePlugins,
       workspacePath,
       previousState?.codexHooks,
       {
@@ -2417,7 +3353,7 @@ export async function syncWorkspace(
   // file. Copilot discovers project hooks only from .github/hooks/*.json;
   // copying a plugin's hook scripts there does not activate its root hooks.json.
   const copilotHookSync = await sw.measure('copilot-hooks-sync', () =>
-    syncCopilotProjectHooks(validPlugins, workspacePath, {
+    syncCopilotProjectHooks(filePlugins, workspacePath, {
       dryRun,
       previouslyManaged: getPreviouslySyncedFiles(
         previousState,
@@ -2435,52 +3371,11 @@ export async function syncWorkspace(
     ...copilotHookSync.copyResults,
   ];
   let writtenSkillsIndexFiles: string[] = [];
-  const skipWorkspaceFiles =
-    !!config.workspace?.source && !validatedWorkspaceSource;
   if (config.workspace && !skipWorkspaceFiles) {
     sw.start('workspace-files');
-    const sourcePath = validatedWorkspaceSource?.resolved;
-    const filesToCopy = [...config.workspace.files];
-
-    // Auto-include agent files if they exist in source and aren't already listed.
-    // Skip when repositories is empty — agent files contain WORKSPACE-RULES that
-    // reference repository paths which don't exist yet.
-    if (hasRepositories && sourcePath) {
-      for (const agentFile of AGENT_FILES) {
-        const agentPath = join(sourcePath, agentFile);
-        if (existsSync(agentPath) && !filesToCopy.includes(agentFile)) {
-          filesToCopy.push(agentFile);
-        }
-      }
-    }
-
-    // Step 5a: Collect and fetch GitHub repos from file sources
-    const fileSourceRepos = collectGitHubReposFromFiles(filesToCopy);
-    let githubCache = new Map<string, string>();
-
-    if (fileSourceRepos.length > 0) {
-      const { cache, errors } = await fetchFileSourceRepos(fileSourceRepos);
-      if (errors.length > 0) {
-        return failedSyncResult(
-          `File source fetch failed (workspace unchanged):\n${errors.map((e) => `  - ${e}`).join('\n')}`,
-          { pluginResults, totalFailed: errors.length },
-        );
-      }
-      githubCache = cache;
-    }
-
-    // Step 5b: Validate all file sources exist before copying
-    const fileValidationErrors = validateFileSources(
-      filesToCopy,
-      sourcePath,
-      githubCache,
-    );
-    if (fileValidationErrors.length > 0) {
-      return failedSyncResult(
-        `File source validation failed (workspace unchanged):\n${fileValidationErrors.map((e) => `  - ${e}`).join('\n')}`,
-        { pluginResults, totalFailed: fileValidationErrors.length },
-      );
-    }
+    const sourcePath = workspaceFilesSourcePath;
+    const filesToCopy = workspaceFilesToCopy;
+    const githubCache = workspaceFilesGithubCache;
 
     // Step 5c: Discover skills from workspace repositories
     const repoSkills =
@@ -2572,7 +3467,7 @@ export async function syncWorkspace(
   sw.start('mcp-sync');
   const mcpSyncResult = runMcpSync(
     workspacePath,
-    validPlugins,
+    filePlugins,
     config,
     previousState,
     syncClients,
@@ -2588,7 +3483,7 @@ export async function syncWorkspace(
   // Collect all skill names from installed plugins (including disabled) so that
   // skills that are still available but just not synced are not reported as deleted.
   const availableSkillNames = await collectAvailableSkillNames(
-    validPlugins,
+    filePlugins,
     warnings,
   );
   const allCopyResultsForState = [
@@ -2603,9 +3498,20 @@ export async function syncWorkspace(
     warnings,
   );
   // Count results
-  const { totalCopied, totalFailed, totalSkipped, totalGenerated } =
-    countCopyResults(pluginResults, workspaceFileResults);
-  const hasFailures = pluginResults.some((r) => !r.success) || totalFailed > 0;
+  const {
+    totalCopied,
+    totalFailed: fileFailures,
+    totalSkipped,
+    totalGenerated,
+  } = countCopyResults(pluginResults, workspaceFileResults);
+  const nativeFailures =
+    nativeResult?.effects.filter(
+      (effect) => effect.action === 'failed' || effect.action === 'unknown',
+    ).length ?? 0;
+  const totalFailed = fileFailures + nativeFailures;
+  const hasFailures = pluginResults.some((result) => !result.success) ||
+    totalFailed > 0 ||
+    nativeResult?.success === false;
 
   const newStatePaths = collectSyncedPaths(
     allCopyResultsForState,
@@ -2613,6 +3519,7 @@ export async function syncWorkspace(
     syncClients,
     resolvedMappings,
     agentDedupeRecords,
+    clientContexts,
   );
   const deletedArtifacts = computeDeletedArtifacts(
     previousState,
@@ -2624,16 +3531,12 @@ export async function syncWorkspace(
   );
 
   // Persist sync state (skip in dry-run mode)
-  const { pluginsByClient: nativePluginsByClient } =
-    collectNativePluginSources(validPlugins);
   if (!dryRun) {
-    const sources = await buildSourcesProvenance(validPlugins, config.plugins);
+    const sources = await buildSourcesProvenance(filePlugins, config.plugins);
     await sw.measure('persist-state', () =>
       persistSyncState(
         workspacePath,
         newStatePaths,
-        nativePluginsByClient,
-        nativeResult,
         {
           ...(vscodeState && { vscodeState }),
           ...(codexHookSync.managedHooks && {
@@ -2726,14 +3629,17 @@ function readGitBranch(repoPath: string): string | null {
  * @returns Sync result
  */
 export async function syncUserWorkspace(
-  options: { offline?: boolean; dryRun?: boolean; force?: boolean } = {},
+  options: SyncOptions = {},
 ): Promise<SyncResult> {
-  // MIGRATION: v1→v2 - remove after v3 release
-  await migrateUserWorkspaceSkillsV1toV2();
-
   const sw = new Stopwatch();
   const homeDir = resolve(getHomeDir());
-  const config = await getUserWorkspaceConfig();
+  const {
+    offline = false,
+    dryRun = false,
+    force = false,
+    nativeSelection,
+  } = options;
+  let config = await getUserWorkspaceConfig();
 
   if (!config) {
     return {
@@ -2746,58 +3652,153 @@ export async function syncUserWorkspace(
     };
   }
 
-  const workspaceClients = config.clients;
-  const { offline = false, dryRun = false, force = false } = options;
+  const {
+    plans: allPluginPlans,
+    warnings: planWarnings,
+    errors: allPlanErrors,
+  } = buildPluginSyncPlans(config.plugins, config.clients, 'user');
+  const planErrors = nativeSelection
+    ? buildPluginSyncPlans(
+        config.plugins.filter((plugin) => {
+          const source = getEffectivePluginSource(plugin);
+          return nativeSelectionMatches(nativeSelection, source, source);
+        }),
+        config.clients,
+        'user',
+      ).errors
+    : allPlanErrors;
+  if (planErrors.length > 0) {
+    return failedSyncResult(
+      `Native preflight failed (user workspace unchanged):\n${planErrors.map((error) => `  - ${error}`).join('\n')}`,
+      { totalFailed: planErrors.length, warnings: planWarnings },
+    );
+  }
 
-  const { plans: allPluginPlans, warnings: planWarnings } =
-    buildPluginSyncPlans(config.plugins, workspaceClients, 'user');
   const pluginPlans = allPluginPlans.filter(
     (plan) => plan.clients.length > 0 || plan.nativeClients.length > 0,
   );
-  const syncClients = collectSyncClients(workspaceClients, pluginPlans);
-
-  // Pre-register unique marketplaces to avoid race conditions during parallel validation
-  const marketplaceResults = await sw.measure('marketplace-registration', () =>
-    ensureMarketplacesRegistered(pluginPlans.map((plan) => plan.source)),
+  const syncClients = collectSyncClients(config.clients, pluginPlans);
+  const preflightContexts = resolveClientContexts(syncClients, 'user', {
+    homeDir,
+    cwd: process.cwd(),
+    env: process.env,
+  });
+  const nativePreflightErrors = await preflightNativePlans(
+    pluginPlans,
+    'user',
+    preflightContexts,
+    nativeSelection,
   );
+  if (nativePreflightErrors.length > 0) {
+    return failedSyncResult(
+      `Native preflight failed (user workspace unchanged):\n${nativePreflightErrors.map((error) => `  - ${error}`).join('\n')}`,
+      {
+        totalFailed: nativePreflightErrors.length,
+        warnings: planWarnings,
+        nativeResult: nativePreflightFailureResult(
+          pluginPlans,
+          'user',
+          preflightContexts,
+          nativePreflightErrors,
+          nativeSelection,
+        ),
+      },
+    );
+  }
 
-  // Seed fetchCache with marketplace paths so fetchPlugin skips redundant git pulls
+  if (!dryRun) {
+    // MIGRATION: v1→v2 - remove after v3 release.
+    await migrateUserWorkspaceSkillsV1toV2();
+    config = (await getUserWorkspaceConfig()) ?? config;
+  }
+
+  const filePlans = pluginPlans.filter((plan) => plan.clients.length > 0);
+  const marketplaceResults = await sw.measure('marketplace-registration', () =>
+    ensureMarketplacesRegistered(filePlans.map((plan) => plan.source)),
+  );
   await seedFetchCacheFromMarketplaces(marketplaceResults);
 
-  // Validate all plugins
   const validatedPlugins = await sw.measure(
     'plugin-validation',
     () => validateAllPlugins(pluginPlans, homeDir, offline),
     `${pluginPlans.length} plugin(s)`,
   );
-  const failedValidations = validatedPlugins.filter((v) => !v.success);
-  const validPlugins = validatedPlugins.filter((v) => v.success);
+  const failedValidations = validatedPlugins.filter((plugin) => !plugin.success);
+  const requiredNativeFailures = failedValidations.filter((plugin) => {
+    const plan = pluginPlans.find(
+      (candidate) => candidate.configurationIndex === plugin.configurationIndex,
+    );
+    return (
+      (plan?.nativeClients.length ?? 0) > 0 &&
+      nativeSelectionMatches(
+        nativeSelection,
+        plan?.source ?? plugin.plugin,
+        plan?.source ?? plugin.plugin,
+      )
+    );
+  });
   const warnings = [
     ...planWarnings,
-    ...failedValidations.map((v) => `${v.plugin}: ${v.error} (skipped)`),
+    ...failedValidations.map(
+      (plugin) => `${plugin.plugin}: ${plugin.error} (skipped)`,
+    ),
   ];
+  if (requiredNativeFailures.length > 0) {
+    return failedSyncResult(
+      `Mixed native/file preflight failed (user workspace unchanged):\n${requiredNativeFailures.map((plugin) => `  - ${plugin.plugin}: ${plugin.error}`).join('\n')}`,
+      { totalFailed: requiredNativeFailures.length, warnings },
+    );
+  }
+  const validPlugins = validatedPlugins.filter((plugin) => plugin.success);
+  const filePlugins = validPlugins.filter((plugin) => plugin.clients.length > 0);
   const messages: string[] = [];
-
-  // If ALL plugins failed, abort
   if (validPlugins.length === 0 && pluginPlans.length > 0) {
     return failedSyncResult(
-      `All plugins failed validation:\n${failedValidations.map((v) => `  - ${v.plugin}: ${v.error}`).join('\n')}`,
+      `All plugins failed validation:\n${failedValidations.map((plugin) => `  - ${plugin.plugin}: ${plugin.error}`).join('\n')}`,
       { totalFailed: failedValidations.length, warnings },
     );
   }
 
   // Load previous sync state (stored at ~/.allagents/sync-state.json)
   const previousState = await loadSyncState(homeDir);
+  const userContextClients = [
+    ...new Set([
+      ...syncClients,
+      ...(Object.keys(previousState?.files ?? {}) as ClientType[]),
+      ...(previousState?.nativeResources?.resources
+        .filter((resource) => resource.scope === 'user')
+        .map((resource) => resource.client) ?? []),
+    ]),
+  ];
+  const userClientContexts = resolveClientContexts(userContextClients, 'user', {
+    homeDir,
+    cwd: process.cwd(),
+    env: process.env,
+  });
+  const userContextMappings = clientMappingsFromContexts(
+    userClientContexts,
+    USER_CLIENT_MAPPINGS,
+  );
+  const resolvedUserMappings = resolveClientMappings(
+    syncClients,
+    userContextMappings,
+  );
 
   // Selective purge
   if (!dryRun) {
     await sw.measure('selective-purge', () =>
-      selectivePurgeWorkspace(homeDir, previousState, syncClients),
+      selectivePurgeWorkspace(
+        homeDir,
+        previousState,
+        syncClients,
+        resolvedUserMappings,
+        userClientContexts,
+      ),
     );
 
     const relocatedHooks = await sw.measure('legacy-copilot-hook-scan', () =>
       findRelocatedGitHubHooks(
-        validPlugins
+        filePlugins
           .filter(
             (plugin) =>
               plugin.clients.includes('copilot') &&
@@ -2809,7 +3810,7 @@ export async function syncUserWorkspace(
           })),
         homeDir,
         'copilot',
-        { clientMappings: USER_CLIENT_MAPPINGS },
+        { clientMappings: userContextMappings },
       ),
     );
 
@@ -2833,22 +3834,18 @@ export async function syncUserWorkspace(
       : undefined;
   const allSkills = await sw.measure('skill-collection', () =>
     collectAllSkills(
-      validPlugins,
+      filePlugins,
       disabledSkillsSet,
       enabledSkillsSet,
       warnings,
     ),
   );
   const pluginSkillMaps = buildPluginSkillNameMaps(allSkills);
-  const resolvedUserMappings = resolveClientMappings(
-    syncClients,
-    USER_CLIENT_MAPPINGS,
-  );
   const agentOutputPlan = await sw.measure('agent-output-planning', () =>
     planValidatedPluginAgentOutputs(
-      validPlugins,
+      filePlugins,
       homeDir,
-      USER_CLIENT_MAPPINGS,
+      userContextMappings,
     ),
   );
   appendAgentOutputConflictWarnings(agentOutputPlan, warnings);
@@ -2861,7 +3858,7 @@ export async function syncUserWorkspace(
     'plugin-copy',
     () =>
       Promise.all(
-        validPlugins.map(async (vp, validIndex) => {
+        filePlugins.map(async (vp, validIndex) => {
           const skillNameMap = pluginSkillMaps.get(vp.resolved);
           const configurationIndex = vp.configurationIndex ?? validIndex;
           const agentOutputs =
@@ -2872,7 +3869,7 @@ export async function syncUserWorkspace(
             indexedAgentOutputPlan.failures.get(configurationIndex) ?? [];
           const pluginMappings = resolveClientMappings(
             vp.clients,
-            USER_CLIENT_MAPPINGS,
+            userContextMappings,
           );
           const result = await copyValidatedPlugin(
             vp,
@@ -2885,11 +3882,17 @@ export async function syncUserWorkspace(
             agentOutputs,
             agentConflicts,
             agentFailures,
+            Object.fromEntries(
+              [...userClientContexts].map(([client, context]) => [
+                client,
+                context.writeRoot,
+              ]),
+            ),
           );
           return { ...result, scope: 'user' as const };
         }),
       ),
-    `${validPlugins.length} plugin(s)`,
+    `${filePlugins.length} plugin(s)`,
   );
 
   // MCP Proxy: prepare transform if configured (user-scoped)
@@ -2900,7 +3903,7 @@ export async function syncUserWorkspace(
   let userCollectWarningsEmitted = false;
   function getUserServersForClient(client: ClientType): Map<string, unknown> {
     const { servers, warnings: collectWarnings } = collectMcpServers(
-      validPlugins,
+      filePlugins,
       userWorkspaceMcpServers,
       client,
     );
@@ -2923,7 +3926,7 @@ export async function syncUserWorkspace(
       'vscode',
     );
     const vscodeMcpOverrides = getUserServersForClient('vscode');
-    const vscodeMcp = syncVscodeMcpConfig(validPlugins, {
+    const vscodeMcp = syncVscodeMcpConfig(filePlugins, {
       dryRun,
       force,
       trackedServers: trackedMcpServers,
@@ -2942,7 +3945,7 @@ export async function syncUserWorkspace(
       'codex',
     );
     const codexMcpOverrides = getUserServersForClient('codex');
-    const codexMcp = await syncCodexMcpServers(validPlugins, {
+    const codexMcp = await syncCodexMcpServers(filePlugins, {
       dryRun,
       trackedServers: trackedMcpServers,
       ...(codexMcpOverrides && { serverOverrides: codexMcpOverrides }),
@@ -2960,7 +3963,7 @@ export async function syncUserWorkspace(
       'claude',
     );
     const claudeMcpOverrides = getUserServersForClient('claude');
-    const claudeMcp = await syncClaudeMcpServersViaCli(validPlugins, {
+    const claudeMcp = await syncClaudeMcpServersViaCli(filePlugins, {
       dryRun,
       trackedServers: trackedMcpServers,
       ...(claudeMcpOverrides && { serverOverrides: claudeMcpOverrides }),
@@ -2979,7 +3982,7 @@ export async function syncUserWorkspace(
     );
     const copilotMcpPath = getCopilotMcpConfigPath();
     const copilotMcpOverrides = getUserServersForClient('copilot');
-    const copilotMcp = syncClaudeMcpConfig(validPlugins, {
+    const copilotMcp = syncClaudeMcpConfig(filePlugins, {
       dryRun,
       force,
       configPath: copilotMcpPath,
@@ -3003,7 +4006,7 @@ export async function syncUserWorkspace(
     'universal',
   ]);
   const allUserMcpServers = collectMcpServers(
-    validPlugins,
+    filePlugins,
     userWorkspaceMcpServers,
   ).servers;
   if (allUserMcpServers.size > 0) {
@@ -3024,14 +4027,14 @@ export async function syncUserWorkspace(
       'user',
       homeDir,
       dryRun,
-      warnings,
-      messages,
+      userClientContexts,
+      nativeSelection,
     ),
   );
 
   // Compute deleted artifacts: compare previous state vs what was just synced
   const availableUserSkillNames = await collectAvailableSkillNames(
-    validPlugins,
+    filePlugins,
     warnings,
   );
   const allCopyResultsForState = pluginResults.flatMap((r) => r.copyResults);
@@ -3043,8 +4046,17 @@ export async function syncUserWorkspace(
     warnings,
   );
   // Count results
-  const { totalCopied, totalFailed, totalSkipped, totalGenerated } =
-    countCopyResults(pluginResults, []);
+  const {
+    totalCopied,
+    totalFailed: fileFailures,
+    totalSkipped,
+    totalGenerated,
+  } = countCopyResults(pluginResults, []);
+  const nativeFailures =
+    nativeResult?.effects.filter(
+      (effect) => effect.action === 'failed' || effect.action === 'unknown',
+    ).length ?? 0;
+  const totalFailed = fileFailures + nativeFailures;
 
   const newStatePaths = collectSyncedPaths(
     allCopyResultsForState,
@@ -3052,6 +4064,7 @@ export async function syncUserWorkspace(
     syncClients,
     resolvedUserMappings,
     agentDedupeRecords,
+    userClientContexts,
   );
   const deletedArtifacts = computeDeletedArtifacts(
     previousState,
@@ -3062,16 +4075,12 @@ export async function syncUserWorkspace(
     agentDedupeRecords,
   );
 
-  // Save sync state (including MCP servers and native plugins)
+  // Save sync state (including MCP servers and native resources).
   if (!dryRun) {
-    const { pluginsByClient: nativePluginsByClient } =
-      collectNativePluginSources(validPlugins);
     await sw.measure('persist-state', () =>
       persistSyncState(
         homeDir,
         newStatePaths,
-        nativePluginsByClient,
-        nativeResult,
         {
           ...(Object.keys(mcpResults).length > 0 && {
             mcpTrackedServers: Object.fromEntries(
@@ -3088,7 +4097,10 @@ export async function syncUserWorkspace(
 
   const uniqueWarnings = [...new Set(warnings)];
   return {
-    success: totalFailed === 0,
+    success:
+      totalFailed === 0 &&
+      pluginResults.every((result) => result.success) &&
+      nativeResult?.success !== false,
     pluginResults,
     totalCopied,
     totalFailed,

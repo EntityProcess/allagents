@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { buildDescription, type CommandMeta } from '../../src/cli/help.js';
 import { initMeta, syncMeta, statusMeta } from '../../src/cli/metadata/workspace.js';
-import { marketplaceListMeta, marketplaceAddMeta, marketplaceRemoveMeta, marketplaceUpdateMeta, marketplaceBrowseMeta, pluginListMeta, pluginValidateMeta, pluginInstallMeta, pluginUninstallMeta } from '../../src/cli/metadata/plugin.js';
+import { marketplaceListMeta, marketplaceAddMeta, marketplaceRemoveMeta, marketplaceUpdateMeta, marketplaceBrowseMeta, pluginListMeta, pluginValidateMeta, pluginInstallMeta, pluginUninstallMeta, pluginUpdateMeta } from '../../src/cli/metadata/plugin.js';
 import { updateMeta } from '../../src/cli/metadata/self.js';
 
 /**
@@ -13,6 +13,7 @@ const allCommandMetas: { name: string; meta: CommandMeta }[] = [
   { name: 'workspace status', meta: statusMeta },
   { name: 'plugin install', meta: pluginInstallMeta },
   { name: 'plugin uninstall', meta: pluginUninstallMeta },
+  { name: 'plugin update', meta: pluginUpdateMeta },
   { name: 'plugin marketplace list', meta: marketplaceListMeta },
   { name: 'plugin marketplace add', meta: marketplaceAddMeta },
   { name: 'plugin marketplace remove', meta: marketplaceRemoveMeta },

@@ -35,6 +35,10 @@ import { parseFileSource } from '../utils/plugin-path.js';
 import { createSymlink } from '../utils/symlink.js';
 import { parseSkillMetadata } from '../validators/skill.js';
 import { discoverNestedSkillEntries } from './skills.js';
+import {
+  assertSafeDestination,
+  resolveMappedPath,
+} from './client-context.js';
 
 /**
  * Agent instruction files that receive WORKSPACE-RULES injection
@@ -82,11 +86,16 @@ export async function ensureWorkspaceRules(
 /**
  * Result of a file copy operation
  */
+export type CopyArtifactType = 'skill' | 'command' | 'agent' | 'hook';
+
 export interface CopyResult {
   source: string;
   destination: string;
   action: 'copied' | 'deduped' | 'skipped' | 'failed' | 'generated';
   error?: string;
+  /** Resolved ownership supplied by the copy operation, when applicable. */
+  client?: ClientType;
+  artifactType?: CopyArtifactType;
 }
 
 /**
@@ -97,6 +106,8 @@ export interface CopyOptions {
   dryRun?: boolean;
   /** Override client path mappings (defaults to CLIENT_MAPPINGS) */
   clientMappings?: Record<string, ClientMapping>;
+  /** Selected filesystem root that bounds this client's external writes. */
+  writeRoot?: string;
   /**
    * Glob patterns of files to exclude during sync.
    * Paths are relative to the plugin root (e.g., ".github/instructions/file.md",
@@ -239,10 +250,20 @@ export async function copyCommands(
     return results;
   }
 
-  const destDir = join(workspacePath, mapping.commandsPath);
-  if (!dryRun) {
-    await mkdir(destDir, { recursive: true });
+  const destDir = resolveMappedPath(workspacePath, mapping.commandsPath);
+  try {
+    await assertSafeDestination(options.writeRoot ?? workspacePath, destDir);
+  } catch (error) {
+    return [{
+      source: sourceDir,
+      destination: destDir,
+      action: 'failed',
+      error: error instanceof Error ? error.message : 'Unsafe destination',
+      client,
+      artifactType: 'command',
+    }];
   }
+  if (!dryRun) await mkdir(destDir, { recursive: true });
 
   const files = await readdir(sourceDir);
   const mdFiles = files.filter((f) => f.endsWith('.md'));
@@ -383,9 +404,22 @@ export async function copySkills(
     return results;
   }
 
-  const destDir = join(workspacePath, mapping.skillsPath);
+  const destDir = resolveMappedPath(workspacePath, mapping.skillsPath);
+  const writeRoot = options.writeRoot ?? workspacePath;
   if (!dryRun) {
-    await mkdir(destDir, { recursive: true });
+    try {
+      await assertSafeDestination(writeRoot, destDir);
+      await mkdir(destDir, { recursive: true });
+    } catch (error) {
+      return skillSources.map((skill) => ({
+        source: skill.sourcePath,
+        destination: join(destDir, skill.name),
+        action: 'failed',
+        error: error instanceof Error ? error.message : 'Unsafe destination',
+        client,
+        artifactType: 'skill',
+      }));
+    }
   }
 
   // Determine if we should use symlinks for this client
@@ -403,6 +437,21 @@ export async function copySkills(
         source: skill.sourcePath,
         destination: skillDestPath,
         action: 'copied',
+        client,
+        artifactType: 'skill',
+      };
+    }
+
+    try {
+      await assertSafeDestination(writeRoot, skillDestPath);
+    } catch (error) {
+      return {
+        source: skill.sourcePath,
+        destination: skillDestPath,
+        action: 'failed',
+        error: error instanceof Error ? error.message : 'Unsafe destination',
+        client,
+        artifactType: 'skill',
       };
     }
 
@@ -423,6 +472,8 @@ export async function copySkills(
           source: canonicalSkillPath,
           destination: skillDestPath,
           action: 'copied', // Report as copied for consistency
+          client,
+          artifactType: 'skill',
         };
       }
       // Symlink failed, fall back to copy
@@ -450,6 +501,8 @@ export async function copySkills(
         source: skill.sourcePath,
         destination: skillDestPath,
         action: 'copied',
+        client,
+        artifactType: 'skill',
       };
     } catch (error) {
       return {
@@ -457,6 +510,8 @@ export async function copySkills(
         destination: skillDestPath,
         action: 'failed',
         error: error instanceof Error ? error.message : 'Unknown error',
+        client,
+        artifactType: 'skill',
       };
     }
   });
@@ -630,7 +685,7 @@ export async function copyHooks(
     return results;
   }
 
-  const destDir = join(workspacePath, mapping.hooksPath);
+  const destDir = resolveMappedPath(workspacePath, mapping.hooksPath);
 
   // hooks/hooks.json is a plugin declaration, not a repository hook payload.
   // Project Copilot sync materializes it separately with COPILOT_PLUGIN_ROOT
@@ -702,10 +757,20 @@ export async function copyAgents(
     return results;
   }
 
-  const destDir = join(workspacePath, mapping.agentsPath);
-  if (!dryRun) {
-    await mkdir(destDir, { recursive: true });
+  const destDir = resolveMappedPath(workspacePath, mapping.agentsPath);
+  try {
+    await assertSafeDestination(options.writeRoot ?? workspacePath, destDir);
+  } catch (error) {
+    return [{
+      source: sourceDir,
+      destination: destDir,
+      action: 'failed',
+      error: error instanceof Error ? error.message : 'Unsafe destination',
+      client,
+      artifactType: 'agent',
+    }];
   }
+  if (!dryRun) await mkdir(destDir, { recursive: true });
 
   const files = await readdir(sourceDir);
   const mdFiles = files.filter((f) => f.endsWith('.md'));
@@ -918,7 +983,10 @@ export async function planAgentOutputs(
         for (const client of plugin.clients) {
           const agentsPath = resolvedPluginMappings[client]?.agentsPath;
           if (!agentsPath) continue;
-          const destination = join(workspacePath, agentsPath, entry.name);
+          const destination = join(
+            resolveMappedPath(workspacePath, agentsPath),
+            entry.name,
+          );
           mergeAgentOutputConsumer(candidates, {
             configurationIndex: plugin.configurationIndex,
             plugin: plugin.plugin,
@@ -1209,7 +1277,10 @@ export async function findRelocatedGitHubHooks(
     return emptyResult;
   }
 
-  const destDir = join(workspacePath, mapping.githubPath, 'hooks');
+  const destDir = join(
+    resolveMappedPath(workspacePath, mapping.githubPath),
+    'hooks',
+  );
   const candidates = new Set<string>();
   await Promise.all(
     sources.map(async ({ pluginPath, exclude }) => {
@@ -1344,6 +1415,7 @@ interface PlannedAgentCopyOptions {
   dryRun: boolean;
   clientMappings: Record<string, ClientMapping>;
   skillNameMap?: Map<string, string>;
+  writeRoot?: string;
 }
 
 async function copyPlannedAgentOutputs(
@@ -1352,11 +1424,29 @@ async function copyPlannedAgentOutputs(
 ): Promise<CopyResult[]> {
   return Promise.all(
     outputs.map(async (output): Promise<CopyResult> => {
+      const client = output.clients[0];
+      try {
+        await assertSafeDestination(
+          options.writeRoot ?? dirname(output.destination),
+          output.destination,
+        );
+      } catch (error) {
+        return {
+          source: output.source,
+          destination: output.destination,
+          action: 'failed',
+          error: error instanceof Error ? error.message : 'Unsafe destination',
+          ...(client && { client }),
+          artifactType: 'agent',
+        };
+      }
       if (options.dryRun) {
         return {
           source: output.source,
           destination: output.destination,
           action: 'copied',
+          ...(client && { client }),
+          artifactType: 'agent',
         };
       }
 
@@ -1368,9 +1458,8 @@ async function copyPlannedAgentOutputs(
             join(output.pluginPath, '.github'),
             output.source,
           ).replaceAll('\\', '/');
-          const firstClient = output.clients[0];
-          const skillsPath = firstClient
-            ? (options.clientMappings[firstClient]?.skillsPath ?? '')
+          const skillsPath = client
+            ? (options.clientMappings[client]?.skillsPath ?? '')
             : '';
           content = adjustLinksInContent(content, sourceRelativeToGithub, {
             ...(options.skillNameMap && {
@@ -1384,6 +1473,8 @@ async function copyPlannedAgentOutputs(
           source: output.source,
           destination: output.destination,
           action: 'copied',
+          ...(client && { client }),
+          artifactType: 'agent',
         };
       } catch (error) {
         return {
@@ -1391,6 +1482,8 @@ async function copyPlannedAgentOutputs(
           destination: output.destination,
           action: 'failed',
           error: error instanceof Error ? error.message : 'Unknown error',
+          ...(client && { client }),
+          artifactType: 'agent',
         };
       }
     }),
@@ -1418,6 +1511,7 @@ export async function copyGitHubContent(
           dryRun,
           clientMappings: mappings,
           ...(skillNameMap && { skillNameMap }),
+          ...(options.writeRoot && { writeRoot: options.writeRoot }),
         })
       : results;
   }
@@ -1447,7 +1541,7 @@ export async function copyGitHubContent(
     planningFailures = directPlan.failures;
   }
 
-  const destDir = join(workspacePath, mapping.githubPath);
+  const destDir = resolveMappedPath(workspacePath, mapping.githubPath);
   const effectiveExclude = githubContentExcludes(mapping, options.exclude);
   let hasAggregateContent = false;
   try {
@@ -1503,6 +1597,7 @@ export async function copyGitHubContent(
       dryRun,
       clientMappings: mappings,
       ...(skillNameMap && { skillNameMap }),
+      ...(options.writeRoot && { writeRoot: options.writeRoot }),
     })),
   );
   results.push(
@@ -1621,6 +1716,7 @@ export async function copyPluginToWorkspace(
           dryRun: baseOptions.dryRun ?? false,
           clientMappings: mappings,
           ...(skillNameMap && { skillNameMap }),
+          ...(baseOptions.writeRoot && { writeRoot: baseOptions.writeRoot }),
         },
       ),
     ]);

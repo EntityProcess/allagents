@@ -30,6 +30,20 @@ describe('ClientEntrySchema', () => {
     });
   });
 
+  it('parses Pi and OMP in bare, colon, and object forms', () => {
+    for (const client of ['pi', 'omp'] as const) {
+      expect(ClientEntrySchema.parse(client)).toBe(client);
+      expect(ClientEntrySchema.parse(`${client}:native`)).toEqual({
+        name: client,
+        install: 'native',
+      });
+      expect(ClientEntrySchema.parse({ name: client })).toEqual({
+        name: client,
+        install: 'file',
+      });
+    }
+  });
+
   describe('normalizeClientEntry', () => {
     it('normalizes bare string to object', () => {
       expect(normalizeClientEntry('claude')).toEqual({ name: 'claude', install: 'file' });

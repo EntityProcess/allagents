@@ -102,13 +102,14 @@ export const marketplaceBrowseMeta: AgentCommandMeta = {
 
 export const pluginListMeta: AgentCommandMeta = {
   command: 'plugin list',
-  description: 'List installed plugins and standalone skills',
-  whenToUse: 'To see which plugins and skills are currently installed in your workspace',
+  description: 'List declared plugins with durable ownership and live state',
+  whenToUse:
+    'To distinguish configured files and Pi/OMP native resources from what is installed, disabled, missing, retained, or uncertain in each scope',
   examples: [
     'allagents plugin list',
   ],
   expectedOutput:
-    'Lists marketplace specs and friendly direct-plugin names with type, scope, clients, and a compact direct source. JSON preserves each raw spec. If none are installed, suggests marketplace browse.',
+    'Merges declarations, AllAgents ownership/provenance, and exact live native observation. Native inspection failures retain partial results and exit 1.',
   outputSchema: {
     plugins: [{
       name: 'string',
@@ -118,6 +119,20 @@ export const pluginListMeta: AgentCommandMeta = {
       kind: 'string',
       clients: 'string[] | undefined',
       nativeClients: 'string[] | undefined',
+      nativeResources: [{
+        client: 'string',
+        scope: 'user | project',
+        kind: 'plugin | package',
+        requestedIdentity: 'string',
+        resolvedIdentity: 'string',
+        root: 'string',
+        action: 'string',
+        phase: 'inspection',
+        changed: 'boolean',
+        declared: 'boolean',
+        ownership: 'managed | referenced | uncertain | none',
+        error: 'string | undefined',
+      }],
     }],
     total: 'number',
   },
@@ -145,16 +160,16 @@ export const pluginValidateMeta: AgentCommandMeta = {
 
 export const pluginInstallMeta: AgentCommandMeta = {
   command: 'plugin install',
-  description: 'Install plugin to workspace (supports plugin@marketplace, GitHub URL, or local path). Use --scope user for user-level install.',
-  whenToUse: 'To add a new plugin to your workspace (or user-level config with --scope user) and immediately sync it',
+  description: 'Install a file plugin or ordinary Pi/OMP native resource. Use --scope user for user-level install.',
+  whenToUse:
+    'To add a plugin declaration and sync it after native source, runtime, scope, trust, and live inventory preflight succeeds',
   examples: [
     'allagents plugin install my-plugin@official',
-    'allagents plugin install https://github.com/user/plugin',
-    'allagents plugin install ../local-plugin',
+    'allagents plugin install npm:pi-extension --scope user',
     'allagents plugin install my-plugin@official --scope user',
   ],
   expectedOutput:
-    'Confirms the plugin was added, then runs sync. Shows sync results. Exit 0 on success, exit 1 on failure.',
+    'Fails before declaration edits or fetching when native preflight is invalid; otherwise reports the declaration and typed file/native sync outcomes.',
   positionals: [
     { name: 'plugin', type: 'string', required: true, description: 'Plugin identifier (plugin@marketplace, GitHub URL, or local path)' },
   ],
@@ -179,15 +194,16 @@ export const pluginInstallMeta: AgentCommandMeta = {
 
 export const pluginUninstallMeta: AgentCommandMeta = {
   command: 'plugin uninstall',
-  description: 'Uninstall plugin from workspace config. Use --scope user for user-level uninstall.',
-  whenToUse: 'To remove a plugin from your workspace (or user-level config with --scope user) and re-sync',
+  description: 'Remove a declaration and safely reconcile its scoped resources',
+  whenToUse:
+    'To remove a project/user declaration or retry retained native cleanup after the declaration is already absent',
   examples: [
     'allagents plugin uninstall my-plugin@official',
-    'allagents plugin uninstall https://github.com/user/plugin',
+    'allagents plugin uninstall npm:pi-extension --scope user',
     'allagents plugin uninstall my-plugin@official --scope user',
   ],
   expectedOutput:
-    'Confirms the plugin was removed, then runs sync to clean up. Exit 0 on success, exit 1 on failure.',
+    'Reports declaration removal separately, removes only corroborated AllAgents-managed native resources in the selected scope, retains referenced/uncertain resources, and exits 1 on failed or unknown cleanup.',
   positionals: [
     { name: 'plugin', type: 'string', required: true, description: 'Plugin identifier to uninstall' },
   ],
@@ -196,28 +212,32 @@ export const pluginUninstallMeta: AgentCommandMeta = {
   ],
   outputSchema: {
     plugin: 'string',
-    scope: 'string',
-    syncResult: {
-      copied: 'number',
-      generated: 'number',
-      failed: 'number',
-      skipped: 'number',
-      plugins: [{ plugin: 'string', success: 'boolean', copied: 'number', generated: 'number', failed: 'number' }],
+    scopes: ['user | project'],
+    declarations: [{
+      scope: 'user | project',
+      action: 'removed | absent | failed',
+      error: 'string | undefined',
+    }],
+    syncResults: {
+      project: 'sync result | undefined',
+      user: 'sync result | undefined',
     },
   },
 };
 
 export const pluginUpdateMeta: AgentCommandMeta = {
   command: 'plugin update',
-  description: 'Update installed plugins to latest version and sync plugin files (skips AGENTS.md)',
-  whenToUse: 'To pull the latest changes for installed plugins and deploy plugin files only, without regenerating AGENTS.md',
+  description: 'Update only selected file and ordinary native resources',
+  whenToUse:
+    'To update one declared plugin or all selected-scope plugins while targeting each Pi/OMP adapter by exact identity and scope',
   examples: [
     'allagents plugin update',
     'allagents plugin update my-plugin@official',
-    'allagents plugin update --scope user',
+    'allagents plugin update npm:pi-extension --scope user',
+    'allagents plugin update --scope all',
   ],
   expectedOutput:
-    'Shows update status per plugin, then syncs plugin files. Exit 0 if all succeed, exit 1 if any fail.',
+    'Preflights native targets before generic fetching, updates only requested identities/scopes, reports per-scope sync/native outcomes, and exits 1 if any pass fails.',
   positionals: [
     { name: 'plugin', type: 'string', required: false, description: 'Specific plugin to update (updates all if omitted)' },
   ],
@@ -229,11 +249,9 @@ export const pluginUpdateMeta: AgentCommandMeta = {
     updated: 'number',
     skipped: 'number',
     failed: 'number',
-    syncResult: {
-      copied: 'number',
-      generated: 'number',
-      failed: 'number',
-      skipped: 'number',
+    syncResults: {
+      project: 'sync result | undefined',
+      user: 'sync result | undefined',
     },
   },
 };

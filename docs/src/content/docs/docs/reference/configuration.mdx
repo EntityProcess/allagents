@@ -53,6 +53,26 @@ clients:
   - cursor
 ```
 
+### Client Install Modes
+
+A bare client name uses file sync. Native mode delegates compatible plugin
+resources to the client's own package or plugin manager:
+
+```yaml
+clients:
+  - pi:native
+  - name: omp
+    install: native
+```
+
+The colon shorthand and object form are equivalent. A plugin object may set its
+own `install: file` or `install: native` override.
+
+Pi native mode supports npm, Git, and local package sources at project or user
+scope. Project installs require trust recorded outside the project-controlled
+Pi agent root. OMP native mode accepts marketplace-backed plugin specs at
+project or user scope and requires OMP 18.1.17 or newer.
+
 ### Setup Commands
 
 The optional top-level `setup` field is an ordered list. A string runs on every

@@ -1,8 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { discoverRepoSkills, discoverWorkspaceSkills } from '../../../src/core/repo-skills.js';
+import {
+  discoverRepoSkills,
+  discoverWorkspaceSkills,
+} from '../../../src/core/repo-skills.js';
 
 function makeSkill(dir: string, name: string, description: string) {
   const skillDir = join(dir, name);
@@ -113,6 +122,47 @@ describe('discoverRepoSkills', () => {
     expect(names).toEqual(['agents-skill', 'claude-skill']);
   });
 
+  it('uses Pi native-before-shared precedence without scanning above the repository', async () => {
+    const repoDir = join(tmpDir, 'repo');
+    makeSkill(join(repoDir, '.pi', 'skills'), 'collision', 'Pi native');
+    makeSkill(join(repoDir, '.agents', 'skills'), 'collision', 'Shared');
+    makeSkill(
+      join(repoDir, '.agents', 'skills'),
+      'shared-only',
+      'Shared only',
+    );
+    makeSkill(join(tmpDir, '.pi', 'skills'), 'outside-boundary', 'Outside');
+
+    const results = await discoverRepoSkills(repoDir, {
+      clients: ['pi', 'universal'],
+    });
+
+    expect(results.map((entry) => entry.name)).toEqual([
+      'collision',
+      'shared-only',
+    ]);
+    expect(results[0]?.description).toBe('Pi native');
+  });
+
+  it('uses OMP native precedence before legacy and shared skill roots', async () => {
+    makeSkill(join(tmpDir, '.omp', 'skills'), 'collision', 'OMP native');
+    makeSkill(join(tmpDir, '.agent', 'skills'), 'collision', 'Legacy shared');
+    makeSkill(join(tmpDir, '.agents', 'skills'), 'collision', 'Shared');
+    makeSkill(join(tmpDir, '.agent', 'skills'), 'legacy-only', 'Legacy only');
+    makeSkill(join(tmpDir, '.agents', 'skills'), 'shared-only', 'Shared only');
+
+    const results = await discoverRepoSkills(tmpDir, {
+      clients: ['omp'],
+    });
+
+    expect(results.map((entry) => entry.name)).toEqual([
+      'collision',
+      'legacy-only',
+      'shared-only',
+    ]);
+    expect(results[0]?.description).toBe('OMP native');
+  });
+
   it('returns empty when skill directory does not exist', async () => {
     const results = await discoverRepoSkills(tmpDir, {
       clients: ['claude'],
@@ -172,5 +222,33 @@ describe('discoverWorkspaceSkills opt-in', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].location).not.toContain('//');
+  });
+
+  it('keeps Pi native precedence across configured repositories', async () => {
+    const sharedRepo = join(tmpDir, 'shared-repo');
+    const nativeRepo = join(tmpDir, 'native-repo');
+    makeSkill(
+      join(sharedRepo, '.agents', 'skills'),
+      'collision',
+      'A much larger shared skill description',
+    );
+    makeSkill(
+      join(nativeRepo, '.pi', 'skills'),
+      'collision',
+      'Pi native',
+    );
+
+    const results = await discoverWorkspaceSkills(
+      tmpDir,
+      [
+        { path: './shared-repo', skills: true },
+        { path: './native-repo', skills: true },
+      ],
+      ['pi'],
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.description).toBe('Pi native');
+    expect(results[0]?.location).toContain('/.pi/skills/');
   });
 });

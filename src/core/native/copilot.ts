@@ -1,8 +1,62 @@
-import { executeCommand, type NativeClient, type NativeCommandResult, type NativeSyncResult } from './types.js';
+import {
+  executeCommand,
+  type NativeClient,
+  type NativeCommandOptions,
+  type NativeInspectionResult,
+  type NativeMutationResult,
+  type NativeOperationContext,
+  type NativeResource,
+  type NativeSourceResolution,
+} from './types.js';
+
+function commandOptions(context: NativeOperationContext): NativeCommandOptions {
+  return {
+    ...(context.cwd && { cwd: context.cwd }),
+    ...(context.env && { env: context.env }),
+  };
+}
+
+function commandError(result: {
+  error?: string;
+  exitCode?: number | null;
+  signal?: NodeJS.Signals | null;
+}): string {
+  if (result.error) return result.error;
+  if (result.signal) return `Copilot CLI terminated by ${result.signal}`;
+  return `Copilot CLI exited with code ${result.exitCode ?? 'unknown'}`;
+}
+
+function inventoryIdentities(value: unknown): string[] | null {
+  const record =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  const entries = Array.isArray(value)
+    ? value
+    : (record?.plugins ?? record?.installedPlugins ?? record?.installed_plugins);
+  if (!Array.isArray(entries)) return null;
+  return entries.flatMap((entry) => {
+    if (typeof entry === 'string') return [entry];
+    if (!entry || typeof entry !== 'object') return [];
+    const plugin = entry as Record<string, unknown>;
+    for (const key of ['id', 'spec', 'plugin', 'name']) {
+      if (typeof plugin[key] === 'string' && plugin[key].length > 0) {
+        return [plugin[key]];
+      }
+    }
+    return [];
+  });
+}
 
 export class CopilotNativeClient implements NativeClient {
-  async isAvailable(): Promise<boolean> {
-    const result = await executeCommand('copilot', ['--version']);
+  readonly client = 'copilot';
+
+  async isAvailable(context?: NativeOperationContext): Promise<boolean> {
+    const result = await executeCommand(
+      'copilot',
+      ['--version'],
+      context ? commandOptions(context) : undefined,
+    );
     return result.success;
   }
 
@@ -15,17 +69,11 @@ export class CopilotNativeClient implements NativeClient {
     if (atIndex <= 0 || atIndex === allagentsSource.length - 1) return null;
 
     const marketplacePart = allagentsSource.slice(atIndex + 1);
-
-    // Must have a marketplace part (not a URL)
     if (marketplacePart.includes('://')) return null;
-
-    // Validate non-empty marketplace name
     if (marketplacePart.includes('/')) {
       const parts = marketplacePart.split('/');
-      if (!parts[1]) return null; // trailing slash
+      if (!parts[1]) return null;
     }
-
-    // Keep the full source as-is (copilot uses owner/repo format)
     return allagentsSource;
   }
 
@@ -39,78 +87,130 @@ export class CopilotNativeClient implements NativeClient {
     return null;
   }
 
-  addMarketplace(source: string, options?: { cwd?: string }): Promise<NativeCommandResult> {
-    return executeCommand('copilot', ['plugin', 'marketplace', 'add', source], options);
-  }
-
-  installPlugin(spec: string, _scope: 'user' | 'project', options?: { cwd?: string }): Promise<NativeCommandResult> {
-    // Copilot has no scope flag — plugins install globally
-    return executeCommand('copilot', ['plugin', 'install', spec], options);
-  }
-
-  uninstallPlugin(spec: string, _scope: 'user' | 'project', options?: { cwd?: string }): Promise<NativeCommandResult> {
-    // Copilot has no scope flag — plugins uninstall globally
-    return executeCommand('copilot', ['plugin', 'uninstall', spec], options);
-  }
-
-  async syncPlugins(
-    plugins: string[],
-    scope: 'user' | 'project' = 'user',
-    options: { cwd?: string; dryRun?: boolean } = {},
-  ): Promise<NativeSyncResult> {
-    const result: NativeSyncResult = {
-      marketplacesAdded: [],
-      pluginsInstalled: [],
-      pluginsFailed: [],
-      skipped: [],
+  resolveSource(
+    source: string,
+    context: NativeOperationContext,
+    provenance: Readonly<Record<string, string>> = {},
+  ): NativeSourceResolution {
+    const spec = this.toPluginSpec(source);
+    if (!spec) {
+      return {
+        success: false,
+        error: `Copilot native install does not support source '${source}'`,
+      };
+    }
+    return {
+      success: true,
+      resource: {
+        kind: 'plugin',
+        requestedIdentity: source,
+        resolvedIdentity: spec,
+        context,
+        provenance,
+      },
     };
+  }
 
-    if (options.dryRun) {
-      for (const plugin of plugins) {
-        const spec = this.toPluginSpec(plugin);
-        if (spec) {
-          result.pluginsInstalled.push({ plugin: spec });
-        } else {
-          result.skipped.push(plugin);
-        }
-      }
-      return result;
+  async inspect(
+    context: NativeOperationContext,
+  ): Promise<NativeInspectionResult> {
+    const result = await executeCommand(
+      'copilot',
+      ['plugin', 'list', '--json'],
+      commandOptions(context),
+    );
+    if (!result.success) {
+      return { success: false, resources: [], error: commandError(result) };
     }
 
-    const marketplaceSources = new Set<string>();
-    for (const plugin of plugins) {
-      const source = this.extractMarketplaceSource(plugin);
-      if (source) marketplaceSources.add(source);
+    try {
+      const parsed = result.output ? JSON.parse(result.output) : [];
+      const identities = inventoryIdentities(parsed);
+      if (!identities) throw new Error('expected a plugin array');
+      return {
+        success: true,
+        resources: identities.map((identity) => ({
+          kind: 'plugin',
+          requestedIdentity: identity,
+          resolvedIdentity: identity,
+          context,
+          provenance: {},
+        })),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        resources: [],
+        error: `Could not parse Copilot plugin inventory: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
+  }
 
-    for (const source of marketplaceSources) {
-      const addResult = await this.addMarketplace(source, options);
-      if (addResult.success) {
-        result.marketplacesAdded.push(source);
+  async install(
+    resource: NativeResource,
+    context: NativeOperationContext,
+  ): Promise<NativeMutationResult> {
+    const registrations: string[] = [];
+    const marketplaceSource = resource.provenance.marketplaceSource;
+    if (marketplaceSource) {
+      const registration = await executeCommand(
+        'copilot',
+        ['plugin', 'marketplace', 'add', marketplaceSource],
+        commandOptions(context),
+      );
+      if (!registration.success) {
+        return { success: false, error: commandError(registration) };
       }
+      registrations.push(marketplaceSource);
     }
-
-    for (const plugin of plugins) {
-      const spec = this.toPluginSpec(plugin);
-      if (!spec) {
-        result.skipped.push(plugin);
-        continue;
-      }
-      const installResult = await this.installPlugin(spec, scope, options);
-      if (installResult.success) {
-        result.pluginsInstalled.push({ plugin: spec });
-      } else {
-        const rawError = installResult.error ?? 'Unknown error';
-        const error = rawError.includes('Plugin path escapes marketplace directory')
-          ? `${rawError} (Copilot rejected a plugin path from this marketplace manifest. Use file install for copilot to avoid native install for this plugin.)`
-          : rawError;
-        result.pluginsFailed.push({
-          plugin: spec,
-          error,
-        });
-      }
+    const result = await executeCommand(
+      'copilot',
+      ['plugin', 'install', resource.resolvedIdentity],
+      commandOptions(context),
+    );
+    if (result.success) {
+      return {
+        success: true,
+        ...(registrations.length > 0 && { registrations }),
+      };
     }
+    const rawError = commandError(result);
+    const error = rawError.includes('Plugin path escapes marketplace directory')
+      ? `${rawError} (Copilot rejected a plugin path from this marketplace manifest. Use file install for copilot to avoid native install for this plugin.)`
+      : rawError;
+    return {
+      success: false,
+      error,
+      ...(registrations.length > 0 && { registrations }),
+    };
+  }
 
-    return result;
+  async update(
+    resource: NativeResource,
+    _current: NativeResource,
+    context: NativeOperationContext,
+  ): Promise<NativeMutationResult> {
+    const result = await executeCommand(
+      'copilot',
+      ['plugin', 'update', resource.resolvedIdentity],
+      commandOptions(context),
+    );
+    return result.success
+      ? { success: true }
+      : { success: false, error: commandError(result) };
+  }
+
+  async remove(
+    resource: NativeResource,
+    context: NativeOperationContext,
+  ): Promise<NativeMutationResult> {
+    const result = await executeCommand(
+      'copilot',
+      ['plugin', 'uninstall', resource.resolvedIdentity],
+      commandOptions(context),
+    );
+    return result.success
+      ? { success: true }
+      : { success: false, error: commandError(result) };
   }
 }

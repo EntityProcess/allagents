@@ -78,8 +78,9 @@ export const setupMeta: AgentCommandMeta = {
 
 export const syncMeta: AgentCommandMeta = {
   command: 'update',
-  description: 'Update plugins in workspace',
-  whenToUse: 'After modifying workspace.yaml or pulling shared config changes',
+  description: 'Reconcile ordinary file and native plugin resources',
+  whenToUse:
+    'After modifying workspace.yaml or pulling shared config changes, including Pi packages or OMP plugins declared with native install mode',
   examples: [
     'allagents update',
     'allagents update --dry-run',
@@ -87,7 +88,7 @@ export const syncMeta: AgentCommandMeta = {
     'allagents update --verbose',
   ],
   expectedOutput:
-    'Lists synced files with status per plugin. Exit 0 on success, exit 1 if any files failed.',
+    'Attempts user and project scopes independently, lists file changes and typed Pi/OMP native outcomes, and exits 1 if any required native or file action fails.',
   options: [
     {
       flag: '--offline',
@@ -121,6 +122,22 @@ export const syncMeta: AgentCommandMeta = {
         failed: 'number',
       },
     ],
+    nativeResources: {
+      success: 'boolean',
+      effects: [{
+        client: 'string',
+        scope: 'user | project',
+        nativeScope: 'string',
+        kind: 'plugin | package',
+        requestedIdentity: 'string',
+        resolvedIdentity: 'string',
+        root: 'string',
+        action: 'string',
+        phase: 'string',
+        changed: 'boolean',
+        error: 'string | undefined',
+      }],
+    },
   },
 };
 
@@ -140,12 +157,12 @@ export const pruneMeta: AgentCommandMeta = {
 
 export const statusMeta: AgentCommandMeta = {
   command: 'status',
-  description: 'Show sync status of plugins',
+  description: 'Show declared, managed, and live plugin status',
   whenToUse:
-    'To check which plugins and skills are configured and whether they are available locally',
+    'To compare workspace declarations and AllAgents ownership with exact live Pi/OMP and file-resource state',
   examples: ['allagents status', 'allagents workspace status'],
   expectedOutput:
-    'Lists all configured plugins/skills with availability status and configured clients. Exit 0 on success, exit 1 if workspace is not initialized.',
+    'Lists configured files plus native client/scope identities as installed, configured-missing, disabled, unusable, or unknown. Native inspection failures exit 1 without hiding other scope outcomes.',
   outputSchema: {
     plugins: [
       {
@@ -156,5 +173,20 @@ export const statusMeta: AgentCommandMeta = {
       },
     ],
     clients: ['string'],
+    nativeResources: [{
+      client: 'string',
+      scope: 'user | project',
+      kind: 'plugin | package',
+      requestedIdentity: 'string',
+      resolvedIdentity: 'string',
+      root: 'string',
+      action: 'installed | configured-missing | disabled | unusable | unknown',
+      phase: 'inspection',
+      changed: 'boolean',
+      declared: 'boolean',
+      ownership: 'managed | referenced | uncertain | none',
+      transition: 'string | undefined',
+      error: 'string | undefined',
+    }],
   },
 };

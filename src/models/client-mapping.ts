@@ -87,6 +87,24 @@ export const AGENT_HOSTS: readonly AgentHost[] = [
     user: { skillsPath: '.codex/skills/', agentFile: 'AGENTS.md' },
   },
   {
+    id: 'pi',
+    name: 'Pi',
+    project: { skillsPath: '.pi/skills/', agentFile: 'AGENTS.md' },
+    user: {
+      skillsPath: '.pi/agent/skills/',
+      agentFile: '.pi/agent/AGENTS.md',
+    },
+  },
+  {
+    id: 'omp',
+    name: 'OMP',
+    project: { skillsPath: '.omp/skills/', agentFile: 'AGENTS.md' },
+    user: {
+      skillsPath: '.omp/agent/skills/',
+      agentFile: '.omp/agent/AGENTS.md',
+    },
+  },
+  {
     id: 'cursor',
     name: 'Cursor',
     project: { skillsPath: '.cursor/skills/', agentFile: 'AGENTS.md' },
