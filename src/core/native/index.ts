@@ -26,12 +26,16 @@ export { CopilotNativeClient } from './copilot.js';
 export {
   OmpNativeClient,
   inspectOmpMarketplaceRegistry,
+  ompProfileNativeScope,
   parseOmpPluginId,
+  resolveOmpMarketplacePluginSource,
   type OmpMarketplaceCatalog,
   type OmpMarketplaceCatalogPlugin,
   type OmpMarketplaceInspection,
   type OmpMarketplaceRegistryEntry,
   type OmpNativeClientOptions,
+  type OmpNativeScope,
+  type OmpProfileNativeScope,
 } from './omp.js';
 export {
   PiNativeClient,

@@ -6,11 +6,13 @@ import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   ClientEntry,
   PluginEntry,
+  UserWorkspaceConfig,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
 import {
   getEffectivePluginSource,
   getPluginSource,
+  UserWorkspaceConfigSchema,
 } from '../models/workspace-config.js';
 import {
   getPluginDisplayName,
@@ -35,6 +37,7 @@ import {
   resolveGitHubIdentity,
   upsertGitHubPluginSourceAllowlistInConfig,
 } from './workspace-modify.js';
+import { parseUserWorkspaceConfigForEdit } from '../utils/workspace-parser.js';
 
 /**
  * Default clients for user-scope installations.
@@ -82,7 +85,7 @@ export async function ensureUserWorkspace(clients?: ClientEntry[]): Promise<void
   const configPath = getUserWorkspaceConfigPath();
   if (existsSync(configPath)) return;
 
-  const defaultConfig: WorkspaceConfig = {
+  const defaultConfig: UserWorkspaceConfig = {
     repositories: [],
     plugins: [],
     clients: clients ? [...clients] : [...DEFAULT_USER_CLIENTS],
@@ -93,18 +96,17 @@ export async function ensureUserWorkspace(clients?: ClientEntry[]): Promise<void
 }
 
 /**
- * Read user-level workspace config. Returns null if not found.
+ * Read and validate the user-level workspace config. Returns null only when the
+ * file is absent; invalid YAML or declarations are surfaced to the caller.
  */
-export async function getUserWorkspaceConfig(): Promise<WorkspaceConfig | null> {
+export async function getUserWorkspaceConfig(): Promise<UserWorkspaceConfig | null> {
   const configPath = getUserWorkspaceConfigPath();
   if (!existsSync(configPath)) return null;
-
-  try {
-    const content = await readFile(configPath, 'utf-8');
-    return load(content) as WorkspaceConfig;
-  } catch {
-    return null;
-  }
+  const editable = await parseUserWorkspaceConfigForEdit(configPath);
+  return {
+    ...UserWorkspaceConfigSchema.parse(editable),
+    clients: editable.clients,
+  };
 }
 
 /**
@@ -203,8 +205,7 @@ export async function removeUserPlugin(plugin: string): Promise<ModifyResult> {
   const configPath = getUserWorkspaceConfigPath();
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseUserWorkspaceConfigForEdit(configPath);
 
     // Exact match first
     let index = config.plugins.findIndex(
@@ -280,8 +281,9 @@ export async function getUserPluginsForMarketplace(
 export async function removeUserPluginsForMarketplace(
   marketplaceName: string,
 ): Promise<string[]> {
-  const config = await getUserWorkspaceConfig();
-  if (!config) return [];
+  const configPath = getUserWorkspaceConfigPath();
+  if (!existsSync(configPath)) return [];
+  const config = await parseUserWorkspaceConfigForEdit(configPath);
 
   const matching = config.plugins.filter((entry) => {
     const parsed = parsePluginSpec(getPluginSource(entry));
@@ -290,7 +292,6 @@ export async function removeUserPluginsForMarketplace(
 
   if (matching.length === 0) return [];
 
-  const configPath = getUserWorkspaceConfigPath();
   config.plugins = config.plugins.filter((entry) => !matching.includes(entry));
   await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
   return matching.map((entry) => getPluginSource(entry));
@@ -306,8 +307,7 @@ async function addPluginToUserConfig(
   force?: boolean,
 ): Promise<ModifyResult> {
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseUserWorkspaceConfigForEdit(configPath);
 
     // Check for exact match
     const exactIndex = config.plugins.findIndex(
@@ -393,8 +393,7 @@ export async function setUserClients(
   const configPath = getUserWorkspaceConfigPath();
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseUserWorkspaceConfigForEdit(configPath);
     config.clients = clients;
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
@@ -472,8 +471,7 @@ export async function addUserDisabledSkill(
   const { pluginName, skillName } = parsed;
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseUserWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -531,8 +529,7 @@ export async function removeUserDisabledSkill(
   const { pluginName, skillName } = parsed;
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseUserWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -626,8 +623,7 @@ export async function addUserEnabledSkill(
   const { pluginName, skillName } = parsed;
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseUserWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -685,8 +681,7 @@ export async function removeUserEnabledSkill(
   const { pluginName, skillName } = parsed;
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseUserWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -748,8 +743,7 @@ export async function setUserPluginSkillsMode(
   const configPath = getUserWorkspaceConfigPath();
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseUserWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -787,8 +781,7 @@ export async function upsertUserGitHubPluginSourceAllowlist(
   const configPath = getUserWorkspaceConfigPath();
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseUserWorkspaceConfigForEdit(configPath);
     const result = await upsertGitHubPluginSourceAllowlistInConfig(
       config,
       source,
@@ -889,7 +882,6 @@ export async function getInstalledProjectPlugins(
   try {
     const content = await readFile(configPath, 'utf-8');
     const config = load(content) as WorkspaceConfig;
-    if (!config?.plugins) return [];
 
     const result: InstalledPluginInfo[] = [];
     for (const pluginEntry of config.plugins) {
@@ -916,13 +908,7 @@ export async function migrateUserWorkspaceSkillsV1toV2(): Promise<void> {
   const configPath = getUserWorkspaceConfigPath();
   if (!existsSync(configPath)) return;
 
-  let config: WorkspaceConfig;
-  try {
-    const content = await readFile(configPath, 'utf-8');
-    config = load(content) as WorkspaceConfig;
-  } catch {
-    return;
-  }
+  const config = await parseUserWorkspaceConfigForEdit(configPath);
 
   if (!config || (config.version !== undefined && config.version >= 2)) return;
 

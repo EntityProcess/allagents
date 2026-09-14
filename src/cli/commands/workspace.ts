@@ -1,6 +1,16 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { command, flag, option, optional, positional, string } from 'cmd-ts';
+import {
+  array,
+  command,
+  flag,
+  multioption,
+  option,
+  optional,
+  positional,
+  string,
+} from 'cmd-ts';
+import { resetFetchCache } from '../../core/plugin.js';
 import { pruneOrphanedPlugins } from '../../core/prune.js';
 import { getWorkspaceStatus } from '../../core/status.js';
 import {
@@ -9,9 +19,12 @@ import {
   syncWorkspace,
 } from '../../core/sync.js';
 import type { SyncResult } from '../../core/sync.js';
+import { updateInstalledProfiles } from '../../core/profile/index.js';
+import type { ProfileApplyResult } from '../../core/profile/index.js';
 import {
   ensureUserWorkspace,
-  getUserWorkspaceConfig,
+  getUserWorkspaceConfigPath,
+  isUserConfigPath,
 } from '../../core/user-workspace.js';
 import {
   addRepository,
@@ -40,6 +53,7 @@ import {
   formatSyncHeader,
   formatSyncSummary,
 } from '../format-sync.js';
+import { buildProfileData, formatProfileResult } from '../format-profile.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import {
@@ -272,6 +286,333 @@ const setupCmd = command({
 // workspace sync
 // =============================================================================
 
+export interface WorkspaceSyncCommandOptions {
+  readonly offline: boolean;
+  readonly dryRun: boolean;
+  readonly force: boolean;
+  readonly verbose: boolean;
+  readonly noManaged: boolean;
+  readonly profile: readonly string[];
+}
+
+export interface WorkspaceSyncCommandDependencies {
+  readonly userConfigExists: () => boolean;
+  readonly projectConfigExists: (cwd: string) => boolean;
+  readonly ensureUserWorkspace: typeof ensureUserWorkspace;
+  readonly resetFetchCache: () => void | Promise<void>;
+  readonly syncUserWorkspace: typeof syncUserWorkspace;
+  readonly syncWorkspace: typeof syncWorkspace;
+  readonly updateInstalledProfiles: typeof updateInstalledProfiles;
+  readonly exit: (code: number) => void;
+}
+
+const workspaceSyncCommandDependencies: WorkspaceSyncCommandDependencies = {
+  userConfigExists: () => existsSync(getUserWorkspaceConfigPath()),
+  projectConfigExists: (cwd) =>
+    !isUserConfigPath(cwd) &&
+    existsSync(join(cwd, '.allagents', 'workspace.yaml')),
+  ensureUserWorkspace,
+  resetFetchCache,
+  syncUserWorkspace,
+  syncWorkspace,
+  updateInstalledProfiles,
+  exit: (code) => {
+    process.exit(code);
+  },
+};
+
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function printSyncResult(
+  result: SyncResult,
+  options: Pick<WorkspaceSyncCommandOptions, 'dryRun' | 'verbose'>,
+): void {
+  // Show purge plan in dry-run mode
+  if (
+    options.dryRun &&
+    result.purgedPaths &&
+    result.purgedPaths.length > 0
+  ) {
+    console.log('Would purge managed directories:');
+    for (const purgePath of result.purgedPaths) {
+      console.log(`  ${purgePath.client}:`);
+      for (const path of purgePath.paths) {
+        console.log(`    - ${path}`);
+      }
+    }
+    console.log('');
+  }
+
+  // Print managed repo results
+  if (result.managedRepoResults && result.managedRepoResults.length > 0) {
+    for (const line of formatManagedRepoResults(result.managedRepoResults)) {
+      console.log(line);
+    }
+    console.log('');
+  }
+
+  // Print sync header
+  for (const line of formatSyncHeader(result)) {
+    console.log(line);
+  }
+  console.log('');
+
+  // Print plugin results
+  for (const pluginResult of result.pluginResults) {
+    console.log(formatPluginHeader(pluginResult));
+
+    if (pluginResult.error) {
+      console.log(`  Error: ${pluginResult.error}`);
+    }
+
+    for (const line of formatPluginArtifacts(pluginResult.copyResults)) {
+      console.log(line);
+    }
+
+    const generated = pluginResult.copyResults.filter(
+      (copyResult) => copyResult.action === 'generated',
+    ).length;
+    const failed = pluginResult.copyResults.filter(
+      (copyResult) => copyResult.action === 'failed',
+    ).length;
+
+    if (generated > 0) console.log(`  Generated: ${generated} files`);
+    if (failed > 0) {
+      console.log(`  Failed: ${failed} files`);
+      for (const failedResult of pluginResult.copyResults.filter(
+        (copyResult) => copyResult.action === 'failed',
+      )) {
+        console.log(
+          `    - ${failedResult.destination}: ${failedResult.error}`,
+        );
+      }
+    }
+  }
+
+  // Show warnings
+  if (result.warnings && result.warnings.length > 0) {
+    console.log('\nWarnings:');
+    for (const warning of result.warnings) {
+      console.log(`  \u26A0 ${warning}`);
+    }
+  }
+
+  // Show informational messages
+  if (options.verbose && result.messages && result.messages.length > 0) {
+    console.log('');
+    for (const message of result.messages) {
+      console.log(`  ${message}`);
+    }
+  }
+
+  // Print MCP server sync results
+  if (result.mcpResults) {
+    for (const [scope, mcpResult] of Object.entries(result.mcpResults)) {
+      if (!mcpResult) continue;
+      const mcpLines = formatMcpResult(mcpResult, scope);
+      if (mcpLines.length > 0) {
+        console.log('');
+        for (const line of mcpLines) {
+          console.log(line);
+        }
+      }
+    }
+  }
+
+  // Print native plugin sync results
+  if (result.nativeResult) {
+    const nativeLines = formatNativeResult(result.nativeResult);
+    if (nativeLines.length > 0) {
+      console.log('\nnative:');
+      for (const line of nativeLines) {
+        console.log(line);
+      }
+    }
+  }
+
+  // Print summary (only generated/failed/skipped/deleted totals)
+  const summaryLines = formatSyncSummary(result);
+  if (summaryLines.length > 0) {
+    console.log('');
+    for (const line of summaryLines) {
+      console.log(line);
+    }
+  }
+
+  // Print timing breakdown (debug only: ALLAGENTS_DEBUG=timing)
+  if (process.env.ALLAGENTS_DEBUG?.includes('timing') && result.timing) {
+    console.error('');
+    const totalMs = result.timing.totalMs;
+    console.error(`[debug] Sync timing (total: ${formatTimingMs(totalMs)})`);
+    console.error(`[debug] ${'─'.repeat(56)}`);
+    for (const step of result.timing.steps) {
+      const pct =
+        totalMs > 0 ? ((step.durationMs / totalMs) * 100).toFixed(1) : '0.0';
+      const detail = step.detail ? ` [${step.detail}]` : '';
+      const label = step.label.padEnd(40);
+      const duration = formatTimingMs(step.durationMs).padStart(8);
+      console.error(
+        `[debug]   ${label} ${duration}  ${pct.padStart(5)}%${detail}`,
+      );
+    }
+    console.error(`[debug] ${'─'.repeat(56)}`);
+  }
+}
+
+export async function executeWorkspaceSyncCommand(
+  options: WorkspaceSyncCommandOptions,
+  dependencies: WorkspaceSyncCommandDependencies = workspaceSyncCommandDependencies,
+): Promise<void> {
+  try {
+    if (!isJsonMode() && options.dryRun) {
+      console.log('Dry run mode - no changes will be made\n');
+    }
+
+    const requestedProfiles = [...new Set(options.profile)];
+    const targetedProfileUpdate = requestedProfiles.length > 0;
+    let userConfigExists = false;
+    let projectConfigExists = false;
+
+    if (!targetedProfileUpdate) {
+      userConfigExists = dependencies.userConfigExists();
+      projectConfigExists = dependencies.projectConfigExists(process.cwd());
+
+      // If neither config exists, auto-create user config and show guidance.
+      if (!userConfigExists && !projectConfigExists) {
+        await dependencies.ensureUserWorkspace();
+        if (isJsonMode()) {
+          jsonOutput({
+            success: true,
+            command: 'workspace sync',
+            data: { message: 'No plugins configured', profiles: [] },
+          });
+        } else {
+          console.log(
+            'No plugins configured. Run `allagents plugin install <plugin>` to get started.',
+          );
+        }
+        return;
+      }
+    }
+
+    let combined: SyncResult | null = null;
+    let profileResults: readonly ProfileApplyResult[] = [];
+    const passErrors: string[] = [];
+
+    // All ordinary and profile passes share one fetch cache.
+    await dependencies.resetFetchCache();
+
+    if (userConfigExists) {
+      try {
+        combined = await dependencies.syncUserWorkspace({
+          offline: options.offline,
+          dryRun: options.dryRun,
+          force: options.force,
+        });
+      } catch (error) {
+        passErrors.push(`User workspace: ${errorMessage(error)}`);
+      }
+    }
+
+    if (targetedProfileUpdate || userConfigExists) {
+      try {
+        profileResults = await dependencies.updateInstalledProfiles(
+          targetedProfileUpdate ? requestedProfiles : undefined,
+          {
+            offline: options.offline,
+            dryRun: options.dryRun,
+          },
+        );
+      } catch (error) {
+        passErrors.push(`Profiles: ${errorMessage(error)}`);
+      }
+    }
+
+    if (projectConfigExists) {
+      try {
+        const projectResult = await dependencies.syncWorkspace(process.cwd(), {
+          offline: options.offline,
+          dryRun: options.dryRun,
+          skipManaged: options.noManaged,
+        });
+        combined = combined
+          ? mergeSyncResults(combined, projectResult)
+          : projectResult;
+      } catch (error) {
+        passErrors.push(`Project workspace: ${errorMessage(error)}`);
+      }
+    }
+
+    const ordinarySuccess =
+      combined === null ||
+      (combined.success && combined.totalFailed === 0);
+    const success =
+      passErrors.length === 0 &&
+      ordinarySuccess &&
+      profileResults.every((result) => result.success);
+
+    if (isJsonMode()) {
+      jsonOutput({
+        success,
+        command: 'workspace sync',
+        data: {
+          ...(combined ? buildSyncData(combined) : {}),
+          profiles: profileResults.map(buildProfileData),
+        },
+        ...(!success && {
+          error:
+            passErrors.length > 0
+              ? passErrors.join('; ')
+              : 'Sync completed with failures',
+        }),
+      });
+      if (!success) dependencies.exit(1);
+      return;
+    }
+
+    if (combined) {
+      printSyncResult(combined, options);
+    }
+
+    let separateProfileOutput = combined !== null;
+    for (const profileResult of profileResults) {
+      if (separateProfileOutput) console.log('');
+      for (const line of formatProfileResult(profileResult)) {
+        console.log(line);
+      }
+      separateProfileOutput = true;
+    }
+
+    if (passErrors.length > 0) {
+      if (combined || profileResults.length > 0) console.error('');
+      for (const error of passErrors) {
+        console.error(`Error: ${error}`);
+      }
+    }
+
+    if (!success) dependencies.exit(1);
+  } catch (error) {
+    if (error instanceof Error) {
+      if (isJsonMode()) {
+        jsonOutput({
+          success: false,
+          command: 'workspace sync',
+          error: error.message,
+        });
+        dependencies.exit(1);
+        return;
+      }
+      console.error(`Error: ${error.message}`);
+      dependencies.exit(1);
+      return;
+    }
+    throw error;
+  }
+}
+
 const syncCmd = command({
   name: 'update',
   aliases: ['sync'],
@@ -301,232 +642,13 @@ const syncCmd = command({
       long: 'no-managed',
       description: 'Skip managed repository clone/pull operations',
     }),
+    profile: multioption({
+      type: array(string),
+      long: 'profile',
+      description: 'Update only this installed profile (repeatable)',
+    }),
   },
-  handler: async ({ offline, dryRun, force, verbose, noManaged }) => {
-    try {
-      if (!isJsonMode() && dryRun) {
-        console.log('Dry run mode - no changes will be made\n');
-      }
-
-      const userConfigExists = !!(await getUserWorkspaceConfig());
-      const projectConfigPath = join(
-        process.cwd(),
-        '.allagents',
-        'workspace.yaml',
-      );
-      const projectConfigExists = existsSync(projectConfigPath);
-
-      // If neither config exists, auto-create user config and show guidance
-      if (!userConfigExists && !projectConfigExists) {
-        await ensureUserWorkspace();
-        if (isJsonMode()) {
-          jsonOutput({
-            success: true,
-            command: 'workspace sync',
-            data: { message: 'No plugins configured' },
-          });
-        } else {
-          console.log(
-            'No plugins configured. Run `allagents plugin install <plugin>` to get started.',
-          );
-        }
-        return;
-      }
-
-      let combined: SyncResult | null = null;
-
-      // Reset fetch cache so both user and project scopes share fetched repos
-      const { resetFetchCache } = await import('../../core/plugin.js');
-      resetFetchCache();
-
-      // Sync user workspace if config exists
-      if (userConfigExists) {
-        const userResult = await syncUserWorkspace({ offline, dryRun, force });
-        combined = userResult;
-      }
-
-      // Sync project workspace if config exists
-      if (projectConfigExists) {
-        const projectResult = await syncWorkspace(process.cwd(), {
-          offline,
-          dryRun,
-          skipManaged: noManaged,
-        });
-        combined = combined
-          ? mergeSyncResults(combined, projectResult)
-          : projectResult;
-      }
-
-      // At this point, at least one config existed so combined is set
-      const result = combined as SyncResult;
-
-      if (isJsonMode()) {
-        const syncData = buildSyncData(result);
-        const success = result.success && result.totalFailed === 0;
-        jsonOutput({
-          success,
-          command: 'workspace sync',
-          data: syncData,
-          ...(!success && { error: 'Sync completed with failures' }),
-        });
-        if (!success) {
-          process.exit(1);
-        }
-        return;
-      }
-
-      // Show purge plan in dry-run mode
-      if (dryRun && result.purgedPaths && result.purgedPaths.length > 0) {
-        console.log('Would purge managed directories:');
-        for (const purgePath of result.purgedPaths) {
-          console.log(`  ${purgePath.client}:`);
-          for (const path of purgePath.paths) {
-            console.log(`    - ${path}`);
-          }
-        }
-        console.log('');
-      }
-
-      // Print managed repo results
-      if (result.managedRepoResults && result.managedRepoResults.length > 0) {
-        for (const line of formatManagedRepoResults(
-          result.managedRepoResults,
-        )) {
-          console.log(line);
-        }
-        console.log('');
-      }
-
-      // Print sync header
-      for (const line of formatSyncHeader(result)) {
-        console.log(line);
-      }
-      console.log('');
-
-      // Print plugin results
-      for (const pluginResult of result.pluginResults) {
-        console.log(formatPluginHeader(pluginResult));
-
-        if (pluginResult.error) {
-          console.log(`  Error: ${pluginResult.error}`);
-        }
-
-        for (const line of formatPluginArtifacts(pluginResult.copyResults)) {
-          console.log(line);
-        }
-
-        const generated = pluginResult.copyResults.filter(
-          (r) => r.action === 'generated',
-        ).length;
-        const failed = pluginResult.copyResults.filter(
-          (r) => r.action === 'failed',
-        ).length;
-
-        if (generated > 0) console.log(`  Generated: ${generated} files`);
-        if (failed > 0) {
-          console.log(`  Failed: ${failed} files`);
-          for (const failedResult of pluginResult.copyResults.filter(
-            (r) => r.action === 'failed',
-          )) {
-            console.log(
-              `    - ${failedResult.destination}: ${failedResult.error}`,
-            );
-          }
-        }
-      }
-
-      // Show warnings
-      if (result.warnings && result.warnings.length > 0) {
-        console.log('\nWarnings:');
-        for (const warning of result.warnings) {
-          console.log(`  \u26A0 ${warning}`);
-        }
-      }
-
-      // Show informational messages
-      if (verbose && result.messages && result.messages.length > 0) {
-        console.log('');
-        for (const message of result.messages) {
-          console.log(`  ${message}`);
-        }
-      }
-
-      // Print MCP server sync results
-      if (result.mcpResults) {
-        for (const [scope, mcpResult] of Object.entries(result.mcpResults)) {
-          if (!mcpResult) continue;
-          const mcpLines = formatMcpResult(mcpResult, scope);
-          if (mcpLines.length > 0) {
-            console.log('');
-            for (const line of mcpLines) {
-              console.log(line);
-            }
-          }
-        }
-      }
-
-      // Print native plugin sync results
-      if (result.nativeResult) {
-        const nativeLines = formatNativeResult(result.nativeResult);
-        if (nativeLines.length > 0) {
-          console.log('\nnative:');
-          for (const line of nativeLines) {
-            console.log(line);
-          }
-        }
-      }
-
-      // Print summary (only generated/failed/skipped/deleted totals)
-      const summaryLines = formatSyncSummary(result);
-      if (summaryLines.length > 0) {
-        console.log('');
-        for (const line of summaryLines) {
-          console.log(line);
-        }
-      }
-
-      // Print timing breakdown (debug only: ALLAGENTS_DEBUG=timing)
-      if (process.env.ALLAGENTS_DEBUG?.includes('timing') && result.timing) {
-        console.error('');
-        const totalMs = result.timing.totalMs;
-        console.error(
-          `[debug] Sync timing (total: ${formatTimingMs(totalMs)})`,
-        );
-        console.error(`[debug] ${'─'.repeat(56)}`);
-        for (const step of result.timing.steps) {
-          const pct =
-            totalMs > 0
-              ? ((step.durationMs / totalMs) * 100).toFixed(1)
-              : '0.0';
-          const detail = step.detail ? ` [${step.detail}]` : '';
-          const label = step.label.padEnd(40);
-          const duration = formatTimingMs(step.durationMs).padStart(8);
-          console.error(
-            `[debug]   ${label} ${duration}  ${pct.padStart(5)}%${detail}`,
-          );
-        }
-        console.error(`[debug] ${'─'.repeat(56)}`);
-      }
-
-      if (!result.success || result.totalFailed > 0) {
-        process.exit(1);
-      }
-    } catch (error) {
-      if (error instanceof Error) {
-        if (isJsonMode()) {
-          jsonOutput({
-            success: false,
-            command: 'workspace sync',
-            error: error.message,
-          });
-          process.exit(1);
-        }
-        console.error(`Error: ${error.message}`);
-        process.exit(1);
-      }
-      throw error;
-    }
-  },
+  handler: executeWorkspaceSyncCommand,
 });
 
 function formatTimingMs(ms: number): string {

@@ -78,17 +78,19 @@ export const setupMeta: AgentCommandMeta = {
 
 export const syncMeta: AgentCommandMeta = {
   command: 'update',
-  description: 'Reconcile ordinary file and native plugin resources',
+  description: 'Reconcile ordinary resources and installed global profiles',
   whenToUse:
-    'After modifying workspace.yaml or pulling shared config changes, including Pi packages or OMP plugins declared with native install mode',
+    'After modifying workspace.yaml, pulling shared config changes, or changing an installed global profile declaration',
   examples: [
     'allagents update',
     'allagents update --dry-run',
     'allagents update --offline',
     'allagents update --verbose',
+    'allagents update --profile work --profile review',
+    'allagents workspace sync --profile work',
   ],
   expectedOutput:
-    'Attempts user and project scopes independently, lists file changes and typed Pi/OMP native outcomes, and exits 1 if any required native or file action fails.',
+    'Attempts user workspace, installed declared profiles, and project workspace in order without stopping later passes after a failure. With --profile, validates and updates only selected profiles that are both installed and declared. Exit 1 after all applicable passes if any pass fails.',
   options: [
     {
       flag: '--offline',
@@ -106,6 +108,11 @@ export const syncMeta: AgentCommandMeta = {
       short: '-v',
       type: 'boolean',
       description: 'Show informational sync messages',
+    },
+    {
+      flag: '--profile',
+      type: 'string',
+      description: 'Update only this installed profile (repeatable)',
     },
   ],
   outputSchema: {
@@ -138,6 +145,25 @@ export const syncMeta: AgentCommandMeta = {
         error: 'string | undefined',
       }],
     },
+    profiles: [
+      {
+        profile: 'string',
+        operation: 'update',
+        status: 'installed | removed | partial | failed',
+        steps: [
+          {
+            client: 'string',
+            kind: 'root | file | settings | mcp | native | marketplace | launcher',
+            identity: 'string',
+            status:
+              'created | updated | removed | unchanged | referenced | retained | failed',
+            error: 'string | undefined',
+          },
+        ],
+        warnings: ['string'],
+        error: 'string | undefined',
+      },
+    ],
   },
 };
 

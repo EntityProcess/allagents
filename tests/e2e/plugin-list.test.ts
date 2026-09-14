@@ -79,6 +79,11 @@ plugins:
   - demo@acme/official
 clients:
   - claude:native
+profiles:
+  work:
+    clients:
+      - name: pi
+    plugins: []
 `;
 
     writeFileSync(projectConfigPath, projectConfig, 'utf-8');

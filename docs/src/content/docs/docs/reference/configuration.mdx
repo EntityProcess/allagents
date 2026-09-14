@@ -73,6 +73,72 @@ scope. Project installs require trust recorded outside the project-controlled
 Pi agent root. OMP native mode accepts marketplace-backed plugin specs at
 project or user scope and requires OMP 18.1.17 or newer.
 
+### Global Profiles
+
+Named profiles are declared only in the user workspace at
+`~/.allagents/workspace.yaml`. A project `.allagents/workspace.yaml` containing
+`profiles` is invalid.
+
+```yaml
+profiles:
+  compound-engineering:
+    clients:
+      - name: omp
+        install: native
+        launcher: omp-compound
+    plugins:
+      - source: EveryInc/compound-engineering-plugin
+        ref: main
+        install: native
+
+  pi-tools:
+    clients:
+      - name: pi
+        install: native
+        launcher: pi-tools
+    plugins:
+      - source: ./pi-package
+        install: native
+      - source: npm:pi-mcp-adapter
+        install: native
+    mcpServers:
+      local-tools:
+        command: node
+        args: [/absolute/path/to/server.mjs]
+        env:
+          API_TOKEN: ${API_TOKEN}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `profiles.<name>.clients` | Yes | One or more object-form profile clients |
+| `clients[].name` | Yes | Supported profile client; currently `pi` or `omp` |
+| `clients[].install` | No | Default plugin mode, `file` by default |
+| `clients[].launcher` | No | Safe command basename written to the configured user bin directory |
+| `clients[].settings` | No | Strict client settings object; Pi and OMP currently accept no settings |
+| `profiles.<name>.plugins` | No | Profile plugin declarations; defaults to an empty list |
+| `plugins[].source` | Yes | npm, GitHub, marketplace, or local source supported by the selected adapter |
+| `plugins[].ref` | No | Requested Git ref for a GitHub source |
+| `plugins[].install` | No | Per-plugin `file` or `native` override |
+| `plugins[].clients` | No | Restrict the plugin to named clients in this profile |
+| `plugins[].skills` | No | Skill allowlist or `{ exclude: [...] }` where the adapter supports filtering |
+| `profiles.<name>.mcpServers` | No | Profile-scoped stdio or HTTP MCP declarations |
+
+Relative local plugin sources resolve from the user's home directory, not the
+current project. Profile names and launcher names are safe command basenames;
+machine paths, resolved revisions, generated launcher paths, and ownership
+state are not declaration fields.
+
+MCP credentials must remain runtime references. Environment values and HTTP
+headers accept exact `${ENV_VAR}` references only, and credential-bearing
+command arguments must use the same exact form. Resolved secret values are
+never written to plans, launchers, profile state, or generated configuration.
+
+Install profiles explicitly with `allagents profile install <name> --yes`.
+Ordinary `allagents update` reconciles installed, still-declared profiles;
+repeat `--profile <name>` to select only installed profiles. Removing a
+declaration does not uninstall it—use `allagents profile remove <name> --yes`.
+
 ### Setup Commands
 
 The optional top-level `setup` field is an ordered list. A string runs on every

@@ -30,9 +30,15 @@ type OmpCommandRunner = (
 
 type OmpFileReader = (path: string) => Promise<string>;
 
+export interface OmpProfileNativeScope {
+  readonly kind: 'profile';
+  readonly name: string;
+}
+
 export interface OmpNativeClientOptions {
   execute?: OmpCommandRunner;
   readFile?: OmpFileReader;
+  nativeScope?: OmpProfileNativeScope;
 }
 
 export interface OmpMarketplaceCatalogPlugin {
@@ -161,6 +167,29 @@ function isName(value: unknown): value is string {
     value.length <= 64 &&
     NAME_PATTERN.test(value)
   );
+}
+
+export type OmpNativeScope = 'user' | 'project' | `profile:${string}`;
+
+export function ompProfileNativeScope(profileName: string): `profile:${string}` {
+  if (
+    !isName(profileName) ||
+    profileName === 'default' ||
+    profileName === '.' ||
+    profileName === '..' ||
+    profileName.endsWith('.')
+  ) {
+    throw new Error(`Invalid OMP profile name '${profileName}'`);
+  }
+  return `profile:${profileName}`;
+}
+
+function profileNameFromNativeScope(
+  nativeScope: string | undefined,
+): string | undefined {
+  if (!nativeScope?.startsWith('profile:')) return undefined;
+  const profileName = nativeScope.slice('profile:'.length);
+  return ompProfileNativeScope(profileName).slice('profile:'.length);
 }
 
 function absolutePath(path: string): boolean {
@@ -374,6 +403,106 @@ function parseCatalog(
   return { catalog: { name: parsed.data.name, plugins } };
 }
 
+/**
+ * Resolve a native plugin from a catalog that has already been fetched.
+ *
+ * An exact plugin id may select one entry from a larger catalog. A marketplace
+ * source has no plugin selector, so it is accepted only when the catalog has a
+ * single valid plugin. Keeping this pure lets profile planning reject
+ * ambiguity before registration or installation.
+ */
+export function resolveOmpMarketplacePluginSource(
+  source: string,
+  catalogValue: unknown,
+  context: NativeOperationContext,
+  provenance: Readonly<Record<string, string>> = {},
+): NativeSourceResolution {
+  const parsedCatalog = parseCatalog(catalogValue, '<fetched marketplace>');
+  const catalog = parsedCatalog.catalog;
+  if (!catalog) {
+    return {
+      success: false,
+      error:
+        parsedCatalog.error ??
+        'Fetched OMP marketplace catalog is malformed',
+    };
+  }
+
+  const exact = parseOmpPluginId(source);
+  let plugin: OmpMarketplaceCatalogPlugin | undefined;
+  let marketplaceSource: string | undefined;
+  if (exact) {
+    if (exact.marketplace !== catalog.name) {
+      return {
+        success: false,
+        error: `OMP plugin marketplace '${exact.marketplace}' does not match fetched catalog '${catalog.name}'`,
+      };
+    }
+    plugin = catalog.plugins.find((candidate) => candidate.name === exact.name);
+    if (!plugin) {
+      return {
+        success: false,
+        error: `OMP catalog '${catalog.name}' has no plugin '${exact.name}'`,
+      };
+    }
+  } else {
+    const trimmed = source.trim();
+    const isLocal =
+      trimmed === '~' ||
+      trimmed.startsWith('~/') ||
+      trimmed.startsWith('~\\') ||
+      trimmed.startsWith('./') ||
+      trimmed.startsWith('../') ||
+      absolutePath(trimmed);
+    const sourceType = githubRepository(trimmed)
+      ? 'github'
+      : isLocal
+        ? 'local'
+        : undefined;
+    const normalized = sourceType
+      ? normalizeMarketplaceSource(trimmed, sourceType, context)
+      : null;
+    if (!normalized) {
+      return {
+        success: false,
+        error: `OMP marketplace source must be an exact plugin id, GitHub repository, or local path: '${source}'`,
+      };
+    }
+    if (catalog.plugins.length !== 1) {
+      return {
+        success: false,
+        error: `OMP marketplace source '${source}' must resolve exactly one plugin, but catalog '${catalog.name}' contains ${catalog.plugins.length}`,
+      };
+    }
+    plugin = catalog.plugins[0];
+    marketplaceSource = normalized.source;
+  }
+
+  if (!plugin) {
+    return {
+      success: false,
+      error: `OMP catalog '${catalog.name}' did not resolve a plugin`,
+    };
+  }
+  const resolvedIdentity = `${plugin.name}@${catalog.name}`;
+  return {
+    success: true,
+    resource: {
+      kind: 'plugin',
+      requestedIdentity: source,
+      resolvedIdentity,
+      context,
+      provenance: {
+        ...provenance,
+        pluginName: plugin.name,
+        marketplaceName: catalog.name,
+        ...(marketplaceSource && { marketplaceSource }),
+        ...(plugin.version && { catalogVersion: plugin.version }),
+      },
+    },
+  };
+}
+
 async function readJson(
   path: string,
   reader: OmpFileReader,
@@ -390,6 +519,109 @@ async function readJson(
     };
   }
 }
+async function readOptionalText(
+  path: string,
+  reader: OmpFileReader,
+): Promise<{ contents?: string; error?: string }> {
+  try {
+    return { contents: await reader(path) };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    return {
+      error: `Could not read OMP marketplace checkout ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function marketplaceCheckoutRevision(
+  marketplace: OmpMarketplaceRegistryEntry,
+  reader: OmpFileReader,
+): Promise<{ sha?: string; error?: string }> {
+  if (marketplace.sourceType === 'url') {
+    return {
+      error: `OMP marketplace '${marketplace.name}' is not backed by a verifiable Git checkout`,
+    };
+  }
+  const checkoutRoot =
+    marketplace.sourceType === 'local'
+      ? marketplace.sourceUri
+      : resolve(marketplace.catalogPath, '..');
+  if (!absolutePath(checkoutRoot)) {
+    return {
+      error: `OMP marketplace '${marketplace.name}' checkout path is not absolute`,
+    };
+  }
+  const gitDirectory = join(checkoutRoot, '.git');
+  const head = await readOptionalText(join(gitDirectory, 'HEAD'), reader);
+  if (head.error) return { error: head.error };
+  const headValue = head.contents?.trim();
+  if (!headValue) {
+    return {
+      error: `OMP marketplace '${marketplace.name}' checkout has no readable HEAD`,
+    };
+  }
+  if (/^[0-9a-f]{40,64}$/i.test(headValue)) {
+    return { sha: headValue.toLowerCase() };
+  }
+  const reference = /^ref: (refs\/[A-Za-z0-9._/-]+)$/.exec(headValue)?.[1];
+  if (
+    !reference ||
+    reference.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
+    return {
+      error: `OMP marketplace '${marketplace.name}' checkout has an invalid HEAD`,
+    };
+  }
+  const loose = await readOptionalText(join(gitDirectory, ...reference.split('/')), reader);
+  if (loose.error) return { error: loose.error };
+  const looseSha = loose.contents?.trim();
+  if (looseSha && /^[0-9a-f]{40,64}$/i.test(looseSha)) {
+    return { sha: looseSha.toLowerCase() };
+  }
+  const packed = await readOptionalText(join(gitDirectory, 'packed-refs'), reader);
+  if (packed.error) return { error: packed.error };
+  const packedSha = packed.contents
+    ?.split(/\r?\n/)
+    .map((line) => line.trim().split(/\s+/, 2))
+    .find(([, name]) => name === reference)?.[0];
+  return packedSha && /^[0-9a-f]{40,64}$/i.test(packedSha)
+    ? { sha: packedSha.toLowerCase() }
+    : {
+        error: `OMP marketplace '${marketplace.name}' checkout does not resolve HEAD`,
+      };
+}
+
+async function verifyMarketplaceRevision(
+  resource: NativeResource,
+  marketplace: OmpMarketplaceRegistryEntry,
+  reader: OmpFileReader,
+): Promise<string | null> {
+  const requestedRef = resource.provenance.requestedRef;
+  const resolvedRef = resource.provenance.resolvedRef;
+  const expectedSha = resource.provenance.resolvedSha;
+  if (requestedRef && requestedRef !== resolvedRef) {
+    return `OMP marketplace requested ref '${requestedRef}' resolved as '${resolvedRef ?? 'unknown'}'`;
+  }
+  if (resolvedRef && resolvedRef !== 'main') {
+    return `OMP CLI cannot enforce marketplace ref '${resolvedRef}'`;
+  }
+  if (!expectedSha) {
+    return requestedRef || resolvedRef
+      ? `OMP marketplace ref '${requestedRef ?? resolvedRef}' has no authoritative resolved revision`
+      : null;
+  }
+  if (!/^[0-9a-f]{40,64}$/i.test(expectedSha)) {
+    return 'OMP marketplace resolved revision is malformed';
+  }
+  const actual = await marketplaceCheckoutRevision(marketplace, reader);
+  if (!actual.sha) {
+    return actual.error ?? `Could not verify OMP marketplace '${marketplace.name}' revision`;
+  }
+  return actual.sha === expectedSha.toLowerCase()
+    ? null
+    : `OMP marketplace '${marketplace.name}' resolved revision does not match requested '${requestedRef ?? resolvedRef ?? expectedSha}'`;
+}
+
 
 function marketplaceRegistryPath(context: NativeOperationContext): string | null {
   const dataRoot = context.roots?.data;
@@ -483,7 +715,9 @@ export async function inspectOmpMarketplaceRegistry(
         registryPath,
         marketplaces: [],
         missing: false,
-        error: catalogFile.error ?? `OMP marketplace catalog is missing: ${raw.catalogPath}`,
+        error:
+          catalogFile.error ??
+          `OMP marketplace catalog is missing: ${raw.catalogPath}`,
       };
     }
     const parsedCatalog = parseCatalog(catalogFile.value, raw.catalogPath);
@@ -493,7 +727,9 @@ export async function inspectOmpMarketplaceRegistry(
         registryPath,
         marketplaces: [],
         missing: false,
-        error: parsedCatalog.error ?? `Malformed OMP marketplace catalog: ${raw.catalogPath}`,
+        error:
+          parsedCatalog.error ??
+          `Malformed OMP marketplace catalog: ${raw.catalogPath}`,
       };
     }
     if (parsedCatalog.catalog.name !== raw.name) {
@@ -585,12 +821,32 @@ function desiredPlugin(resource: NativeResource): ParsedPluginId | null {
   return parseOmpPluginId(resource.resolvedIdentity);
 }
 
-function validateContext(context: NativeOperationContext): string | null {
-  if (context.client !== 'omp') return `OMP adapter received context for '${context.client}'`;
-  if (context.nativeScope !== context.scope) {
-    return `OMP native scope '${context.nativeScope}' conflicts with AllAgents scope '${context.scope}'`;
+function validateContext(
+  context: NativeOperationContext,
+  fixedProfileName?: string,
+): string | null {
+  if (context.client !== 'omp') {
+    return `OMP adapter received context for '${context.client}'`;
   }
-  if (!absolutePath(context.root)) return 'OMP operation context root must be absolute';
+  let contextProfileName: string | undefined;
+  try {
+    contextProfileName = profileNameFromNativeScope(context.nativeScope);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  const profileName = fixedProfileName ?? contextProfileName;
+  const expectedNativeScope = profileName
+    ? `profile:${profileName}`
+    : context.scope;
+  if (context.nativeScope !== expectedNativeScope) {
+    return `OMP native scope '${context.nativeScope}' conflicts with selected scope '${expectedNativeScope}'`;
+  }
+  if (profileName && context.scope !== 'user') {
+    return 'OMP named profiles support only the AllAgents user scope';
+  }
+  if (!absolutePath(context.root)) {
+    return 'OMP operation context root must be absolute';
+  }
   if (!marketplaceRegistryPath(context)) {
     return 'OMP operation context has no authoritative absolute data root';
   }
@@ -600,8 +856,9 @@ function validateContext(context: NativeOperationContext): string | null {
 function validateResourceContext(
   resource: NativeResource,
   context: NativeOperationContext,
+  profileName?: string,
 ): string | null {
-  const contextError = validateContext(context);
+  const contextError = validateContext(context, profileName);
   if (contextError) return contextError;
   if (resource.kind !== 'plugin' || !desiredPlugin(resource)) {
     return 'OMP mutation requires one valid marketplace plugin identity';
@@ -674,18 +931,36 @@ export class OmpNativeClient implements NativeClient {
   readonly client = 'omp';
   private readonly run: OmpCommandRunner;
   private readonly reader: OmpFileReader;
+  private readonly profileName: string | undefined;
   private versionResult: { success: boolean; error?: string } | undefined;
 
   constructor(options: OmpNativeClientOptions = {}) {
     this.run = options.execute ?? executeCommand;
     this.reader = options.readFile ?? ((path) => readFile(path, 'utf8'));
+    this.profileName = options.nativeScope?.name;
+    if (this.profileName !== undefined) {
+      ompProfileNativeScope(this.profileName);
+    }
+  }
+
+  private execute(
+    args: string[],
+    context?: NativeOperationContext,
+  ): Promise<NativeCommandResult> {
+    const profileName =
+      this.profileName ?? profileNameFromNativeScope(context?.nativeScope);
+    return this.run(
+      'omp',
+      profileName ? ['--profile', profileName, ...args] : args,
+      commandOptions(context),
+    );
   }
 
   private async supportedVersion(
     context?: NativeOperationContext,
   ): Promise<{ success: boolean; error?: string }> {
     if (this.versionResult) return this.versionResult;
-    const result = await this.run('omp', ['--version'], commandOptions(context));
+    const result = await this.execute(['--version'], context);
     if (!result.success) {
       this.versionResult = { success: false, error: commandError(result) };
       return this.versionResult;
@@ -710,6 +985,7 @@ export class OmpNativeClient implements NativeClient {
   }
 
   async isAvailable(context?: NativeOperationContext): Promise<boolean> {
+    if (context && validateContext(context, this.profileName)) return false;
     return (await this.supportedVersion(context)).success;
   }
 
@@ -746,7 +1022,7 @@ export class OmpNativeClient implements NativeClient {
   }
 
   async inspect(context: NativeOperationContext): Promise<NativeInspectionResult> {
-    const contextError = validateContext(context);
+    const contextError = validateContext(context, this.profileName);
     if (contextError) return { success: false, resources: [], observations: [], error: contextError };
     const supported = await this.supportedVersion(context);
     if (!supported.success) {
@@ -758,10 +1034,9 @@ export class OmpNativeClient implements NativeClient {
       };
     }
 
-    const result = await this.run(
-      'omp',
+    const result = await this.execute(
       ['plugin', 'list', '--json'],
-      commandOptions(context),
+      context,
     );
     if (!result.success) {
       return {
@@ -832,7 +1107,13 @@ export class OmpNativeClient implements NativeClient {
         kind: 'plugin',
         requestedIdentity: entry.id,
         resolvedIdentity: entry.id,
-        context: { ...context, scope: entry.scope, nativeScope: entry.scope },
+        context: {
+          ...context,
+          scope: entry.scope,
+          nativeScope: context.nativeScope.startsWith('profile:')
+            ? context.nativeScope
+            : entry.scope,
+        },
         provenance: {
           pluginName: parsed.name,
           marketplaceName: parsed.marketplace,
@@ -868,7 +1149,11 @@ export class OmpNativeClient implements NativeClient {
     resource: NativeResource,
     context: NativeOperationContext,
   ): Promise<{ inspection?: NativeInspectionResult; error?: string }> {
-    const validationError = validateResourceContext(resource, context);
+    const validationError = validateResourceContext(
+      resource,
+      context,
+      this.profileName,
+    );
     if (validationError) return { error: validationError };
     const inspection = await this.inspect(context);
     if (!inspection.success) {
@@ -897,6 +1182,83 @@ export class OmpNativeClient implements NativeClient {
     });
   }
 
+  async removeMarketplaceRegistration(
+    marketplaceName: string,
+    context: NativeOperationContext,
+  ): Promise<NativeMutationResult> {
+    const contextError = validateContext(context, this.profileName);
+    if (contextError) return { success: false, error: contextError };
+    if (!profileNameFromNativeScope(context.nativeScope)) {
+      return {
+        success: false,
+        error: 'OMP marketplace registration cleanup requires a named profile',
+      };
+    }
+    if (!isName(marketplaceName)) {
+      return {
+        success: false,
+        error: `Invalid OMP marketplace name '${marketplaceName}'`,
+      };
+    }
+
+    const inspection = await this.inspect(context);
+    if (!inspection.success) {
+      return {
+        success: false,
+        error:
+          inspection.error ?? 'Could not inspect OMP profile marketplace usage',
+      };
+    }
+    const referenced = inspection.observations?.find(
+      ({ resource }) =>
+        resource.provenance.marketplaceName === marketplaceName,
+    );
+    if (referenced) {
+      return {
+        success: false,
+        error: `OMP marketplace '${marketplaceName}' is still referenced by '${referenced.resource.resolvedIdentity}'`,
+      };
+    }
+
+    const before = await this.registry(context, true);
+    if (!before.success) {
+      return {
+        success: false,
+        error:
+          before.error ?? 'Could not inspect OMP marketplace registrations',
+      };
+    }
+    if (!before.marketplaces.some(({ name }) => name === marketplaceName)) {
+      return { success: true };
+    }
+
+    const removal = await this.execute(
+      ['plugin', 'marketplace', 'remove', marketplaceName],
+      context,
+    );
+    if (!removal.success) {
+      return {
+        success: false,
+        error: `Could not remove OMP marketplace '${marketplaceName}': ${commandError(removal)}`,
+      };
+    }
+    const after = await this.registry(context, true);
+    if (!after.success) {
+      return {
+        success: false,
+        error:
+          after.error ??
+          `OMP marketplace '${marketplaceName}' removal could not be verified`,
+      };
+    }
+    return after.marketplaces.some(({ name }) => name === marketplaceName)
+      ? {
+          success: false,
+          error: `OMP marketplace '${marketplaceName}' remains registered after removal`,
+        }
+      : { success: true };
+  }
+
   async install(
     resource: NativeResource,
     context: NativeOperationContext,
@@ -910,17 +1272,15 @@ export class OmpNativeClient implements NativeClient {
       return { success: false, error: registry.error ?? 'OMP marketplace inspection failed' };
     }
     let resolved = marketplaceForResource(resource, registry, context);
-    if (
-      before.inspection.resources.some(
-        (candidate) => candidate.resolvedIdentity === resource.resolvedIdentity,
-      )
-    ) {
-      return resolved.marketplace
-        ? { success: true }
-        : {
-            success: false,
-            error: resolved.error ?? 'OMP marketplace identity is unresolved',
-          };
+    const alreadyInstalled = before.inspection.resources.some(
+      (candidate) =>
+        candidate.resolvedIdentity === resource.resolvedIdentity,
+    );
+    if (alreadyInstalled && !resolved.marketplace) {
+      return {
+        success: false,
+        error: resolved.error ?? 'OMP marketplace identity is unresolved',
+      };
     }
 
     const registrations: string[] = [];
@@ -932,10 +1292,9 @@ export class OmpNativeClient implements NativeClient {
           error: resolved.error ?? 'OMP marketplace identity is unresolved',
         };
       }
-      const registration = await this.run(
-        'omp',
+      const registration = await this.execute(
         ['plugin', 'marketplace', 'add', source],
-        commandOptions(context),
+        context,
       );
       if (!registration.success) {
         return {
@@ -959,11 +1318,22 @@ export class OmpNativeClient implements NativeClient {
       }
       registrations.push(source);
     }
+    const revisionError = resolved.marketplace
+      ? await verifyMarketplaceRevision(resource, resolved.marketplace, this.reader)
+      : 'OMP marketplace identity is unresolved';
+    if (revisionError) {
+      return {
+        success: false,
+        error: revisionError,
+        ...(registrations.length > 0 && { registrations }),
+      };
+    }
+    if (alreadyInstalled) return { success: true };
 
-    const install = await this.run(
-      'omp',
+
+    const install = await this.execute(
       ['plugin', 'install', '--scope', context.scope, resource.resolvedIdentity],
-      commandOptions(context),
+      context,
     );
     if (!install.success) {
       return {
@@ -1027,11 +1397,17 @@ export class OmpNativeClient implements NativeClient {
         error: resolved.error ?? 'OMP marketplace identity is unresolved',
       };
     }
+    const revisionError = await verifyMarketplaceRevision(
+      resource,
+      resolved.marketplace,
+      this.reader,
+    );
+    if (revisionError) return { success: false, error: revisionError };
 
-    const result = await this.run(
-      'omp',
+
+    const result = await this.execute(
       ['plugin', 'upgrade', '--scope', context.scope, resource.resolvedIdentity],
-      commandOptions(context),
+      context,
     );
     if (!result.success) {
       return {
@@ -1065,10 +1441,9 @@ export class OmpNativeClient implements NativeClient {
     ) {
       return { success: true };
     }
-    const result = await this.run(
-      'omp',
+    const result = await this.execute(
       ['plugin', 'uninstall', '--scope', context.scope, resource.resolvedIdentity],
-      commandOptions(context),
+      context,
     );
     if (!result.success) {
       return {

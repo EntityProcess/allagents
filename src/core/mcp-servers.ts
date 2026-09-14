@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { dump, load } from 'js-yaml';
+import { dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   ClientEntry,
@@ -14,6 +14,7 @@ import {
   getClientTypes,
 } from '../models/workspace-config.js';
 import { ensureWorkspace } from './workspace-modify.js';
+import { parseWorkspaceConfigForEdit } from '../utils/workspace-parser.js';
 
 const PROJECT_MCP_CLIENTS: ReadonlySet<ClientType> = new Set<ClientType>([
   'claude',
@@ -64,8 +65,7 @@ function getConfigPath(workspacePath: string): string {
 }
 
 async function readConfig(configPath: string): Promise<WorkspaceConfig> {
-  const content = await readFile(configPath, 'utf-8');
-  return load(content) as WorkspaceConfig;
+  return parseWorkspaceConfigForEdit(configPath);
 }
 
 async function writeConfig(

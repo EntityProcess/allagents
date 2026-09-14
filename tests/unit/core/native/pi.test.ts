@@ -161,6 +161,12 @@ describe('native/pi source normalization', () => {
     expect(
       normalizePiPackageSource('https://github.com/only-one-part', operationContext),
     ).toBeNull();
+    expect(
+      normalizePiPackageSource(
+        'https://token:secret@github.com/acme/private-plugin.git',
+        operationContext,
+      ),
+    ).toBeNull();
   });
 });
 

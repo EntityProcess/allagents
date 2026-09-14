@@ -22,6 +22,13 @@
 - Native Pi package and OMP marketplace-plugin lifecycle support for install,
   update, uninstall, status, and list output, with fail-closed trust and
   ownership checks.
+- Global Pi and OMP profiles declared in `~/.allagents/workspace.yaml`, with
+  preflighted install/status/remove commands, generated launchers, incremental
+  managed-versus-referenced ownership state, and repeatable
+  `allagents update --profile`.
+- Pi profile MCP materialization with an explicitly declared, usable
+  profile-scoped `pi-mcp-adapter`, plus native OMP named-profile marketplace
+  lifecycle and revision verification.
 
 
 ## [1.0.0] - 2026-03-13

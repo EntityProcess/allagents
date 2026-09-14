@@ -84,7 +84,10 @@ import {
   formatPluginSource,
   getPluginDisplayName,
 } from '../../utils/plugin-path.js';
-import { parseWorkspaceConfig } from '../../utils/workspace-parser.js';
+import {
+  parseUserWorkspaceConfig,
+  parseWorkspaceConfig,
+} from '../../utils/workspace-parser.js';
 
 
 /**
@@ -823,7 +826,10 @@ const pluginListCmd = command({
       ): Promise<void> {
         if (!existsSync(configPath)) return;
         try {
-          const config = await parseWorkspaceConfig(configPath);
+          const config =
+            scope === 'user'
+              ? await parseUserWorkspaceConfig(configPath)
+              : await parseWorkspaceConfig(configPath);
           const { plans } = buildPluginSyncPlans(
             config.plugins,
             config.clients,
