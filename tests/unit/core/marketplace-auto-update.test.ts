@@ -32,6 +32,7 @@ mock.module('simple-git', () => ({
 }));
 
 mock.module('../../../src/core/git.js', () => ({
+  createGit: () => createMockGit(),
   pull: mock((path: string) => {
     pullCalls.push({ path });
     if (pullShouldFail) return Promise.reject(new Error('network timeout'));

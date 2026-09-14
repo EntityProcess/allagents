@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import {
+  chmodSync,
   mkdirSync,
   writeFileSync,
   readFileSync,
@@ -191,7 +192,15 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     const registry = JSON.parse(
       readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
     );
-    expect(registry.marketplaces['canonical-name'].path).toBe(mpPath);
+    expect(registry.marketplaces['canonical-name'].path).toBe(
+      join(
+        testHome,
+        '.allagents',
+        'plugins',
+        'marketplaces',
+        'canonical-name',
+      ),
+    );
   });
 
   it('should refresh a malformed alias under its exact registry key', async () => {
@@ -226,7 +235,9 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     );
     expect(Object.keys(registry.marketplaces)).toEqual(['alias']);
     expect(registry.marketplaces.alias.name).toBe('canonical-name');
-    expect(registry.marketplaces.alias.path).toBe(mpPath);
+    expect(registry.marketplaces.alias.path).toBe(
+      join(testHome, '.allagents', 'plugins', 'marketplaces', 'alias'),
+    );
   });
 
   it('should not refresh when offline', async () => {
@@ -305,13 +316,10 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
       },
     });
 
-    // Create a marker file in the old directory
     writeFileSync(join(mpPath, 'old-marker.txt'), 'old');
 
     cloneToMock.mockImplementation(
       (_url: string, path: string, _branch?: string) => {
-        // By the time clone is called, old directory should be deleted
-        // (clone target is the new path based on marketplace name)
         mkdirSync(path, { recursive: true });
         return Promise.resolve();
       },
@@ -319,7 +327,6 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
 
     await resolvePluginSpecWithAutoRegister('missing@test-mp');
 
-    // Old directory should be gone (rm was called before clone)
     expect(existsSync(join(mpPath, 'old-marker.txt'))).toBe(false);
   });
 
@@ -357,7 +364,7 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
     });
   });
 
-  it('should restore the old cache without overwriting a concurrent registry repair', async () => {
+  it('restores the old cache when the registry save fails after publication', async () => {
     const mpPath = setupMarketplace('test-mp', []);
     writeFileSync(join(mpPath, 'old-marker.txt'), 'old');
     setupRegistry({
@@ -367,34 +374,27 @@ describe('resolvePluginSpecWithAutoRegister refresh', () => {
         path: mpPath,
       },
     });
-    const repairedPath = join(testHome, 'repaired-local-marketplace');
-    mkdirSync(repairedPath, { recursive: true });
     cloneToMock.mockImplementation((_url: string, path: string) => {
       mkdirSync(path, { recursive: true });
-      setupRegistry({
-        'test-mp': {
-          name: 'test-mp',
-          source: { type: 'local', location: repairedPath },
-          path: repairedPath,
-        },
-      });
+      writeFileSync(join(path, 'new-marker.txt'), 'new');
+      chmodSync(join(testHome, '.allagents'), 0o500);
       return Promise.resolve();
     });
 
     const result = await resolvePluginSpecWithAutoRegister(
       'missing-plugin@test-mp',
-    );
+    ).finally(() => chmodSync(join(testHome, '.allagents'), 0o700));
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("registration 'test-mp' changed during refresh");
     expect(readFileSync(join(mpPath, 'old-marker.txt'), 'utf-8')).toBe('old');
+    expect(existsSync(join(mpPath, 'new-marker.txt'))).toBe(false);
     const registry = JSON.parse(
       readFileSync(join(testHome, '.allagents', 'marketplaces.json'), 'utf-8'),
     );
     expect(registry.marketplaces['test-mp']).toEqual({
       name: 'test-mp',
-      source: { type: 'local', location: repairedPath },
-      path: repairedPath,
+      source: { type: 'github', location: 'owner/test-mp' },
+      path: mpPath,
     });
   });
 
