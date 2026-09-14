@@ -30,6 +30,14 @@ export {
   type CopilotNativeClientOptions,
 } from './copilot.js';
 export {
+  CodexNativeClient,
+  parseCodexMarketplaceInventory,
+  parseCodexPluginId,
+  parseCodexPluginInventory,
+  type CodexMarketplaceRegistrationInspection,
+  type CodexNativeClientOptions,
+} from './codex.js';
+export {
   OmpNativeClient,
   inspectOmpMarketplaceRegistry,
   ompProfileNativeScope,

@@ -1,6 +1,7 @@
 import type { ClientType } from '../../../models/workspace-config.js';
 import type { ProfileAdapter } from '../types.js';
 import { copilotProfileAdapter } from './copilot.js';
+import { codexProfileAdapter } from './codex.js';
 import { ompProfileAdapter } from './omp.js';
 import { openCodeProfileAdapter } from './opencode.js';
 import { piProfileAdapter } from './pi.js';
@@ -8,6 +9,7 @@ import { piProfileAdapter } from './pi.js';
 const PROFILE_ADAPTERS: Readonly<Partial<Record<ClientType, ProfileAdapter>>> =
   Object.freeze({
     copilot: copilotProfileAdapter,
+    codex: codexProfileAdapter,
     pi: piProfileAdapter,
     omp: ompProfileAdapter,
     opencode: openCodeProfileAdapter,
@@ -21,6 +23,7 @@ export {
   CopilotProfileAdapter,
   copilotProfileAdapter,
 } from './copilot.js';
+export { CodexProfileAdapter, codexProfileAdapter } from './codex.js';
 export { OmpProfileAdapter, ompProfileAdapter } from './omp.js';
 export {
   OpenCodeProfileAdapter,

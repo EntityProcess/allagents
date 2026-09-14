@@ -140,15 +140,34 @@ profiles:
         command: review-mcp
         env:
           REVIEW_TOKEN: ${REVIEW_TOKEN}
+
+  codex-review:
+    clients:
+      - name: codex
+        install: native
+        launcher: codex-review
+        settings:
+          model: gpt-5.6-sol
+          model_reasoning_effort: high
+          approval_policy: on-request
+          sandbox_mode: workspace-write
+    plugins:
+      - source: ./codex-marketplace
+        install: native
+    mcpServers:
+      review:
+        command: review-mcp
+        env:
+          REVIEW_TOKEN: ${REVIEW_TOKEN}
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `profiles.<name>.clients` | Yes | One or more object-form profile clients |
-| `clients[].name` | Yes | Supported profile client; currently `pi`, `omp`, `opencode`, or `copilot` |
+| `clients[].name` | Yes | Supported profile client; currently `pi`, `omp`, `opencode`, `copilot`, or `codex` |
 | `clients[].install` | No | Default plugin mode, `file` by default; OpenCode rejects `native` because its CLI lacks a complete inspect/update/remove lifecycle |
 | `clients[].launcher` | No | Safe command basename written to the configured user bin directory |
-| `clients[].settings` | No | Strict client settings object; Pi and OMP accept no settings, while OpenCode and Copilot accept their documented profile settings |
+| `clients[].settings` | No | Strict client settings object; Pi and OMP accept no settings, while OpenCode, Copilot, and Codex accept their documented profile settings |
 | `profiles.<name>.plugins` | No | Profile plugin declarations; defaults to an empty list |
 | `plugins[].source` | Yes | npm, GitHub, marketplace, or local source supported by the selected adapter |
 | `plugins[].ref` | No | Requested Git ref for a GitHub source |
@@ -193,6 +212,22 @@ Copilot native plugins must resolve to exactly one authoritative marketplace
 entry. Native skill filters and native Git refs are rejected because Copilot
 cannot enforce either constraint. File installation supports skill selection
 and pinned Git sources instead.
+
+Codex profiles require Codex CLI 0.149.0 or newer. Their launchers set an
+isolated `CODEX_HOME`, require the generated `<profile>.config.toml`, select it
+with `--profile <profile>`, and preserve the caller's working directory for
+normal project discovery. Settings accept `model`, `model_reasoning_effort`,
+`model_reasoning_summary`, `model_verbosity`, `approval_policy`,
+`sandbox_mode`, `web_search`, and `personality`. All other keys fail
+validation.
+
+Codex MCP declarations share the named TOML profile. Exact `${ENV_VAR}`
+references become Codex environment-variable names (`env_vars` or
+`env_http_headers`) instead of literal values. References in commands, arguments,
+URLs, or remapped stdio variables fail before mutation because Codex does not
+interpolate them. Native plugins use authoritative marketplace identities;
+AllAgents delegates registration, install, Git marketplace upgrade, targeted
+refresh, uninstall, and safe marketplace removal to Codex.
 
 Install profiles explicitly with `allagents profile install <name> --yes`.
 Ordinary `allagents update` reconciles installed, still-declared profiles;

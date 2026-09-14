@@ -292,6 +292,53 @@ describe('profile workspace declarations', () => {
     }
   });
 
+  it('accepts only the conservative documented Codex profile settings', () => {
+    const result = UserWorkspaceConfigSchema.parse(
+      userConfigWithProfile({
+        clients: [
+          {
+            name: 'codex',
+            settings: {
+              model: 'gpt-5.6-sol',
+              model_reasoning_effort: 'xhigh',
+              model_reasoning_summary: 'concise',
+              model_verbosity: 'low',
+              approval_policy: 'on-request',
+              sandbox_mode: 'workspace-write',
+              web_search: 'indexed',
+              personality: 'pragmatic',
+            },
+          },
+        ],
+      }),
+    );
+    expect(result.profiles?.research?.clients[0]?.settings).toEqual({
+      model: 'gpt-5.6-sol',
+      model_reasoning_effort: 'xhigh',
+      model_reasoning_summary: 'concise',
+      model_verbosity: 'low',
+      approval_policy: 'on-request',
+      sandbox_mode: 'workspace-write',
+      web_search: 'indexed',
+      personality: 'pragmatic',
+    });
+    for (const settings of [
+      { unknown: true },
+      { approval_policy: 'untrusted' },
+      { sandbox_mode: 'full' },
+      { web_search: true },
+      { model_reasoning_effort: 'extreme' },
+    ]) {
+      expect(
+        UserWorkspaceConfigSchema.safeParse(
+          userConfigWithProfile({
+            clients: [{ name: 'codex', settings }],
+          }),
+        ).success,
+      ).toBe(false);
+    }
+  });
+
   it('rejects unknown and machine-generated fields throughout declarations', () => {
     for (const profile of [
       { clients: [{ name: 'pi', scope: 'user' }] },

@@ -422,6 +422,29 @@ function findDisabledNativeResource(
   )?.resource;
 }
 
+function findInstalledNativeResource(
+  inspection: NativeInspectionResult,
+  matches: (resource: NativeResource) => boolean,
+): NativeResource | undefined {
+  return (
+    inspection.resources.find(matches) ??
+    inspection.observations?.find(
+      (observation) =>
+        observation.status === 'disabled' && matches(observation.resource),
+    )?.resource
+  );
+}
+
+function findDisabledNativeResource(
+  inspection: NativeInspectionResult,
+  matches: (resource: NativeResource) => boolean,
+): NativeResource | undefined {
+  return inspection.observations?.find(
+    (observation) =>
+      observation.status === 'disabled' && matches(observation.resource),
+  )?.resource;
+}
+
 async function planManagedFile(input: {
   client: ClientType;
   kind: 'file' | 'settings' | 'mcp' | 'launcher';
@@ -576,6 +599,7 @@ function mcpDisclosures(
   }
   return Object.freeze(servers);
 }
+
 
 
 async function planRoot(

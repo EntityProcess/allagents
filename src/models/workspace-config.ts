@@ -505,6 +505,30 @@ export type CopilotProfileSettings = z.infer<
   typeof CopilotProfileSettingsSchema
 >;
 
+export const CodexProfileSettingsSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    model_reasoning_effort: z
+      .enum(['minimal', 'low', 'medium', 'high', 'xhigh'])
+      .optional(),
+    model_reasoning_summary: z
+      .enum(['auto', 'concise', 'detailed', 'none'])
+      .optional(),
+    model_verbosity: z.enum(['low', 'medium', 'high']).optional(),
+    approval_policy: z.enum(['on-request', 'never']).optional(),
+    sandbox_mode: z
+      .enum(['read-only', 'workspace-write', 'danger-full-access'])
+      .optional(),
+    web_search: z.enum(['disabled', 'cached', 'indexed', 'live']).optional(),
+    personality: z.enum(['none', 'friendly', 'pragmatic']).optional(),
+  })
+  .strict();
+
+export type CodexProfileSettings = z.infer<
+  typeof CodexProfileSettingsSchema
+>;
+
+
 /**
  * Profile clients deliberately use object form only. Unsupported clients still
  * parse with empty settings so orchestration can report an adapter capability
@@ -524,7 +548,9 @@ export const ProfileClientSchema = z
         ? OpenCodeProfileSettingsSchema
         : client.name === 'copilot'
           ? CopilotProfileSettingsSchema
-          : EmptyProfileSettingsSchema;
+          : client.name === 'codex'
+            ? CodexProfileSettingsSchema
+            : EmptyProfileSettingsSchema;
     const result = settingsSchema.safeParse(client.settings);
     if (result.success) return;
     for (const issue of result.error.issues) {
