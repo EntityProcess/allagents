@@ -11,6 +11,7 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import {
   executeCommand,
+  compareNativeVersions,
   type NativeClient,
   type NativeCommandOptions,
   type NativeCommandResult,
@@ -779,16 +780,6 @@ function versionTuple(output: string): [number, number, number] | null {
     : null;
 }
 
-function compareVersion(
-  left: readonly number[],
-  right: readonly number[],
-): number {
-  for (let index = 0; index < 3; index++) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
-}
 
 function sourceFromResource(resource: NativeResource): string {
   return resource.provenance.commandSource ?? resource.requestedIdentity;
@@ -832,8 +823,8 @@ export class PiNativeClient implements NativeClient {
     const version = versionTuple(result.output);
     return Boolean(
       version &&
-      compareVersion(version, PI_MINIMUM_VERSION) >= 0 &&
-      compareVersion(version, PI_MAXIMUM_VERSION) < 0,
+      compareNativeVersions(version, PI_MINIMUM_VERSION) >= 0 &&
+      compareNativeVersions(version, PI_MAXIMUM_VERSION) < 0,
     );
   }
 

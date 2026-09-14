@@ -3,6 +3,7 @@ import { isAbsolute, join, resolve, win32 } from 'node:path';
 import { z } from 'zod';
 import {
   executeCommand,
+  compareNativeVersions,
   type NativeClient,
   type NativeCommandOptions,
   type NativeCommandResult,
@@ -203,16 +204,6 @@ function parseVersion(output: string): [number, number, number] | null {
   return version.every(Number.isSafeInteger) ? version : null;
 }
 
-function compareVersion(
-  left: readonly number[],
-  right: readonly number[],
-): number {
-  for (let index = 0; index < 3; index++) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
-}
 
 export function parseOmpPluginId(value: string): ParsedPluginId | null {
   const separator = value.lastIndexOf('@');
@@ -707,7 +698,7 @@ export class OmpNativeClient implements NativeClient {
       };
       return this.versionResult;
     }
-    if (compareVersion(version, OMP_MINIMUM_VERSION) < 0) {
+    if (compareNativeVersions(version, OMP_MINIMUM_VERSION) < 0) {
       this.versionResult = {
         success: false,
         error: `OMP ${version.join('.')} is unsupported; version 18.1.17 or newer is required`,

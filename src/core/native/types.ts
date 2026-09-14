@@ -35,6 +35,17 @@ export interface NativeOperationContext {
   roots?: Readonly<Record<string, string>>;
 }
 
+export function compareNativeVersions(
+  left: readonly number[],
+  right: readonly number[],
+): number {
+  for (let index = 0; index < 3; index++) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
 export interface NativeResource {
   kind: NativeResourceKind;
   requestedIdentity: string;
