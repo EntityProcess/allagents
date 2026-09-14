@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenCodeProfileAdapter } from '../../../../src/core/profile/adapters/opencode.js';
+import { isNativeProfileAdapter } from '../../../../src/core/profile/types.js';
 
 describe('OpenCode profile adapter', () => {
   it('selects additive configuration overrides without changing the workspace', () => {
@@ -108,23 +109,14 @@ describe('OpenCode profile adapter', () => {
     expect(adapter.serializeMcp(context, { plugins: [] })).toBeNull();
   });
 
-  it('fails explicit native installation instead of emulating plugin lifecycle', () => {
+  it('is structurally file-only without a fake native lifecycle', () => {
     const adapter = new OpenCodeProfileAdapter();
-    const context = adapter.resolveContext('review', {
-      homeDir: '/home/test',
-      workspaceDirectory: '/work/project',
-    });
     expect(adapter.capabilities.nativeInstall).toBe(false);
-    expect(
-      adapter.resolveNativeSource(
-        { declarationIndex: 0, source: 'npm:plugin', install: 'native' },
-        context,
-      ),
-    ).toEqual({
-      success: false,
-      error:
-        'OpenCode does not expose a complete inspect/update/remove plugin lifecycle; use install mode file',
-    });
+    expect(isNativeProfileAdapter(adapter)).toBe(false);
+    expect('nativeClient' in adapter).toBe(false);
+    expect('resolveNativeSource' in adapter).toBe(false);
+    expect('resolveNativeMetadata' in adapter).toBe(false);
+    expect('discloseNativeCommands' in adapter).toBe(false);
   });
 
   it('removes only the exact runtime-generated gitignore during root cleanup', async () => {

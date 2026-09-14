@@ -4,22 +4,12 @@ import {
   ProfileMcpServerConfigSchema,
   ProfileNameSchema,
 } from '../../../models/workspace-config.js';
-import type {
-  NativeClient,
-  NativeInspectionResult,
-  NativeMutationResult,
-  NativeOperationContext,
-  NativeScope,
-  NativeResource,
-  NativeSourceResolution,
-} from '../../native/types.js';
+import type { FileOnlyProfileAdapter } from '../types.js';
 import { removeManagedFile, sha256Fingerprint } from '../files.js';
 import type {
-  ProfileAdapter,
   ProfileClientContext,
   ProfileContextOptions,
   ProfilePlannedFile,
-  ProfileResolvedPlugin,
   ProfileSerializationInput,
 } from '../types.js';
 import { serializeProfileMcpServers } from './mcp.js';
@@ -44,67 +34,6 @@ const CAPABILITIES = Object.freeze({
   recursiveRootCleanup: false,
 });
 const SECRET_REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
-
-class OpenCodeFileOnlyNativeClient implements NativeClient {
-  readonly client = 'opencode';
-
-  async isAvailable(_context?: NativeOperationContext): Promise<boolean> {
-    return false;
-  }
-
-  supportsScope(_scope: NativeScope): boolean {
-    return false;
-  }
-
-  resolveSource(
-    _source: string,
-    _context: NativeOperationContext,
-    _provenance?: Readonly<Record<string, string>>,
-  ): NativeSourceResolution {
-    return {
-      success: false,
-      error:
-        'OpenCode does not expose a complete inspect/update/remove plugin lifecycle; use install mode file',
-    };
-  }
-
-  async inspect(
-    _context: NativeOperationContext,
-  ): Promise<NativeInspectionResult> {
-    return { success: true, resources: [] };
-  }
-
-  async install(
-    _resource: NativeResource,
-    _context: NativeOperationContext,
-  ): Promise<NativeMutationResult> {
-    return {
-      success: false,
-      error: 'OpenCode native profile installation is unsupported',
-    };
-  }
-
-  async update(
-    _resource: NativeResource,
-    _current: NativeResource,
-    _context: NativeOperationContext,
-  ): Promise<NativeMutationResult> {
-    return {
-      success: false,
-      error: 'OpenCode native profile updates are unsupported',
-    };
-  }
-
-  async remove(
-    _resource: NativeResource,
-    _context: NativeOperationContext,
-  ): Promise<NativeMutationResult> {
-    return {
-      success: false,
-      error: 'OpenCode native profile removal is unsupported',
-    };
-  }
-}
 
 function assertOpenCodeContext(context: ProfileClientContext): void {
   const expectedConfig = join(context.root, 'opencode.json');
@@ -165,10 +94,9 @@ function serializeOpenCodeMcp(
   return Object.freeze(mcp);
 }
 
-export class OpenCodeProfileAdapter implements ProfileAdapter {
+export class OpenCodeProfileAdapter implements FileOnlyProfileAdapter {
   readonly client = 'opencode' as const;
   readonly capabilities = CAPABILITIES;
-  readonly nativeClient = new OpenCodeFileOnlyNativeClient();
 
   resolveContext(
     profileName: string,
@@ -219,14 +147,6 @@ export class OpenCodeProfileAdapter implements ProfileAdapter {
     });
   }
 
-  resolveNativeSource(
-    _plugin: ProfileResolvedPlugin,
-    context: ProfileClientContext,
-  ): NativeSourceResolution {
-    assertOpenCodeContext(context);
-    return this.nativeClient.resolveSource('', context.operationContext);
-  }
-
   serializeSettings(
     context: ProfileClientContext,
     input: ProfileSerializationInput,
@@ -273,6 +193,6 @@ export class OpenCodeProfileAdapter implements ProfileAdapter {
   }
 }
 
-export const openCodeProfileAdapter: ProfileAdapter = Object.freeze(
+export const openCodeProfileAdapter: FileOnlyProfileAdapter = Object.freeze(
   new OpenCodeProfileAdapter(),
 );
