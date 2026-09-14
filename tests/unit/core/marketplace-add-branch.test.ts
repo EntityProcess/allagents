@@ -99,6 +99,61 @@ describe('addMarketplace branch support', () => {
     expect(result.error).toContain('reserved for the default branch');
   });
 
+  it('fails before cloning when the registry is unreadable', async () => {
+    const registryPath = join(testHome, '.allagents', 'marketplaces.json');
+    const cachePath = join(
+      testHome,
+      '.allagents',
+      'plugins',
+      'marketplaces',
+      'repo',
+    );
+    writeFileSync(registryPath, '{"version":1,"marketplaces":');
+
+    await expect(addMarketplace('owner/repo')).rejects.toThrow(
+      `Marketplace registry at ${registryPath} is unreadable`,
+    );
+
+    expect(cloneCalls).toHaveLength(0);
+    expect(existsSync(cachePath)).toBe(false);
+  });
+
+  it('preserves concurrent marketplace registrations', async () => {
+    let cloneCount = 0;
+    let signalBothClones!: () => void;
+    const bothClonesReached = new Promise<void>((resolve) => {
+      signalBothClones = resolve;
+    });
+    let releaseClones!: () => void;
+    const clonesReleased = new Promise<void>((resolve) => {
+      releaseClones = resolve;
+    });
+    cloneToMock.mockImplementation(
+      async (url: string, dest: string, ref?: string) => {
+        cloneCalls.push({ url, dest, ref });
+        mkdirSync(dest, { recursive: true });
+        cloneCount++;
+        if (cloneCount === 2) signalBothClones();
+        await clonesReleased;
+      },
+    );
+
+    const addA = addMarketplace('owner/repo-a', 'repo-a');
+    const addB = addMarketplace('owner/repo-b', 'repo-b');
+    await bothClonesReached;
+    releaseClones();
+
+    const [resultA, resultB] = await Promise.all([addA, addB]);
+    const registry = await loadRegistry();
+
+    expect(resultA.success).toBe(true);
+    expect(resultB.success).toBe(true);
+    expect(Object.keys(registry.marketplaces).sort()).toEqual([
+      'repo-a',
+      'repo-b',
+    ]);
+  });
+
   it('should clone with branch when --name is provided', async () => {
     const result = await addMarketplace(
       'https://github.com/owner/repo/tree/feat/v2',
