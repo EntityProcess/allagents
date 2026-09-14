@@ -118,6 +118,8 @@ describe('native/types', () => {
             expect(JSON.parse(stdout)).toEqual({
               success: true,
               output: JSON.stringify({ runtime: 'node', args }),
+              exitCode: 0,
+              signal: null,
             });
           }
 
@@ -170,6 +172,8 @@ describe('native/types', () => {
           ).toEqual({
             success: true,
             output: JSON.stringify({ runtime: 'node', args }),
+            exitCode: 0,
+            signal: null,
           });
 
           const cwdFallbackProc = Bun.spawnSync(
