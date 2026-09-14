@@ -1,4 +1,4 @@
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import {
   CodexProfileSettingsSchema,
   ProfileMcpServerConfigSchema,
@@ -8,10 +8,13 @@ import {
   CodexNativeClient,
   type NativeSourceResolution,
 } from '../../native/index.js';
+import { resolveCodexProfileMetadata } from '../native-metadata.js';
 import type {
-  ProfileAdapter,
+  NativeProfileAdapter,
   ProfileClientContext,
   ProfileContextOptions,
+  ProfileNativeCommandRequest,
+  ProfileNativeMetadataOptions,
   ProfilePlannedFile,
   ProfileResolvedPlugin,
   ProfileSerializationInput,
@@ -174,7 +177,7 @@ function serializeCodexMcp(
   return Object.freeze(servers);
 }
 
-export class CodexProfileAdapter implements ProfileAdapter {
+export class CodexProfileAdapter implements NativeProfileAdapter {
   readonly client = 'codex' as const;
   readonly capabilities = CAPABILITIES;
   readonly nativeClient = new CodexNativeClient({
@@ -233,6 +236,20 @@ export class CodexProfileAdapter implements ProfileAdapter {
     return this.nativeClient.isAvailable(context.operationContext);
   }
 
+  resolveNativeMetadata(
+    plugin: ProfileResolvedPlugin,
+    context: ProfileClientContext,
+    options: ProfileNativeMetadataOptions,
+  ): Promise<ProfileResolvedPlugin> {
+    assertCodexContext(context);
+    return resolveCodexProfileMetadata(
+      plugin,
+      context,
+      options,
+      this.nativeClient,
+    );
+  }
+
   resolveNativeSource(
     plugin: ProfileResolvedPlugin,
     context: ProfileClientContext,
@@ -283,6 +300,106 @@ export class CodexProfileAdapter implements ProfileAdapter {
     );
   }
 
+  discloseNativeCommands(
+    request: ProfileNativeCommandRequest,
+    context: ProfileClientContext,
+  ) {
+    assertCodexContext(context);
+    if (!['create', 'update', 'remove'].includes(request.action)) return [];
+    if (request.kind === 'marketplace') {
+      if (request.action === 'remove') {
+        return [
+          {
+            command: 'codex',
+            args: [
+              'plugin',
+              'marketplace',
+              'remove',
+              request.registration.name,
+              '--json',
+            ],
+          },
+        ];
+      }
+      const verb = request.action === 'create' ? 'add' : 'upgrade';
+      return [
+        {
+          command: 'codex',
+          args: [
+            'plugin',
+            'marketplace',
+            verb,
+            request.action === 'create'
+              ? request.registration.source
+              : request.registration.name,
+            '--json',
+          ],
+        },
+      ];
+    }
+
+    const commands = [];
+    const marketplaceName = request.resource.provenance.marketplaceName;
+    const marketplaceSource = request.resource.provenance.marketplaceSource;
+    if (
+      request.action === 'create' &&
+      marketplaceSource &&
+      request.resource.provenance.managedMarketplaceRegistration === 'true'
+    ) {
+      const args = ['plugin', 'marketplace', 'add', marketplaceSource];
+      if (request.resource.provenance.resolvedRef) {
+        args.push('--ref', request.resource.provenance.resolvedRef);
+      }
+      if (request.resource.provenance.marketplaceSparsePath) {
+        args.push(
+          '--sparse',
+          request.resource.provenance.marketplaceSparsePath,
+        );
+      }
+      args.push('--json');
+      commands.push({ command: 'codex', args });
+    } else if (
+      request.action === 'update' &&
+      marketplaceName &&
+      marketplaceSource &&
+      !isAbsolute(marketplaceSource)
+    ) {
+      commands.push({
+        command: 'codex',
+        args: ['plugin', 'marketplace', 'upgrade', marketplaceName, '--json'],
+      });
+    }
+
+    const verb = request.action === 'remove' ? 'remove' : 'add';
+    commands.push({
+      command: 'codex',
+      args: ['plugin', verb, request.resource.resolvedIdentity, '--json'],
+    });
+    return commands;
+  }
+
+  inspectMarketplaceRegistration(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ) {
+    assertCodexContext(context);
+    return this.nativeClient.inspectMarketplaceRegistration(
+      marketplaceName,
+      context.operationContext,
+    );
+  }
+
+  removeMarketplaceRegistration(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ) {
+    assertCodexContext(context);
+    return this.nativeClient.removeMarketplaceRegistration(
+      marketplaceName,
+      context.operationContext,
+    );
+  }
+
   serializeSettings(
     context: ProfileClientContext,
     input: ProfileSerializationInput,
@@ -314,6 +431,6 @@ export class CodexProfileAdapter implements ProfileAdapter {
   }
 }
 
-export const codexProfileAdapter: ProfileAdapter = Object.freeze(
+export const codexProfileAdapter: NativeProfileAdapter = Object.freeze(
   new CodexProfileAdapter(),
 );

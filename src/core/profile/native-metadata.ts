@@ -1,7 +1,13 @@
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve, sep } from 'node:path';
-import type { CopilotNativeClient } from '../native/index.js';
+import type {
+  CodexNativeClient,
+  CopilotNativeClient,
+} from '../native/index.js';
 import {
   inspectOmpMarketplaceRegistry,
+  parseCodexPluginId,
   parseCopilotPluginId,
   parseOmpPluginId,
 } from '../native/index.js';
@@ -240,6 +246,176 @@ export async function resolveCopilotProfileMetadata(
       path: source.path,
       marketplaceSource: registration.source ?? registrationSource,
       marketplaceRegistrationManaged: !registration.present,
+      ...(source.resolvedRef && { resolvedRef: source.resolvedRef }),
+      ...(source.resolvedSha && { resolvedSha: source.resolvedSha }),
+    });
+  } finally {
+    await source.cleanup?.();
+  }
+}
+
+const CODEX_MARKETPLACE_MANIFESTS = [
+  '.agents/plugins/marketplace.json',
+  '.claude-plugin/marketplace.json',
+] as const;
+
+async function readCodexMarketplaceCatalog(
+  marketplaceRoot: string,
+): Promise<{ name: string; plugins: readonly string[] }> {
+  const path = CODEX_MARKETPLACE_MANIFESTS.map((relativePath) =>
+    join(marketplaceRoot, relativePath),
+  ).find((candidate) => existsSync(candidate));
+  if (!path) {
+    throw new Error(
+      `Codex marketplace manifest not found (checked ${CODEX_MARKETPLACE_MANIFESTS.join(', ')})`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(path, 'utf8'));
+  } catch {
+    throw new Error('Failed to parse Codex marketplace manifest as JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Codex marketplace manifest must be an object');
+  }
+  const catalog = parsed as Record<string, unknown>;
+  if (typeof catalog.name !== 'string' || !Array.isArray(catalog.plugins)) {
+    throw new Error('Codex marketplace manifest requires name and plugins');
+  }
+  const plugins = catalog.plugins.map((entry) =>
+    entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? (entry as Record<string, unknown>).name
+      : undefined,
+  );
+  if (
+    !catalog.name ||
+    plugins.some((name) => typeof name !== 'string' || name.length === 0)
+  ) {
+    throw new Error('Codex marketplace manifest contains an invalid identity');
+  }
+  return { name: catalog.name, plugins: plugins as string[] };
+}
+
+function normalizedCodexMarketplaceSource(source: string): string {
+  if (isAbsolute(source)) return `directory:${resolve(source)}`;
+  const parsed = isGitHubUrl(source) ? parseGitHubUrl(source) : null;
+  return parsed
+    ? `git:https://github.com/${parsed.owner}/${parsed.repo}`.toLowerCase()
+    : `git:${source.replace(/\.git$/i, '').toLowerCase()}`;
+}
+
+export async function resolveCodexProfileMetadata(
+  plugin: ProfileResolvedPlugin,
+  context: ProfileClientContext,
+  options: ProfileNativeMetadataOptions,
+  nativeClient: CodexNativeClient,
+): Promise<ProfileResolvedPlugin> {
+  const exact = parseCodexPluginId(plugin.source);
+  if (exact) {
+    if (plugin.requestedRef || plugin.resolvedRef) {
+      throw new Error(
+        `Codex plugin identity '${plugin.source}' cannot select a marketplace ref`,
+      );
+    }
+    const registration = await nativeClient.inspectMarketplaceRegistration(
+      exact.marketplace,
+      context.operationContext,
+    );
+    if (!registration.success) {
+      throw new Error(
+        registration.error ??
+          'Could not inspect the selected Codex profile marketplace registry',
+      );
+    }
+    if (!registration.present) {
+      throw new Error(
+        `Codex plugin '${plugin.source}' references an unregistered marketplace`,
+      );
+    }
+    const catalog = await nativeClient.inspectMarketplacePlugin(
+      exact.marketplace,
+      exact.plugin,
+      context.operationContext,
+    );
+    if (!catalog.success || !catalog.present) {
+      throw new Error(
+        catalog.error ??
+          `Codex plugin '${plugin.source}' is not an authoritative catalog identity`,
+      );
+    }
+    return Object.freeze({
+      ...plugin,
+      marketplace: exact.marketplace,
+      pluginName: exact.plugin,
+      ...(registration.source && { marketplaceSource: registration.source }),
+    });
+  }
+
+  const source = await resolveProfileFileSource(
+    { ...plugin, install: 'file' },
+    options,
+  );
+  try {
+    const catalog = await readCodexMarketplaceCatalog(source.path);
+    if (catalog.plugins.length !== 1 || !catalog.plugins[0]) {
+      throw new Error(
+        `Codex marketplace source '${plugin.source}' must expose exactly one catalog plugin`,
+      );
+    }
+    const registration = await nativeClient.inspectMarketplaceRegistration(
+      catalog.name,
+      context.operationContext,
+    );
+    if (!registration.success) {
+      throw new Error(
+        registration.error ??
+          'Could not inspect the selected Codex profile marketplace registry',
+      );
+    }
+    const parsedSource = isGitHubUrl(source.source)
+      ? parseGitHubUrl(source.source)
+      : null;
+    const registrationSource = parsedSource
+      ? `${parsedSource.owner}/${parsedSource.repo}`
+      : resolve(source.path);
+    if (registration.present) {
+      if (
+        registration.source &&
+        normalizedCodexMarketplaceSource(registration.source) !==
+          normalizedCodexMarketplaceSource(registrationSource)
+      ) {
+        throw new Error(
+          `Codex marketplace '${catalog.name}' is already registered from a different source`,
+        );
+      }
+      if (source.resolvedRef) {
+        throw new Error(
+          `Codex marketplace '${catalog.name}' is already registered and its ref cannot be verified`,
+        );
+      }
+      const liveCatalog = await nativeClient.inspectMarketplacePlugin(
+        catalog.name,
+        catalog.plugins[0],
+        context.operationContext,
+      );
+      if (!liveCatalog.success || !liveCatalog.present) {
+        throw new Error(
+          liveCatalog.error ??
+            `Codex marketplace '${catalog.name}' does not expose plugin '${catalog.plugins[0]}'`,
+        );
+      }
+    }
+    return Object.freeze({
+      ...plugin,
+      marketplace: catalog.name,
+      pluginName: catalog.plugins[0],
+      path: source.path,
+      marketplaceSource: registration.source ?? registrationSource,
+      marketplaceRegistrationManaged: !registration.present,
+      ...(parsedSource?.subpath && {
+        marketplaceSparsePath: parsedSource.subpath,
+      }),
       ...(source.resolvedRef && { resolvedRef: source.resolvedRef }),
       ...(source.resolvedSha && { resolvedSha: source.resolvedSha }),
     });

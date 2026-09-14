@@ -399,28 +399,6 @@ function sameNativeIdentity(
   );
 }
 
-function findInstalledNativeResource(
-  inspection: NativeInspectionResult,
-  matches: (resource: NativeResource) => boolean,
-): NativeResource | undefined {
-  return (
-    inspection.resources.find(matches) ??
-    inspection.observations?.find(
-      (observation) =>
-        observation.status === 'disabled' && matches(observation.resource),
-    )?.resource
-  );
-}
-
-function findDisabledNativeResource(
-  inspection: NativeInspectionResult,
-  matches: (resource: NativeResource) => boolean,
-): NativeResource | undefined {
-  return inspection.observations?.find(
-    (observation) =>
-      observation.status === 'disabled' && matches(observation.resource),
-  )?.resource;
-}
 
 function findInstalledNativeResource(
   inspection: NativeInspectionResult,

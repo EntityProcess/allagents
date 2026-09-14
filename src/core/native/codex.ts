@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   executeCommand,
+  compareNativeVersions,
   type NativeClient,
   type NativeCommandOptions,
   type NativeCommandResult,
@@ -83,17 +84,6 @@ function commandError(result: NativeCommandResult): string {
 function versionTuple(output: string): readonly number[] | null {
   const match = /(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?=\D|$)/.exec(output);
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
-
-function compareVersion(
-  left: readonly number[],
-  right: readonly number[],
-): number {
-  for (let index = 0; index < 3; index++) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
 }
 
 function parseJsonRecord(output: string): Record<string, unknown> | null {
@@ -294,7 +284,8 @@ export class CodexNativeClient implements NativeClient {
     const parsedVersion = versionTuple(version.output);
     if (
       this.minimumVersion &&
-      (!parsedVersion || compareVersion(parsedVersion, this.minimumVersion) < 0)
+      (!parsedVersion ||
+        compareNativeVersions(parsedVersion, this.minimumVersion) < 0)
     ) {
       return false;
     }
