@@ -9,10 +9,14 @@ import {
   type NativeSourceResolution,
 } from '../../native/index.js';
 import { isGitHubUrl, parseGitHubUrl } from '../../../utils/plugin-path.js';
+import { resolveCopilotProfileMetadata } from '../native-metadata.js';
+import type { ProfileOperationKind, ProfileStepKind } from '../index.js';
 import type {
-  ProfileAdapter,
+  NativeProfileAdapter,
   ProfileClientContext,
   ProfileContextOptions,
+  ProfileNativeCommandRequest,
+  ProfileNativeMetadataOptions,
   ProfilePlannedFile,
   ProfileResolvedPlugin,
   ProfileSerializationInput,
@@ -121,12 +125,35 @@ function copilotMarketplaceSetting(
   }
 }
 
-export class CopilotProfileAdapter implements ProfileAdapter {
+export class CopilotProfileAdapter implements NativeProfileAdapter {
   readonly client = 'copilot' as const;
   readonly capabilities = CAPABILITIES;
   readonly nativeClient = new CopilotNativeClient({
     minimumVersion: COPILOT_MINIMUM_VERSION,
   });
+  stepOrder(kind: ProfileStepKind, operation: ProfileOperationKind): number {
+    const rank: Record<ProfileStepKind, number> =
+      operation === 'remove'
+        ? {
+            launcher: 0,
+            file: 1,
+            settings: 1,
+            mcp: 1,
+            native: 2,
+            marketplace: 3,
+            root: 4,
+          }
+        : {
+            root: 0,
+            file: 1,
+            settings: 2,
+            mcp: 2,
+            native: 3,
+            marketplace: 4,
+            launcher: 5,
+          };
+    return rank[kind];
+  }
 
   resolveContext(
     profileName: string,
@@ -186,6 +213,20 @@ export class CopilotProfileAdapter implements ProfileAdapter {
     return this.nativeClient.isAvailable(context.operationContext);
   }
 
+  resolveNativeMetadata(
+    plugin: ProfileResolvedPlugin,
+    context: ProfileClientContext,
+    options: ProfileNativeMetadataOptions,
+  ): Promise<ProfileResolvedPlugin> {
+    assertCopilotContext(context);
+    return resolveCopilotProfileMetadata(
+      plugin,
+      context,
+      options,
+      this.nativeClient,
+    );
+  }
+
   resolveNativeSource(
     plugin: ProfileResolvedPlugin,
     context: ProfileClientContext,
@@ -241,6 +282,69 @@ export class CopilotProfileAdapter implements ProfileAdapter {
         requestedIdentity: plugin.source,
       },
     };
+  }
+
+  discloseNativeCommands(
+    request: ProfileNativeCommandRequest,
+    context: ProfileClientContext,
+  ) {
+    assertCopilotContext(context);
+    if (!['create', 'update', 'remove'].includes(request.action)) return [];
+    if (request.kind === 'marketplace') {
+      const verb =
+        request.action === 'create'
+          ? 'add'
+          : request.action === 'remove'
+            ? 'remove'
+            : 'update';
+      return [
+        {
+          command: 'copilot',
+          args: [
+            'plugin',
+            'marketplace',
+            verb,
+            request.action === 'create'
+              ? request.registration.source
+              : request.registration.name,
+          ],
+        },
+      ];
+    }
+    const verb =
+      request.action === 'create'
+        ? 'install'
+        : request.action === 'remove'
+          ? 'uninstall'
+          : 'update';
+    return [
+      {
+        command: 'copilot',
+        args: ['plugin', verb, request.resource.resolvedIdentity],
+      },
+    ];
+  }
+
+  inspectMarketplaceRegistration(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ) {
+    assertCopilotContext(context);
+    return this.nativeClient.inspectMarketplaceRegistration(
+      marketplaceName,
+      context.operationContext,
+    );
+  }
+
+  removeMarketplaceRegistration(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ) {
+    assertCopilotContext(context);
+    return this.nativeClient.removeMarketplaceRegistration(
+      marketplaceName,
+      context.operationContext,
+    );
   }
 
   serializeSettings(
@@ -321,6 +425,6 @@ export class CopilotProfileAdapter implements ProfileAdapter {
   }
 }
 
-export const copilotProfileAdapter: ProfileAdapter = Object.freeze(
+export const copilotProfileAdapter: NativeProfileAdapter = Object.freeze(
   new CopilotProfileAdapter(),
 );

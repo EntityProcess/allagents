@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   executeCommand,
+  compareNativeVersions,
   type NativeClient,
   type NativeCommandOptions,
   type NativeCommandResult,
@@ -70,17 +71,6 @@ function commandError(result: {
 function versionTuple(output: string): readonly number[] | null {
   const match = /(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?=\D|$)/.exec(output);
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
-
-function compareVersion(
-  left: readonly number[],
-  right: readonly number[],
-): number {
-  for (let index = 0; index < 3; index++) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
 }
 
 export function parseCopilotPluginInventory(output: string): string[] | null {
@@ -184,7 +174,7 @@ export class CopilotNativeClient implements NativeClient {
     if (!this.minimumVersion) return true;
     const version = versionTuple(result.output);
     return Boolean(
-      version && compareVersion(version, this.minimumVersion) >= 0,
+      version && compareNativeVersions(version, this.minimumVersion) >= 0,
     );
   }
 
