@@ -365,6 +365,41 @@ export async function saveRegistryToPath(
   }
 }
 
+/** Tail of the in-process write queue for each registry path, keyed by resolved path. */
+const registryLockTails = new Map<string, Promise<void>>();
+
+/**
+ * Serialize read-modify-write access to one registry file within this process.
+ *
+ * Every caller that loads a registry, changes it, and saves it back
+ * (updateMarketplace, refreshMarketplace, removeInvalidMarketplaceRegistration)
+ * runs its whole load-mutate-save sequence through this queue. Without it,
+ * two calls racing on the same shared `marketplaces.json` — e.g. validating
+ * several plugins in parallel, each auto-updating its own marketplace — can
+ * each load a snapshot, save independently, and have the second save silently
+ * discard the first save's change. On Windows the concurrent renames onto the
+ * same destination can also throw EPERM instead of just losing data.
+ *
+ * This only protects against concurrent writers within one process; it is
+ * not a cross-process file lock.
+ */
+function withRegistryLock<T>(
+  registryPath: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = resolve(registryPath);
+  const previousTail = registryLockTails.get(key) ?? Promise.resolve();
+  const result = previousTail.then(fn);
+  registryLockTails.set(
+    key,
+    result.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return result;
+}
+
 /**
  * Load marketplace registry from disk
  */
@@ -991,14 +1026,14 @@ export async function updateMarketplace(
   let projectDirty = false;
 
   for (const registration of toUpdateScoped) {
-    const { entry: marketplace, key, scope } = registration;
+    const { entry: marketplace, scope } = registration;
     const accessError = getMarketplaceAccessError(marketplace);
     if (accessError) {
-      const registry = scope === 'user' ? userRegistry : projectRegistry;
+      // removeInvalidMarketplaceRegistration reloads and saves the registry
+      // itself under withRegistryLock, so it already persisted the removal —
+      // the final save below reloads fresh and won't resurrect this entry.
       const removal = await removeInvalidMarketplaceRegistration(registration);
-      if (removal.removed && registry) {
-        deleteRegistryMarketplace(registry, key);
-      } else if (!removal.removed) {
+      if (!removal.removed) {
         blockedSaveScopes.add(scope);
       }
       invalidRegistrations.add(registration);
@@ -1085,20 +1120,32 @@ export async function updateMarketplace(
     }
   }
 
-  // Save updated timestamps back to the appropriate registries
+  // Save updated timestamps back to the appropriate registries.
+  //
+  // Reload each registry fresh right before merging, under withRegistryLock:
+  // this call and any other updateMarketplace()/refreshMarketplace() call
+  // racing on the same shared registry path (e.g. one per plugin, validated
+  // in parallel — see validateAllPlugins) each apply only their own entries
+  // on top of the latest saved state, instead of overwriting each other with
+  // a stale in-memory snapshot loaded at the top of this function.
   for (const registration of toUpdateScoped) {
-    const { entry, key, scope } = registration;
     if (invalidRegistrations.has(registration)) continue;
-    if (scope === 'user') {
-      setRegistryMarketplace(userRegistry, key, entry);
+    if (registration.scope === 'user') {
       userDirty = true;
     } else if (projectRegistry) {
-      setRegistryMarketplace(projectRegistry, key, entry);
       projectDirty = true;
     }
   }
   if (userDirty && !blockedSaveScopes.has('user')) {
-    await saveRegistry(userRegistry);
+    await withRegistryLock(userRegistryPath, async () => {
+      const currentRegistry = await loadRegistryFromPath(userRegistryPath);
+      for (const registration of toUpdateScoped) {
+        if (registration.scope !== 'user' || invalidRegistrations.has(registration))
+          continue;
+        setRegistryMarketplace(currentRegistry, registration.key, registration.entry);
+      }
+      await saveRegistryToPath(currentRegistry, userRegistryPath);
+    });
   }
   if (
     projectDirty &&
@@ -1106,7 +1153,18 @@ export async function updateMarketplace(
     projectRegistry &&
     projectRegistryPath
   ) {
-    await saveRegistryToPath(projectRegistry, projectRegistryPath);
+    await withRegistryLock(projectRegistryPath, async () => {
+      const currentRegistry = await loadRegistryFromPath(projectRegistryPath);
+      for (const registration of toUpdateScoped) {
+        if (
+          registration.scope !== 'project' ||
+          invalidRegistrations.has(registration)
+        )
+          continue;
+        setRegistryMarketplace(currentRegistry, registration.key, registration.entry);
+      }
+      await saveRegistryToPath(currentRegistry, projectRegistryPath);
+    });
   }
 
   return results;
@@ -1448,25 +1506,27 @@ interface InvalidMarketplaceRemovalResult extends MarketplaceResult {
 async function removeInvalidMarketplaceRegistration(
   registration: MarketplaceRegistration,
 ): Promise<InvalidMarketplaceRemovalResult> {
-  const registry = await loadRegistryFromPath(registration.registryPath);
-  const currentEntry = getRegistryMarketplace(registry, registration.key);
-  if (!currentEntry || !hasSameMarketplaceIdentity(currentEntry, registration.entry)) {
+  return withRegistryLock(registration.registryPath, async () => {
+    const registry = await loadRegistryFromPath(registration.registryPath);
+    const currentEntry = getRegistryMarketplace(registry, registration.key);
+    if (!currentEntry || !hasSameMarketplaceIdentity(currentEntry, registration.entry)) {
+      return {
+        success: false,
+        removed: false,
+        error: `Marketplace registration '${registration.key}' changed before unsafe cleanup. No registry entry or filesystem path was removed; retry the command.`,
+      };
+    }
+    deleteRegistryMarketplace(registry, registration.key);
+    await saveRegistryToPath(registry, registration.registryPath);
     return {
       success: false,
-      removed: false,
-      error: `Marketplace registration '${registration.key}' changed before unsafe cleanup. No registry entry or filesystem path was removed; retry the command.`,
+      removed: true,
+      error: getInvalidMarketplaceRegistrationError(
+        registration.key,
+        registration.entry,
+      ),
     };
-  }
-  deleteRegistryMarketplace(registry, registration.key);
-  await saveRegistryToPath(registry, registration.registryPath);
-  return {
-    success: false,
-    removed: true,
-    error: getInvalidMarketplaceRegistrationError(
-      registration.key,
-      registration.entry,
-    ),
-  };
+  });
 }
 
 function hasSameMarketplaceIdentity(
@@ -1580,51 +1640,53 @@ async function refreshMarketplace(
     path: managedPath,
     lastUpdated: new Date().toISOString(),
   };
-  const registry = await loadRegistryFromPath(registration.registryPath);
-  const currentEntry = getRegistryMarketplace(registry, registration.key);
-  if (!currentEntry || !hasSameMarketplaceIdentity(currentEntry, marketplace)) {
-    let cleanupError: unknown;
-    let restoreError: unknown;
-    try {
-      await rm(managedPath, { recursive: true, force: true });
-    } catch (error) {
-      cleanupError = error;
-    }
-    if (!cleanupError && hadExistingCache && existsSync(backupPath)) {
+  return withRegistryLock(registration.registryPath, async () => {
+    const registry = await loadRegistryFromPath(registration.registryPath);
+    const currentEntry = getRegistryMarketplace(registry, registration.key);
+    if (!currentEntry || !hasSameMarketplaceIdentity(currentEntry, marketplace)) {
+      let cleanupError: unknown;
+      let restoreError: unknown;
       try {
-        await rename(backupPath, managedPath);
+        await rm(managedPath, { recursive: true, force: true });
       } catch (error) {
-        restoreError = error;
+        cleanupError = error;
       }
+      if (!cleanupError && hadExistingCache && existsSync(backupPath)) {
+        try {
+          await rename(backupPath, managedPath);
+        } catch (error) {
+          restoreError = error;
+        }
+      }
+
+      let recoveryMessage = '';
+      if (cleanupError) {
+        const detail = cleanupError instanceof Error
+          ? cleanupError.message
+          : String(cleanupError);
+        recoveryMessage = hadExistingCache
+          ? ` Automatic recovery could not remove the replacement cache: ${detail}. The replacement remains at ${managedPath}, and the original cache remains at ${backupPath}.`
+          : ` Automatic cleanup failed: ${detail}. The replacement cache remains at ${managedPath}.`;
+      } else if (restoreError) {
+        const detail = restoreError instanceof Error
+          ? restoreError.message
+          : String(restoreError);
+        recoveryMessage = ` Automatic recovery failed: ${detail}. The original cache remains at ${backupPath}.`;
+      }
+      return {
+        success: false,
+        error: `Marketplace registration '${registration.key}' changed during refresh. The registry was not overwritten.${recoveryMessage}`,
+      };
+    }
+    setRegistryMarketplace(registry, registration.key, refreshedMarketplace);
+    await saveRegistryToPath(registry, registration.registryPath);
+
+    if (hadExistingCache) {
+      await rm(backupPath, { recursive: true, force: true }).catch(() => {});
     }
 
-    let recoveryMessage = '';
-    if (cleanupError) {
-      const detail = cleanupError instanceof Error
-        ? cleanupError.message
-        : String(cleanupError);
-      recoveryMessage = hadExistingCache
-        ? ` Automatic recovery could not remove the replacement cache: ${detail}. The replacement remains at ${managedPath}, and the original cache remains at ${backupPath}.`
-        : ` Automatic cleanup failed: ${detail}. The replacement cache remains at ${managedPath}.`;
-    } else if (restoreError) {
-      const detail = restoreError instanceof Error
-        ? restoreError.message
-        : String(restoreError);
-      recoveryMessage = ` Automatic recovery failed: ${detail}. The original cache remains at ${backupPath}.`;
-    }
-    return {
-      success: false,
-      error: `Marketplace registration '${registration.key}' changed during refresh. The registry was not overwritten.${recoveryMessage}`,
-    };
-  }
-  setRegistryMarketplace(registry, registration.key, refreshedMarketplace);
-  await saveRegistryToPath(registry, registration.registryPath);
-
-  if (hadExistingCache) {
-    await rm(backupPath, { recursive: true, force: true }).catch(() => {});
-  }
-
-  return { success: true, marketplace: refreshedMarketplace, replaced: true };
+    return { success: true, marketplace: refreshedMarketplace, replaced: true };
+  });
 }
 
 /**
