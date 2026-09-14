@@ -12,9 +12,13 @@ import {
   type ProfileManagerDependencies,
   type ProfileRuntimeOptions,
 } from '../../../../src/core/profile/index.js';
+import { resolveOmpProfileMetadata } from '../../../../src/core/profile/native-metadata.js';
 import type {
   ProfileAdapter,
   ProfileClientContext,
+  ProfileMarketplaceRegistration,
+  ProfileNativeCommandRequest,
+  ProfileNativeMetadataOptions,
   ProfileResolvedPlugin,
   ProfileSerializationInput,
 } from '../../../../src/core/profile/types.js';
@@ -24,6 +28,7 @@ import type {
   NativeMutationResult,
   NativeOperationContext,
   NativeResource,
+  NativeResourceObservation,
 } from '../../../../src/core/native/types.js';
 
 const roots: string[] = [];
@@ -65,8 +70,10 @@ async function pluginFixture(root: string, name = 'demo', body = '# Demo\n'): Pr
 class MemoryNativeClient implements NativeClient {
   readonly client: string;
   readonly resources: NativeResource[] = [];
+  readonly observations: NativeResourceObservation[] = [];
   readonly calls: string[] = [];
   failUpdate = false;
+  failInstall = false;
 
   constructor(client: string) {
     this.client = client;
@@ -89,11 +96,18 @@ class MemoryNativeClient implements NativeClient {
   }
 
   async inspect(): Promise<NativeInspectionResult> {
-    return { success: true, resources: [...this.resources] };
+    return {
+      success: true,
+      resources: [...this.resources],
+      observations: [...this.observations],
+    };
   }
 
   async install(resource: NativeResource): Promise<NativeMutationResult> {
     this.calls.push(`install:${resource.resolvedIdentity}`);
+    if (this.failInstall) {
+      return { success: false, error: 'install failed' };
+    }
     if (this.failInstallRegistration) {
       return {
         success: false,
@@ -115,8 +129,15 @@ class MemoryNativeClient implements NativeClient {
 
   async remove(resource: NativeResource): Promise<NativeMutationResult> {
     this.calls.push(`remove:${resource.resolvedIdentity}`);
-    const index = this.resources.findIndex((entry) => entry.resolvedIdentity === resource.resolvedIdentity);
+    const index = this.resources.findIndex(
+      (entry) => entry.resolvedIdentity === resource.resolvedIdentity,
+    );
     if (index >= 0) this.resources.splice(index, 1);
+    const observationIndex = this.observations.findIndex(
+      (entry) =>
+        entry.resource.resolvedIdentity === resource.resolvedIdentity,
+    );
+    if (observationIndex >= 0) this.observations.splice(observationIndex, 1);
     return { success: true };
   }
 
@@ -145,15 +166,37 @@ class MemoryProfileAdapter implements ProfileAdapter {
     settings: false,
     status: true,
     cleanup: true,
+    recursiveRootCleanup: true,
   };
   readonly nativeClient: MemoryNativeClient;
+  readonly mcpPrerequisite:
+    | {
+        matches(resource: NativeResource): boolean;
+        inspect(context: ProfileClientContext): Promise<{
+          classification: string;
+          packageSource?: string;
+        }>;
+      }
+    | undefined;
   mcpInspections = 0;
+  readonly marketplaceCalls: string[] = [];
+  runtimeAvailable = true;
+  runtimeChecks = 0;
 
   constructor(
     readonly client: 'pi' | 'omp',
     private readonly home: string,
   ) {
     this.nativeClient = new MemoryNativeClient(client);
+    this.mcpPrerequisite =
+      client === 'pi'
+        ? {
+            matches(resource) {
+              return resource.resolvedIdentity === 'npm:pi-mcp-adapter';
+            },
+            inspect: () => this.inspectMcpAdapter(),
+          }
+        : undefined;
   }
 
   resolveContext(profileName: string, options: { workspaceDirectory: string }): ProfileClientContext {
@@ -192,9 +235,106 @@ class MemoryProfileAdapter implements ProfileAdapter {
     };
   }
 
-  resolveNativeSource(plugin: ProfileResolvedPlugin, context: ProfileClientContext) {
-    return this.nativeClient.resolveSource(plugin.source, context.operationContext);
+  async isRuntimeAvailable() {
+    this.runtimeChecks++;
+    return this.runtimeAvailable;
   }
+
+  resolveNativeSource(
+    plugin: ProfileResolvedPlugin,
+    context: ProfileClientContext,
+  ) {
+    if (
+      this.client === 'omp' &&
+      plugin.marketplace &&
+      plugin.pluginName &&
+      plugin.marketplaceSource
+    ) {
+      return {
+        success: true,
+        resource: {
+          kind: 'plugin' as const,
+          requestedIdentity: plugin.source,
+          resolvedIdentity: `${plugin.pluginName}@${plugin.marketplace}`,
+          context: context.operationContext,
+          provenance: {
+            marketplaceName: plugin.marketplace,
+            marketplaceSource: plugin.marketplaceSource,
+            ...(plugin.marketplaceRegistrationManaged && {
+              managedMarketplaceRegistration: 'true',
+            }),
+          },
+        },
+      };
+    }
+    return this.nativeClient.resolveSource(
+      plugin.source,
+      context.operationContext,
+    );
+  }
+  resolveNativeMetadata(
+    plugin: ProfileResolvedPlugin,
+    context: ProfileClientContext,
+    options: ProfileNativeMetadataOptions,
+  ) {
+    return this.client === 'omp'
+      ? resolveOmpProfileMetadata(plugin, context, options)
+      : Promise.resolve(plugin);
+  }
+
+  discloseNativeCommands(
+    request: ProfileNativeCommandRequest,
+    context: ProfileClientContext,
+  ) {
+    if (request.kind === 'marketplace') {
+      return [
+        {
+          command: 'omp',
+          args: [
+            '--profile',
+            context.profileName,
+            'plugin',
+            'marketplace',
+            'add',
+            request.registration.source,
+          ],
+        },
+      ];
+    }
+    return [
+      {
+        command: this.client,
+        args:
+          this.client === 'omp'
+            ? [
+                '--profile',
+                context.profileName,
+                'plugin',
+                'install',
+                '--scope',
+                'user',
+                request.resource.resolvedIdentity,
+              ]
+            : [
+                request.action === 'remove' ? 'remove' : 'install',
+                request.resource.requestedIdentity,
+                '--no-approve',
+              ],
+      },
+    ];
+  }
+
+  async applyMarketplaceRegistration(
+    registration: ProfileMarketplaceRegistration,
+  ) {
+    this.marketplaceCalls.push(`register:${registration.name}`);
+    return { success: true };
+  }
+
+  async removeMarketplaceRegistration() {
+    return { success: true };
+  }
+
 
   serializeSettings() {
     return null;
@@ -265,6 +405,29 @@ describe('profile lifecycle manager', () => {
       },
     });
     await expect(planProfileOperation('invalid', 'install', test.options, dependencies(pi))).rejects.toThrow("not declared by this profile");
+  });
+
+  it('checks adapter runtime support for file-only plans and status', async () => {
+    const test = await fixture();
+    const local = await pluginFixture(test.workspaceDirectory);
+    await writeWorkspace(test.userConfigPath, {
+      work: {
+        clients: [{ name: 'pi', install: 'file' }],
+        plugins: [{ source: local, install: 'file', clients: ['pi'] }],
+      },
+    });
+    const pi = new MemoryProfileAdapter('pi', test.home);
+    pi.runtimeAvailable = false;
+    const deps = dependencies(pi);
+
+    await expect(
+      planProfileOperation('work', 'install', test.options, deps),
+    ).rejects.toThrow('pi CLI is unavailable or unsupported');
+    const status = (await getProfileStatuses(test.options, deps)).find(
+      (entry) => entry.profile === 'work',
+    );
+    expect(status?.status).toBe('unsupported');
+    expect(pi.runtimeChecks).toBe(2);
   });
 
   it('rejects unsupported skill filtering and unowned collisions before mutation', async () => {
@@ -353,6 +516,118 @@ describe('profile lifecycle manager', () => {
     expect(pi.nativeClient.calls).toEqual([]);
   });
 
+  it('rejects a preexisting disabled native plugin without taking ownership', async () => {
+    const test = await fixture();
+    await writeWorkspace(test.userConfigPath, {
+      work: {
+        clients: [{ name: 'pi', install: 'native' }],
+        plugins: ['npm:external'],
+      },
+    });
+    const pi = new MemoryProfileAdapter('pi', test.home);
+    const context = pi.resolveContext('work', test.options);
+    pi.nativeClient.observations.push({
+      resource: pi.nativeClient.resource(
+        'npm:external',
+        context.operationContext,
+      ),
+      status: 'disabled',
+    });
+
+    await expect(
+      planProfileOperation(
+        'work',
+        'install',
+        test.options,
+        dependencies(pi),
+      ),
+    ).rejects.toThrow(
+      "Native profile plugin 'npm:external' is disabled and is not owned by AllAgents",
+    );
+    expect(pi.nativeClient.calls).toEqual([]);
+  });
+
+  it('rejects a referenced native plugin that becomes disabled', async () => {
+    const test = await fixture();
+    await writeWorkspace(test.userConfigPath, {
+      work: {
+        clients: [{ name: 'pi', install: 'native' }],
+        plugins: ['npm:external'],
+      },
+    });
+    const pi = new MemoryProfileAdapter('pi', test.home);
+    const context = pi.resolveContext('work', test.options);
+    pi.nativeClient.resources.push(
+      pi.nativeClient.resource('npm:external', context.operationContext),
+    );
+    const deps = dependencies(pi);
+    const install = await planProfileOperation(
+      'work',
+      'install',
+      test.options,
+      deps,
+    );
+    expect((await applyProfilePlan(install, test.options, deps)).success).toBe(
+      true,
+    );
+    const referenced = pi.nativeClient.resources.pop();
+    expect(referenced).toBeDefined();
+    pi.nativeClient.observations.push({
+      resource: referenced as NativeResource,
+      status: 'disabled',
+    });
+    pi.nativeClient.calls.length = 0;
+
+    await expect(
+      planProfileOperation('work', 'update', test.options, deps),
+    ).rejects.toThrow(
+      "Native profile plugin 'npm:external' is disabled and is not owned by AllAgents",
+    );
+    expect(pi.nativeClient.calls).toEqual([]);
+  });
+
+  it('removes a managed native plugin after it becomes disabled', async () => {
+    const test = await fixture();
+    await writeWorkspace(test.userConfigPath, {
+      work: {
+        clients: [{ name: 'pi', install: 'native' }],
+        plugins: ['npm:managed'],
+      },
+    });
+    const pi = new MemoryProfileAdapter('pi', test.home);
+    const deps = dependencies(pi);
+    const install = await planProfileOperation(
+      'work',
+      'install',
+      test.options,
+      deps,
+    );
+    expect((await applyProfilePlan(install, test.options, deps)).success).toBe(
+      true,
+    );
+    const managed = pi.nativeClient.resources.pop();
+    expect(managed).toBeDefined();
+    pi.nativeClient.observations.push({
+      resource: managed as NativeResource,
+      status: 'disabled',
+    });
+    pi.nativeClient.calls.length = 0;
+
+    const removal = await planProfileOperation(
+      'work',
+      'remove',
+      test.options,
+      deps,
+    );
+    expect(
+      removal.steps.find((step) => step.kind === 'native')?.action,
+    ).toBe('remove');
+    expect((await applyProfilePlan(removal, test.options, deps)).success).toBe(
+      true,
+    );
+    expect(pi.nativeClient.calls).toEqual(['remove:npm:managed']);
+  });
+
   it('releases stale referenced relationships during update', async () => {
     const test = await fixture();
     await writeWorkspace(test.userConfigPath, {
@@ -395,7 +670,7 @@ describe('profile lifecycle manager', () => {
     ).toBe(false);
   });
 
-  it('is idempotent and conservatively retains modified stale managed files', async () => {
+  it('releases retained modified files after preserving them', async () => {
     const test = await fixture();
     const local = await pluginFixture(test.workspaceDirectory);
     await writeWorkspace(test.userConfigPath, {
@@ -419,10 +694,66 @@ describe('profile lifecycle manager', () => {
     const stale = await planProfileOperation('work', 'update', test.options, deps);
     expect(stale.steps.find((step) => step.identity === destination)?.action).toBe('retain');
     const staleResult = await applyProfilePlan(stale, test.options, deps);
-    expect(staleResult.status).toBe('partial');
-    expect(staleResult.success).toBe(false);
-    expect(staleResult.error).toContain('could not be fully reconciled');
+    expect(staleResult.status).toBe('installed');
+    expect(staleResult.success).toBe(true);
+    expect(staleResult.error).toBeUndefined();
     expect(await readFile(destination as string, 'utf8')).toBe('user modified');
+    const state = JSON.parse(
+      await readFile(
+        join(test.home, '.allagents', 'profiles', 'work', 'state.json'),
+        'utf8',
+      ),
+    ) as { resources: Array<{ identity: string }> };
+    expect(
+      state.resources.some((resource) => resource.identity === destination),
+    ).toBe(false);
+  });
+
+  it('releases files retained because they changed after planning', async () => {
+    const test = await fixture();
+    const local = await pluginFixture(test.workspaceDirectory);
+    await writeWorkspace(test.userConfigPath, {
+      work: { clients: [{ name: 'pi' }], plugins: [local] },
+    });
+    const pi = new MemoryProfileAdapter('pi', test.home);
+    const deps = dependencies(pi);
+    const install = await planProfileOperation(
+      'work',
+      'install',
+      test.options,
+      deps,
+    );
+    await applyProfilePlan(install, test.options, deps);
+    const destination = install.steps.find((step) => step.kind === 'file')
+      ?.identity as string;
+
+    await writeWorkspace(test.userConfigPath, {
+      work: { clients: [{ name: 'pi' }], plugins: [] },
+    });
+    const update = await planProfileOperation(
+      'work',
+      'update',
+      test.options,
+      deps,
+    );
+    expect(
+      update.steps.find((step) => step.identity === destination)?.action,
+    ).toBe('remove');
+    await writeFile(destination, 'changed after planning', 'utf8');
+
+    const result = await applyProfilePlan(update, test.options, deps);
+    expect(result.status).toBe('installed');
+    expect(result.success).toBe(true);
+    expect(await readFile(destination, 'utf8')).toBe('changed after planning');
+    const state = JSON.parse(
+      await readFile(
+        join(test.home, '.allagents', 'profiles', 'work', 'state.json'),
+        'utf8',
+      ),
+    ) as { resources: Array<{ identity: string }> };
+    expect(
+      state.resources.some((resource) => resource.identity === destination),
+    ).toBe(false);
   });
 
   it('preserves the published fingerprint across a failed file update and retries it', async () => {
@@ -495,7 +826,7 @@ describe('profile lifecycle manager', () => {
     expect(await readFile(sentinel, 'utf8')).toBe('owned by user');
   });
 
-  it('returns unsuccessful partial removal when modified managed files are retained', async () => {
+  it('completes removal while preserving modified managed files', async () => {
     const test = await fixture();
     const local = await pluginFixture(test.workspaceDirectory);
     await writeWorkspace(test.userConfigPath, {
@@ -510,8 +841,12 @@ describe('profile lifecycle manager', () => {
     await writeFile(destination, 'modified', 'utf8');
     const removal = await planProfileOperation('work', 'remove', test.options, deps);
     const result = await applyProfilePlan(removal, test.options, deps);
-    expect(result.status).toBe('partial');
-    expect(result.success).toBe(false);
+    expect(result.status).toBe('removed');
+    expect(result.success).toBe(true);
+    expect(await readFile(destination, 'utf8')).toBe('modified');
+    await expect(
+      stat(join(test.home, '.allagents', 'profiles', 'work', 'state.json')),
+    ).rejects.toThrow();
   });
 
   it('reports and removes declaration-missing state even without a workspace file', async () => {
@@ -659,6 +994,64 @@ describe('profile lifecycle manager', () => {
     ]);
   });
 
+  it('checkpoints an OMP marketplace before a dependent plugin failure', async () => {
+    const test = await fixture();
+    const marketplace = join(test.workspaceDirectory, 'checkpoint-catalog');
+    await mkdir(join(marketplace, '.claude-plugin'), { recursive: true });
+    await writeFile(
+      join(marketplace, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'checkpoint-catalog',
+        owner: { name: 'test' },
+        plugins: [{ name: 'tool', source: './tool' }],
+      }),
+      'utf8',
+    );
+    await writeWorkspace(test.userConfigPath, {
+      work: {
+        clients: [{ name: 'omp', install: 'native' }],
+        plugins: [marketplace],
+      },
+    });
+    const omp = new MemoryProfileAdapter('omp', test.home);
+    omp.nativeClient.failInstall = true;
+    const deps = dependencies(omp);
+    const plan = await planProfileOperation(
+      'work',
+      'install',
+      test.options,
+      deps,
+    );
+    expect(
+      plan.steps
+        .filter((step) => ['marketplace', 'native'].includes(step.kind))
+        .map((step) => step.kind),
+    ).toEqual(['marketplace', 'native']);
+
+    const result = await applyProfilePlan(plan, test.options, deps);
+    expect(result.success).toBe(false);
+    expect(omp.marketplaceCalls).toEqual(['register:checkpoint-catalog']);
+    const state = JSON.parse(
+      await readFile(
+        join(test.home, '.allagents', 'profiles', 'work', 'state.json'),
+        'utf8',
+      ),
+    ) as {
+      resources: Array<{
+        kind: string;
+        identity: string;
+        transition: string;
+      }>;
+    };
+    expect(state.resources).toContainEqual(
+      expect.objectContaining({
+        kind: 'marketplace',
+        identity: 'checkpoint-catalog',
+        transition: 'installed',
+      }),
+    );
+  });
+
   it('rejects direct OMP plugin IDs absent from the selected profile registry', async () => {
     const test = await fixture();
     await writeWorkspace(test.userConfigPath, {
@@ -717,5 +1110,72 @@ describe('profile lifecycle manager', () => {
       updateInstalledProfiles(['first', 'second'], test.options, deps),
     ).rejects.toThrow('must be a real directory');
     expect(pi.nativeClient.calls).toEqual([]);
+  });
+
+  it('continues ordinary updates when one profile cannot be planned', async () => {
+    const test = await fixture();
+    await writeWorkspace(test.userConfigPath, {
+      first: {
+        clients: [{ name: 'pi', install: 'native' }],
+        plugins: ['npm:first'],
+      },
+      second: {
+        clients: [{ name: 'pi', install: 'native' }],
+        plugins: ['npm:second'],
+      },
+      third: {
+        clients: [{ name: 'pi', install: 'native' }],
+        plugins: ['npm:third'],
+      },
+    });
+    const pi = new MemoryProfileAdapter('pi', test.home);
+    const deps = dependencies(pi);
+    for (const name of ['first', 'second', 'third']) {
+      const plan = await planProfileOperation(
+        name,
+        'install',
+        test.options,
+        deps,
+      );
+      await applyProfilePlan(plan, test.options, deps);
+    }
+
+    const missing = join(test.workspaceDirectory, 'missing-plugin');
+    await writeWorkspace(test.userConfigPath, {
+      first: {
+        clients: [{ name: 'pi', install: 'native' }],
+        plugins: ['npm:first'],
+      },
+      second: {
+        clients: [{ name: 'pi', install: 'native' }],
+        plugins: ['npm:second', { source: missing, install: 'file' }],
+      },
+      third: {
+        clients: [{ name: 'pi', install: 'native' }],
+        plugins: ['npm:third'],
+      },
+    });
+    pi.nativeClient.calls.length = 0;
+
+    const results = await updateInstalledProfiles(
+      undefined,
+      test.options,
+      deps,
+    );
+    expect(results.map((result) => result.profile)).toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
+    expect(results.map((result) => result.success)).toEqual([
+      true,
+      false,
+      true,
+    ]);
+    expect(results[1]?.error).toContain('must be a real directory');
+    expect(pi.nativeClient.calls).toEqual([
+      'update:npm:first',
+      'update:npm:third',
+    ]);
   });
 });

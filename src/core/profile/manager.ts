@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readdir, rm, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { ProfileResourceRelationship, ProfileState } from '../../models/profile-state.js';
-import type { ClientType, ProfileDeclaration } from '../../models/workspace-config.js';
-import type { NativeOperationContext } from '../native/types.js';
-import { inspectOmpMarketplaceRegistry } from '../native/index.js';
+import type {
+  ProfileResourceRelationship,
+  ProfileState,
+} from '../../models/profile-state.js';
+import type {
+  ClientType,
+  ProfileDeclaration,
+} from '../../models/workspace-config.js';
 import {
   assertSafeProfilePath,
   fingerprintProfileFile,
@@ -35,7 +39,7 @@ import {
   type ResolvedProfileRuntime,
 } from './plan.js';
 import { getProfileAdapter } from './adapters/registry.js';
-import type { ProfileAdapter } from './types.js';
+import { isNativeProfileAdapter, type ProfileAdapter } from './types.js';
 import type {
   ProfileApplyResult,
   ProfileApplyStep,
@@ -51,21 +55,35 @@ export interface ProfileManagerDependencies extends ProfilePlanDependencies {
 }
 
 function safeError(error: unknown): string {
-  return sanitizeProfileError(error instanceof Error ? error.message : String(error)) ?? 'Profile operation failed';
+  return (
+    sanitizeProfileError(
+      error instanceof Error ? error.message : String(error),
+    ) ?? 'Profile operation failed'
+  );
 }
 
 function resultStatus(action: ProfilePlanAction): ProfileApplyStepStatus {
   switch (action) {
-    case 'create': return 'created';
-    case 'update': return 'updated';
-    case 'remove': return 'removed';
-    case 'reference': return 'referenced';
-    case 'retain': return 'retained';
-    default: return 'unchanged';
+    case 'create':
+      return 'created';
+    case 'update':
+      return 'updated';
+    case 'remove':
+      return 'removed';
+    case 'reference':
+      return 'referenced';
+    case 'retain':
+      return 'retained';
+    default:
+      return 'unchanged';
   }
 }
 
-function appliedStep(step: InternalProfilePlanStep, status: ProfileApplyStepStatus, error?: string): ProfileApplyStep {
+function appliedStep(
+  step: InternalProfilePlanStep,
+  status: ProfileApplyStepStatus,
+  error?: string,
+): ProfileApplyStep {
   return {
     client: step.public.client,
     kind: step.public.kind,
@@ -84,7 +102,8 @@ function prepareExistingState(
   startedAt: string,
 ): ProfileState {
   if (!internal.priorState) {
-    if (!internal.declaration) throw new Error('Cannot create profile state without a declaration');
+    if (!internal.declaration)
+      throw new Error('Cannot create profile state without a declaration');
     return createProfileState({
       profile: internal.public.profile,
       clients: internal.clients,
@@ -97,13 +116,17 @@ function prepareExistingState(
     });
   }
   const clients = [...internal.priorState.clients];
-  for (const client of internal.clients) if (!clients.includes(client)) clients.push(client);
+  for (const client of internal.clients)
+    if (!clients.includes(client)) clients.push(client);
   return {
     ...internal.priorState,
     clients,
     declarationDigest: internal.public.declarationDigest,
     status: 'partial',
-    clientStatuses: clients.map((client) => ({ client, status: 'partial' as const })),
+    clientStatuses: clients.map((client) => ({
+      client,
+      status: 'partial' as const,
+    })),
     operation: {
       id: randomUUID(),
       kind: internal.public.operation,
@@ -204,53 +227,70 @@ async function applyOneStep(
   if (action === 'unchanged') return { status: 'unchanged' };
 
   if (step.public.kind === 'root') {
-    if (!step.path || !step.root) throw new Error('Profile root plan is incomplete');
+    if (!step.path || !step.root)
+      throw new Error('Profile root plan is incomplete');
     if (action === 'remove') {
-      const unresolvedManagedResource = state.resources.some(
+      const unresolvedResource = state.resources.some(
         (resource) =>
           resource.key !== step.relationship.key &&
           resource.client === step.public.client &&
-          resource.ownership === 'managed' &&
           resource.transition !== 'removed',
       );
-      if (unresolvedManagedResource) return { status: 'retained' };
-      if (!step.context) throw new Error('Profile root plan has no selected client context');
+      if (unresolvedResource) return { status: 'retained' };
+      if (!step.context)
+        throw new Error('Profile root plan has no selected client context');
       const expectedRoot =
         step.context.operationContext.roots?.config ?? step.context.root;
-      await removeOwnedManagedRoot(step.path, expectedRoot);
-      return { status: 'removed' };
+      const adapter = internal.adapters.get(step.public.client);
+      if (!adapter)
+        throw new Error(
+          `Profile root plan has no adapter for ${step.public.client}`,
+        );
+      if (adapter.capabilities.recursiveRootCleanup) {
+        await removeOwnedManagedRoot(step.path, expectedRoot);
+        return { status: 'removed' };
+      }
+      await assertSafeProfilePath(expectedRoot, step.path);
+      await adapter.prepareRootCleanup?.(step.context);
+      return {
+        status: (await removeEmptyManagedRoot(step.path))
+          ? 'removed'
+          : 'retained',
+      };
     }
     await assertSafeProfilePath(step.root, step.path);
     await mkdir(step.path, { recursive: true, mode: 0o700 });
     return { status: 'created' };
   }
 
-  if (step.requiresPiMcpAdapter) {
-    if (!step.context) throw new Error('Pi MCP plan has no selected client context');
-    const adapter = internal.adapters.get('pi') as
-      | (ProfileAdapter & {
-          inspectMcpAdapter?: (
-            context: NonNullable<InternalProfilePlanStep['context']>,
-          ) => Promise<{ classification: string }>;
-        })
-      | undefined;
-    if (!adapter?.inspectMcpAdapter) {
-      throw new Error('Pi profile adapter cannot verify the MCP prerequisite');
+  if (step.requiresMcpPrerequisite) {
+    if (!step.context) {
+      throw new Error('MCP plan has no selected client context');
     }
-    const inspection = await adapter.inspectMcpAdapter(step.context);
+    const client = step.public.client;
+    const prerequisite = internal.adapters.get(client)?.mcpPrerequisite;
+    if (!prerequisite) {
+      throw new Error(
+        `${client} profile adapter cannot verify the MCP prerequisite`,
+      );
+    }
+    const inspection = await prerequisite.inspect(step.context);
     if (inspection.classification !== 'usable') {
       throw new Error(
-        `Pi profile MCP requires a usable pi-mcp-adapter after package installation; found ${inspection.classification}`,
+        `${client} profile MCP requires a usable native prerequisite after package installation; found ${inspection.classification}`,
       );
     }
   }
 
   if (['file', 'settings', 'mcp', 'launcher'].includes(step.public.kind)) {
-    if (!step.path) throw new Error(`Profile ${step.public.kind} plan has no path`);
-    const root = step.public.kind === 'launcher'
-      ? internal.runtime.binDir
-      : step.context?.root ?? step.root;
-    if (!root) throw new Error(`Profile ${step.public.kind} plan has no write root`);
+    if (!step.path)
+      throw new Error(`Profile ${step.public.kind} plan has no path`);
+    const root =
+      step.public.kind === 'launcher'
+        ? internal.runtime.binDir
+        : (step.context?.root ?? step.root);
+    if (!root)
+      throw new Error(`Profile ${step.public.kind} plan has no write root`);
     if (action === 'remove') {
       const removal = await removeManagedFile({
         root,
@@ -293,24 +333,27 @@ async function applyOneStep(
       throw new Error('Native profile plan is incomplete');
     }
     const adapter = internal.adapters.get(step.public.client);
-    if (!adapter) {
-      throw new Error(`Profile adapter disappeared for ${step.public.client}`);
+    if (!adapter || !isNativeProfileAdapter(adapter)) {
+      throw new Error(
+        `Profile adapter disappeared or has no native lifecycle for ${step.public.client}`,
+      );
     }
-    const result = action === 'remove'
-      ? await adapter.nativeClient.remove(
-          step.nativeResource,
-          step.context.operationContext,
-        )
-      : action === 'update' && step.currentNativeResource
-        ? await adapter.nativeClient.update(
+    const result =
+      action === 'remove'
+        ? await adapter.nativeClient.remove(
             step.nativeResource,
-            step.currentNativeResource,
             step.context.operationContext,
           )
-        : await adapter.nativeClient.install(
-            step.nativeResource,
-            step.context.operationContext,
-          );
+        : action === 'update' && step.currentNativeResource
+          ? await adapter.nativeClient.update(
+              step.nativeResource,
+              step.currentNativeResource,
+              step.context.operationContext,
+            )
+          : await adapter.nativeClient.install(
+              step.nativeResource,
+              step.context.operationContext,
+            );
     if (!result.success) {
       return {
         status: 'failed',
@@ -330,18 +373,36 @@ async function applyOneStep(
   }
 
   if (step.public.kind === 'marketplace') {
-    if (!step.context) throw new Error('Marketplace cleanup plan has no context');
-    if (action !== 'remove') return { status: resultStatus(action) };
+    if (!step.context) throw new Error('Marketplace plan has no context');
     const adapter = internal.adapters.get(step.public.client);
-    const nativeClient = adapter?.nativeClient as
-      | (ProfileAdapter['nativeClient'] & {
-          removeMarketplaceRegistration?: (
-            marketplaceName: string,
-            context: NativeOperationContext,
-          ) => Promise<{ success: boolean; error?: string }>;
-        })
-      | undefined;
-    if (!nativeClient?.removeMarketplaceRegistration) {
+    if (!adapter || !isNativeProfileAdapter(adapter)) {
+      throw new Error(
+        `${step.public.client} profile adapter has no native marketplace lifecycle`,
+      );
+    }
+    if (action === 'create') {
+      if (
+        !step.marketplaceRegistration ||
+        !adapter.applyMarketplaceRegistration
+      ) {
+        throw new Error(
+          `${step.public.client} profile adapter cannot register marketplaces`,
+        );
+      }
+      const result = await adapter.applyMarketplaceRegistration(
+        step.marketplaceRegistration,
+        step.context,
+      );
+      if (!result.success) {
+        throw new Error(
+          result.error ??
+            `Could not register marketplace '${step.marketplaceRegistration.name}'`,
+        );
+      }
+      return { status: 'created' };
+    }
+    if (action !== 'remove') return { status: resultStatus(action) };
+    if (!adapter.removeMarketplaceRegistration) {
       throw new Error(
         `${step.public.client} profile adapter cannot remove marketplace registrations`,
       );
@@ -349,9 +410,9 @@ async function applyOneStep(
     const marketplaceName =
       step.relationship.provenance?.marketplaceName ??
       step.relationship.identity;
-    const result = await nativeClient.removeMarketplaceRegistration(
+    const result = await adapter.removeMarketplaceRegistration(
       marketplaceName,
-      step.context.operationContext,
+      step.context,
     );
     if (!result.success) {
       throw new Error(
@@ -379,10 +440,20 @@ function completedRelationship(
           : status === 'updated'
             ? 'updated'
             : 'installed';
-  return transitioned(step.relationship, transition);
+  const released =
+    status === 'retained'
+      ? {
+          ...step.relationship,
+          ownership: 'referenced' as const,
+          cleanup: 'none' as const,
+        }
+      : step.relationship;
+  return transitioned(released, transition);
 }
 
-function pendingTransition(step: InternalProfilePlanStep): ProfileResourceRelationship['transition'] {
+function pendingTransition(
+  step: InternalProfilePlanStep,
+): ProfileResourceRelationship['transition'] {
   if (step.public.action === 'remove') return 'pending-remove';
   if (step.public.action === 'update') return 'pending-update';
   return 'pending-install';
@@ -406,7 +477,9 @@ function dryRunResult(internal: InternalProfilePlan): ProfileApplyResult {
     operation: internal.public.operation,
     status: internal.public.operation === 'remove' ? 'removed' : 'installed',
     success: true,
-    steps: internal.steps.map((step) => appliedStep(step, resultStatus(step.public.action))),
+    steps: internal.steps.map((step) =>
+      appliedStep(step, resultStatus(step.public.action)),
+    ),
     warnings: internal.public.warnings,
   };
 }
@@ -425,7 +498,15 @@ export async function applyProfilePlan(
     state = await saveProfileState(profileRoot, state);
   } catch (error) {
     const message = safeError(error);
-    return { profile: plan.profile, operation: plan.operation, status: 'failed', success: false, steps: [], warnings: plan.warnings, error: message };
+    return {
+      profile: plan.profile,
+      operation: plan.operation,
+      status: 'failed',
+      success: false,
+      steps: [],
+      warnings: plan.warnings,
+      error: message,
+    };
   }
 
   const results: ProfileApplyStep[] = [];
@@ -472,7 +553,8 @@ export async function applyProfilePlan(
       results.push(appliedStep(step, applied.status));
     } catch (error) {
       const message = safeError(error);
-      const failureTransition = step.public.action === 'remove' ? 'cleanup-failed' : 'failed';
+      const failureTransition =
+        step.public.action === 'remove' ? 'cleanup-failed' : 'failed';
       try {
         state = await checkpoint(
           internal,
@@ -483,17 +565,42 @@ export async function applyProfilePlan(
         );
       } catch (checkpointError) {
         const checkpointMessage = safeError(checkpointError);
-        results.push(appliedStep(step, 'failed', `${message}; state checkpoint failed: ${checkpointMessage}`));
-        return { profile: plan.profile, operation: plan.operation, status: 'failed', success: false, steps: results, warnings: plan.warnings, error: `${message}; state checkpoint failed: ${checkpointMessage}` };
+        results.push(
+          appliedStep(
+            step,
+            'failed',
+            `${message}; state checkpoint failed: ${checkpointMessage}`,
+          ),
+        );
+        return {
+          profile: plan.profile,
+          operation: plan.operation,
+          status: 'failed',
+          success: false,
+          steps: results,
+          warnings: plan.warnings,
+          error: `${message}; state checkpoint failed: ${checkpointMessage}`,
+        };
       }
       results.push(appliedStep(step, 'failed', message));
-      return { profile: plan.profile, operation: plan.operation, status: 'partial', success: false, steps: results, warnings: plan.warnings, error: message };
+      return {
+        profile: plan.profile,
+        operation: plan.operation,
+        status: 'partial',
+        success: false,
+        steps: results,
+        warnings: plan.warnings,
+        error: message,
+      };
     }
   }
 
   const completedAt = operationTimestamp(dependencies);
-  const retainedManaged = state.resources.some((resource) =>
-    resource.ownership === 'managed' && (resource.transition === 'retained' || resource.transition === 'cleanup-failed'),
+  const retainedManaged = state.resources.some(
+    (resource) =>
+      resource.ownership === 'managed' &&
+      (resource.transition === 'retained' ||
+        resource.transition === 'cleanup-failed'),
   );
   if (plan.operation === 'remove') {
     if (!retainedManaged) {
@@ -502,16 +609,34 @@ export async function applyProfilePlan(
         await assertSafeProfilePath(profileRoot, statePath);
         await rm(statePath, { force: true });
         await removeEmptyManagedRoot(profileRoot);
-        return { profile: plan.profile, operation: plan.operation, status: 'removed', success: true, steps: results, warnings: plan.warnings };
+        return {
+          profile: plan.profile,
+          operation: plan.operation,
+          status: 'removed',
+          success: true,
+          steps: results,
+          warnings: plan.warnings,
+        };
       } catch (error) {
         const message = safeError(error);
-        return { profile: plan.profile, operation: plan.operation, status: 'partial', success: false, steps: results, warnings: plan.warnings, error: message };
+        return {
+          profile: plan.profile,
+          operation: plan.operation,
+          status: 'partial',
+          success: false,
+          steps: results,
+          warnings: plan.warnings,
+          error: message,
+        };
       }
     }
     state = await saveProfileState(profileRoot, {
       ...state,
       status: 'partial',
-      clientStatuses: state.clients.map((client) => ({ client, status: 'partial' as const })),
+      clientStatuses: state.clients.map((client) => ({
+        client,
+        status: 'partial' as const,
+      })),
       operation: { ...state.operation, updatedAt: completedAt, completedAt },
     });
     return {
@@ -545,21 +670,16 @@ export async function applyProfilePlan(
           step.public.client === resource.client &&
           step.public.action !== 'remove' &&
           step.public.action !== 'retain' &&
-          step.nativeResource?.provenance.marketplaceName ===
-            resource.identity,
+          step.nativeResource?.provenance.marketplaceName === resource.identity,
       )
     ) {
       desiredKeys.add(resource.key);
     }
   }
-  const releasedReferencedKeys = new Set(
-    internal.steps
-      .filter(
-        (step) =>
-          step.public.action === 'retain' &&
-          step.relationship.ownership === 'referenced',
-      )
-      .map((step) => step.relationship.key),
+  const releasedKeys = new Set(
+    activeResources
+      .filter((resource) => resource.transition === 'retained')
+      .map((resource) => resource.key),
   );
   const hasManagedResidue = activeResources.some(
     (resource) =>
@@ -570,8 +690,7 @@ export async function applyProfilePlan(
   const finalClients = [...internal.clients];
   const finalResources = activeResources.filter(
     (resource) =>
-      finalClients.includes(resource.client) &&
-      !releasedReferencedKeys.has(resource.key),
+      finalClients.includes(resource.client) && !releasedKeys.has(resource.key),
   );
   const finalStatus = hasManagedResidue ? 'partial' : 'installed';
   state = await saveProfileState(profileRoot, {
@@ -579,7 +698,10 @@ export async function applyProfilePlan(
     clients: finalClients,
     resources: finalResources,
     status: finalStatus,
-    clientStatuses: finalClients.map((client) => ({ client, status: finalStatus })),
+    clientStatuses: finalClients.map((client) => ({
+      client,
+      status: finalStatus,
+    })),
     operation: { ...state.operation, updatedAt: completedAt, completedAt },
   });
   const success = finalStatus === 'installed';
@@ -596,13 +718,29 @@ export async function applyProfilePlan(
   };
 }
 
-function declarationUsesNative(declaration: ProfileDeclaration | undefined, client: ClientType): boolean {
-  const declaredClient = declaration?.clients.find((entry) => entry.name === client);
+function declarationUsesNative(
+  declaration: ProfileDeclaration | undefined,
+  client: ClientType,
+): boolean {
+  const declaredClient = declaration?.clients.find(
+    (entry) => entry.name === client,
+  );
   if (!declaredClient) return false;
-  return declaration?.plugins.some((plugin) => {
-    if (typeof plugin === 'object' && plugin.clients && !plugin.clients.includes(client)) return false;
-    return (typeof plugin === 'object' && plugin.install ? plugin.install : declaredClient.install) === 'native';
-  }) ?? false;
+  return (
+    declaration?.plugins.some((plugin) => {
+      if (
+        typeof plugin === 'object' &&
+        plugin.clients &&
+        !plugin.clients.includes(client)
+      )
+        return false;
+      return (
+        (typeof plugin === 'object' && plugin.install
+          ? plugin.install
+          : declaredClient.install) === 'native'
+      );
+    }) ?? false
+  );
 }
 
 async function launcherStatuses(
@@ -612,7 +750,12 @@ async function launcherStatuses(
   runtime: ResolvedProfileRuntime,
   adapters: ReadonlyMap<ClientType, ProfileAdapter>,
 ) {
-  const values: Array<{ client: ClientType; name: string; path: string; onPath: boolean }> = [];
+  const values: Array<{
+    client: ClientType;
+    name: string;
+    path: string;
+    onPath: boolean;
+  }> = [];
   const seen = new Set<string>();
   if (declaration) {
     for (const client of declaration.clients) {
@@ -620,12 +763,28 @@ async function launcherStatuses(
       const adapter = adapters.get(client.name);
       if (!adapter) continue;
       const context = adapter.resolveContext(profile, runtime);
-      for (const rendered of renderProfileLaunchers(client.launcher, context.launcher).filter((entry) => runtime.platform === 'win32' ? entry.companion !== 'posix' : entry.companion === 'posix')) {
+      for (const rendered of renderProfileLaunchers(
+        client.launcher,
+        context.launcher,
+      ).filter((entry) =>
+        runtime.platform === 'win32'
+          ? entry.companion !== 'posix'
+          : entry.companion === 'posix',
+      )) {
         const path = join(runtime.binDir, rendered.fileName);
         const key = `${client.name}:${path}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        values.push({ client: client.name, name: client.launcher, path, onPath: diagnoseLauncherPath(runtime.binDir, runtime.environment.PATH ?? process.env.PATH, runtime.platform).onPath });
+        values.push({
+          client: client.name,
+          name: client.launcher,
+          path,
+          onPath: diagnoseLauncherPath(
+            runtime.binDir,
+            runtime.environment.PATH ?? process.env.PATH,
+            runtime.platform,
+          ).onPath,
+        });
       }
     }
   }
@@ -636,9 +795,15 @@ async function launcherStatuses(
     seen.add(key);
     values.push({
       client: resource.client,
-      name: resource.provenance?.launcherName ?? basename(resource.path).replace(/\.(?:cmd|ps1)$/i, ''),
+      name:
+        resource.provenance?.launcherName ??
+        basename(resource.path).replace(/\.(?:cmd|ps1)$/i, ''),
       path: resource.path,
-      onPath: diagnoseLauncherPath(dirname(resource.path), runtime.environment.PATH ?? process.env.PATH, runtime.platform).onPath,
+      onPath: diagnoseLauncherPath(
+        dirname(resource.path),
+        runtime.environment.PATH ?? process.env.PATH,
+        runtime.platform,
+      ).onPath,
     });
   }
   return values;
@@ -655,9 +820,19 @@ export async function getProfileStatus(
   const loaded = await loadProfileState(getProfileRoot(runtime, profile));
   if (loaded.status === 'malformed') {
     return {
-      profile, operation: 'status', status: 'partial', declared: Boolean(declaration), installed: true,
-      ...(declaration && { declarationDigest: hashProfileDeclaration(declaration) }),
-      clients: declaration?.clients.map((client) => client.name) ?? [], steps: [], launchers: [], warnings: [], error: loaded.error,
+      profile,
+      operation: 'status',
+      status: 'partial',
+      declared: Boolean(declaration),
+      installed: true,
+      ...(declaration && {
+        declarationDigest: hashProfileDeclaration(declaration),
+      }),
+      clients: declaration?.clients.map((client) => client.name) ?? [],
+      steps: [],
+      launchers: [],
+      warnings: [],
+      error: loaded.error,
     };
   }
   const state = loaded.status === 'loaded' ? loaded.state : null;
@@ -677,52 +852,121 @@ export async function getProfileStatus(
       continue;
     }
     adapters.set(client, adapter);
-    if (declarationUsesNative(declaration, client)) {
-      const context = adapter.resolveContext(profile, runtime);
-      if (!await adapter.nativeClient.isAvailable(context.operationContext)) unsupported = `${client} CLI is unavailable or unsupported`;
+    const context = adapter.resolveContext(profile, runtime);
+    const runtimeAvailable = adapter.isRuntimeAvailable
+      ? await adapter.isRuntimeAvailable(context)
+      : !declarationUsesNative(declaration, client) ||
+        (isNativeProfileAdapter(adapter) &&
+          (await adapter.nativeClient.isAvailable(context.operationContext)));
+    if (!runtimeAvailable) {
+      unsupported = `${client} CLI is unavailable or unsupported`;
     }
   }
-  const launchers = await launcherStatuses(profile, declaration, state, runtime, adapters);
+  const launchers = await launcherStatuses(
+    profile,
+    declaration,
+    state,
+    runtime,
+    adapters,
+  );
   if (!state) {
     return {
-      profile, operation: 'status', status: unsupported ? 'unsupported' : 'missing', declared: Boolean(declaration), installed: false,
-      ...(declaration && { declarationDigest: hashProfileDeclaration(declaration) }),
-      clients, steps: [], launchers, warnings: [], ...(unsupported && { error: unsupported }),
+      profile,
+      operation: 'status',
+      status: unsupported ? 'unsupported' : 'missing',
+      declared: Boolean(declaration),
+      installed: false,
+      ...(declaration && {
+        declarationDigest: hashProfileDeclaration(declaration),
+      }),
+      clients,
+      steps: [],
+      launchers,
+      warnings: [],
+      ...(unsupported && { error: unsupported }),
     };
   }
   const steps: ProfileApplyStep[] = [];
   let drifted = false;
   const marketplaceInspections = new Map<
-    ClientType,
-    Awaited<ReturnType<typeof inspectOmpMarketplaceRegistry>>
+    string,
+    { success: boolean; present: boolean; error?: string }
   >();
   for (const resource of state.resources) {
     if (resource.transition === 'removed') continue;
-    if (resource.path && ['file', 'settings', 'mcp', 'launcher'].includes(resource.kind)) {
+    if (
+      resource.path &&
+      ['file', 'settings', 'mcp', 'launcher'].includes(resource.kind)
+    ) {
       try {
         const fingerprint = await fingerprintProfileFile(resource.path);
         const matches = Boolean(
           resource.fingerprint && fingerprint === resource.fingerprint,
         );
-        steps.push({ client: resource.client, kind: resource.kind, identity: resource.identity, status: matches ? resource.ownership === 'referenced' ? 'referenced' : 'unchanged' : 'failed', ...(!matches && { error: fingerprint === null ? 'resource is missing' : 'resource fingerprint drifted' }) });
+        steps.push({
+          client: resource.client,
+          kind: resource.kind,
+          identity: resource.identity,
+          status: matches
+            ? resource.ownership === 'referenced'
+              ? 'referenced'
+              : 'unchanged'
+            : 'failed',
+          ...(!matches && {
+            error:
+              fingerprint === null
+                ? 'resource is missing'
+                : 'resource fingerprint drifted',
+          }),
+        });
         if (!matches) drifted = true;
       } catch (error) {
         drifted = true;
-        steps.push({ client: resource.client, kind: resource.kind, identity: resource.identity, status: 'failed', error: safeError(error) });
+        steps.push({
+          client: resource.client,
+          kind: resource.kind,
+          identity: resource.identity,
+          status: 'failed',
+          error: safeError(error),
+        });
       }
       continue;
     }
     if (resource.kind === 'native') {
       const adapter = adapters.get(resource.client);
-      if (!adapter) {
+      if (!adapter || !isNativeProfileAdapter(adapter)) {
         drifted = true;
-        steps.push({ client: resource.client, kind: 'native', identity: resource.identity, status: 'failed', error: 'adapter unsupported' });
+        steps.push({
+          client: resource.client,
+          kind: 'native',
+          identity: resource.identity,
+          status: 'failed',
+          error: 'native adapter unsupported',
+        });
         continue;
       }
       const context = adapter.resolveContext(profile, runtime);
-      const inspection = await adapter.nativeClient.inspect(context.operationContext);
-      const present = inspection.success && inspection.resources.some((candidate) => candidate.resolvedIdentity === resource.identity);
-      steps.push({ client: resource.client, kind: 'native', identity: resource.identity, status: present ? resource.ownership === 'referenced' ? 'referenced' : 'unchanged' : 'failed', ...(!present && { error: inspection.error ?? 'native resource is missing' }) });
+      const inspection = await adapter.nativeClient.inspect(
+        context.operationContext,
+      );
+      const present =
+        inspection.success &&
+        inspection.resources.some(
+          (candidate) => candidate.resolvedIdentity === resource.identity,
+        );
+      steps.push({
+        client: resource.client,
+        kind: 'native',
+        identity: resource.identity,
+        status: present
+          ? resource.ownership === 'referenced'
+            ? 'referenced'
+            : 'unchanged'
+          : 'failed',
+        ...(!present && {
+          error: inspection.error ?? 'native resource is missing',
+        }),
+      });
       if (!present) drifted = true;
       continue;
     }
@@ -740,7 +984,9 @@ export async function getProfileStatus(
               ? 'referenced'
               : 'unchanged'
             : 'failed',
-          ...(!present && { error: 'managed profile root is not a real directory' }),
+          ...(!present && {
+            error: 'managed profile root is not a real directory',
+          }),
         });
         if (!present) drifted = true;
       } catch (error) {
@@ -760,7 +1006,7 @@ export async function getProfileStatus(
     }
     if (resource.kind === 'marketplace') {
       const adapter = adapters.get(resource.client);
-      if (!adapter || resource.client !== 'omp') {
+      if (!adapter) {
         drifted = true;
         steps.push({
           client: resource.client,
@@ -771,20 +1017,27 @@ export async function getProfileStatus(
         });
         continue;
       }
-      let inspection = marketplaceInspections.get(resource.client);
-      if (!inspection) {
-        const context = adapter.resolveContext(profile, runtime);
-        inspection = await inspectOmpMarketplaceRegistry(
-          context.operationContext,
-          { allowMissing: true },
-        );
-        marketplaceInspections.set(resource.client, inspection);
-      }
       const marketplaceName =
         resource.provenance?.marketplaceName ?? resource.identity;
-      const present =
-        inspection.success &&
-        inspection.marketplaces.some(({ name }) => name === marketplaceName);
+      const inspectionKey = `${resource.client}:${marketplaceName}`;
+      let inspection = marketplaceInspections.get(inspectionKey);
+      if (!inspection) {
+        const context = adapter.resolveContext(profile, runtime);
+        inspection =
+          isNativeProfileAdapter(adapter) &&
+          adapter.inspectMarketplaceRegistration
+            ? await adapter.inspectMarketplaceRegistration(
+                marketplaceName,
+                context,
+              )
+            : {
+                success: false,
+                present: false,
+                error: 'marketplace registry inspection is unsupported',
+              };
+        marketplaceInspections.set(inspectionKey, inspection);
+      }
+      const present = inspection.success && inspection.present;
       steps.push({
         client: resource.client,
         kind: 'marketplace',
@@ -797,7 +1050,7 @@ export async function getProfileStatus(
         ...(!present && {
           error:
             inspection.error ??
-            `OMP marketplace '${marketplaceName}' is missing`,
+            `${resource.client} marketplace '${marketplaceName}' is missing`,
         }),
       });
       if (!present) drifted = true;
@@ -807,12 +1060,14 @@ export async function getProfileStatus(
       client: resource.client,
       kind: resource.kind,
       identity: resource.identity,
-      status:
-        resource.ownership === 'referenced' ? 'referenced' : 'unchanged',
+      status: resource.ownership === 'referenced' ? 'referenced' : 'unchanged',
     });
   }
-  const declarationDigest = declaration ? hashProfileDeclaration(declaration) : undefined;
-  if (declarationDigest && declarationDigest !== state.declarationDigest) drifted = true;
+  const declarationDigest = declaration
+    ? hashProfileDeclaration(declaration)
+    : undefined;
+  if (declarationDigest && declarationDigest !== state.declarationDigest)
+    drifted = true;
   const status = !declaration
     ? 'declaration-missing'
     : unsupported
@@ -823,9 +1078,18 @@ export async function getProfileStatus(
           ? 'drifted'
           : 'installed';
   return {
-    profile, operation: 'status', status, declared: Boolean(declaration), installed: true,
-    ...(declarationDigest && { declarationDigest }), stateDigest: state.declarationDigest,
-    clients, steps, launchers, warnings: [], ...(unsupported && { error: unsupported }),
+    profile,
+    operation: 'status',
+    status,
+    declared: Boolean(declaration),
+    installed: true,
+    ...(declarationDigest && { declarationDigest }),
+    stateDigest: state.declarationDigest,
+    clients,
+    steps,
+    launchers,
+    warnings: [],
+    ...(unsupported && { error: unsupported }),
   };
 }
 
@@ -839,13 +1103,15 @@ export async function getProfileStatuses(
   const profilesRoot = join(runtime.homeDir, '.allagents', 'profiles');
   try {
     for (const entry of await readdir(profilesRoot, { withFileTypes: true })) {
-      if (entry.isDirectory() && !names.includes(entry.name)) names.push(entry.name);
+      if (entry.isDirectory() && !names.includes(entry.name))
+        names.push(entry.name);
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   const results: ProfileStatusResult[] = [];
-  for (const name of names) results.push(await getProfileStatus(name, options, dependencies));
+  for (const name of names)
+    results.push(await getProfileStatus(name, options, dependencies));
   return results;
 }
 
@@ -862,9 +1128,19 @@ export async function getProfilesForUpdate(
     : declaredNames;
   const selected: string[] = [];
   for (const name of requested) {
-    if (!workspace.profiles?.[name]) throw new Error(`Profile '${name}' is not declared`);
+    if (!workspace.profiles?.[name]) {
+      throw new Error(`Profile '${name}' is not declared`);
+    }
     const loaded = await loadProfileState(getProfileRoot(runtime, name));
-    if (loaded.status === 'malformed') throw new Error(`Refusing profile update because '${name}' state is malformed: ${loaded.error}`);
+    if (loaded.status === 'malformed') {
+      if (requestedNames?.length) {
+        throw new Error(
+          `Refusing profile update because '${name}' state is malformed: ${loaded.error}`,
+        );
+      }
+      selected.push(name);
+      continue;
+    }
     const retryableUpdate =
       loaded.status === 'loaded' &&
       loaded.state.status === 'partial' &&
@@ -873,7 +1149,9 @@ export async function getProfilesForUpdate(
       loaded.status !== 'loaded' ||
       (loaded.state.status !== 'installed' && !retryableUpdate)
     ) {
-      if (requestedNames?.length) throw new Error(`Profile '${name}' is not installed`);
+      if (requestedNames?.length) {
+        throw new Error(`Profile '${name}' is not installed`);
+      }
       continue;
     }
     selected.push(name);
@@ -881,30 +1159,76 @@ export async function getProfilesForUpdate(
   return selected;
 }
 
+async function applyProfileUpdatePlan(
+  plan: ProfilePlan,
+  options: ProfileRuntimeOptions,
+  dependencies: ProfileManagerDependencies,
+): Promise<ProfileApplyResult> {
+  try {
+    return await applyProfilePlan(plan, options, dependencies);
+  } catch (error) {
+    return {
+      profile: plan.profile,
+      operation: 'update',
+      status: 'failed',
+      success: false,
+      steps: [],
+      warnings: plan.warnings,
+      error: safeError(error),
+    };
+  }
+}
+
+function failedProfileUpdate(
+  profile: string,
+  error: unknown,
+): ProfileApplyResult {
+  return {
+    profile,
+    operation: 'update',
+    status: 'failed',
+    success: false,
+    steps: [],
+    warnings: [],
+    error: safeError(error),
+  };
+}
+
 export async function updateInstalledProfiles(
   requestedNames: readonly string[] | undefined,
   options: ProfileRuntimeOptions = {},
   dependencies: ProfileManagerDependencies = {},
 ): Promise<readonly ProfileApplyResult[]> {
-  const selected = await getProfilesForUpdate(requestedNames, options, dependencies);
-  const plans: ProfilePlan[] = [];
-  for (const profile of selected) {
-    plans.push(await planProfileOperation(profile, 'update', options, dependencies));
-  }
+  const selected = await getProfilesForUpdate(
+    requestedNames,
+    options,
+    dependencies,
+  );
   const results: ProfileApplyResult[] = [];
-  for (const plan of plans) {
+  if (requestedNames?.length) {
+    const plans: ProfilePlan[] = [];
+    for (const profile of selected) {
+      plans.push(
+        await planProfileOperation(profile, 'update', options, dependencies),
+      );
+    }
+    for (const plan of plans) {
+      results.push(await applyProfileUpdatePlan(plan, options, dependencies));
+    }
+    return results;
+  }
+
+  for (const profile of selected) {
     try {
-      results.push(await applyProfilePlan(plan, options, dependencies));
+      const plan = await planProfileOperation(
+        profile,
+        'update',
+        options,
+        dependencies,
+      );
+      results.push(await applyProfileUpdatePlan(plan, options, dependencies));
     } catch (error) {
-      results.push({
-        profile: plan.profile,
-        operation: 'update',
-        status: 'failed',
-        success: false,
-        steps: [],
-        warnings: plan.warnings,
-        error: safeError(error),
-      });
+      results.push(failedProfileUpdate(profile, error));
     }
   }
   return results;

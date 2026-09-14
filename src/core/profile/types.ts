@@ -6,8 +6,16 @@ import type {
   PluginSkillsConfig,
 } from '../../models/workspace-config.js';
 import type {
+  ProfileOperationKind,
+  ProfilePlanAction,
+  ProfilePlanCommand,
+  ProfileStepKind,
+} from './index.js';
+import type {
   NativeClient,
+  NativeMutationResult,
   NativeOperationContext,
+  NativeResource,
   NativeSourceResolution,
 } from '../native/types.js';
 
@@ -20,6 +28,8 @@ export interface ProfileAdapterCapabilities {
   readonly settings: boolean;
   readonly status: boolean;
   readonly cleanup: boolean;
+  /** Recursively remove client-created artifacts only when the selected root is wholly disposable. */
+  readonly recursiveRootCleanup: boolean;
 }
 
 export interface ProfileLauncherInvocation {
@@ -27,6 +37,8 @@ export interface ProfileLauncherInvocation {
   readonly args: readonly string[];
   /** Undefined explicitly removes an inherited ambient selector. */
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** Absolute files which must exist before the client can safely launch. */
+  readonly requiredFiles?: readonly string[];
 }
 
 export interface ProfileContextOptions {
@@ -58,6 +70,9 @@ export interface ProfileResolvedPlugin {
   readonly path?: string;
   readonly marketplace?: string;
   readonly pluginName?: string;
+  readonly marketplaceSource?: string;
+  readonly marketplaceRegistrationManaged?: boolean;
+  readonly marketplaceSparsePath?: string;
   readonly install: InstallMode;
   readonly skills?: PluginSkillsConfig;
   readonly clients?: readonly ClientType[];
@@ -78,25 +93,61 @@ export interface ProfileSerializationInput {
   readonly mcpServers?: Readonly<Record<string, McpServerConfig>>;
 }
 
+export interface ProfileMcpPrerequisite {
+  matches(resource: NativeResource): boolean;
+  inspect(context: ProfileClientContext): Promise<{
+    readonly classification: string;
+    readonly packageSource?: string;
+  }>;
+}
+
+export interface ProfileNativeMetadataOptions {
+  readonly homeDir: string;
+  readonly workspaceDirectory: string;
+  readonly offline: boolean;
+  readonly dryRun: boolean;
+}
+
+export interface ProfileMarketplaceRegistration {
+  readonly name: string;
+  readonly source: string;
+}
+export interface ProfileMarketplaceRegistrationInspection {
+  readonly success: boolean;
+  readonly present: boolean;
+  readonly error?: string;
+}
+
+export type ProfileNativeCommandRequest =
+  | {
+      readonly kind: 'native';
+      readonly action: ProfilePlanAction;
+      readonly resource: NativeResource;
+    }
+  | {
+      readonly kind: 'marketplace';
+      readonly action: ProfilePlanAction;
+      readonly registration: ProfileMarketplaceRegistration;
+    };
+
 /**
- * Deep profile seam. Runtime-specific roots, selectors, serialization, and
- * native lifecycle remain inside the adapter; orchestration consumes only this
- * immutable context and exact planned bytes.
+ * Shared profile seam. Runtime-specific roots, selectors, and serialization
+ * remain inside every adapter. Native adapters additionally own metadata,
+ * lifecycle, and truthful command disclosure.
  */
-export interface ProfileAdapter {
+interface ProfileAdapterBase {
   readonly client: ClientType;
   readonly capabilities: ProfileAdapterCapabilities;
-  readonly nativeClient: NativeClient;
 
   resolveContext(
     profileName: string,
     options: ProfileContextOptions,
   ): ProfileClientContext;
-
-  resolveNativeSource(
-    plugin: ProfileResolvedPlugin,
-    context: ProfileClientContext,
-  ): NativeSourceResolution;
+  /** Validate that the selected client runtime supports this profile mechanism. */
+  isRuntimeAvailable?(context: ProfileClientContext): Promise<boolean>;
+  /** Optional provider ordering without exposing provider names to orchestration. */
+  stepOrder?(kind: ProfileStepKind, operation: ProfileOperationKind): number;
+  readonly mcpPrerequisite?: ProfileMcpPrerequisite;
 
   serializeSettings(
     context: ProfileClientContext,
@@ -107,4 +158,65 @@ export interface ProfileAdapter {
     context: ProfileClientContext,
     input: ProfileSerializationInput,
   ): ProfilePlannedFile | null;
+
+  /** Remove adapter-known generated files before generic empty-directory cleanup. */
+  prepareRootCleanup?(context: ProfileClientContext): Promise<void>;
+}
+
+export interface NativeProfileAdapter extends ProfileAdapterBase {
+  readonly capabilities: ProfileAdapterCapabilities & {
+    readonly nativeInstall: true;
+  };
+  readonly nativeClient: NativeClient;
+
+  resolveNativeMetadata?(
+    plugin: ProfileResolvedPlugin,
+    context: ProfileClientContext,
+    options: ProfileNativeMetadataOptions,
+  ): Promise<ProfileResolvedPlugin>;
+
+  resolveNativeSource(
+    plugin: ProfileResolvedPlugin,
+    context: ProfileClientContext,
+  ): NativeSourceResolution;
+
+  discloseNativeCommands(
+    request: ProfileNativeCommandRequest,
+    context: ProfileClientContext,
+  ): readonly ProfilePlanCommand[];
+
+  applyMarketplaceRegistration?(
+    registration: ProfileMarketplaceRegistration,
+    context: ProfileClientContext,
+  ): Promise<NativeMutationResult>;
+
+  inspectMarketplaceRegistration?(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ): Promise<ProfileMarketplaceRegistrationInspection>;
+
+  removeMarketplaceRegistration?(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ): Promise<NativeMutationResult>;
+}
+
+export interface FileOnlyProfileAdapter extends ProfileAdapterBase {
+  readonly capabilities: ProfileAdapterCapabilities & {
+    readonly nativeInstall: false;
+  };
+  readonly nativeClient?: never;
+  readonly resolveNativeMetadata?: never;
+  readonly resolveNativeSource?: never;
+  readonly discloseNativeCommands?: never;
+  readonly applyMarketplaceRegistration?: never;
+  readonly removeMarketplaceRegistration?: never;
+}
+
+export type ProfileAdapter = NativeProfileAdapter | FileOnlyProfileAdapter;
+
+export function isNativeProfileAdapter(
+  adapter: ProfileAdapter,
+): adapter is NativeProfileAdapter {
+  return adapter.capabilities.nativeInstall;
 }

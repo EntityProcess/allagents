@@ -5,11 +5,15 @@ import {
   inspectPiMcpAdapter,
   type PiMcpAdapterInspection,
 } from '../../native/index.js';
-import type { NativeSourceResolution } from '../../native/types.js';
 import type {
-  ProfileAdapter,
+  NativeResource,
+  NativeSourceResolution,
+} from '../../native/types.js';
+import type {
+  NativeProfileAdapter,
   ProfileClientContext,
   ProfileContextOptions,
+  ProfileNativeCommandRequest,
   ProfilePlannedFile,
   ProfileResolvedPlugin,
   ProfileSerializationInput,
@@ -29,6 +33,7 @@ const CAPABILITIES = Object.freeze({
   settings: false,
   status: true,
   cleanup: true,
+  recursiveRootCleanup: true,
 });
 
 function assertPiContext(context: ProfileClientContext): void {
@@ -45,10 +50,19 @@ function assertPiContext(context: ProfileClientContext): void {
   }
 }
 
-export class PiProfileAdapter implements ProfileAdapter {
+export class PiProfileAdapter implements NativeProfileAdapter {
   readonly client = 'pi' as const;
   readonly capabilities = CAPABILITIES;
   readonly nativeClient = new PiNativeClient();
+  readonly mcpPrerequisite = Object.freeze({
+    matches(resource: NativeResource): boolean {
+      return (
+        resource.provenance.packageIdentity === 'npm:pi-mcp-adapter' ||
+        resource.resolvedIdentity === 'npm:pi-mcp-adapter'
+      );
+    },
+    inspect: (context: ProfileClientContext) => this.inspectMcpAdapter(context),
+  });
 
   resolveContext(
     profileName: string,
@@ -104,7 +118,8 @@ export class PiProfileAdapter implements ProfileAdapter {
     if (plugin.install !== 'native') {
       return {
         success: false,
-        error: 'Pi profile native source resolution requires install mode native',
+        error:
+          'Pi profile native source resolution requires install mode native',
       };
     }
     if (plugin.skills !== undefined) {
@@ -121,13 +136,47 @@ export class PiProfileAdapter implements ProfileAdapter {
         ...(plugin.resolvedSha && { resolvedSha: plugin.resolvedSha }),
       },
     );
-    if (!resolved.success && /:\/\//.test(plugin.source) && /@/.test(plugin.source)) {
+    if (
+      !resolved.success &&
+      /:\/\//.test(plugin.source) &&
+      /@/.test(plugin.source)
+    ) {
       return {
         success: false,
         error: 'Pi native source is invalid or credential-bearing',
       };
     }
     return resolved;
+  }
+
+  discloseNativeCommands(
+    request: ProfileNativeCommandRequest,
+    context: ProfileClientContext,
+  ) {
+    assertPiContext(context);
+    if (
+      request.kind !== 'native' ||
+      !['create', 'update', 'remove'].includes(request.action)
+    ) {
+      return [];
+    }
+    const verb =
+      request.action === 'create'
+        ? 'install'
+        : request.action === 'remove'
+          ? 'remove'
+          : 'update';
+    return [
+      {
+        command: 'pi',
+        args: [
+          verb,
+          request.resource.provenance.commandSource ??
+            request.resource.requestedIdentity,
+          '--no-approve',
+        ],
+      },
+    ];
   }
 
   serializeSettings(
@@ -166,6 +215,6 @@ export class PiProfileAdapter implements ProfileAdapter {
   }
 }
 
-export const piProfileAdapter: ProfileAdapter = Object.freeze(
+export const piProfileAdapter: NativeProfileAdapter = Object.freeze(
   new PiProfileAdapter(),
 );

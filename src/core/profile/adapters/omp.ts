@@ -3,15 +3,20 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { ProfileNameSchema } from '../../../models/workspace-config.js';
 import {
   OmpNativeClient,
+  inspectOmpMarketplaceRegistry,
   ompProfileNativeScope,
   parseOmpPluginId,
   resolveOmpMarketplacePluginSource,
 } from '../../native/index.js';
+import { resolveOmpProfileMetadata } from '../native-metadata.js';
 import type { NativeSourceResolution } from '../../native/types.js';
 import type {
-  ProfileAdapter,
+  NativeProfileAdapter,
   ProfileClientContext,
   ProfileContextOptions,
+  ProfileMarketplaceRegistration,
+  ProfileNativeCommandRequest,
+  ProfileNativeMetadataOptions,
   ProfilePlannedFile,
   ProfileResolvedPlugin,
   ProfileSerializationInput,
@@ -31,6 +36,7 @@ const CAPABILITIES = Object.freeze({
   settings: false,
   status: true,
   cleanup: true,
+  recursiveRootCleanup: true,
 });
 const MCP_SCHEMA_URL =
   'https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json';
@@ -49,7 +55,7 @@ function assertOmpContext(context: ProfileClientContext): void {
   }
 }
 
-export class OmpProfileAdapter implements ProfileAdapter {
+export class OmpProfileAdapter implements NativeProfileAdapter {
   readonly client = 'omp' as const;
   readonly capabilities = CAPABILITIES;
   readonly nativeClient = new OmpNativeClient();
@@ -69,7 +75,9 @@ export class OmpProfileAdapter implements ProfileAdapter {
     const root = join(profileRoot, 'agent');
     const platform = options.platform ?? process.platform;
     const xdgEnabled = platform === 'linux' || platform === 'darwin';
-    const xdgProfileRoot = (category: 'DATA' | 'STATE' | 'CACHE'): string | undefined => {
+    const xdgProfileRoot = (
+      category: 'DATA' | 'STATE' | 'CACHE',
+    ): string | undefined => {
       if (!xdgEnabled) return undefined;
       const configured = environmentInput[`XDG_${category}_HOME`];
       if (!configured || !isAbsolute(configured)) return undefined;
@@ -131,6 +139,15 @@ export class OmpProfileAdapter implements ProfileAdapter {
     });
   }
 
+  resolveNativeMetadata(
+    plugin: ProfileResolvedPlugin,
+    context: ProfileClientContext,
+    options: ProfileNativeMetadataOptions,
+  ): Promise<ProfileResolvedPlugin> {
+    assertOmpContext(context);
+    return resolveOmpProfileMetadata(plugin, context, options);
+  }
+
   resolveNativeSource(
     plugin: ProfileResolvedPlugin,
     context: ProfileClientContext,
@@ -139,7 +156,8 @@ export class OmpProfileAdapter implements ProfileAdapter {
     if (plugin.install !== 'native') {
       return {
         success: false,
-        error: 'OMP profile native source resolution requires install mode native',
+        error:
+          'OMP profile native source resolution requires install mode native',
       };
     }
     if (plugin.skills !== undefined) {
@@ -158,13 +176,19 @@ export class OmpProfileAdapter implements ProfileAdapter {
       return this.nativeClient.resolveSource(
         plugin.source,
         context.operationContext,
-        { declarationIndex: String(plugin.declarationIndex) },
+        {
+          declarationIndex: String(plugin.declarationIndex),
+          ...(plugin.marketplace && { marketplaceName: plugin.marketplace }),
+          ...(plugin.marketplaceSource && {
+            marketplaceSource: plugin.marketplaceSource,
+          }),
+          ...(plugin.marketplaceRegistrationManaged && {
+            managedMarketplaceRegistration: 'true',
+          }),
+        },
       );
     }
-    if (
-      plugin.requestedRef &&
-      plugin.resolvedRef !== plugin.requestedRef
-    ) {
+    if (plugin.requestedRef && plugin.resolvedRef !== plugin.requestedRef) {
       return {
         success: false,
         error: `OMP marketplace requested ref '${plugin.requestedRef}' resolved as '${plugin.resolvedRef ?? 'unknown'}'`,
@@ -196,7 +220,9 @@ export class OmpProfileAdapter implements ProfileAdapter {
       'marketplaces',
     );
     const candidate = plugin.path ? resolve(plugin.path) : undefined;
-    const cacheRelative = candidate ? relative(cacheRoot, candidate) : undefined;
+    const cacheRelative = candidate
+      ? relative(cacheRoot, candidate)
+      : undefined;
     const stableCachedSource =
       candidate &&
       cacheRelative !== undefined &&
@@ -215,10 +241,108 @@ export class OmpProfileAdapter implements ProfileAdapter {
       context.operationContext,
       {
         declarationIndex: String(plugin.declarationIndex),
+        marketplaceName: plugin.marketplace,
+        ...(plugin.marketplaceSource && {
+          marketplaceSource: plugin.marketplaceSource,
+        }),
+        ...(plugin.marketplaceRegistrationManaged && {
+          managedMarketplaceRegistration: 'true',
+        }),
         ...(plugin.requestedRef && { requestedRef: plugin.requestedRef }),
         ...(plugin.resolvedRef && { resolvedRef: plugin.resolvedRef }),
         ...(plugin.resolvedSha && { resolvedSha: plugin.resolvedSha }),
       },
+    );
+  }
+
+  discloseNativeCommands(
+    request: ProfileNativeCommandRequest,
+    context: ProfileClientContext,
+  ) {
+    assertOmpContext(context);
+    if (!['create', 'update', 'remove'].includes(request.action)) return [];
+    if (request.kind === 'marketplace') {
+      const verb =
+        request.action === 'create'
+          ? 'add'
+          : request.action === 'remove'
+            ? 'remove'
+            : 'update';
+      return [
+        {
+          command: 'omp',
+          args: [
+            '--profile',
+            context.profileName,
+            'plugin',
+            'marketplace',
+            verb,
+            request.action === 'create'
+              ? request.registration.source
+              : request.registration.name,
+          ],
+        },
+      ];
+    }
+    const verb =
+      request.action === 'create'
+        ? 'install'
+        : request.action === 'remove'
+          ? 'uninstall'
+          : 'upgrade';
+    return [
+      {
+        command: 'omp',
+        args: [
+          '--profile',
+          context.profileName,
+          'plugin',
+          verb,
+          '--scope',
+          'user',
+          request.resource.resolvedIdentity,
+        ],
+      },
+    ];
+  }
+
+  applyMarketplaceRegistration(
+    registration: ProfileMarketplaceRegistration,
+    context: ProfileClientContext,
+  ) {
+    assertOmpContext(context);
+    return this.nativeClient.registerMarketplace(
+      registration,
+      context.operationContext,
+    );
+  }
+
+  async inspectMarketplaceRegistration(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ) {
+    assertOmpContext(context);
+    const inspection = await inspectOmpMarketplaceRegistry(
+      context.operationContext,
+      { allowMissing: true },
+    );
+    return {
+      success: inspection.success,
+      present:
+        inspection.success &&
+        inspection.marketplaces.some(({ name }) => name === marketplaceName),
+      ...(inspection.error && { error: inspection.error }),
+    };
+  }
+
+  removeMarketplaceRegistration(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ) {
+    assertOmpContext(context);
+    return this.nativeClient.removeMarketplaceRegistration(
+      marketplaceName,
+      context.operationContext,
     );
   }
 
@@ -251,6 +375,6 @@ export class OmpProfileAdapter implements ProfileAdapter {
   }
 }
 
-export const ompProfileAdapter: ProfileAdapter = Object.freeze(
+export const ompProfileAdapter: NativeProfileAdapter = Object.freeze(
   new OmpProfileAdapter(),
 );
