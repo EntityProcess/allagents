@@ -75,6 +75,36 @@ outside `COPILOT_HOME`, so this is configuration isolation, not a security
 sandbox. See GitHub's [Copilot CLI configuration directory
 reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference).
 
+### Claude Code
+
+Claude Code global profiles require Claude Code 2.1.268 or newer. AllAgents sets
+an absolute, owned `CLAUDE_CONFIG_DIR`, isolates `CLAUDE_CODE_PLUGIN_CACHE_DIR`,
+and clears inherited plugin seed and transcript-directory selectors. The
+generated launcher preserves arguments and the caller's working directory, so
+the active project's `CLAUDE.md`, settings, skills, and `.mcp.json` continue to
+compose with the selected global profile.
+
+File installation writes selected skills, commands, agents, hooks, and
+`CLAUDE.md` beneath the isolated root. Strict settings are written to
+`settings.json`. Profile MCP servers are written to the additive
+`allagents.mcp.json` passed by the launcher without `--strict-mcp-config`;
+portable `${ENV_VAR}` references remain unresolved on disk and normal project
+MCP discovery stays active.
+
+Native installation requires one authoritative marketplace identity. AllAgents
+materializes Claude's declarative marketplace and plugin settings, then
+delegates registration, install, update, uninstall, inventory, and safe
+marketplace cleanup to Claude's user scope inside the selected root. Native
+skill filters and sparse marketplace paths are rejected; file installation is
+the deterministic alternative.
+
+The isolated root also holds Claude-managed credentials, sessions, trust state,
+plugin caches, and runtime metadata. Removing an AllAgents-created profile
+intentionally removes that isolated runtime state after native cleanup. Ambient
+`~/.claude`, project files, and platform credential stores remain outside the
+filesystem cleanup boundary; inherited authentication environment variables
+can still override the selected profile login.
+
 ### Codex
 
 Codex global profiles require Codex CLI 0.149.0 or newer. AllAgents assigns an

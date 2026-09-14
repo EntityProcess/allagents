@@ -159,15 +159,37 @@ profiles:
         command: review-mcp
         env:
           REVIEW_TOKEN: ${REVIEW_TOKEN}
+
+  claude-review:
+    clients:
+      - name: claude
+        install: native
+        launcher: claude-review
+        settings:
+          model: sonnet
+          effortLevel: high
+          fallbackModel: [haiku]
+          autoUpdatesChannel: stable
+    plugins:
+      - source: ./claude-marketplace
+        install: native
+      - source: ./review-tools
+        install: file
+        skills: [review]
+    mcpServers:
+      review:
+        command: review-mcp
+        env:
+          REVIEW_TOKEN: ${REVIEW_TOKEN}
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `profiles.<name>.clients` | Yes | One or more object-form profile clients |
-| `clients[].name` | Yes | Supported profile client; currently `pi`, `omp`, `opencode`, `copilot`, or `codex` |
+| `clients[].name` | Yes | Supported profile client; currently `pi`, `omp`, `opencode`, `copilot`, `codex`, or `claude` |
 | `clients[].install` | No | Default plugin mode, `file` by default; OpenCode rejects `native` because its CLI lacks a complete inspect/update/remove lifecycle |
 | `clients[].launcher` | No | Safe command basename written to the configured user bin directory |
-| `clients[].settings` | No | Strict client settings object; Pi and OMP accept no settings, while OpenCode, Copilot, and Codex accept their documented profile settings |
+| `clients[].settings` | No | Strict client settings object; Pi and OMP accept no settings, while OpenCode, Copilot, Codex, and Claude accept their documented profile settings |
 | `profiles.<name>.plugins` | No | Profile plugin declarations; defaults to an empty list |
 | `plugins[].source` | Yes | npm, GitHub, marketplace, or local source supported by the selected adapter |
 | `plugins[].ref` | No | Requested Git ref for a GitHub source |
@@ -228,6 +250,27 @@ URLs, or remapped stdio variables fail before mutation because Codex does not
 interpolate them. Native plugins use authoritative marketplace identities;
 AllAgents delegates registration, install, Git marketplace upgrade, targeted
 refresh, uninstall, and safe marketplace removal to Codex.
+
+Claude profiles require Claude Code 2.1.268 or newer. Their launchers select an
+absolute, isolated `CLAUDE_CONFIG_DIR`, isolate the plugin cache, and clear
+inherited plugin seed and transcript-bucketing selectors. The caller's working
+directory remains unchanged, so project `CLAUDE.md`, settings, skills, and
+`.mcp.json` discovery continue normally.
+
+Claude profile settings accept `model`, `effortLevel`, `fallbackModel`,
+`outputStyle`, `autoMemoryEnabled`, `spinnerTipsEnabled`, and
+`autoUpdatesChannel`. All other keys fail validation. AllAgents writes
+`settings.json` and an additive `allagents.mcp.json`; the launcher requires both
+files and passes only the MCP file explicitly, without suppressing normal
+project MCP discovery. `${ENV_VAR}` references remain unresolved until Claude
+starts.
+
+Native Claude plugins require exactly one authoritative marketplace identity.
+AllAgents writes the marketplace and enabled-plugin declarations Claude needs,
+then delegates install, update, uninstall, inventory, and safe marketplace
+cleanup to Claude's user scope inside the selected root. Native skill filters
+and sparse marketplace paths fail before mutation; use file installation for
+those cases.
 
 Install profiles explicitly with `allagents profile install <name> --yes`.
 Ordinary `allagents update` reconciles installed, still-declared profiles;

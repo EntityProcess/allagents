@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ClaudeProfileAdapter } from '../../../../src/core/profile/adapters/claude.js';
 import { CopilotProfileAdapter } from '../../../../src/core/profile/adapters/copilot.js';
 import { CodexProfileAdapter } from '../../../../src/core/profile/adapters/codex.js';
 import { OmpProfileAdapter } from '../../../../src/core/profile/adapters/omp.js';
@@ -464,6 +465,6 @@ describe('profile adapter registry', () => {
     );
     expect(getProfileAdapter('copilot')).toBeInstanceOf(CopilotProfileAdapter);
     expect(getProfileAdapter('codex')).toBeInstanceOf(CodexProfileAdapter);
-    expect(getProfileAdapter('claude')).toBeNull();
+    expect(getProfileAdapter('claude')).toBeInstanceOf(ClaudeProfileAdapter);
   });
 });

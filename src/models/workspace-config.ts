@@ -446,6 +446,22 @@ export function getLauncherCollisionKey(name: string): string {
 
 const EmptyProfileSettingsSchema = z.object({}).strict();
 
+export const ClaudeProfileSettingsSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    effortLevel: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+    fallbackModel: z.array(z.string().min(1)).min(1).optional(),
+    outputStyle: z.string().min(1).optional(),
+    autoMemoryEnabled: z.boolean().optional(),
+    spinnerTipsEnabled: z.boolean().optional(),
+    autoUpdatesChannel: z.enum(['stable', 'latest']).optional(),
+  })
+  .strict();
+
+export type ClaudeProfileSettings = z.infer<
+  typeof ClaudeProfileSettingsSchema
+>;
+
 export const OpenCodeProfileSettingsSchema = z
   .object({
     model: z.string().min(1).optional(),
@@ -528,7 +544,6 @@ export type CodexProfileSettings = z.infer<
   typeof CodexProfileSettingsSchema
 >;
 
-
 /**
  * Profile clients deliberately use object form only. Unsupported clients still
  * parse with empty settings so orchestration can report an adapter capability
@@ -544,13 +559,15 @@ export const ProfileClientSchema = z
   .strict()
   .superRefine((client, context) => {
     const settingsSchema =
-      client.name === 'opencode'
-        ? OpenCodeProfileSettingsSchema
-        : client.name === 'copilot'
-          ? CopilotProfileSettingsSchema
-          : client.name === 'codex'
-            ? CodexProfileSettingsSchema
-            : EmptyProfileSettingsSchema;
+      client.name === 'claude'
+        ? ClaudeProfileSettingsSchema
+        : client.name === 'opencode'
+          ? OpenCodeProfileSettingsSchema
+          : client.name === 'copilot'
+            ? CopilotProfileSettingsSchema
+            : client.name === 'codex'
+              ? CodexProfileSettingsSchema
+              : EmptyProfileSettingsSchema;
     const result = settingsSchema.safeParse(client.settings);
     if (result.success) return;
     for (const issue of result.error.issues) {
