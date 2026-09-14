@@ -29,6 +29,9 @@
 - Pi profile MCP materialization with an explicitly declared, usable
   profile-scoped `pi-mcp-adapter`, plus native OMP named-profile marketplace
   lifecycle and revision verification.
+- OpenCode global profiles using additive `OPENCODE_CONFIG` and
+  `OPENCODE_CONFIG_DIR` overrides, file-installed skills and commands, strict
+  settings, MCP serialization, generated launchers, and ownership-safe cleanup.
 
 
 ## [1.0.0] - 2026-03-13

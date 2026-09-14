@@ -200,6 +200,54 @@ describe('profile workspace declarations', () => {
     ).toBe(false);
   });
 
+  it('accepts only documented OpenCode profile settings', () => {
+    const result = UserWorkspaceConfigSchema.parse(
+      userConfigWithProfile({
+        clients: [
+          {
+            name: 'opencode',
+            settings: {
+              model: 'anthropic/claude-sonnet-4-5',
+              small_model: 'anthropic/claude-haiku-4-5',
+              share: 'disabled',
+              autoupdate: 'notify',
+              snapshot: false,
+              subagent_depth: 2,
+              logLevel: 'WARN',
+              enabled_providers: ['anthropic'],
+            },
+          },
+        ],
+      }),
+    );
+    expect(result.profiles?.research?.clients[0]?.settings).toEqual({
+      model: 'anthropic/claude-sonnet-4-5',
+      small_model: 'anthropic/claude-haiku-4-5',
+      share: 'disabled',
+      autoupdate: 'notify',
+      snapshot: false,
+      subagent_depth: 2,
+      logLevel: 'WARN',
+      enabled_providers: ['anthropic'],
+    });
+    expect(
+      UserWorkspaceConfigSchema.safeParse(
+        userConfigWithProfile({
+          clients: [
+            { name: 'opencode', settings: { configPath: '/tmp/opencode' } },
+          ],
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      UserWorkspaceConfigSchema.safeParse(
+        userConfigWithProfile({
+          clients: [{ name: 'opencode', settings: { share: 'always' } }],
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
   it('rejects unknown and machine-generated fields throughout declarations', () => {
     for (const profile of [
       { clients: [{ name: 'pi', scope: 'user' }] },

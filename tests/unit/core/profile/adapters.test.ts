@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OmpProfileAdapter } from '../../../../src/core/profile/adapters/omp.js';
+import { OpenCodeProfileAdapter } from '../../../../src/core/profile/adapters/opencode.js';
 import { PiProfileAdapter } from '../../../../src/core/profile/adapters/pi.js';
 import { getProfileAdapter } from '../../../../src/core/profile/adapters/registry.js';
 import type {
@@ -452,9 +453,12 @@ describe('OMP profile adapter', () => {
 });
 
 describe('profile adapter registry', () => {
-  test('returns only complete Pi and OMP adapters', () => {
+  test('returns only complete Pi, OMP, and OpenCode adapters', () => {
     expect(getProfileAdapter('pi')).toBeInstanceOf(PiProfileAdapter);
     expect(getProfileAdapter('omp')).toBeInstanceOf(OmpProfileAdapter);
+    expect(getProfileAdapter('opencode')).toBeInstanceOf(
+      OpenCodeProfileAdapter,
+    );
     expect(getProfileAdapter('claude')).toBeNull();
   });
 });

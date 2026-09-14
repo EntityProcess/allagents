@@ -446,6 +446,26 @@ export function getLauncherCollisionKey(name: string): string {
 
 const EmptyProfileSettingsSchema = z.object({}).strict();
 
+export const OpenCodeProfileSettingsSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    small_model: z.string().min(1).optional(),
+    default_agent: z.string().min(1).optional(),
+    username: z.string().min(1).optional(),
+    share: z.enum(['manual', 'auto', 'disabled']).optional(),
+    autoupdate: z.union([z.boolean(), z.literal('notify')]).optional(),
+    snapshot: z.boolean().optional(),
+    subagent_depth: z.number().int().nonnegative().optional(),
+    logLevel: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR']).optional(),
+    disabled_providers: z.array(z.string().min(1)).optional(),
+    enabled_providers: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+export type OpenCodeProfileSettings = z.infer<
+  typeof OpenCodeProfileSettingsSchema
+>;
+
 /**
  * Profile clients deliberately use object form only. Unsupported clients still
  * parse with empty settings so orchestration can report an adapter capability
@@ -456,9 +476,23 @@ export const ProfileClientSchema = z
     name: ClientTypeSchema,
     install: InstallModeSchema.default('file'),
     launcher: ProfileNameSchema.optional(),
-    settings: EmptyProfileSettingsSchema.default({}),
+    settings: z.record(z.unknown()).default({}),
   })
-  .strict();
+  .strict()
+  .superRefine((client, context) => {
+    const settingsSchema =
+      client.name === 'opencode'
+        ? OpenCodeProfileSettingsSchema
+        : EmptyProfileSettingsSchema;
+    const result = settingsSchema.safeParse(client.settings);
+    if (result.success) return;
+    for (const issue of result.error.issues) {
+      context.addIssue({
+        ...issue,
+        path: ['settings', ...issue.path],
+      });
+    }
+  });
 
 export type ProfileClient = z.infer<typeof ProfileClientSchema>;
 

@@ -107,15 +107,27 @@ profiles:
         args: [/absolute/path/to/server.mjs]
         env:
           API_TOKEN: ${API_TOKEN}
+
+  oc-review:
+    clients:
+      - name: opencode
+        launcher: opencode-review
+        settings:
+          model: anthropic/claude-sonnet-4-5
+          share: disabled
+          autoupdate: false
+    plugins:
+      - source: ./review-tools
+        install: file
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `profiles.<name>.clients` | Yes | One or more object-form profile clients |
-| `clients[].name` | Yes | Supported profile client; currently `pi` or `omp` |
-| `clients[].install` | No | Default plugin mode, `file` by default |
+| `clients[].name` | Yes | Supported profile client; currently `pi`, `omp`, or `opencode` |
+| `clients[].install` | No | Default plugin mode, `file` by default; OpenCode rejects `native` because its CLI lacks a complete inspect/update/remove lifecycle |
 | `clients[].launcher` | No | Safe command basename written to the configured user bin directory |
-| `clients[].settings` | No | Strict client settings object; Pi and OMP currently accept no settings |
+| `clients[].settings` | No | Strict client settings object; Pi and OMP accept no settings, while OpenCode accepts its documented scalar profile settings |
 | `profiles.<name>.plugins` | No | Profile plugin declarations; defaults to an empty list |
 | `plugins[].source` | Yes | npm, GitHub, marketplace, or local source supported by the selected adapter |
 | `plugins[].ref` | No | Requested Git ref for a GitHub source |
@@ -133,6 +145,14 @@ MCP credentials must remain runtime references. Environment values and HTTP
 headers accept exact `${ENV_VAR}` references only, and credential-bearing
 command arguments must use the same exact form. Resolved secret values are
 never written to plans, launchers, profile state, or generated configuration.
+
+OpenCode profile settings accept `model`, `small_model`, `default_agent`,
+`username`, `share`, `autoupdate`, `snapshot`, `subagent_depth`, `logLevel`,
+`disabled_providers`, and `enabled_providers`. All other keys fail validation.
+The launcher sets both OpenCode configuration override variables. These layers
+still merge with normal global and project configuration; they are not a strict
+runtime sandbox. `${ENV_VAR}` MCP references are serialized to OpenCode's
+runtime `{env:ENV_VAR}` syntax without resolving the value.
 
 Install profiles explicitly with `allagents profile install <name> --yes`.
 Ordinary `allagents update` reconciles installed, still-declared profiles;
