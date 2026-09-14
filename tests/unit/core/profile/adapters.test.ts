@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CopilotProfileAdapter } from '../../../../src/core/profile/adapters/copilot.js';
 import { OmpProfileAdapter } from '../../../../src/core/profile/adapters/omp.js';
 import { OpenCodeProfileAdapter } from '../../../../src/core/profile/adapters/opencode.js';
 import { PiProfileAdapter } from '../../../../src/core/profile/adapters/pi.js';
@@ -252,6 +253,7 @@ describe('OMP profile adapter', () => {
         },
       },
     });
+
     expect(context.operationContext.env).toMatchObject({
       HOME: paths.home,
       USERPROFILE: paths.home,
@@ -453,12 +455,13 @@ describe('OMP profile adapter', () => {
 });
 
 describe('profile adapter registry', () => {
-  test('returns only complete Pi, OMP, and OpenCode adapters', () => {
+  test('returns every implemented profile adapter', () => {
     expect(getProfileAdapter('pi')).toBeInstanceOf(PiProfileAdapter);
     expect(getProfileAdapter('omp')).toBeInstanceOf(OmpProfileAdapter);
     expect(getProfileAdapter('opencode')).toBeInstanceOf(
       OpenCodeProfileAdapter,
     );
+    expect(getProfileAdapter('copilot')).toBeInstanceOf(CopilotProfileAdapter);
     expect(getProfileAdapter('claude')).toBeNull();
   });
 });

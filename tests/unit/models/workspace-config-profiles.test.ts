@@ -248,6 +248,50 @@ describe('profile workspace declarations', () => {
     ).toBe(false);
   });
 
+  it('accepts only documented Copilot profile settings', () => {
+    const result = UserWorkspaceConfigSchema.parse(
+      userConfigWithProfile({
+        clients: [
+          {
+            name: 'copilot',
+            settings: {
+              model: 'claude-sonnet-4.5',
+              autoUpdate: false,
+              remote: 'off',
+              remoteExport: false,
+              'ide.autoConnect': false,
+              disableAllHooks: true,
+              disabledMcpServers: ['github-mcp-server'],
+            },
+          },
+        ],
+      }),
+    );
+    expect(result.profiles?.research?.clients[0]?.settings).toEqual({
+      model: 'claude-sonnet-4.5',
+      autoUpdate: false,
+      remote: 'off',
+      remoteExport: false,
+      'ide.autoConnect': false,
+      disableAllHooks: true,
+      disabledMcpServers: ['github-mcp-server'],
+    });
+    for (const settings of [
+      { configPath: '/tmp/copilot' },
+      { remote: 'sometimes' },
+      { commandHistoryMaxSize: 0 },
+      { disabledMcpServers: [''] },
+    ]) {
+      expect(
+        UserWorkspaceConfigSchema.safeParse(
+          userConfigWithProfile({
+            clients: [{ name: 'copilot', settings }],
+          }),
+        ).success,
+      ).toBe(false);
+    }
+  });
+
   it('rejects unknown and machine-generated fields throughout declarations', () => {
     for (const profile of [
       { clients: [{ name: 'pi', scope: 'user' }] },

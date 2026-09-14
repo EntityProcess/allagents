@@ -22,7 +22,13 @@ export {
   toNativeEffectData,
 } from './types.js';
 export { ClaudeNativeClient } from './claude.js';
-export { CopilotNativeClient } from './copilot.js';
+export {
+  CopilotNativeClient,
+  parseCopilotPluginId,
+  parseCopilotPluginInventory,
+  type CopilotMarketplaceRegistrationInspection,
+  type CopilotNativeClientOptions,
+} from './copilot.js';
 export {
   OmpNativeClient,
   inspectOmpMarketplaceRegistry,

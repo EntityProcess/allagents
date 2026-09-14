@@ -466,6 +466,45 @@ export type OpenCodeProfileSettings = z.infer<
   typeof OpenCodeProfileSettingsSchema
 >;
 
+export const CopilotProfileSettingsSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    theme: z
+      .enum(['default', 'github', 'dim', 'high-contrast', 'colorblind'])
+      .optional(),
+    autoUpdate: z.boolean().optional(),
+    autoUpdatesChannel: z.enum(['stable', 'prerelease']).optional(),
+    banner: z.enum(['always', 'once', 'never']).optional(),
+    askUser: z.boolean().optional(),
+    includeCoAuthoredBy: z.boolean().optional(),
+    stream: z.boolean().optional(),
+    streamerMode: z.boolean().optional(),
+    toolSearch: z.boolean().optional(),
+    updateTerminalTitle: z.boolean().optional(),
+    respectGitignore: z.boolean().optional(),
+    disableAllHooks: z.boolean().optional(),
+    experimental: z.boolean().optional(),
+    bashEnv: z.boolean().optional(),
+    keepAlive: z.enum(['on', 'off', 'busy']).optional(),
+    commandHistoryMaxSize: z.number().int().min(1).max(1000).optional(),
+    compactPaste: z.boolean().optional(),
+    mouse: z.boolean().optional(),
+    terminalProgress: z.boolean().optional(),
+    remote: z.enum(['on', 'off']).optional(),
+    remoteExport: z.boolean().optional(),
+    'ide.autoConnect': z.boolean().optional(),
+    shellShortcut: z.boolean().optional(),
+    'customAgents.defaultLocalOnly': z.boolean().optional(),
+    storeTokenPlaintext: z.boolean().optional(),
+    disabledMcpServers: z.array(z.string().min(1)).optional(),
+    enabledMcpServers: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+export type CopilotProfileSettings = z.infer<
+  typeof CopilotProfileSettingsSchema
+>;
+
 /**
  * Profile clients deliberately use object form only. Unsupported clients still
  * parse with empty settings so orchestration can report an adapter capability
@@ -483,7 +522,9 @@ export const ProfileClientSchema = z
     const settingsSchema =
       client.name === 'opencode'
         ? OpenCodeProfileSettingsSchema
-        : EmptyProfileSettingsSchema;
+        : client.name === 'copilot'
+          ? CopilotProfileSettingsSchema
+          : EmptyProfileSettingsSchema;
     const result = settingsSchema.safeParse(client.settings);
     if (result.success) return;
     for (const issue of result.error.issues) {

@@ -43,6 +43,38 @@ runtime-generated `.gitignore`. A modified `.gitignore` or any unrelated file
 retains the root and reports a partial removal instead of recursively deleting
 unknown content.
 
+### GitHub Copilot CLI
+
+Copilot global profiles require GitHub Copilot CLI 1.0.74 or newer. AllAgents
+sets `COPILOT_HOME` to an owned configuration root and
+`COPILOT_CACHE_HOME` to a sibling owned cache directory. The generated launcher
+preserves its arguments and current working directory, so Copilot continues to
+discover the active project's instructions, agents, skills, settings, and MCP
+configuration normally.
+
+File installation writes personal skills, agents, hooks, and
+`copilot-instructions.md` beneath the selected `COPILOT_HOME`. Profile settings
+are written to `settings.json`; MCP servers are written to `mcp-config.json`
+with runtime `${ENV_VAR}` references preserved. AllAgents also includes the
+declarative plugin and marketplace settings that Copilot's native lifecycle
+requires, preventing the runtime from rewriting an untracked settings file.
+
+Native installation resolves one plugin identity from authoritative marketplace
+metadata, materializes a missing marketplace registration, and delegates install,
+targeted update, and uninstall to Copilot. A native plugin cannot declare a skill filter.
+Copilot's marketplace command cannot pin a Git ref, so a native declaration
+with `ref` fails before mutation instead of installing an unverified revision.
+Use file installation when a pinned source or selected skills are required.
+
+Removal uninstalls managed native plugins and releases managed marketplace
+registrations before recursively deleting only an AllAgents-created client
+root. A root that existed before installation is referenced rather than owned;
+unrelated or conflicting files are preserved and reported instead of adopted.
+Copilot's operating-system credential store and enterprise policy remain
+outside `COPILOT_HOME`, so this is configuration isolation, not a security
+sandbox. See GitHub's [Copilot CLI configuration directory
+reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference).
+
 ## Provider-Specific Clients
 
 These clients use their own skills directory. As above, Hooks lists

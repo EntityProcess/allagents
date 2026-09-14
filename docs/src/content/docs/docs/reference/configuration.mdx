@@ -119,15 +119,36 @@ profiles:
     plugins:
       - source: ./review-tools
         install: file
+
+  copilot-review:
+    clients:
+      - name: copilot
+        launcher: copilot-review
+        settings:
+          autoUpdate: false
+          remote: "off"
+          remoteExport: false
+          ide.autoConnect: false
+    plugins:
+      - source: EveryInc/compound-engineering-plugin
+        install: native
+      - source: ./review-tools
+        install: file
+        skills: [review]
+    mcpServers:
+      review:
+        command: review-mcp
+        env:
+          REVIEW_TOKEN: ${REVIEW_TOKEN}
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `profiles.<name>.clients` | Yes | One or more object-form profile clients |
-| `clients[].name` | Yes | Supported profile client; currently `pi`, `omp`, or `opencode` |
+| `clients[].name` | Yes | Supported profile client; currently `pi`, `omp`, `opencode`, or `copilot` |
 | `clients[].install` | No | Default plugin mode, `file` by default; OpenCode rejects `native` because its CLI lacks a complete inspect/update/remove lifecycle |
 | `clients[].launcher` | No | Safe command basename written to the configured user bin directory |
-| `clients[].settings` | No | Strict client settings object; Pi and OMP accept no settings, while OpenCode accepts its documented scalar profile settings |
+| `clients[].settings` | No | Strict client settings object; Pi and OMP accept no settings, while OpenCode and Copilot accept their documented profile settings |
 | `profiles.<name>.plugins` | No | Profile plugin declarations; defaults to an empty list |
 | `plugins[].source` | Yes | npm, GitHub, marketplace, or local source supported by the selected adapter |
 | `plugins[].ref` | No | Requested Git ref for a GitHub source |
@@ -153,6 +174,25 @@ The launcher sets both OpenCode configuration override variables. These layers
 still merge with normal global and project configuration; they are not a strict
 runtime sandbox. `${ENV_VAR}` MCP references are serialized to OpenCode's
 runtime `{env:ENV_VAR}` syntax without resolving the value.
+
+Copilot profiles require GitHub Copilot CLI 1.0.74 or newer. Their launchers set
+both `COPILOT_HOME` and `COPILOT_CACHE_HOME`; the selected configuration and
+cache roots are isolated while normal current-project discovery remains active.
+Copilot profile settings accept `model`, `theme`, `autoUpdate`,
+`autoUpdatesChannel`, `banner`, `askUser`, `includeCoAuthoredBy`, `stream`,
+`streamerMode`, `toolSearch`, `updateTerminalTitle`, `respectGitignore`,
+`disableAllHooks`, `experimental`, `bashEnv`, `keepAlive`,
+`commandHistoryMaxSize`, `compactPaste`, `mouse`, `terminalProgress`, `remote`,
+`remoteExport`, `ide.autoConnect`, `shellShortcut`,
+`customAgents.defaultLocalOnly`, `storeTokenPlaintext`, `disabledMcpServers`,
+and `enabledMcpServers`. All other keys fail validation. MCP declarations are
+written to the selected root's `mcp-config.json`, retain `${ENV_VAR}` references,
+and expose their declared tools to Copilot.
+
+Copilot native plugins must resolve to exactly one authoritative marketplace
+entry. Native skill filters and native Git refs are rejected because Copilot
+cannot enforce either constraint. File installation supports skill selection
+and pinned Git sources instead.
 
 Install profiles explicitly with `allagents profile install <name> --yes`.
 Ordinary `allagents update` reconciles installed, still-declared profiles;
