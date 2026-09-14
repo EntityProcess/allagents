@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   executeCommand,
+  compareNativeVersions,
   type NativeClient,
   type NativeCommandOptions,
   type NativeCommandResult,
@@ -64,17 +65,6 @@ function commandError(result: NativeCommandResult): string {
 function versionTuple(output: string): readonly number[] | null {
   const match = /(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?=\D|$)/.exec(output);
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
-
-function compareVersion(
-  left: readonly number[],
-  right: readonly number[],
-): number {
-  for (let index = 0; index < 3; index++) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
 }
 
 async function profileRootExists(
@@ -182,9 +172,9 @@ export function parseClaudePluginInventory(output: string): {
   const installedValues = Array.isArray(parsed)
     ? parsed
     : parsed && typeof parsed === 'object'
-      ? (['installed', 'plugins', 'installedPlugins', 'installed_plugins']
+      ? ((['installed', 'plugins', 'installedPlugins', 'installed_plugins']
           .map((key) => (parsed as Record<string, unknown>)[key])
-          .find(Array.isArray) as unknown[] | undefined) ?? null
+          .find(Array.isArray) as unknown[] | undefined) ?? null)
       : null;
   const availableValues =
     parsed &&
@@ -425,7 +415,8 @@ export class ClaudeNativeClient implements NativeClient {
     const parsedVersion = versionTuple(version.output);
     if (
       this.minimumVersion &&
-      (!parsedVersion || compareVersion(parsedVersion, this.minimumVersion) < 0)
+      (!parsedVersion ||
+        compareNativeVersions(parsedVersion, this.minimumVersion) < 0)
     ) {
       return false;
     }
@@ -638,13 +629,7 @@ export class ClaudeNativeClient implements NativeClient {
       }
       const result = await this.run(
         'claude',
-        [
-          'plugin',
-          'install',
-          resource.resolvedIdentity,
-          '--scope',
-          scope,
-        ],
+        ['plugin', 'install', resource.resolvedIdentity, '--scope', scope],
         commandOptions(context),
       );
       return result.success
@@ -756,13 +741,7 @@ export class ClaudeNativeClient implements NativeClient {
     if (!isProfileContext(context)) {
       const result = await this.run(
         'claude',
-        [
-          'plugin',
-          'update',
-          resource.resolvedIdentity,
-          '--scope',
-          scope,
-        ],
+        ['plugin', 'update', resource.resolvedIdentity, '--scope', scope],
         commandOptions(context),
       );
       return result.success
@@ -815,13 +794,7 @@ export class ClaudeNativeClient implements NativeClient {
     if (!isProfileContext(context)) {
       const result = await this.run(
         'claude',
-        [
-          'plugin',
-          'uninstall',
-          resource.resolvedIdentity,
-          '--scope',
-          scope,
-        ],
+        ['plugin', 'uninstall', resource.resolvedIdentity, '--scope', scope],
         commandOptions(context),
       );
       return result.success

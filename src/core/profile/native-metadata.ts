@@ -2,11 +2,13 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 import type {
+  ClaudeNativeClient,
   CodexNativeClient,
   CopilotNativeClient,
 } from '../native/index.js';
 import {
   inspectOmpMarketplaceRegistry,
+  parseClaudePluginId,
   parseCodexPluginId,
   parseCopilotPluginId,
   parseOmpPluginId,
@@ -416,6 +418,129 @@ export async function resolveCodexProfileMetadata(
       ...(parsedSource?.subpath && {
         marketplaceSparsePath: parsedSource.subpath,
       }),
+      ...(source.resolvedRef && { resolvedRef: source.resolvedRef }),
+      ...(source.resolvedSha && { resolvedSha: source.resolvedSha }),
+    });
+  } finally {
+    await source.cleanup?.();
+  }
+}
+
+export async function resolveClaudeProfileMetadata(
+  plugin: ProfileResolvedPlugin,
+  context: ProfileClientContext,
+  options: ProfileNativeMetadataOptions,
+  nativeClient: ClaudeNativeClient,
+): Promise<ProfileResolvedPlugin> {
+  const exact = parseClaudePluginId(plugin.source);
+  if (exact) {
+    if (plugin.requestedRef || plugin.resolvedRef) {
+      throw new Error(
+        `Claude plugin identity '${plugin.source}' cannot select a marketplace ref`,
+      );
+    }
+    const registration = await nativeClient.inspectMarketplaceRegistration(
+      exact.marketplace,
+      context.operationContext,
+    );
+    if (!registration.success) {
+      throw new Error(
+        registration.error ??
+          'Could not inspect the selected Claude profile marketplace registry',
+      );
+    }
+    if (!registration.present) {
+      throw new Error(
+        `Claude plugin '${plugin.source}' references an unregistered marketplace`,
+      );
+    }
+    const catalog = await nativeClient.inspectMarketplacePlugin(
+      exact.marketplace,
+      exact.plugin,
+      context.operationContext,
+    );
+    if (!catalog.success || !catalog.present) {
+      throw new Error(
+        catalog.error ??
+          `Claude plugin '${plugin.source}' is not an authoritative catalog identity`,
+      );
+    }
+    return Object.freeze({
+      ...plugin,
+      marketplace: exact.marketplace,
+      pluginName: exact.plugin,
+      ...(registration.source && { marketplaceSource: registration.source }),
+      ...(registration.ref && { resolvedRef: registration.ref }),
+    });
+  }
+
+  const source = await resolveProfileFileSource(
+    { ...plugin, install: 'file' },
+    options,
+  );
+  try {
+    const parsedSource = isGitHubUrl(source.source)
+      ? parseGitHubUrl(source.source)
+      : null;
+    if (parsedSource?.subpath) {
+      throw new Error(
+        'Claude native profile marketplaces cannot preserve sparse paths; use file install',
+      );
+    }
+    const catalog = await parseMarketplaceManifest(source.path);
+    if (!catalog.success) throw new Error(catalog.error);
+    if (catalog.data.plugins.length !== 1 || !catalog.data.plugins[0]) {
+      throw new Error(
+        `Claude marketplace source '${plugin.source}' must expose exactly one catalog plugin`,
+      );
+    }
+    const registration = await nativeClient.inspectMarketplaceRegistration(
+      catalog.data.name,
+      context.operationContext,
+    );
+    if (!registration.success) {
+      throw new Error(
+        registration.error ??
+          'Could not inspect the selected Claude profile marketplace registry',
+      );
+    }
+    const registrationSource = parsedSource
+      ? `${parsedSource.owner}/${parsedSource.repo}`
+      : resolve(source.path);
+    if (registration.present) {
+      if (
+        registration.source &&
+        normalizedMarketplaceSource(registration.source) !==
+          normalizedMarketplaceSource(registrationSource)
+      ) {
+        throw new Error(
+          `Claude marketplace '${catalog.data.name}' is already registered from a different source`,
+        );
+      }
+      if (source.resolvedRef && registration.ref !== source.resolvedRef) {
+        throw new Error(
+          `Claude marketplace '${catalog.data.name}' is registered at a different ref`,
+        );
+      }
+      const liveCatalog = await nativeClient.inspectMarketplacePlugin(
+        catalog.data.name,
+        catalog.data.plugins[0].name,
+        context.operationContext,
+      );
+      if (!liveCatalog.success || !liveCatalog.present) {
+        throw new Error(
+          liveCatalog.error ??
+            `Claude marketplace '${catalog.data.name}' does not expose plugin '${catalog.data.plugins[0].name}'`,
+        );
+      }
+    }
+    return Object.freeze({
+      ...plugin,
+      marketplace: catalog.data.name,
+      pluginName: catalog.data.plugins[0].name,
+      path: source.path,
+      marketplaceSource: registration.source ?? registrationSource,
+      marketplaceRegistrationManaged: !registration.present,
       ...(source.resolvedRef && { resolvedRef: source.resolvedRef }),
       ...(source.resolvedSha && { resolvedSha: source.resolvedSha }),
     });

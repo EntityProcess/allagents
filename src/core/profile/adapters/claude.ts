@@ -9,10 +9,14 @@ import {
   type NativeSourceResolution,
 } from '../../native/index.js';
 import { isGitHubUrl, parseGitHubUrl } from '../../../utils/plugin-path.js';
+import { resolveClaudeProfileMetadata } from '../native-metadata.js';
+import type { ProfileOperationKind, ProfileStepKind } from '../index.js';
 import type {
-  ProfileAdapter,
+  NativeProfileAdapter,
   ProfileClientContext,
   ProfileContextOptions,
+  ProfileNativeCommandRequest,
+  ProfileNativeMetadataOptions,
   ProfilePlannedFile,
   ProfileResolvedPlugin,
   ProfileSerializationInput,
@@ -126,12 +130,35 @@ function serializeClaudeMcp(
   return Object.freeze(servers);
 }
 
-export class ClaudeProfileAdapter implements ProfileAdapter {
+export class ClaudeProfileAdapter implements NativeProfileAdapter {
   readonly client = 'claude' as const;
   readonly capabilities = CAPABILITIES;
   readonly nativeClient = new ClaudeNativeClient({
     minimumVersion: CLAUDE_MINIMUM_VERSION,
   });
+  stepOrder(kind: ProfileStepKind, operation: ProfileOperationKind): number {
+    const rank: Record<ProfileStepKind, number> =
+      operation === 'remove'
+        ? {
+            launcher: 0,
+            native: 1,
+            marketplace: 2,
+            file: 3,
+            settings: 3,
+            mcp: 3,
+            root: 4,
+          }
+        : {
+            root: 0,
+            file: 1,
+            native: 2,
+            marketplace: 3,
+            settings: 4,
+            mcp: 5,
+            launcher: 6,
+          };
+    return rank[kind];
+  }
 
   resolveContext(
     profileName: string,
@@ -196,6 +223,20 @@ export class ClaudeProfileAdapter implements ProfileAdapter {
     return this.nativeClient.isAvailable(context.operationContext);
   }
 
+  resolveNativeMetadata(
+    plugin: ProfileResolvedPlugin,
+    context: ProfileClientContext,
+    options: ProfileNativeMetadataOptions,
+  ): Promise<ProfileResolvedPlugin> {
+    assertClaudeContext(context);
+    return resolveClaudeProfileMetadata(
+      plugin,
+      context,
+      options,
+      this.nativeClient,
+    );
+  }
+
   resolveNativeSource(
     plugin: ProfileResolvedPlugin,
     context: ProfileClientContext,
@@ -253,6 +294,129 @@ export class ClaudeProfileAdapter implements ProfileAdapter {
         requestedIdentity: plugin.source,
       },
     };
+  }
+
+  discloseNativeCommands(
+    request: ProfileNativeCommandRequest,
+    context: ProfileClientContext,
+  ) {
+    assertClaudeContext(context);
+    if (!['create', 'update', 'remove'].includes(request.action)) return [];
+    if (request.kind === 'marketplace') {
+      if (request.action === 'create') {
+        return [
+          {
+            command: 'claude',
+            args: [
+              'plugin',
+              'marketplace',
+              'add',
+              request.registration.source,
+              '--scope',
+              'user',
+            ],
+          },
+        ];
+      }
+      if (request.action === 'remove') {
+        return [
+          {
+            command: 'claude',
+            args: [
+              'plugin',
+              'marketplace',
+              'remove',
+              request.registration.name,
+              '--scope',
+              'user',
+            ],
+          },
+        ];
+      }
+      return [
+        {
+          command: 'claude',
+          args: ['plugin', 'marketplace', 'update', request.registration.name],
+        },
+      ];
+    }
+
+    const commands = [];
+    const marketplaceName = request.resource.provenance.marketplaceName;
+    const marketplaceSource = request.resource.provenance.marketplaceSource;
+    if (
+      request.action === 'create' &&
+      marketplaceSource &&
+      request.resource.provenance.managedMarketplaceRegistration === 'true'
+    ) {
+      const sourceArgument =
+        request.resource.provenance.resolvedRef &&
+        /^[^/:]+\/[^/]+$/.test(marketplaceSource)
+          ? `${marketplaceSource}@${request.resource.provenance.resolvedRef}`
+          : marketplaceSource;
+      commands.push({
+        command: 'claude',
+        args: [
+          'plugin',
+          'marketplace',
+          'add',
+          sourceArgument,
+          '--scope',
+          'user',
+        ],
+      });
+    } else if (
+      request.action === 'update' &&
+      marketplaceSource &&
+      marketplaceName
+    ) {
+      commands.push({
+        command: 'claude',
+        args: ['plugin', 'marketplace', 'update', marketplaceName],
+      });
+    }
+
+    const verb =
+      request.action === 'create'
+        ? 'install'
+        : request.action === 'remove'
+          ? 'uninstall'
+          : 'update';
+    commands.push({
+      command: 'claude',
+      args: [
+        'plugin',
+        verb,
+        request.resource.resolvedIdentity,
+        '--scope',
+        'user',
+        '--yes',
+        '--json',
+      ],
+    });
+    return commands;
+  }
+
+  inspectMarketplaceRegistration(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ) {
+    assertClaudeContext(context);
+    return this.nativeClient.inspectMarketplaceRegistration(
+      marketplaceName,
+      context.operationContext,
+    );
+  }
+
+  removeMarketplaceRegistration(
+    marketplaceName: string,
+    context: ProfileClientContext,
+  ) {
+    assertClaudeContext(context);
+    return this.nativeClient.removeMarketplaceRegistration(
+      marketplaceName,
+      context.operationContext,
+    );
   }
 
   serializeSettings(
