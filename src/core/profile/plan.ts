@@ -1012,7 +1012,6 @@ export async function planProfileOperation(
         });
         desiredKeys.add(rel.key);
       }
-      const deferredNativeSteps: InternalProfilePlanStep[] = [];
       for (const entry of orderedNative) {
         const prior = previousResource(
           priorState,
@@ -1336,7 +1335,6 @@ export async function planProfileOperation(
         });
         desiredKeys.add(planned.relationship.key);
       }
-      steps.push(...deferredNativeSteps);
 
       if (declaredClient.launcher) {
         const rendered = renderProfileLaunchers(
