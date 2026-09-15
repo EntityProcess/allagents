@@ -181,7 +181,7 @@ describe('profile workspace declarations', () => {
   it('accepts unsupported client names only with strict empty settings', () => {
     expect(
       UserWorkspaceConfigSchema.safeParse(
-        userConfigWithProfile({ clients: [{ name: 'claude', settings: {} }] }),
+        userConfigWithProfile({ clients: [{ name: 'cursor', settings: {} }] }),
       ).success,
     ).toBe(true);
     expect(
@@ -198,6 +198,41 @@ describe('profile workspace declarations', () => {
         }),
       ).success,
     ).toBe(false);
+  });
+
+  it('accepts only conservative documented Claude profile settings', () => {
+    const settings = {
+      model: 'sonnet',
+      effortLevel: 'xhigh',
+      fallbackModel: ['haiku'],
+      outputStyle: 'Explanatory',
+      autoMemoryEnabled: false,
+      spinnerTipsEnabled: false,
+      autoUpdatesChannel: 'stable',
+    };
+    const result = UserWorkspaceConfigSchema.parse(
+      userConfigWithProfile({
+        clients: [{ name: 'claude', settings }],
+      }),
+    );
+    expect(result.profiles?.research?.clients[0]?.settings).toEqual(settings);
+
+    for (const invalid of [
+      { unknown: true },
+      { effortLevel: 'max' },
+      { fallbackModel: [] },
+      { fallbackModel: [''] },
+      { autoUpdatesChannel: 'prerelease' },
+      { autoMemoryEnabled: 'false' },
+    ]) {
+      expect(
+        UserWorkspaceConfigSchema.safeParse(
+          userConfigWithProfile({
+            clients: [{ name: 'claude', settings: invalid }],
+          }),
+        ).success,
+      ).toBe(false);
+    }
   });
 
   it('accepts only documented OpenCode profile settings', () => {

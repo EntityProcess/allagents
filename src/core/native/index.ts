@@ -21,7 +21,14 @@ export {
   sanitizeNativeProvenance,
   toNativeEffectData,
 } from './types.js';
-export { ClaudeNativeClient } from './claude.js';
+export {
+  ClaudeNativeClient,
+  parseClaudeMarketplaceInventory,
+  parseClaudePluginId,
+  parseClaudePluginInventory,
+  type ClaudeMarketplaceRegistrationInspection,
+  type ClaudeNativeClientOptions,
+} from './claude.js';
 export {
   CopilotNativeClient,
   parseCopilotPluginId,

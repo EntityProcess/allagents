@@ -36,6 +36,7 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run schema:check
       - run: bun run build
 
   typecheck:
