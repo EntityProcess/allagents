@@ -14,7 +14,7 @@ inventory of each runtime's native extension APIs.
 | Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
 |--------|--------|------------|-------|----------|------------------|
 | Copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No | `.github/` |
-| Codex | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| Codex | `.codex/skills/` | `AGENTS.md` | `.codex/hooks.json` (generated) | No | No |
 | OpenCode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
 | Gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
 | Amp Code | `.agents/skills/` | `AGENTS.md` | No | No | No |
@@ -95,6 +95,11 @@ delegates marketplace registration, plugin installation, Git marketplace
 upgrade, local plugin refresh, removal, and inventory inspection to Codex.
 Removing an AllAgents-managed marketplace fails closed while another installed
 plugin still depends on it.
+
+At project scope, AllAgents combines supported plugin hook declarations in
+`.codex/hooks.json`. Native Codex plugins can also bundle `hooks/hooks.json`.
+Isolated profile file installation does not currently translate hook
+declarations; use native installation when a profile plugin requires them.
 
 `CODEX_HOME` also contains Codex credentials, sessions, logs, and caches.
 Recursive cleanup is limited to a client root AllAgents created for this
