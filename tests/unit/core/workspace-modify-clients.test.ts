@@ -42,4 +42,16 @@ describe('setClients', () => {
     expect(config.clients).toEqual(['claude']);
     rmSync(emptyDir, { recursive: true, force: true });
   });
+
+  it('rejects project profiles before changing clients', async () => {
+    const configPath = join(testDir, '.allagents', 'workspace.yaml');
+    const invalid =
+      'repositories: []\nplugins: []\nclients:\n  - claude\nprofiles:\n  research:\n    clients:\n      - name: pi\n';
+    writeFileSync(configPath, invalid);
+
+    const result = await setClients(['omp'], testDir);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('profiles');
+    expect(readFileSync(configPath, 'utf-8')).toBe(invalid);
+  });
 });

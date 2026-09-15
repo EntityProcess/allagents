@@ -10,6 +10,7 @@ import {
   getUserWorkspaceConfigPath,
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
+  setUserClients,
 } from '../../../src/core/user-workspace.js';
 import { stubHomeDir } from '../../helpers/env.js';
 
@@ -87,6 +88,44 @@ describe('user-workspace', () => {
       expect(config).toBeTruthy();
       expect(config!.plugins).toBeInstanceOf(Array);
       expect(config!.clients).toBeInstanceOf(Array);
+    });
+
+    test('accepts profiles-only config and defaults ordinary arrays', async () => {
+      const configPath = getUserWorkspaceConfigPath();
+      await mkdir(join(tempHome, '.allagents'), { recursive: true });
+      await writeFile(
+        configPath,
+        'profiles:\n  research:\n    clients:\n      - name: pi\n',
+        'utf-8',
+      );
+
+      const config = await getUserWorkspaceConfig();
+      expect(config?.repositories).toEqual([]);
+      expect(config?.plugins).toEqual([]);
+      expect(config?.clients).toEqual([]);
+      expect(config?.profiles?.research?.clients[0]?.settings).toEqual({});
+
+      const editResult = await setUserClients(['omp']);
+      expect(editResult.success).toBe(true);
+      const edited = await readFile(configPath, 'utf-8');
+      expect(edited).toContain('profiles:');
+      expect(edited).not.toContain('settings:');
+      expect(edited).not.toContain('install:');
+    });
+
+    test('propagates invalid user config and refuses an unrelated edit', async () => {
+      const configPath = getUserWorkspaceConfigPath();
+      await mkdir(join(tempHome, '.allagents'), { recursive: true });
+      const invalid =
+        'repositories: []\nplugins: []\nclients: []\nprofiles:\n  bad:\n    clients:\n      - name: pi\n        settings:\n          root: /tmp/pi\n';
+      await writeFile(configPath, invalid, 'utf-8');
+
+      await expect(getUserWorkspaceConfig()).rejects.toThrow(
+        'profiles.bad.clients.0.settings',
+      );
+      const result = await setUserClients(['omp']);
+      expect(result.success).toBe(false);
+      expect(await readFile(configPath, 'utf-8')).toBe(invalid);
     });
   });
 

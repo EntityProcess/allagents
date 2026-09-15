@@ -85,3 +85,5 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun test tests/unit/core/native/types.test.ts tests/unit/cli/workspace-setup-command.test.ts
+      - name: Test generated Windows profile launcher
+        run: bun test tests/unit/core/profile/manager.test.ts

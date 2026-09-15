@@ -234,7 +234,14 @@ function parseGitSource(source: string): PiNormalizedSource | null {
   if (/^(?:https?|ssh|git):\/\//i.test(value)) {
     try {
       const url = new URL(value);
-      if (url.search || url.hash) return null;
+      if (
+        url.password ||
+        (url.username && !(url.protocol === 'ssh:' && url.username === 'git')) ||
+        url.search ||
+        url.hash
+      ) {
+        return null;
+      }
       return buildGitSource(source, url.hostname, url.pathname);
     } catch {
       return null;

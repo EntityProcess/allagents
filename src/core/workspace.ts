@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, writeFile, copyFile, unlink } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ import { ensureWorkspaceRules } from './transform.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, type WorkspaceRepository } from '../constants.js';
 import { getClientTypes, type ClientEntry } from '../models/workspace-config.js';
 import { isGitHubUrl, parseGitHubUrl, getPluginCachePath } from '../utils/plugin-path.js';
+import { validateProjectWorkspaceConfig } from '../utils/workspace-parser.js';
 import { fetchWorkspaceFromGitHub, readFileFromClone } from './github-fetch.js';
 import { cleanupTempDir } from './git.js';
 import { getMarketplacesDir } from './marketplace.js';
@@ -50,14 +51,10 @@ export async function initWorkspace(
   const configPath = join(configDir, WORKSPACE_CONFIG_FILE);
 
   // Check if workspace already exists (has .allagents/workspace.yaml)
-  if (existsSync(configPath)) {
-    if (options.force) {
-      await unlink(configPath);
-    } else {
-      throw new Error(
-        `Workspace already exists: ${absoluteTarget}\n  Found existing ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
-      );
-    }
+  if (existsSync(configPath) && !options.force) {
+    throw new Error(
+      `Workspace already exists: ${absoluteTarget}\n  Found existing ${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`,
+    );
   }
 
   // Get template path for default template
@@ -199,12 +196,38 @@ export async function initWorkspace(
       workspaceYamlContent = dump(configParsed, { lineWidth: -1 });
     }
 
-    // Write workspace.yaml
+    // Preserve init's historical support for sparse templates while validating
+    // every supplied value and rejecting project-only forbidden fields before
+    // replacing an existing workspace.
+    const input = load(workspaceYamlContent);
+    const inputRecord =
+      input && typeof input === 'object' && !Array.isArray(input)
+        ? (input as Record<string, unknown>)
+        : null;
+    const inputWorkspace =
+      inputRecord?.workspace &&
+      typeof inputRecord.workspace === 'object' &&
+      !Array.isArray(inputRecord.workspace)
+        ? (inputRecord.workspace as Record<string, unknown>)
+        : undefined;
+    const parsed = validateProjectWorkspaceConfig(
+      inputRecord
+        ? {
+            repositories: [],
+            plugins: [],
+            clients: [],
+            ...inputRecord,
+            ...(inputWorkspace && {
+              workspace: { files: [], ...inputWorkspace },
+            }),
+          }
+        : input,
+      configPath,
+    );
     await writeFile(configPath, workspaceYamlContent, 'utf-8');
 
-    // Parse config to check repositories and clients (needed before copying template)
-    const parsed = load(workspaceYamlContent) as Record<string, unknown>;
-    const clients = (parsed?.clients as ClientEntry[]) ?? [];
+    // Inspect the validated config for post-write template work.
+    const clients = parsed.clients;
     const clientNames = getClientTypes(clients);
 
     // Copy template.code-workspace from source if it exists and vscode client is configured

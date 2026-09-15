@@ -394,6 +394,304 @@ export const McpServerConfigSchema = z.union([
 
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
+/**
+ * Portable secret references are preserved verbatim until the selected client
+ * resolves them at runtime. Profile declarations never accept resolved values.
+ */
+const PROFILE_SECRET_REFERENCE_PATTERN =
+  /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/;
+
+export const ProfileSecretReferenceSchema = z
+  .string()
+  .regex(
+    PROFILE_SECRET_REFERENCE_PATTERN,
+    'Expected an exact ${ENV_VAR} reference',
+  );
+
+/**
+ * Profile and launcher names are also used as filesystem and command
+ * basenames, so they intentionally use a portable subset on every platform.
+ */
+export const ProfileNameSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(
+    /^[a-z0-9][a-z0-9._-]{0,63}$/,
+    'Expected 1-64 lowercase ASCII characters starting with a letter or number',
+  )
+  .refine((name) => name !== '.' && name !== '..', {
+    message: "'.' and '..' are not valid profile or launcher names",
+  })
+  .refine((name) => !name.endsWith('.'), {
+    message: 'Profile and launcher names cannot end with a dot',
+  })
+  .refine(
+    (name) =>
+      !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name),
+    {
+      message: 'Reserved device basenames are not allowed',
+    },
+  );
+
+export type ProfileName = z.infer<typeof ProfileNameSchema>;
+
+/**
+ * Normalize a declared launcher to the command identity which can exist on
+ * every supported platform. Windows companion extensions share one identity.
+ */
+export function getLauncherCollisionKey(name: string): string {
+  return name.toLowerCase().replace(/\.(?:cmd|ps1)$/i, '');
+}
+
+const EmptyProfileSettingsSchema = z.object({}).strict();
+
+/**
+ * Profile clients deliberately use object form only. Unsupported clients still
+ * parse with empty settings so orchestration can report an adapter capability
+ * error instead of misclassifying a valid public client name as bad syntax.
+ */
+export const ProfileClientSchema = z
+  .object({
+    name: ClientTypeSchema,
+    install: InstallModeSchema.default('file'),
+    launcher: ProfileNameSchema.optional(),
+    settings: EmptyProfileSettingsSchema.default({}),
+  })
+  .strict();
+
+export type ProfileClient = z.infer<typeof ProfileClientSchema>;
+
+const ProfilePluginSkillsConfigSchema = z.union([
+  z.array(z.string()),
+  z.object({ exclude: z.array(z.string()) }).strict(),
+]);
+
+/**
+ * Profile plugins reuse the ordinary plugin vocabulary while excluding
+ * project-only file exclusion rules.
+ */
+export const ProfilePluginEntrySchema = z.union([
+  PluginSourceSchema,
+  z
+    .object({
+      source: PluginSourceSchema,
+      ref: z.string().optional(),
+      install: InstallModeSchema.optional(),
+      clients: z.array(ClientTypeSchema).optional(),
+      skills: ProfilePluginSkillsConfigSchema.optional(),
+    })
+    .strict(),
+]);
+
+export type ProfilePluginEntry = z.infer<typeof ProfilePluginEntrySchema>;
+
+/**
+ * Profile MCP declarations retain the existing transport vocabulary, but
+ * credential-bearing values must be portable references rather than secrets.
+ */
+const PROFILE_SENSITIVE_MCP_FIELD_PATTERN =
+  /(?:^|[-_.])(?:api[-_]?key|auth|authorization|credential|key|password|secret|signature|token)(?:$|[-_.])/i;
+
+function isProfileSecretReference(value: string | undefined): boolean {
+  return (
+    value !== undefined && PROFILE_SECRET_REFERENCE_PATTERN.test(value)
+  );
+}
+
+const ProfileMcpArgumentsSchema = z.array(z.string()).superRefine(
+  (arguments_, ctx) => {
+    const invalidIndexes = new Set<number>();
+    const reject = (index: number) => {
+      if (invalidIndexes.has(index)) return;
+      invalidIndexes.add(index);
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index],
+        message: 'Secret arguments must be exact ${ENV_VAR} references',
+      });
+    };
+
+    for (const [index, argument] of arguments_.entries()) {
+      const separateOption = argument.match(/^(?:--?|\/)([^=:\s]+)$/);
+      const separateOptionName = separateOption?.[1];
+      if (
+        separateOptionName &&
+        PROFILE_SENSITIVE_MCP_FIELD_PATTERN.test(separateOptionName)
+      ) {
+        const credentialIndex = index + 1;
+        if (!isProfileSecretReference(arguments_[credentialIndex])) {
+          reject(
+            credentialIndex < arguments_.length ? credentialIndex : index,
+          );
+        }
+        continue;
+      }
+
+      if (/^bearer$/i.test(argument)) {
+        const credentialIndex = index + 1;
+        if (!isProfileSecretReference(arguments_[credentialIndex])) {
+          reject(
+            credentialIndex < arguments_.length ? credentialIndex : index,
+          );
+        }
+        continue;
+      }
+
+      const assignment = argument.match(
+        /^(?:--?|\/)?([^=:\s]+)[=:]\s*(.*)$/,
+      );
+      const assignmentName = assignment?.[1];
+      const inlineCredential =
+        assignmentName &&
+        PROFILE_SENSITIVE_MCP_FIELD_PATTERN.test(assignmentName)
+          ? assignment[2]
+          : undefined;
+      const bearerCredential = argument.match(/\bbearer\s+(.+)$/i)?.[1];
+
+      if (
+        inlineCredential !== undefined &&
+        !isProfileSecretReference(inlineCredential) &&
+        !isProfileSecretReference(bearerCredential)
+      ) {
+        reject(index);
+        continue;
+      }
+
+      if (
+        bearerCredential !== undefined &&
+        !isProfileSecretReference(bearerCredential)
+      ) {
+        reject(index);
+        continue;
+      }
+
+      if (
+        argument.includes('${') &&
+        !isProfileSecretReference(argument) &&
+        !isProfileSecretReference(inlineCredential) &&
+        !isProfileSecretReference(bearerCredential)
+      ) {
+        reject(index);
+      }
+    }
+  },
+);
+
+export const ProfileMcpServerConfigSchema = z.union([
+  z
+    .object({
+      type: z.enum(['http']).optional(),
+      url: z.string(),
+      headers: z.record(ProfileSecretReferenceSchema).optional(),
+      clients: z.array(ClientTypeSchema).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.enum(['stdio']).optional(),
+      command: z.string(),
+      args: ProfileMcpArgumentsSchema.optional(),
+      env: z.record(ProfileSecretReferenceSchema).optional(),
+      clients: z.array(ClientTypeSchema).optional(),
+    })
+    .strict(),
+]);
+
+export type ProfileMcpServerConfig = z.infer<
+  typeof ProfileMcpServerConfigSchema
+>;
+
+export const ProfileDeclarationSchema = z
+  .object({
+    clients: z.array(ProfileClientSchema).min(1),
+    plugins: z.array(ProfilePluginEntrySchema).default([]),
+    mcpServers: z.record(ProfileMcpServerConfigSchema).optional(),
+  })
+  .strict()
+  .superRefine((profile, ctx) => {
+    const declaredClients = new Set<ClientType>();
+
+    profile.clients.forEach((client, index) => {
+      if (declaredClients.has(client.name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['clients', index, 'name'],
+          message: `Client '${client.name}' is declared more than once`,
+        });
+      }
+      declaredClients.add(client.name);
+    });
+
+    const validateSelector = (
+      clients: ClientType[] | undefined,
+      path: (string | number)[],
+    ): void => {
+      if (!clients) return;
+      const selected = new Set<ClientType>();
+      clients.forEach((client, index) => {
+        if (selected.has(client)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [...path, index],
+            message: `Client selector '${client}' is duplicated`,
+          });
+        } else if (!declaredClients.has(client)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [...path, index],
+            message: `Client selector '${client}' is not declared by this profile`,
+          });
+        }
+        selected.add(client);
+      });
+    };
+
+    profile.plugins.forEach((plugin, index) => {
+      if (typeof plugin !== 'string') {
+        validateSelector(plugin.clients, ['plugins', index, 'clients']);
+      }
+    });
+
+    if (profile.mcpServers) {
+      for (const [serverName, server] of Object.entries(profile.mcpServers)) {
+        validateSelector(server.clients, [
+          'mcpServers',
+          serverName,
+          'clients',
+        ]);
+      }
+    }
+  });
+
+export type ProfileDeclaration = z.infer<typeof ProfileDeclarationSchema>;
+
+export const ProfilesSchema = z
+  .record(ProfileNameSchema, ProfileDeclarationSchema)
+  .superRefine((profiles, ctx) => {
+    const launchers = new Map<string, string>();
+
+    for (const [profileName, profile] of Object.entries(profiles)) {
+      profile.clients.forEach((client, index) => {
+        if (!client.launcher) return;
+
+        const collisionKey = getLauncherCollisionKey(client.launcher);
+        const previous = launchers.get(collisionKey);
+        if (previous) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [profileName, 'clients', index, 'launcher'],
+            message: `Launcher '${client.launcher}' collides with '${previous}' on a supported platform`,
+          });
+          return;
+        }
+        launchers.set(collisionKey, client.launcher);
+      });
+    }
+  });
+
+export type Profiles = z.infer<typeof ProfilesSchema>;
+
 const SetupCommandTextSchema = z
   .string()
   .refine(
@@ -444,9 +742,9 @@ export const SetupCommandSchema = z.union([
 export type SetupCommand = z.infer<typeof SetupCommandSchema>;
 
 /**
- * Complete workspace configuration (workspace.yaml)
+ * Ordinary workspace configuration shared by user and project scopes.
  */
-export const WorkspaceConfigSchema = z.object({
+const WorkspaceConfigBaseSchema = z.object({
   version: z.number().optional(),
   /**
    * Shell commands run only by the explicit `allagents workspace setup` action.
@@ -473,4 +771,30 @@ export const WorkspaceConfigSchema = z.object({
   enabledSkills: z.array(z.string()).optional(),
 });
 
-export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
+/**
+ * Project workspaces never contain global profile declarations.
+ */
+export const ProjectWorkspaceConfigSchema = WorkspaceConfigBaseSchema.extend({
+  profiles: z.never().optional(),
+});
+
+export type ProjectWorkspaceConfig = z.infer<typeof WorkspaceConfigBaseSchema>;
+
+/**
+ * User workspaces may consist only of profile declarations. Ordinary arrays
+ * default empty so existing consumers retain their array-based contract.
+ */
+export const UserWorkspaceConfigSchema = WorkspaceConfigBaseSchema.extend({
+  repositories: z.array(RepositorySchema).default([]),
+  plugins: z.array(PluginEntrySchema).default([]),
+  clients: z.array(ClientEntrySchema).default([]),
+  profiles: ProfilesSchema.optional(),
+});
+
+export type UserWorkspaceConfig = z.infer<typeof UserWorkspaceConfigSchema>;
+
+/**
+ * Backward-compatible public alias for project workspace validation.
+ */
+export const WorkspaceConfigSchema = ProjectWorkspaceConfigSchema;
+export type WorkspaceConfig = ProjectWorkspaceConfig;

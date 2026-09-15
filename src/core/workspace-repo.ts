@@ -1,13 +1,14 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { load, dump } from 'js-yaml';
+import { dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { ensureWorkspace, type ModifyResult } from './workspace-modify.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { WorkspaceConfig, Repository, ClientType } from '../models/workspace-config.js';
 import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from './repo-skills.js';
+import { parseWorkspaceConfigForEdit } from '../utils/workspace-parser.js';
 
 /**
  * Detect source platform and owner/repo from a git remote at the given path.
@@ -86,8 +87,7 @@ export async function addRepository(
   await ensureWorkspace(workspacePath);
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     // Check for duplicate path
     if (config.repositories.some((r) => normalizePath(r.path) === normalizedPath)) {
@@ -125,8 +125,7 @@ export async function removeRepository(
   }
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     const normalizedPath = normalizePath(path);
     const index = config.repositories.findIndex((r) => normalizePath(r.path) === normalizedPath);
@@ -153,8 +152,7 @@ export async function listRepositories(
   if (!existsSync(configPath)) return [];
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
     return config.repositories ?? [];
   } catch {
     return [];
@@ -180,8 +178,7 @@ export async function updateAgentFiles(
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
   if (!existsSync(configPath)) return;
 
-  const content = await readFile(configPath, 'utf-8');
-  const config = load(content) as WorkspaceConfig;
+  const config = await parseWorkspaceConfigForEdit(configPath);
 
   if (config.repositories.length === 0) return;
 

@@ -15,9 +15,12 @@ import {
 } from '../core/workspace-modify.js';
 import {
   type WorkspaceConfig,
-  WorkspaceConfigSchema,
   getPluginSource,
 } from '../models/workspace-config.js';
+import {
+  validateProjectWorkspaceConfig,
+  validateUserWorkspaceConfig,
+} from '../utils/workspace-parser.js';
 
 export interface CreateSkillUpdateReconcilerOptions {
   workspacePath: string;
@@ -41,18 +44,20 @@ function configPathForInstallation(
     : (options.userConfigPath ?? getUserWorkspaceConfigPath());
 }
 
-function parseConfig(content: string, path: string): WorkspaceConfig {
+function parseConfig(
+  content: string,
+  path: string,
+  scope: SkillUpdateInstallation['scope'],
+): WorkspaceConfig {
   const raw = load(content);
-  const parsed = WorkspaceConfigSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new Error(
-      `Invalid workspace config at ${path}: ${parsed.error.issues
-        .map((issue) => issue.message)
-        .join('; ')}`,
-    );
+  if (scope === 'user') {
+    validateUserWorkspaceConfig(raw, path);
+  } else {
+    validateProjectWorkspaceConfig(raw, path);
   }
-  // Validate with the schema, but transform the raw object so Zod defaults and
-  // client shorthand normalization do not rewrite unrelated user config.
+  // Validate with the correct scoped schema, but transform the raw object so
+  // defaults and client shorthand normalization do not rewrite unrelated user
+  // configuration.
   return raw as WorkspaceConfig;
 }
 
@@ -207,7 +212,14 @@ function transformConfig(
   installations: SkillUpdateInstallation[],
   unit: SkillUpdateUnit,
 ): string {
-  const config = parseConfig(original, path);
+  const scope = installations[0]?.scope;
+  if (!scope) {
+    throw new Error(`No installations supplied for staged config ${path}`);
+  }
+  if (installations.some((installation) => installation.scope !== scope)) {
+    throw new Error(`Mixed user and project installations target ${path}`);
+  }
+  const config = parseConfig(original, path, scope);
   const removedInstallationIds = new Set(unit.removedInstallationIds ?? []);
   const survivorInstallationIds = new Set(
     unit.survivors.map((impact) => impact.installationId),
@@ -278,7 +290,7 @@ function transformConfig(
   }
 
   const replacement = dump(config, { lineWidth: -1 });
-  parseConfig(replacement, path);
+  parseConfig(replacement, path, scope);
   return replacement;
 }
 

@@ -2,7 +2,10 @@ import { describe, it, expect } from 'bun:test';
 import { writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { parseWorkspaceConfig } from '../../../src/utils/workspace-parser.js';
+import {
+  parseUserWorkspaceConfig,
+  parseWorkspaceConfig,
+} from '../../../src/utils/workspace-parser.js';
 
 function createTestDir(): string {
   return mkdtempSync(join(tmpdir(), 'allagents-parser-'));
@@ -89,6 +92,72 @@ clients: []
       writeFileSync(configPath, invalidConfig);
 
       await expect(parseWorkspaceConfig(configPath)).rejects.toThrow('validation failed');
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('scoped workspace parsing', () => {
+  it('parses profiles only from a user workspace', async () => {
+    const testDir = createTestDir();
+    try {
+      const configPath = join(testDir, 'workspace.yaml');
+      writeFileSync(
+        configPath,
+        `
+profiles:
+  research:
+    clients:
+      - name: pi
+        launcher: pi-research
+`,
+      );
+
+      const result = await parseUserWorkspaceConfig(configPath);
+      expect(result.repositories).toEqual([]);
+      expect(result.plugins).toEqual([]);
+      expect(result.clients).toEqual([]);
+      expect(result.profiles?.research?.clients[0]?.settings).toEqual({});
+
+      await expect(parseWorkspaceConfig(configPath)).rejects.toThrow(
+        'profiles',
+      );
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('surfaces nested user profile validation paths', async () => {
+    const testDir = createTestDir();
+    try {
+      const configPath = join(testDir, 'workspace.yaml');
+      writeFileSync(
+        configPath,
+        `
+profiles:
+  research:
+    clients:
+      - name: pi
+        settings:
+          generatedPath: /tmp/pi
+`,
+      );
+
+      await expect(parseUserWorkspaceConfig(configPath)).rejects.toThrow(
+        'profiles.research.clients.0.settings',
+      );
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('propagates malformed user YAML instead of treating it as absent', async () => {
+    const testDir = createTestDir();
+    try {
+      const configPath = join(testDir, 'workspace.yaml');
+      writeFileSync(configPath, 'profiles: [');
+      await expect(parseUserWorkspaceConfig(configPath)).rejects.toThrow();
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }

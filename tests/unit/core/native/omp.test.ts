@@ -10,6 +10,8 @@ import { join } from 'node:path';
 import {
   OmpNativeClient,
   inspectOmpMarketplaceRegistry,
+  ompProfileNativeScope,
+  resolveOmpMarketplacePluginSource,
 } from '../../../../src/core/native/omp.js';
 import type {
   NativeCommandOptions,
@@ -132,6 +134,23 @@ function writeMarketplace(
     ],
   });
 }
+function writeMarketplaceRevision(
+  paths: OmpFixture,
+  sha: string,
+  name = 'tools',
+): void {
+  const gitDirectory = join(
+    paths.dataRoot,
+    'plugins',
+    'cache',
+    'marketplaces',
+    name,
+    '.git',
+  );
+  mkdirSync(gitDirectory, { recursive: true });
+  writeFileSync(join(gitDirectory, 'HEAD'), `${sha}\n`);
+}
+
 
 function summary(
   paths: OmpFixture,
@@ -262,6 +281,127 @@ describe('native/omp version and context', () => {
       expect(call.options?.env?.PI_CONFIG_FILES).toBeUndefined();
     }
     expect(calls.some((call) => call.args.includes('--profile'))).toBe(false);
+  });
+});
+
+describe('native/omp fetched marketplace source resolution', () => {
+  test('uses an exact plugin id to disambiguate a multi-plugin catalog', () => {
+    const paths = fixture();
+    const operationContext = context('user', paths);
+    const resolved = resolveOmpMarketplacePluginSource(
+      'reviewer@tools',
+      {
+        name: 'tools',
+        owner: { name: 'Example' },
+        plugins: [
+          { name: 'reviewer', source: './reviewer' },
+          { name: 'planner', source: './planner' },
+        ],
+      },
+      operationContext,
+    );
+
+    expect(resolved.success).toBe(true);
+    expect(resolved.resource).toMatchObject({
+      requestedIdentity: 'reviewer@tools',
+      resolvedIdentity: 'reviewer@tools',
+      provenance: {
+        pluginName: 'reviewer',
+        marketplaceName: 'tools',
+      },
+    });
+  });
+
+  test('derives the sole plugin from GitHub and local marketplace sources', () => {
+    const paths = fixture();
+    const operationContext = context('user', paths);
+    const catalog = {
+      name: 'tools',
+      owner: { name: 'Example' },
+      plugins: [{ name: 'reviewer', source: './reviewer' }],
+    };
+
+    const github = resolveOmpMarketplacePluginSource(
+      'https://github.com/Acme/Tools.git',
+      catalog,
+      operationContext,
+    );
+    expect(github.success).toBe(true);
+    expect(github.resource).toMatchObject({
+      resolvedIdentity: 'reviewer@tools',
+      provenance: {
+        marketplaceSource: 'acme/tools',
+      },
+    });
+
+    const local = resolveOmpMarketplacePluginSource(
+      './marketplaces/tools',
+      catalog,
+      operationContext,
+    );
+    expect(local.success).toBe(true);
+    expect(local.resource).toMatchObject({
+      resolvedIdentity: 'reviewer@tools',
+      provenance: {
+        marketplaceSource: join(paths.workspace, 'marketplaces', 'tools'),
+      },
+    });
+  });
+
+  test('rejects ambiguous, mismatched, malformed, and credential-bearing sources', () => {
+    const paths = fixture();
+    const operationContext = context('user', paths);
+    const plugin = { name: 'reviewer', source: './reviewer' };
+    const catalogs = [
+      {
+        name: 'tools',
+        owner: { name: 'Example' },
+        plugins: [plugin, { name: 'planner', source: './planner' }],
+      },
+      {
+        name: 'different',
+        owner: { name: 'Example' },
+        plugins: [plugin],
+      },
+      {
+        name: 'tools',
+        owner: { name: 'Example' },
+        plugins: [{ name: '../escape', source: './reviewer' }],
+      },
+    ];
+
+    expect(
+      resolveOmpMarketplacePluginSource(
+        'acme/tools',
+        catalogs[0],
+        operationContext,
+      ).error,
+    ).toContain('exactly one plugin');
+    expect(
+      resolveOmpMarketplacePluginSource(
+        'reviewer@tools',
+        catalogs[1],
+        operationContext,
+      ).error,
+    ).toContain('does not match');
+    expect(
+      resolveOmpMarketplacePluginSource(
+        'acme/tools',
+        catalogs[2],
+        operationContext,
+      ).success,
+    ).toBe(false);
+    expect(
+      resolveOmpMarketplacePluginSource(
+        'https://token@example.com/acme/tools',
+        {
+          name: 'tools',
+          owner: { name: 'Example' },
+          plugins: [plugin],
+        },
+        operationContext,
+      ).success,
+    ).toBe(false);
   });
 });
 
@@ -627,4 +767,271 @@ describe('native/omp ordered command effects', () => {
       'reviewer@tools',
     ]);
   });
+});
+
+describe('native/omp named profile scope', () => {
+  test('rejects OMP reserved default profile name', () => {
+    expect(() => ompProfileNativeScope('default')).toThrow(
+      "Invalid OMP profile name 'default'",
+    );
+  });
+
+  test('prefixes every runtime command and neutralizes ambient selectors', async () => {
+    const paths = fixture();
+    const operationContext = {
+      ...context('user', paths),
+      nativeScope: 'profile:review',
+    };
+    const marketplace: MarketplaceSummary[] = [];
+    const calls: Array<{ args: string[]; options?: NativeCommandOptions }> = [];
+    const client = new OmpNativeClient({
+      execute: async (_binary, args, options) => {
+        calls.push({ args, ...(options && { options }) });
+        const command = args.slice(2);
+        if (command[0] === '--version') {
+          return { success: true, output: 'omp/18.1.20' };
+        }
+        if (command[0] === 'plugin' && command[1] === 'list') {
+          return { success: true, output: inventory(marketplace) };
+        }
+        if (command[0] === 'plugin' && command[1] === 'marketplace') {
+          writeMarketplace(paths);
+          return { success: true, output: 'added' };
+        }
+        if (command[0] === 'plugin' && command[1] === 'install') {
+          marketplace.push(summary(paths, 'user'));
+          return { success: true, output: 'installed' };
+        }
+        if (command[0] === 'plugin' && command[1] === 'uninstall') {
+          marketplace.splice(0);
+          return { success: true, output: 'removed' };
+        }
+        if (command[0] === 'plugin' && command[1] === 'upgrade') {
+          return { success: true, output: 'upgraded' };
+        }
+        return { success: false, output: '', exitCode: 1 };
+      },
+    });
+    const resource = pluginResource(
+      client,
+      operationContext,
+      'reviewer@tools',
+      'acme/tools',
+    );
+
+    expect((await client.install(resource, operationContext)).success).toBe(true);
+    expect(
+      (await client.update(resource, resource, operationContext)).success,
+    ).toBe(true);
+    expect((await client.remove(resource, operationContext)).success).toBe(true);
+
+    expect(calls.map(({ args }) => args)).toEqual([
+      ['--profile', 'review', '--version'],
+      ['--profile', 'review', 'plugin', 'list', '--json'],
+      ['--profile', 'review', 'plugin', 'marketplace', 'add', 'acme/tools'],
+      [
+        '--profile',
+        'review',
+        'plugin',
+        'install',
+        '--scope',
+        'user',
+        'reviewer@tools',
+      ],
+      ['--profile', 'review', 'plugin', 'list', '--json'],
+      ['--profile', 'review', 'plugin', 'list', '--json'],
+      [
+        '--profile',
+        'review',
+        'plugin',
+        'upgrade',
+        '--scope',
+        'user',
+        'reviewer@tools',
+      ],
+      ['--profile', 'review', 'plugin', 'list', '--json'],
+      ['--profile', 'review', 'plugin', 'list', '--json'],
+      [
+        '--profile',
+        'review',
+        'plugin',
+        'uninstall',
+        '--scope',
+        'user',
+        'reviewer@tools',
+      ],
+      ['--profile', 'review', 'plugin', 'list', '--json'],
+    ]);
+    for (const call of calls) {
+      expect(call.options?.cwd).toBe(paths.workspace);
+      expect(call.options?.env?.SENTINEL).toBe('preserved');
+      expect(call.options?.env?.OMP_PROFILE).toBeUndefined();
+      expect(call.options?.env?.PI_PROFILE).toBeUndefined();
+      expect(call.options?.env?.PI_CONFIG_FILES).toBeUndefined();
+    }
+  });
+  test('preserves named scope from inspection through update and removal', async () => {
+    const paths = fixture();
+    writeMarketplace(paths);
+    const operationContext = {
+      ...context('user', paths),
+      nativeScope: 'profile:review',
+    };
+    const installed = [summary(paths, 'user')];
+    const client = new OmpNativeClient({
+      execute: async (_binary, args) => {
+        const command = args.slice(2);
+        if (command[0] === '--version') {
+          return { success: true, output: 'omp/18.1.20' };
+        }
+        if (command[0] === 'plugin' && command[1] === 'list') {
+          return { success: true, output: inventory(installed) };
+        }
+        if (command[0] === 'plugin' && command[1] === 'upgrade') {
+          return { success: true, output: 'upgraded' };
+        }
+        if (command[0] === 'plugin' && command[1] === 'uninstall') {
+          installed.splice(0);
+          return { success: true, output: 'removed' };
+        }
+        return { success: false, output: '', exitCode: 1 };
+      },
+    });
+
+    const inspection = await client.inspect(operationContext);
+    expect(inspection.success).toBe(true);
+    expect(inspection.resources[0]?.context.nativeScope).toBe('profile:review');
+    const resource = inspection.resources[0]!;
+    expect(
+      (await client.update(resource, resource, operationContext)).success,
+    ).toBe(true);
+    expect((await client.remove(resource, operationContext)).success).toBe(true);
+  });
+
+  test('installs canonical main only from the resolved marketplace revision', async () => {
+    const installFromRevision = async (actualSha: string) => {
+      const paths = fixture();
+      const operationContext = {
+        ...context('user', paths),
+        nativeScope: 'profile:review',
+      };
+      const installed: MarketplaceSummary[] = [];
+      const calls: string[][] = [];
+      const client = new OmpNativeClient({
+        execute: async (_binary, args) => {
+          calls.push(args);
+          const command = args.slice(2);
+          if (command[0] === '--version') {
+            return { success: true, output: 'omp/18.1.20' };
+          }
+          if (command[0] === 'plugin' && command[1] === 'list') {
+            return { success: true, output: inventory(installed) };
+          }
+          if (
+            command[0] === 'plugin' &&
+            command[1] === 'marketplace' &&
+            command[2] === 'add'
+          ) {
+            writeMarketplace(paths);
+            writeMarketplaceRevision(paths, actualSha);
+            return { success: true, output: 'added' };
+          }
+          if (command[0] === 'plugin' && command[1] === 'install') {
+            installed.push(summary(paths, 'user'));
+            return { success: true, output: 'installed' };
+          }
+          return { success: false, output: '', exitCode: 1 };
+        },
+      });
+      const expectedSha = 'a'.repeat(40);
+      const resource = client.resolveSource(
+        'reviewer@tools',
+        operationContext,
+        {
+          marketplaceSource: 'acme/tools',
+          requestedRef: 'main',
+          resolvedRef: 'main',
+          resolvedSha: expectedSha,
+        },
+      ).resource!;
+      return {
+        result: await client.install(resource, operationContext),
+        calls,
+      };
+    };
+
+    const accepted = await installFromRevision('a'.repeat(40));
+    expect(accepted.result.success).toBe(true);
+    expect(
+      accepted.calls.some((args) => args.includes('install')),
+    ).toBe(true);
+
+    const mismatched = await installFromRevision('b'.repeat(40));
+    expect(mismatched.result.success).toBe(false);
+    expect(mismatched.result.error).toContain(
+      "resolved revision does not match requested 'main'",
+    );
+    expect(
+      mismatched.calls.some((args) => args.includes('install')),
+    ).toBe(false);
+  });
+
+  test('removes only unreferenced named-profile marketplace registrations', async () => {
+    const paths = fixture();
+    writeMarketplace(paths);
+    const operationContext = {
+      ...context('user', paths),
+      nativeScope: 'profile:review',
+    };
+    const installed = [summary(paths, 'user')];
+    const calls: string[][] = [];
+    const client = new OmpNativeClient({
+      execute: async (_binary, args) => {
+        calls.push(args);
+        const command = args.slice(2);
+        if (command[0] === '--version') {
+          return { success: true, output: 'omp/18.1.20' };
+        }
+        if (command[0] === 'plugin' && command[1] === 'list') {
+          return { success: true, output: inventory(installed) };
+        }
+        if (
+          command[0] === 'plugin' &&
+          command[1] === 'marketplace' &&
+          command[2] === 'remove'
+        ) {
+          writeJson(join(paths.dataRoot, 'marketplaces.json'), {
+            version: 1,
+            marketplaces: [],
+          });
+          return { success: true, output: 'removed' };
+        }
+        return { success: false, output: '', exitCode: 1 };
+      },
+    });
+
+    const referenced = await client.removeMarketplaceRegistration(
+      'tools',
+      operationContext,
+    );
+    expect(referenced.success).toBe(false);
+    expect(referenced.error).toContain("still referenced by 'reviewer@tools'");
+    expect(calls.some((args) => args.includes('remove'))).toBe(false);
+
+    installed.splice(0);
+    expect(
+      (
+        await client.removeMarketplaceRegistration('tools', operationContext)
+      ).success,
+    ).toBe(true);
+    expect(calls).toContainEqual([
+      '--profile',
+      'review',
+      'plugin',
+      'marketplace',
+      'remove',
+      'tools',
+    ]);
+  });
+
 });

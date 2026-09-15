@@ -61,8 +61,13 @@ Native install mode delegates plugin lifecycle to Pi's package manager. Pi
 0.85.1 through 0.85.x is supported. Package sources may be npm specs such as
 `npm:pi-extension`, Git repositories, or local paths. Project-native operations
 fail before mutation unless Pi's trusted settings outside the project boundary
-authorize that project. AllAgents inspects `pi-mcp-adapter` state but does not
-install or configure the adapter.
+authorize that project. Ordinary workspace sync only inspects
+`pi-mcp-adapter`; a Pi global profile may declare
+`npm:pi-mcp-adapter` with `install: native` and then materialize profile-scoped
+MCP configuration after the installed package is verified as usable.
+Pre-existing usable adapters are recorded as referenced and preserved.
+Pi profile launchers select an isolated `PI_CODING_AGENT_DIR` while retaining
+the caller's working directory and normal project package discovery.
 
 Pi provides lifecycle interception through extensions discovered from
 `.pi/extensions/` and `~/.pi/agent/extensions/`, not through the portable
@@ -86,6 +91,13 @@ is not interchangeable with OMP's JS/TS hook factories.
 Ordinary OMP operations always address the unnamed profile: AllAgents removes
 inherited `OMP_PROFILE`, `PI_PROFILE`, and `PI_CONFIG_FILES` selectors while
 preserving the active HOME and XDG roots.
+
+OMP global profiles use the runtime's native `--profile <name>` selector.
+AllAgents pins HOME, `PI_CONFIG_DIR`, and active XDG roots consistently across
+planning, native commands, status, and generated launchers. The canonical
+GitHub `main` ref is resolved to a revision before mutation and verified against
+OMP's marketplace checkout. Profile removal unregisters a marketplace only
+when this profile introduced it and no installed plugin still references it.
 
 ### VSCode
 

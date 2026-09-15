@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { dump, load } from 'js-yaml';
+import { dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   ClientEntry,
@@ -11,6 +11,7 @@ import type {
 } from '../models/workspace-config.js';
 import { getPluginSource } from '../models/workspace-config.js';
 import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
+import { parseWorkspaceConfigForEdit } from '../utils/workspace-parser.js';
 import {
   isFilesystemRoot,
   isGitHubUrl,
@@ -55,8 +56,7 @@ export async function setClients(
   try {
     await ensureWorkspace(workspacePath);
     const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
     config.clients = clients;
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };
@@ -201,8 +201,7 @@ async function addPluginToConfig(
 ): Promise<ModifyResult> {
   try {
     // Read current config
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     // Check if plugin already exists (exact match)
     const existingExactIndex = config.plugins.findIndex(
@@ -281,8 +280,7 @@ export async function hasPlugin(
   if (!existsSync(configPath)) return false;
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     // Exact match first
     if (config.plugins.some((entry) => getPluginSource(entry) === plugin))
@@ -324,8 +322,7 @@ export async function removePlugin(
 
   try {
     // Read current config
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     // Find plugin - exact match first
     let index = config.plugins.findIndex(
@@ -631,8 +628,7 @@ export async function getDisabledSkills(
   if (!existsSync(configPath)) return [];
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
     const result: string[] = [];
 
     for (const entry of config.plugins) {
@@ -689,8 +685,7 @@ export async function addDisabledSkill(
   const { pluginName, skillName } = parsed;
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -756,8 +751,7 @@ export async function removeDisabledSkill(
   const { pluginName, skillName } = parsed;
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -814,8 +808,7 @@ export async function getEnabledSkills(
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
   if (!existsSync(configPath)) return [];
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
     const result: string[] = [];
 
     for (const entry of config.plugins) {
@@ -866,8 +859,7 @@ export async function addEnabledSkill(
   const { pluginName, skillName } = parsed;
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -932,8 +924,7 @@ export async function removeEnabledSkill(
   const { pluginName, skillName } = parsed;
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -1002,8 +993,7 @@ export async function setPluginSkillsMode(
   }
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     const index = findPluginEntryByName(config, pluginName);
     if (index === -1) {
@@ -1048,8 +1038,7 @@ export async function upsertGitHubPluginSourceAllowlist(
   }
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
     const result = await upsertGitHubPluginSourceAllowlistInConfig(
       config,
       source,
@@ -1143,8 +1132,7 @@ export async function migrateWorkspaceSkillsV1toV2(
 
   let config: WorkspaceConfig;
   try {
-    const content = await readFile(configPath, 'utf-8');
-    config = load(content) as WorkspaceConfig;
+    config = await parseWorkspaceConfigForEdit(configPath);
   } catch {
     return;
   }
@@ -1231,8 +1219,7 @@ export async function updateRepositories(
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
 
     const removeSet = new Set(changes.remove);
     config.repositories = config.repositories.filter(
@@ -1261,8 +1248,7 @@ export async function setRepositories(
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
 
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = await parseWorkspaceConfigForEdit(configPath);
     config.repositories = repositories;
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
     return { success: true };

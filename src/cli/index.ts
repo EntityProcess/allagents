@@ -7,6 +7,7 @@ import { pluginCmd } from './commands/plugin.js';
 import { mcpCmd } from './commands/mcp.js';
 import { selfCmd } from './commands/self.js';
 import { skillsCmd } from './commands/plugin-skills.js';
+import { profileCmd } from './commands/profile.js';
 import {
   extractJsonFlag,
   extractJqFlag,
@@ -37,6 +38,7 @@ const app = conciseSubcommands({
     mcp: mcpCmd,
     self: selfCmd,
     skill: skillsCmd,
+    profile: profileCmd,
   },
 });
 

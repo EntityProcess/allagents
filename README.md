@@ -91,9 +91,13 @@ clients:
 |---|---|
 | `allagents init <path>` | Create a workspace (optionally `--from owner/repo`) |
 | `allagents update` | Sync all plugins to workspace |
+| `allagents update --profile <name>` | Reconcile an installed global profile |
 | `allagents plugin install <spec>` | Install a plugin |
 | `allagents plugin uninstall <spec>` | Remove a plugin |
 | `allagents plugin list` | List installed plugins and skills with source, scope, and clients |
+| `allagents profile install <name> --yes` | Install a declared global profile |
+| `allagents profile status [name]` | Inspect declared and installed profiles |
+| `allagents profile remove <name> --yes` | Remove unchanged managed profile resources |
 | `allagents skill add <name>` | Add a skill from a repo (plural `skills` alias supported) |
 | `allagents skill list` | List skills and status |
 | `allagents mcp add <name> <commandOrUrl>` | Add an MCP server and sync to clients |

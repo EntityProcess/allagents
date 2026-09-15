@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve } from 'node:path';
 import { normalize, sep } from 'node:path';
@@ -41,10 +41,10 @@ import { getUserWorkspaceConfigPath } from '../core/user-workspace.js';
 import type {
   PluginEntry,
   PluginSkillsConfig,
+  UserWorkspaceConfig,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
 import {
-  WorkspaceConfigSchema,
   getEffectivePluginSource,
   getPluginSource,
 } from '../models/workspace-config.js';
@@ -55,6 +55,10 @@ import {
   isGitHubUrl,
   parseGitHubUrl,
 } from '../utils/plugin-path.js';
+import {
+  parseUserWorkspaceConfig,
+  parseWorkspaceConfig,
+} from '../utils/workspace-parser.js';
 import { createSkillUpdateReconciler } from './skill-update-reconciliation.js';
 
 const execFileAsync = promisify(execFile);
@@ -215,23 +219,17 @@ function configPath(scope: SkillUpdateScope, workspacePath: string): string {
     : getUserWorkspaceConfigPath();
 }
 
+type SkillUpdateWorkspaceConfig = WorkspaceConfig | UserWorkspaceConfig;
+
 async function readConfig(
   scope: SkillUpdateScope,
   workspacePath: string,
-): Promise<WorkspaceConfig | null> {
+): Promise<SkillUpdateWorkspaceConfig | null> {
   const path = configPath(scope, workspacePath);
   if (!existsSync(path)) return null;
-  const { load } = await import('js-yaml');
-  const raw = load(await readFile(path, 'utf-8'));
-  const parsed = WorkspaceConfigSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new Error(
-      `Invalid workspace config at ${path}: ${parsed.error.issues
-        .map((issue) => issue.message)
-        .join('; ')}`,
-    );
-  }
-  return raw as WorkspaceConfig;
+  return scope === 'user'
+    ? parseUserWorkspaceConfig(path)
+    : parseWorkspaceConfig(path);
 }
 
 async function revision(path: string): Promise<string> {
@@ -248,7 +246,7 @@ function posixPath(path: string): string {
 function enabledSkills(
   entries: DiscoveredSkillEntry[],
   pluginName: string,
-  config: WorkspaceConfig,
+  config: SkillUpdateWorkspaceConfig,
   pluginSkills: PluginSkillsConfig | undefined,
 ): InstalledSkill[] {
   const isV1 = config.version === undefined || config.version < 2;
@@ -364,7 +362,7 @@ async function inventoryDirect(
   scope: SkillUpdateScope,
   configIndex: number,
   plugin: PluginEntry,
-  config: WorkspaceConfig,
+  config: SkillUpdateWorkspaceConfig,
 ): Promise<SkillUpdateInstallation | null> {
   const effectiveSource = getEffectivePluginSource(plugin);
   const parsed = parseGitHubUrl(effectiveSource);
@@ -404,7 +402,7 @@ async function inventoryMarketplace(
   scope: SkillUpdateScope,
   configIndex: number,
   plugin: PluginEntry,
-  config: WorkspaceConfig,
+  config: SkillUpdateWorkspaceConfig,
   workspacePath: string,
 ): Promise<SkillUpdateInstallation | null | 'local'> {
   const rawSource = getPluginSource(plugin);
@@ -547,7 +545,7 @@ export async function buildSkillUpdateInventory(
   // an unrelated broken user plugin from blocking a project-only update while
   // still making shared caches a cross-scope safety boundary.
   for (const scope of ['project', 'user'] as const) {
-    let config: WorkspaceConfig | null;
+    let config: SkillUpdateWorkspaceConfig | null;
     try {
       config = await readConfig(scope, workspacePath);
     } catch (error) {

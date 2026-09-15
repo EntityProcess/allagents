@@ -120,7 +120,7 @@ describe('agent command metadata', () => {
   test('update has expected options', () => {
     const syncCmd = allCommands.find((c) => c.command === 'update')!;
     expect(syncCmd.options).toBeInstanceOf(Array);
-    expect(syncCmd.options!.length).toBe(3);
+    expect(syncCmd.options!.length).toBe(4);
 
     const dryRun = syncCmd.options!.find((o) => o.flag === '--dry-run');
     expect(dryRun).toBeDefined();
@@ -134,6 +134,11 @@ describe('agent command metadata', () => {
     expect(verbose).toBeDefined();
     expect(verbose!.type).toBe('boolean');
     expect(verbose!.short).toBe('-v');
+
+    const profile = syncCmd.options!.find((o) => o.flag === '--profile');
+    expect(profile).toBeDefined();
+    expect(profile!.type).toBe('string');
+    expect(profile!.description).toContain('repeatable');
   });
 
   test('plugin install has required positional', () => {
@@ -150,9 +155,8 @@ describe('agent command metadata', () => {
     expect(statusCmd.options).toBeUndefined();
   });
 
-  test('describes ordinary Pi and OMP behavior without profile surfaces', () => {
+  test('keeps ordinary Pi and OMP metadata distinct from profile-aware update', () => {
     const ordinaryMetadata = [
-      syncMeta,
       statusMeta,
       pluginListMeta,
       pluginInstallMeta,
@@ -163,7 +167,7 @@ describe('agent command metadata', () => {
     expect(text).toContain('Pi');
     expect(text).toContain('OMP');
     expect(text.toLowerCase()).not.toContain('profile');
-    expect(allCommands.some((command) => command.command.includes('profile'))).toBe(false);
+    expect(JSON.stringify(syncMeta).toLowerCase()).toContain('--profile');
   });
 });
 
