@@ -162,22 +162,17 @@ async function copyDirectoryWithExclusions(
   }
 }
 
-interface DirectoryFile {
-  source: string;
-  relativePath: string;
-}
-
 async function collectDirectoryFiles(
   sourceRoot: string,
   pluginPath: string,
   exclude?: string[],
   relativeDir = '',
-): Promise<DirectoryFile[]> {
+): Promise<string[]> {
   const directory = join(sourceRoot, relativeDir);
   const entries = await readdir(directory, { withFileTypes: true });
   entries.sort((a, b) => a.name.localeCompare(b.name));
 
-  const files: DirectoryFile[] = [];
+  const files: string[] = [];
   for (const entry of entries) {
     const relativePath = join(relativeDir, entry.name);
     const source = join(sourceRoot, relativePath);
@@ -193,7 +188,7 @@ async function collectDirectoryFiles(
         )),
       );
     } else {
-      files.push({ source, relativePath });
+      files.push(relativePath);
     }
   }
   return files;
@@ -731,11 +726,23 @@ export async function copyHooks(
     existsSync(join(sourceDir, 'hooks.json'))
       ? [...(options.exclude ?? []), 'hooks/hooks.json']
       : options.exclude;
-  const hookFiles = await collectDirectoryFiles(
-    sourceDir,
-    pluginPath,
-    effectiveExclude,
-  );
+  let hookFiles: string[];
+  try {
+    hookFiles = await collectDirectoryFiles(
+      sourceDir,
+      pluginPath,
+      effectiveExclude,
+    );
+  } catch (error) {
+    return [{
+      source: sourceDir,
+      destination: destDir,
+      action: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      client,
+      artifactType: 'hook',
+    }];
+  }
   const writeRoot = options.writeRoot ?? workspacePath;
 
   try {
@@ -751,30 +758,37 @@ export async function copyHooks(
     }];
   }
 
-  return Promise.all(
-    hookFiles.map(async ({ source, relativePath }): Promise<CopyResult> => {
-      const destination = join(destDir, relativePath);
-      if (dryRun) {
-        return { source, destination, action: 'copied' };
-      }
+  const results: CopyResult[] = [];
+  const preparedDirectories = new Set<string>();
+  for (const relativePath of hookFiles) {
+    const source = join(sourceDir, relativePath);
+    const destination = join(destDir, relativePath);
+    if (dryRun) {
+      results.push({ source, destination, action: 'copied' });
+      continue;
+    }
 
-      try {
-        await assertSafeDestination(writeRoot, destination);
-        await mkdir(dirname(destination), { recursive: true });
-        await cp(source, destination);
-        return { source, destination, action: 'copied' };
-      } catch (error) {
-        return {
-          source,
-          destination,
-          action: 'failed',
-          error: error instanceof Error ? error.message : 'Unknown error',
-          client,
-          artifactType: 'hook',
-        };
+    try {
+      await assertSafeDestination(writeRoot, destination);
+      const destinationDirectory = dirname(destination);
+      if (!preparedDirectories.has(destinationDirectory)) {
+        await mkdir(destinationDirectory, { recursive: true });
+        preparedDirectories.add(destinationDirectory);
       }
-    }),
-  );
+      await cp(source, destination);
+      results.push({ source, destination, action: 'copied' });
+    } catch (error) {
+      results.push({
+        source,
+        destination,
+        action: 'failed',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        client,
+        artifactType: 'hook',
+      });
+    }
+  }
+  return results;
 }
 
 /**

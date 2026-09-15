@@ -78,6 +78,20 @@ describe('OMP hook sync', () => {
     expect(await readFile(join(destinationDir, 'local.ts'), 'utf8')).toContain('local');
   });
 
+  it('reports an unreadable hook artifact without aborting plugin sync', async () => {
+    root = await mkdtemp(join(tmpdir(), 'allagents-omp-hooks-'));
+    const plugin = join(root, 'plugin');
+    const workspace = join(root, 'workspace');
+    await mkdir(plugin, { recursive: true });
+    await mkdir(workspace, { recursive: true });
+    await writeFile(join(plugin, 'hooks'), 'not a directory\n');
+
+    const results = await copyHooks(plugin, workspace, 'omp');
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.action).toBe('failed');
+  });
+
   it('rejects a hook destination beneath a symlinked client root', async () => {
     root = await mkdtemp(join(tmpdir(), 'allagents-omp-hooks-'));
     const plugin = join(root, 'plugin');
