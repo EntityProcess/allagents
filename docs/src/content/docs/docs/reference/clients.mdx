@@ -7,7 +7,9 @@ AllAgents supports 25 AI coding assistants, organized into universal clients (sh
 
 ## Universal Clients
 
-These clients share the canonical `.agents/skills/` directory:
+These clients primarily share the canonical `.agents/skills/` directory. The
+Hooks column records artifacts AllAgents materializes; it is not a complete
+inventory of each runtime's native extension APIs.
 
 | Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
 |--------|--------|------------|-------|----------|------------------|
@@ -22,13 +24,14 @@ These clients share the canonical `.agents/skills/` directory:
 
 ## Provider-Specific Clients
 
-These clients use their own skills directory:
+These clients use their own skills directory. As above, Hooks lists
+AllAgents-managed destinations rather than every native extension mechanism:
 
 | Client | Skills | Agent File | Hooks | Commands |
 |--------|--------|------------|-------|----------|
 | Claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
-| Pi | `.pi/skills/` | `AGENTS.md` | No | No |
-| OMP | `.omp/skills/` | `AGENTS.md` | No | No |
+| Pi | `.pi/skills/` | `AGENTS.md` | No—use Pi extensions | No |
+| OMP | `.omp/skills/` | `AGENTS.md` | `.omp/hooks/` | No |
 | Cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
 | Factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
 | OpenClaw | `skills/` | `AGENTS.md` | No | No |
@@ -61,14 +64,24 @@ fail before mutation unless Pi's trusted settings outside the project boundary
 authorize that project. AllAgents inspects `pi-mcp-adapter` state but does not
 install or configure the adapter.
 
+Pi provides lifecycle interception through extensions discovered from
+`.pi/extensions/` and `~/.pi/agent/extensions/`, not through the portable
+plugin `hooks/` artifact. AllAgents therefore does not map `hooks/` into Pi;
+native Pi packages can supply extensions through Pi's package lifecycle.
+
 ### OMP
 
-File sync writes project skills to `.omp/skills/` and user skills to
-`~/.omp/agent/skills/`. Native install mode requires OMP 18.1.17 or newer and a
-marketplace-backed plugin spec such as
-`compound-engineering@EveryInc/compound-engineering-plugin`. AllAgents registers
-the required marketplace, delegates scoped install, update, and uninstall to
-OMP, and preserves marketplace registrations on uninstall.
+File sync writes project skills to `.omp/skills/`, user skills to
+`~/.omp/agent/skills/`, and OMP JS/TS hook factories to the corresponding
+`hooks/pre/` or `hooks/post/` discovery path. A factory placed directly in
+`hooks/` is not discovered.
+
+Native install mode requires OMP 18.1.17 or newer and a marketplace-backed
+plugin spec such as `compound-engineering@EveryInc/compound-engineering-plugin`.
+AllAgents registers the required marketplace and delegates the complete plugin
+lifecycle—including OMP-compatible hooks—to OMP. OMP accepts Claude-compatible
+marketplace catalogs, but Claude Code's command-based `hooks/hooks.json` format
+is not interchangeable with OMP's JS/TS hook factories.
 
 Ordinary OMP operations always address the unnamed profile: AllAgents removes
 inherited `OMP_PROFILE`, `PI_PROFILE`, and `PI_CONFIG_FILES` selectors while

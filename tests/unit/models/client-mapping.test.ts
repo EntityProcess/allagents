@@ -73,6 +73,7 @@ describe('CLIENT_MAPPINGS', () => {
   test('pi and OMP use native project skill paths', () => {
     expect(CLIENT_MAPPINGS.pi.skillsPath).toBe('.pi/skills/');
     expect(CLIENT_MAPPINGS.omp.skillsPath).toBe('.omp/skills/');
+    expect(CLIENT_MAPPINGS.omp.hooksPath).toBe('.omp/hooks/');
   });
 
   test('opencode uses provider-specific .opencode/skills/ path', () => {
@@ -170,6 +171,7 @@ describe('USER_CLIENT_MAPPINGS', () => {
   test('pi and OMP use native default user skill paths', () => {
     expect(USER_CLIENT_MAPPINGS.pi.skillsPath).toBe('.pi/agent/skills/');
     expect(USER_CLIENT_MAPPINGS.omp.skillsPath).toBe('.omp/agent/skills/');
+    expect(USER_CLIENT_MAPPINGS.omp.hooksPath).toBe('.omp/agent/hooks/');
   });
 
   test('opencode uses provider-specific ~/.opencode/skills/ path', () => {

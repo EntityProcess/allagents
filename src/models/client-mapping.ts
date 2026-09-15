@@ -98,9 +98,14 @@ export const AGENT_HOSTS: readonly AgentHost[] = [
   {
     id: 'omp',
     name: 'OMP',
-    project: { skillsPath: '.omp/skills/', agentFile: 'AGENTS.md' },
+    project: {
+      skillsPath: '.omp/skills/',
+      hooksPath: '.omp/hooks/',
+      agentFile: 'AGENTS.md',
+    },
     user: {
       skillsPath: '.omp/agent/skills/',
+      hooksPath: '.omp/agent/hooks/',
       agentFile: '.omp/agent/AGENTS.md',
     },
   },
