@@ -25,6 +25,7 @@ import { serializeProfileMcpServers } from './mcp.js';
 
 const FILE_MAPPING = Object.freeze({
   skillsPath: 'skills/',
+  hooksPath: 'hooks/',
   agentFile: 'AGENTS.md',
 });
 const CAPABILITIES = Object.freeze({

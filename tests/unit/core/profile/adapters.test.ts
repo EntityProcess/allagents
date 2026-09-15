@@ -225,7 +225,11 @@ describe('OMP profile adapter', () => {
       client: 'omp',
       mechanism: 'named-profile',
       root: join(profileRoot, 'agent'),
-      fileMapping: { skillsPath: 'skills/', agentFile: 'AGENTS.md' },
+      fileMapping: {
+        skillsPath: 'skills/',
+        hooksPath: 'hooks/',
+        agentFile: 'AGENTS.md',
+      },
       launcher: {
         command: 'omp',
         args: ['--profile', 'review'],
