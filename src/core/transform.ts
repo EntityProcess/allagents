@@ -162,6 +162,43 @@ async function copyDirectoryWithExclusions(
   }
 }
 
+interface DirectoryFile {
+  source: string;
+  relativePath: string;
+}
+
+async function collectDirectoryFiles(
+  sourceRoot: string,
+  pluginPath: string,
+  exclude?: string[],
+  relativeDir = '',
+): Promise<DirectoryFile[]> {
+  const directory = join(sourceRoot, relativeDir);
+  const entries = await readdir(directory, { withFileTypes: true });
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  const files: DirectoryFile[] = [];
+  for (const entry of entries) {
+    const relativePath = join(relativeDir, entry.name);
+    const source = join(sourceRoot, relativePath);
+    if (isExcluded(pluginPath, source, exclude)) continue;
+
+    if (entry.isDirectory()) {
+      files.push(
+        ...(await collectDirectoryFiles(
+          sourceRoot,
+          pluginPath,
+          exclude,
+          relativePath,
+        )),
+      );
+    } else {
+      files.push({ source, relativePath });
+    }
+  }
+  return files;
+}
+
 /**
  * Options for skill copy operations
  */
@@ -673,16 +710,14 @@ export async function copyHooks(
 ): Promise<CopyResult[]> {
   const { dryRun = false } = options;
   const mapping = getMapping(client, options);
-  const results: CopyResult[] = [];
 
-  // Skip if client doesn't support hooks
   if (!mapping.hooksPath) {
-    return results;
+    return [];
   }
 
   const sourceDir = join(pluginPath, 'hooks');
   if (!existsSync(sourceDir)) {
-    return results;
+    return [];
   }
 
   const destDir = resolveMappedPath(workspacePath, mapping.hooksPath);
@@ -696,36 +731,50 @@ export async function copyHooks(
     existsSync(join(sourceDir, 'hooks.json'))
       ? [...(options.exclude ?? []), 'hooks/hooks.json']
       : options.exclude;
-
-  if (dryRun) {
-    results.push({ source: sourceDir, destination: destDir, action: 'copied' });
-    return results;
-  }
-
-  await mkdir(destDir, { recursive: true });
+  const hookFiles = await collectDirectoryFiles(
+    sourceDir,
+    pluginPath,
+    effectiveExclude,
+  );
+  const writeRoot = options.writeRoot ?? workspacePath;
 
   try {
-    if (effectiveExclude && effectiveExclude.length > 0) {
-      await copyDirectoryWithExclusions(
-        sourceDir,
-        destDir,
-        pluginPath,
-        effectiveExclude,
-      );
-    } else {
-      await cp(sourceDir, destDir, { recursive: true });
-    }
-    results.push({ source: sourceDir, destination: destDir, action: 'copied' });
+    await assertSafeDestination(writeRoot, destDir);
   } catch (error) {
-    results.push({
+    return [{
       source: sourceDir,
       destination: destDir,
       action: 'failed',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+      error: error instanceof Error ? error.message : 'Unsafe destination',
+      client,
+      artifactType: 'hook',
+    }];
   }
 
-  return results;
+  return Promise.all(
+    hookFiles.map(async ({ source, relativePath }): Promise<CopyResult> => {
+      const destination = join(destDir, relativePath);
+      if (dryRun) {
+        return { source, destination, action: 'copied' };
+      }
+
+      try {
+        await assertSafeDestination(writeRoot, destination);
+        await mkdir(dirname(destination), { recursive: true });
+        await cp(source, destination);
+        return { source, destination, action: 'copied' };
+      } catch (error) {
+        return {
+          source,
+          destination,
+          action: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+          client,
+          artifactType: 'hook',
+        };
+      }
+    }),
+  );
 }
 
 /**
