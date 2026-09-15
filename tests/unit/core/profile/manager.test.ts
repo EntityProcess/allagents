@@ -375,13 +375,13 @@ function dependencies(...adapters: MemoryProfileAdapter[]): ProfileManagerDepend
 
 describe('profile lifecycle manager', () => {
   test.skipIf(process.platform !== 'win32')(
-    'installs and executes a generated Windows profile launcher through a nested command shim',
+    'installs and executes generated Windows profile launchers through a nested command shim',
     async () => {
       const fixturePaths = await fixture();
       const launcherBin = join(fixturePaths.home, 'profile bin with spaces');
       const nativeBin = join(fixturePaths.home, 'native bin');
       const workingDirectory = join(fixturePaths.home, 'working directory');
-      const recorder = join(fixturePaths.home, 'record argv.cjs');
+      const nativeTarget = join(nativeBin, 'pi.js');
       const invoker = join(fixturePaths.home, 'invoke launcher.ps1');
       await Promise.all([
         mkdir(nativeBin, { recursive: true }),
@@ -389,8 +389,10 @@ describe('profile lifecycle manager', () => {
       ]);
       const canonicalWorkingDirectory = await realpath(workingDirectory);
       await writeFile(
-        recorder,
+        nativeTarget,
         [
+          '#!/usr/bin/env bun',
+          "if (process.argv[2] === '--version') { console.log('0.85.1'); process.exit(0); }",
           "process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR }));",
           'process.exit(23);',
         ].join('\n'),
@@ -398,16 +400,7 @@ describe('profile lifecycle manager', () => {
       );
       await writeFile(
         join(nativeBin, 'pi.cmd'),
-        [
-          '@echo off',
-          'if "%~1"=="--version" (',
-          '  echo 0.85.1',
-          '  exit /b 0',
-          ')',
-          `"${process.execPath}" "${recorder}" %*`,
-          'exit /b %ERRORLEVEL%',
-          '',
-        ].join('\r\n'),
+        ['@echo off', 'bun "%~dp0\\pi.js" %*', 'exit /b %ERRORLEVEL%', ''].join('\r\n'),
         'utf8',
       );
       await writeFile(
@@ -416,10 +409,14 @@ describe('profile lifecycle manager', () => {
           'param(',
           '  [Parameter(Mandatory = $true, Position = 0)]',
           '  [string] $Launcher,',
-          '  [Parameter(Position = 1, ValueFromRemainingArguments = $true)]',
-          '  [string[]] $Forwarded',
+          '  [Parameter(Mandatory = $true, Position = 1)]',
+          '  [string] $Payload',
           ')',
-          '& $Launcher @Forwarded',
+          '$json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Payload))',
+          '$decoded = ConvertFrom-Json -InputObject $json',
+          '$forwarded = @()',
+          'foreach ($item in $decoded) { $forwarded += [string] $item }',
+          '& $Launcher @forwarded',
           'exit $LASTEXITCODE',
           '',
         ].join('\r\n'),
@@ -455,8 +452,7 @@ describe('profile lifecycle manager', () => {
       const plan = await planProfileOperation('work', 'install', options);
       expect((await applyProfilePlan(plan, options)).success).toBe(true);
 
-      const launcher = 'work.cmd';
-      function invoke(runtimeArguments: readonly string[]) {
+      function invoke(runtimeArguments: readonly string[], launcher = 'work.ps1') {
         const child = spawnSync(
           'powershell.exe',
           [
@@ -467,7 +463,7 @@ describe('profile lifecycle manager', () => {
             '-File',
             invoker,
             launcher,
-            ...runtimeArguments,
+            Buffer.from(JSON.stringify(runtimeArguments), 'utf8').toString('base64'),
           ],
           {
             cwd: workingDirectory,
@@ -477,7 +473,7 @@ describe('profile lifecycle manager', () => {
         );
         if (child.status !== 23) {
           throw new Error(
-            `Expected Windows profile launcher exit 23, received ${String(child.status)}; stdout=${JSON.stringify(child.stdout.toString())}; stderr=${JSON.stringify(child.stderr.toString())}`,
+            `Expected Windows profile launcher exit 23, received ${String(child.status)}; signal=${String(child.signal)}; error=${child.error?.message ?? ''}; stdout=${JSON.stringify(child.stdout.toString())}; stderr=${JSON.stringify(child.stderr.toString())}`,
           );
         }
         return JSON.parse(child.stdout.toString()) as {
@@ -486,9 +482,15 @@ describe('profile lifecycle manager', () => {
           agentDir: string;
         };
       }
-
-      expect(invoke([])).toEqual({
-        args: [],
+      const cmdArguments = [
+        'space value',
+        "single'quote",
+        'plain-value',
+        'trailing\\',
+        'unicode-日本語',
+      ];
+      expect(invoke(cmdArguments, 'work.cmd')).toEqual({
+        args: cmdArguments,
         cwd: canonicalWorkingDirectory,
         agentDir: agentDirectory,
       });
@@ -511,6 +513,7 @@ describe('profile lifecycle manager', () => {
         agentDir: agentDirectory,
       });
     },
+    30_000,
   );
   it('honors plugin install precedence and client selectors before planning', async () => {
     const test = await fixture();

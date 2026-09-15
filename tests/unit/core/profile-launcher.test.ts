@@ -53,9 +53,18 @@ describe('profile launchers', () => {
 
     const powershell = launchers[1]?.content ?? '';
     expect(powershell).toContain("$env:API_TOKEN = $env:RUNTIME_TOKEN");
-    expect(powershell).toContain("'C:\\Program Files\\Pi''s Runtime\\pi.exe'");
-    expect(powershell).toContain("'quote''value' @args");
-    expect(powershell).toContain('exit $LASTEXITCODE');
+    expect(powershell).toContain(
+      "$profileCommand = Resolve-ProfileCommand 'C:\\Program Files\\Pi''s Runtime\\pi.exe'",
+    );
+    expect(powershell).toContain(
+      "$profileArguments = @('--profile', 'name with spaces', 'quote''value') + @($args)",
+    );
+    expect(powershell).toContain('function ConvertTo-WindowsCommandLineArgument');
+    expect(powershell).toContain("$interpreterBase -notin @('node', 'bun')");
+    expect(powershell).toContain(
+      "$startInfo.Arguments = (($allArguments | ForEach-Object { ConvertTo-WindowsCommandLineArgument ([string] $_) }) -join ' ')",
+    );
+    expect(powershell).toContain('exit $process.ExitCode');
 
     const cmd = launchers[2]?.content ?? '';
     expect(cmd).toContain('-File "%~dpn0.ps1" %*');
@@ -140,7 +149,7 @@ describe('profile launchers', () => {
       'cmd',
     ]);
     expect(await readFile(join(binRoot, 'work.profile.ps1'), 'utf8')).toContain(
-      "& 'omp' '--profile' 'work.profile' @args",
+      "$profileArguments = @('--profile', 'work.profile') + @($args)",
     );
     expect(await readFile(join(binRoot, 'work.profile.cmd'), 'utf8')).toContain(
       '-File \"%~dpn0.ps1\" %*',
