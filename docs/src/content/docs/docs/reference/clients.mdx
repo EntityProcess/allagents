@@ -3,7 +3,10 @@ title: Supported Clients
 description: AI coding assistant clients supported by AllAgents.
 ---
 
-AllAgents supports 25 AI coding assistants, organized into universal clients (sharing `.agents/skills/`) and provider-specific clients.
+AllAgents supports 25+ AI coding clients, including **Claude Code**,
+**GitHub Copilot**, **Cursor**, **Codex**, **OpenCode**, and 20+ more. The
+support matrix is organized into universal clients (sharing `.agents/skills/`)
+and provider-specific clients.
 
 ## Universal Clients
 
@@ -14,13 +17,128 @@ inventory of each runtime's native extension APIs.
 | Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
 |--------|--------|------------|-------|----------|------------------|
 | Copilot | `.github/skills/` | `AGENTS.md` | `.github/hooks/` | No | `.github/` |
-| Codex | `.agents/skills/` | `AGENTS.md` | No | No | No |
+| Codex | `.codex/skills/` | `AGENTS.md` | `.codex/hooks.json` (generated) | No | No |
 | OpenCode | `.agents/skills/` | `AGENTS.md` | No | `.opencode/commands/` | No |
 | Gemini | `.agents/skills/` | `GEMINI.md` | No | No | No |
 | Amp Code | `.agents/skills/` | `AGENTS.md` | No | No | No |
 | VSCode | `.agents/skills/` | `AGENTS.md` | No | No | `.github/` |
 | Replit | `.agents/skills/` | `AGENTS.md` | No | No | No |
 | Kimi | `.agents/skills/` | `AGENTS.md` | No | No | No |
+
+### OpenCode
+
+OpenCode global profiles use an AllAgents-owned configuration directory and set
+both `OPENCODE_CONFIG` and `OPENCODE_CONFIG_DIR` in the generated launcher.
+These are additive override layers: normal global configuration and
+current-project discovery still apply. They do not isolate OpenCode credentials,
+cache, data, or state.
+
+Profile plugins use file installation for skills and commands. OpenCode's CLI
+can install a plugin but does not expose the complete inspect, targeted update,
+and remove lifecycle required for ownership-safe native installation, so
+`install: native` fails before mutation. Strict profile settings and local or
+remote MCP declarations share the generated `opencode.json`; portable
+`${ENV_VAR}` references become OpenCode `{env:ENV_VAR}` references and are
+resolved only by the runtime.
+
+Profile cleanup removes unchanged managed files and OpenCode's exact
+runtime-generated `.gitignore`. A modified `.gitignore` or any unrelated file
+retains the root and reports a partial removal instead of recursively deleting
+unknown content.
+
+### GitHub Copilot CLI
+
+Copilot global profiles require GitHub Copilot CLI 1.0.74 or newer. AllAgents
+sets `COPILOT_HOME` to an owned configuration root and
+`COPILOT_CACHE_HOME` to a sibling owned cache directory. The generated launcher
+preserves its arguments and current working directory, so Copilot continues to
+discover the active project's instructions, agents, skills, settings, and MCP
+configuration normally.
+
+File installation writes personal skills, agents, hooks, and
+`copilot-instructions.md` beneath the selected `COPILOT_HOME`. Profile settings
+are written to `settings.json`; MCP servers are written to `mcp-config.json`
+with runtime `${ENV_VAR}` references preserved. AllAgents also includes the
+declarative plugin and marketplace settings that Copilot's native lifecycle
+requires, preventing the runtime from rewriting an untracked settings file.
+
+Native installation resolves one plugin identity from authoritative marketplace
+metadata, materializes a missing marketplace registration, and delegates install,
+targeted update, and uninstall to Copilot. A native plugin cannot declare a skill filter.
+Copilot's marketplace command cannot pin a Git ref, so a native declaration
+with `ref` fails before mutation instead of installing an unverified revision.
+Use file installation when a pinned source or selected skills are required.
+
+Removal uninstalls managed native plugins and releases managed marketplace
+registrations before recursively deleting only an AllAgents-created client
+root. A root that existed before installation is referenced rather than owned;
+unrelated or conflicting files are preserved and reported instead of adopted.
+Copilot's operating-system credential store and enterprise policy remain
+outside `COPILOT_HOME`, so this is configuration isolation, not a security
+sandbox. See GitHub's [Copilot CLI configuration directory
+reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference).
+
+### Claude Code
+
+Claude Code global profiles require Claude Code 2.1.268 or newer. AllAgents sets
+an absolute, owned `CLAUDE_CONFIG_DIR`, isolates `CLAUDE_CODE_PLUGIN_CACHE_DIR`,
+and clears inherited plugin seed and transcript-directory selectors. The
+generated launcher preserves arguments and the caller's working directory, so
+the active project's `CLAUDE.md`, settings, skills, and `.mcp.json` continue to
+compose with the selected global profile.
+
+File installation writes selected skills, commands, agents, hooks, and
+`CLAUDE.md` beneath the isolated root. Strict settings are written to
+`settings.json`. Profile MCP servers are written to the additive
+`allagents.mcp.json` passed by the launcher without `--strict-mcp-config`;
+portable `${ENV_VAR}` references remain unresolved on disk and normal project
+MCP discovery stays active.
+
+Native installation requires one authoritative marketplace identity. AllAgents
+materializes Claude's declarative marketplace and plugin settings, then
+delegates registration, install, update, uninstall, inventory, and safe
+marketplace cleanup to Claude's user scope inside the selected root. Native
+skill filters and sparse marketplace paths are rejected; file installation is
+the deterministic alternative.
+
+The isolated root also holds Claude-managed credentials, sessions, trust state,
+plugin caches, and runtime metadata. Removing an AllAgents-created profile
+intentionally removes that isolated runtime state after native cleanup. Ambient
+`~/.claude`, project files, and platform credential stores remain outside the
+filesystem cleanup boundary; inherited authentication environment variables
+can still override the selected profile login.
+
+### Codex
+
+Codex global profiles require Codex CLI 0.149.0 or newer. AllAgents assigns an
+owned `CODEX_HOME`, writes `<profile>.config.toml`, and generates a launcher
+that verifies the named file exists before running `codex --profile <profile>`.
+The launcher preserves arguments and the current working directory, so trusted
+project configuration and instructions retain their documented higher
+precedence.
+
+File installation writes selected skills beneath the isolated home. Strict
+settings and MCP servers share the named TOML profile. Portable MCP
+`${ENV_VAR}` references are translated to Codex's environment-name fields; the
+secret value is never resolved or written. Reference shapes Codex cannot
+represent natively fail before mutation.
+
+Native installation requires one authoritative marketplace identity. AllAgents
+delegates marketplace registration, plugin installation, Git marketplace
+upgrade, local plugin refresh, removal, and inventory inspection to Codex.
+Removing an AllAgents-managed marketplace fails closed while another installed
+plugin still depends on it.
+
+At project scope, AllAgents combines supported plugin hook declarations in
+`.codex/hooks.json`. Native Codex plugins can also bundle `hooks/hooks.json`.
+Isolated profile file installation does not currently translate hook
+declarations; use native installation when a profile plugin requires them.
+
+`CODEX_HOME` also contains Codex credentials, sessions, logs, and caches.
+Recursive cleanup is limited to a client root AllAgents created for this
+profile; removing that profile intentionally removes its isolated runtime
+state. Ambient `~/.codex`, project files, and operating-system keyrings remain
+outside the cleanup boundary.
 
 ## Provider-Specific Clients
 

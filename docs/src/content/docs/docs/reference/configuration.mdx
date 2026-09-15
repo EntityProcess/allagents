@@ -53,6 +53,38 @@ clients:
   - cursor
 ```
 
+### JSON Schema and editor validation
+
+AllAgents publishes separate, versioned schemas for the two workspace scopes:
+
+- [Project workspace schema](https://allagents.dev/schemas/v1/project-workspace.schema.json)
+  for `.allagents/workspace.yaml`. It rejects the global `profiles` field.
+- [User workspace schema](https://allagents.dev/schemas/v1/user-workspace.schema.json)
+  for `~/.allagents/workspace.yaml`. It includes global profiles and strict
+  client-specific settings.
+
+Add the matching YAML Language Server directive as the first line of each file:
+
+```yaml
+# yaml-language-server: $schema=https://allagents.dev/schemas/v1/project-workspace.schema.json
+repositories: []
+plugins: []
+clients: []
+```
+
+```yaml
+# yaml-language-server: $schema=https://allagents.dev/schemas/v1/user-workspace.schema.json
+profiles:
+  review:
+    clients:
+      - name: claude
+```
+
+The `v1` URLs are stable. A future breaking schema contract will use a new
+versioned directory. Runtime Zod validation remains authoritative; regenerate
+the committed schemas with `bun run schema:generate` after changing workspace
+input models, and verify drift with `bun run schema:check`.
+
 ### Client Install Modes
 
 A bare client name uses file sync. Native mode delegates compatible plugin
@@ -107,15 +139,89 @@ profiles:
         args: [/absolute/path/to/server.mjs]
         env:
           API_TOKEN: ${API_TOKEN}
+
+  oc-review:
+    clients:
+      - name: opencode
+        launcher: opencode-review
+        settings:
+          model: anthropic/claude-sonnet-4-5
+          share: disabled
+          autoupdate: false
+    plugins:
+      - source: ./review-tools
+        install: file
+
+  copilot-review:
+    clients:
+      - name: copilot
+        launcher: copilot-review
+        settings:
+          autoUpdate: false
+          remote: "off"
+          remoteExport: false
+          ide.autoConnect: false
+    plugins:
+      - source: EveryInc/compound-engineering-plugin
+        install: native
+      - source: ./review-tools
+        install: file
+        skills: [review]
+    mcpServers:
+      review:
+        command: review-mcp
+        env:
+          REVIEW_TOKEN: ${REVIEW_TOKEN}
+
+  codex-review:
+    clients:
+      - name: codex
+        install: native
+        launcher: codex-review
+        settings:
+          model: gpt-5.6-sol
+          model_reasoning_effort: high
+          approval_policy: on-request
+          sandbox_mode: workspace-write
+    plugins:
+      - source: ./codex-marketplace
+        install: native
+    mcpServers:
+      review:
+        command: review-mcp
+        env:
+          REVIEW_TOKEN: ${REVIEW_TOKEN}
+
+  claude-review:
+    clients:
+      - name: claude
+        install: native
+        launcher: claude-review
+        settings:
+          model: sonnet
+          effortLevel: high
+          fallbackModel: [haiku]
+          autoUpdatesChannel: stable
+    plugins:
+      - source: ./claude-marketplace
+        install: native
+      - source: ./review-tools
+        install: file
+        skills: [review]
+    mcpServers:
+      review:
+        command: review-mcp
+        env:
+          REVIEW_TOKEN: ${REVIEW_TOKEN}
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `profiles.<name>.clients` | Yes | One or more object-form profile clients |
-| `clients[].name` | Yes | Supported profile client; currently `pi` or `omp` |
-| `clients[].install` | No | Default plugin mode, `file` by default |
+| `clients[].name` | Yes | Supported profile client; currently `pi`, `omp`, `opencode`, `copilot`, `codex`, or `claude` |
+| `clients[].install` | No | Default plugin mode, `file` by default; OpenCode rejects `native` because its CLI lacks a complete inspect/update/remove lifecycle |
 | `clients[].launcher` | No | Safe command basename written to the configured user bin directory |
-| `clients[].settings` | No | Strict client settings object; Pi and OMP currently accept no settings |
+| `clients[].settings` | No | Strict client settings object; Pi and OMP accept no settings, while OpenCode, Copilot, Codex, and Claude accept their documented profile settings |
 | `profiles.<name>.plugins` | No | Profile plugin declarations; defaults to an empty list |
 | `plugins[].source` | Yes | npm, GitHub, marketplace, or local source supported by the selected adapter |
 | `plugins[].ref` | No | Requested Git ref for a GitHub source |
@@ -129,10 +235,83 @@ current project. Profile names and launcher names are safe command basenames;
 machine paths, resolved revisions, generated launcher paths, and ownership
 state are not declaration fields.
 
+On Windows, every profile launcher is written as both `<name>.cmd` and
+`<name>.ps1`. Both retain the caller's working directory, selected profile
+environment, and client exit status. The PowerShell companion preserves literal
+arguments—including quotes and empty values—and safely unwraps standard Node-
+and Bun-backed package-manager `.cmd` shims. The Command Prompt companion keeps
+normal `cmd.exe` parsing, so `%`, `&`, `|`, and `^` require the same escaping as
+any other batch command. Invoke `<name>.ps1` explicitly from PowerShell when
+those characters must remain literal.
+
 MCP credentials must remain runtime references. Environment values and HTTP
 headers accept exact `${ENV_VAR}` references only, and credential-bearing
 command arguments must use the same exact form. Resolved secret values are
 never written to plans, launchers, profile state, or generated configuration.
+
+OpenCode profile settings accept `model`, `small_model`, `default_agent`,
+`username`, `share`, `autoupdate`, `snapshot`, `subagent_depth`, `logLevel`,
+`disabled_providers`, and `enabled_providers`. All other keys fail validation.
+The launcher sets both OpenCode configuration override variables. These layers
+still merge with normal global and project configuration; they are not a strict
+runtime sandbox. `${ENV_VAR}` MCP references are serialized to OpenCode's
+runtime `{env:ENV_VAR}` syntax without resolving the value.
+
+Copilot profiles require GitHub Copilot CLI 1.0.74 or newer. Their launchers set
+both `COPILOT_HOME` and `COPILOT_CACHE_HOME`; the selected configuration and
+cache roots are isolated while normal current-project discovery remains active.
+Copilot profile settings accept `model`, `theme`, `autoUpdate`,
+`autoUpdatesChannel`, `banner`, `askUser`, `includeCoAuthoredBy`, `stream`,
+`streamerMode`, `toolSearch`, `updateTerminalTitle`, `respectGitignore`,
+`disableAllHooks`, `experimental`, `bashEnv`, `keepAlive`,
+`commandHistoryMaxSize`, `compactPaste`, `mouse`, `terminalProgress`, `remote`,
+`remoteExport`, `ide.autoConnect`, `shellShortcut`,
+`customAgents.defaultLocalOnly`, `storeTokenPlaintext`, `disabledMcpServers`,
+and `enabledMcpServers`. All other keys fail validation. MCP declarations are
+written to the selected root's `mcp-config.json`, retain `${ENV_VAR}` references,
+and expose their declared tools to Copilot.
+
+Copilot native plugins must resolve to exactly one authoritative marketplace
+entry. Native skill filters and native Git refs are rejected because Copilot
+cannot enforce either constraint. File installation supports skill selection
+and pinned Git sources instead.
+
+Codex profiles require Codex CLI 0.149.0 or newer. Their launchers set an
+isolated `CODEX_HOME`, require the generated `<profile>.config.toml`, select it
+with `--profile <profile>`, and preserve the caller's working directory for
+normal project discovery. Settings accept `model`, `model_reasoning_effort`,
+`model_reasoning_summary`, `model_verbosity`, `approval_policy`,
+`sandbox_mode`, `web_search`, and `personality`. All other keys fail
+validation.
+
+Codex MCP declarations share the named TOML profile. Exact `${ENV_VAR}`
+references become Codex environment-variable names (`env_vars` or
+`env_http_headers`) instead of literal values. References in commands, arguments,
+URLs, or remapped stdio variables fail before mutation because Codex does not
+interpolate them. Native plugins use authoritative marketplace identities;
+AllAgents delegates registration, install, Git marketplace upgrade, targeted
+refresh, uninstall, and safe marketplace removal to Codex.
+
+Claude profiles require Claude Code 2.1.268 or newer. Their launchers select an
+absolute, isolated `CLAUDE_CONFIG_DIR`, isolate the plugin cache, and clear
+inherited plugin seed and transcript-bucketing selectors. The caller's working
+directory remains unchanged, so project `CLAUDE.md`, settings, skills, and
+`.mcp.json` discovery continue normally.
+
+Claude profile settings accept `model`, `effortLevel`, `fallbackModel`,
+`outputStyle`, `autoMemoryEnabled`, `spinnerTipsEnabled`, and
+`autoUpdatesChannel`. All other keys fail validation. AllAgents writes
+`settings.json` and an additive `allagents.mcp.json`; the launcher requires both
+files and passes only the MCP file explicitly, without suppressing normal
+project MCP discovery. `${ENV_VAR}` references remain unresolved until Claude
+starts.
+
+Native Claude plugins require exactly one authoritative marketplace identity.
+AllAgents writes the marketplace and enabled-plugin declarations Claude needs,
+then delegates install, update, uninstall, inventory, and safe marketplace
+cleanup to Claude's user scope inside the selected root. Native skill filters
+and sparse marketplace paths fail before mutation; use file installation for
+those cases.
 
 Install profiles explicitly with `allagents profile install <name> --yes`.
 Ordinary `allagents update` reconciles installed, still-declared profiles;
@@ -412,6 +591,10 @@ plugins:
   - superpowers@obra/superpowers
 ```
 
-This file follows the same `plugins` format as the project-level workspace.yaml but does not support `workspace`, `repositories`, or `clients` fields. User-scoped plugins sync to user-level directories (`~/.claude/`, `~/.codex/`, etc.) and are available across all projects.
+The user file accepts the same ordinary workspace fields as a project file, and
+also accepts global `profiles`. Its `repositories`, `plugins`, and `clients`
+arrays default to empty, so it may contain only profiles. User-scoped ordinary
+plugins sync to user-level directories (`~/.claude/`, `~/.codex/`, etc.);
+profile lifecycle remains explicit and independent.
 
 Sync state for user-scoped plugins is tracked in `~/.allagents/sync-state.json`.

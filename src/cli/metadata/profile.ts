@@ -109,7 +109,7 @@ const profilePlanOutput = {
 
 export const profileInstallMeta: AgentCommandMeta = {
   command: 'profile install',
-  description: 'Install a declared global Pi or OMP profile',
+  description: 'Install a declared global agent profile',
   whenToUse:
     'When you want AllAgents to materialize one user profile, its client resources, and its launchers from the user workspace declaration',
   examples: [

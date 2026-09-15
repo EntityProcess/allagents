@@ -126,39 +126,24 @@ export type InstallMode = z.infer<typeof InstallModeSchema>;
  * "claude:native" → colon shorthand, parsed to { name: "claude", install: "native" }
  * { name, install } → explicit object form
  */
+const CLIENT_INSTALL_SHORTHAND_PATTERN = new RegExp(
+  `^(?:${ClientTypeSchema.options.join('|')}):(?:${InstallModeSchema.options.join('|')})$`,
+);
+
+const ClientInstallShorthandSchema = z
+  .string()
+  .regex(
+    CLIENT_INSTALL_SHORTHAND_PATTERN,
+    `Expected CLIENT:INSTALL with a known client and one of: ${InstallModeSchema.options.join(', ')}`,
+  )
+  .transform((value) => {
+    const [name, install] = value.split(':') as [ClientType, InstallMode];
+    return { name, install };
+  });
+
 export const ClientEntrySchema = z.union([
-  z.string().transform((s, ctx) => {
-    const colonIdx = s.indexOf(':');
-    if (colonIdx === -1) {
-      // Bare string — validate as client type
-      const result = ClientTypeSchema.safeParse(s);
-      if (!result.success) {
-        for (const issue of result.error.issues) ctx.addIssue(issue);
-        return z.NEVER;
-      }
-      return result.data;
-    }
-    // Colon shorthand — split on first colon
-    const name = s.slice(0, colonIdx);
-    const mode = s.slice(colonIdx + 1);
-    const nameResult = ClientTypeSchema.safeParse(name);
-    if (!nameResult.success) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Invalid client type: '${name}'`,
-      });
-      return z.NEVER;
-    }
-    const modeResult = InstallModeSchema.safeParse(mode);
-    if (!modeResult.success) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Invalid install mode: '${mode}'. Valid modes: ${InstallModeSchema.options.join(', ')}`,
-      });
-      return z.NEVER;
-    }
-    return { name: nameResult.data, install: modeResult.data };
-  }),
+  ClientTypeSchema,
+  ClientInstallShorthandSchema,
   z.object({
     name: ClientTypeSchema,
     install: InstallModeSchema.default('file'),
@@ -414,24 +399,9 @@ export const ProfileSecretReferenceSchema = z
  */
 export const ProfileNameSchema = z
   .string()
-  .min(1)
-  .max(64)
   .regex(
-    /^[a-z0-9][a-z0-9._-]{0,63}$/,
-    'Expected 1-64 lowercase ASCII characters starting with a letter or number',
-  )
-  .refine((name) => name !== '.' && name !== '..', {
-    message: "'.' and '..' are not valid profile or launcher names",
-  })
-  .refine((name) => !name.endsWith('.'), {
-    message: 'Profile and launcher names cannot end with a dot',
-  })
-  .refine(
-    (name) =>
-      !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name),
-    {
-      message: 'Reserved device basenames are not allowed',
-    },
+    /^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$))(?!.*\.$)[a-z0-9][a-z0-9._-]{0,63}$/,
+    'Expected 1-64 portable lowercase ASCII characters starting with a letter or number',
   );
 
 export type ProfileName = z.infer<typeof ProfileNameSchema>;
@@ -446,19 +416,180 @@ export function getLauncherCollisionKey(name: string): string {
 
 const EmptyProfileSettingsSchema = z.object({}).strict();
 
-/**
- * Profile clients deliberately use object form only. Unsupported clients still
- * parse with empty settings so orchestration can report an adapter capability
- * error instead of misclassifying a valid public client name as bad syntax.
- */
-export const ProfileClientSchema = z
+export const ClaudeProfileSettingsSchema = z
   .object({
-    name: ClientTypeSchema,
-    install: InstallModeSchema.default('file'),
-    launcher: ProfileNameSchema.optional(),
-    settings: EmptyProfileSettingsSchema.default({}),
+    model: z.string().min(1).optional(),
+    effortLevel: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+    fallbackModel: z.array(z.string().min(1)).min(1).optional(),
+    outputStyle: z.string().min(1).optional(),
+    autoMemoryEnabled: z.boolean().optional(),
+    spinnerTipsEnabled: z.boolean().optional(),
+    autoUpdatesChannel: z.enum(['stable', 'latest']).optional(),
   })
   .strict();
+
+export type ClaudeProfileSettings = z.infer<
+  typeof ClaudeProfileSettingsSchema
+>;
+
+export const OpenCodeProfileSettingsSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    small_model: z.string().min(1).optional(),
+    default_agent: z.string().min(1).optional(),
+    username: z.string().min(1).optional(),
+    share: z.enum(['manual', 'auto', 'disabled']).optional(),
+    autoupdate: z.union([z.boolean(), z.literal('notify')]).optional(),
+    snapshot: z.boolean().optional(),
+    subagent_depth: z.number().int().nonnegative().optional(),
+    logLevel: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR']).optional(),
+    disabled_providers: z.array(z.string().min(1)).optional(),
+    enabled_providers: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+export type OpenCodeProfileSettings = z.infer<
+  typeof OpenCodeProfileSettingsSchema
+>;
+
+export const CopilotProfileSettingsSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    theme: z
+      .enum(['default', 'github', 'dim', 'high-contrast', 'colorblind'])
+      .optional(),
+    autoUpdate: z.boolean().optional(),
+    autoUpdatesChannel: z.enum(['stable', 'prerelease']).optional(),
+    banner: z.enum(['always', 'once', 'never']).optional(),
+    askUser: z.boolean().optional(),
+    includeCoAuthoredBy: z.boolean().optional(),
+    stream: z.boolean().optional(),
+    streamerMode: z.boolean().optional(),
+    toolSearch: z.boolean().optional(),
+    updateTerminalTitle: z.boolean().optional(),
+    respectGitignore: z.boolean().optional(),
+    disableAllHooks: z.boolean().optional(),
+    experimental: z.boolean().optional(),
+    bashEnv: z.boolean().optional(),
+    keepAlive: z.enum(['on', 'off', 'busy']).optional(),
+    commandHistoryMaxSize: z.number().int().min(1).max(1000).optional(),
+    compactPaste: z.boolean().optional(),
+    mouse: z.boolean().optional(),
+    terminalProgress: z.boolean().optional(),
+    remote: z.enum(['on', 'off']).optional(),
+    remoteExport: z.boolean().optional(),
+    'ide.autoConnect': z.boolean().optional(),
+    shellShortcut: z.boolean().optional(),
+    'customAgents.defaultLocalOnly': z.boolean().optional(),
+    storeTokenPlaintext: z.boolean().optional(),
+    disabledMcpServers: z.array(z.string().min(1)).optional(),
+    enabledMcpServers: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+export type CopilotProfileSettings = z.infer<
+  typeof CopilotProfileSettingsSchema
+>;
+
+export const CodexProfileSettingsSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    model_reasoning_effort: z
+      .enum(['minimal', 'low', 'medium', 'high', 'xhigh'])
+      .optional(),
+    model_reasoning_summary: z
+      .enum(['auto', 'concise', 'detailed', 'none'])
+      .optional(),
+    model_verbosity: z.enum(['low', 'medium', 'high']).optional(),
+    approval_policy: z.enum(['on-request', 'never']).optional(),
+    sandbox_mode: z
+      .enum(['read-only', 'workspace-write', 'danger-full-access'])
+      .optional(),
+    web_search: z.enum(['disabled', 'cached', 'indexed', 'live']).optional(),
+    personality: z.enum(['none', 'friendly', 'pragmatic']).optional(),
+  })
+  .strict();
+
+export type CodexProfileSettings = z.infer<
+  typeof CodexProfileSettingsSchema
+>;
+
+/**
+ * Profile clients deliberately use object form only. Each adapter owns a
+ * structural settings schema so runtime validation and generated JSON Schema
+ * expose the same input contract. Clients without an adapter accept only an
+ * empty settings object, allowing orchestration to report capability errors.
+ */
+const ProfileClientCommonShape = {
+  install: InstallModeSchema.default('file'),
+  launcher: ProfileNameSchema.optional(),
+} as const;
+
+export const ProfileClientSchema = z.union([
+  z
+    .object({
+      name: z.literal('claude'),
+      ...ProfileClientCommonShape,
+      settings: ClaudeProfileSettingsSchema.default({}),
+    })
+    .strict(),
+  z
+    .object({
+      name: z.literal('opencode'),
+      ...ProfileClientCommonShape,
+      settings: OpenCodeProfileSettingsSchema.default({}),
+    })
+    .strict(),
+  z
+    .object({
+      name: z.literal('copilot'),
+      ...ProfileClientCommonShape,
+      settings: CopilotProfileSettingsSchema.default({}),
+    })
+    .strict(),
+  z
+    .object({
+      name: z.literal('codex'),
+      ...ProfileClientCommonShape,
+      settings: CodexProfileSettingsSchema.default({}),
+    })
+    .strict(),
+  z
+    .object({
+      name: z.enum(['pi', 'omp']),
+      ...ProfileClientCommonShape,
+      settings: EmptyProfileSettingsSchema.default({}),
+    })
+    .strict(),
+  z
+    .object({
+      name: z.enum([
+        'universal',
+        'cursor',
+        'gemini',
+        'factory',
+        'ampcode',
+        'vscode',
+        'openclaw',
+        'windsurf',
+        'cline',
+        'continue',
+        'roo',
+        'kilo',
+        'trae',
+        'augment',
+        'zencoder',
+        'junie',
+        'openhands',
+        'kiro',
+        'replit',
+        'kimi',
+      ]),
+      ...ProfileClientCommonShape,
+      settings: EmptyProfileSettingsSchema.default({}),
+    })
+    .strict(),
+]);
 
 export type ProfileClient = z.infer<typeof ProfileClientSchema>;
 

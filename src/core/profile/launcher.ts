@@ -1,5 +1,5 @@
 import { readdir } from 'node:fs/promises';
-import { basename, delimiter, dirname, join, resolve, win32 } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve, win32 } from 'node:path';
 import { ProfileNameSchema } from '../../models/workspace-config.js';
 import type { ProfileLauncherInvocation } from './types.js';
 import {
@@ -42,6 +42,12 @@ function quotePowerShell(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+
+function validateRequiredFile(path: string): void {
+  if (!isAbsolute(path) || path.includes('\0')) {
+    throw new Error('Profile launcher required files must be absolute paths');
+  }
+}
 function validateInvocation(invocation: ProfileLauncherInvocation): void {
   if (!invocation.command) throw new Error('Profile launcher command cannot be empty');
   for (const argument of [invocation.command, ...invocation.args]) {
@@ -53,6 +59,7 @@ function validateInvocation(invocation: ProfileLauncherInvocation): void {
       throw new Error('Profile launcher arguments cannot contain credentials or secret-bearing options');
     }
   }
+  for (const path of invocation.requiredFiles ?? []) validateRequiredFile(path);
   for (const [name, value] of Object.entries(invocation.env)) {
     if (!ENVIRONMENT_NAME.test(name)) {
       throw new Error(`Invalid profile launcher environment name: ${name}`);
@@ -82,6 +89,15 @@ function posixEnvironmentLines(
     });
 }
 
+function posixRequiredFileLines(paths: readonly string[]): string[] {
+  return paths.flatMap((path) => [
+    `if [ ! -f ${quotePosix(path)} ]; then`,
+    `  printf '%s\\n' ${quotePosix(`Profile launcher prerequisite is missing: ${path}`)} >&2`,
+    '  exit 1',
+    'fi',
+  ]);
+}
+
 function powerShellEnvironmentLines(
   environment: Readonly<Record<string, string | undefined>>,
 ): string[] {
@@ -95,6 +111,15 @@ function powerShellEnvironmentLines(
       if (reference?.[1]) return `$env:${name} = $env:${reference[1]}`;
       return `$env:${name} = ${quotePowerShell(value)}`;
     });
+}
+
+function powerShellRequiredFileLines(paths: readonly string[]): string[] {
+  return paths.flatMap((path) => [
+    `if (-not (Test-Path -LiteralPath ${quotePowerShell(path)} -PathType Leaf)) {`,
+    `  Write-Error ${quotePowerShell(`Profile launcher prerequisite is missing: ${path}`)}`,
+    '  exit 1',
+    '}',
+  ]);
 }
 
 export interface RenderedProfileLauncher {
@@ -127,6 +152,7 @@ export function renderProfileLaunchers(
       content: [
         '#!/bin/sh',
         ...posixEnvironmentLines(invocation.env),
+        ...posixRequiredFileLines(invocation.requiredFiles ?? []),
         `exec ${posixCommand} "$@"`,
         '',
       ].join('\n'),
@@ -172,6 +198,7 @@ export function renderProfileLaunchers(
         `  return '"' + $escaped + '"'`,
         '}',
         ...powerShellEnvironmentLines(invocation.env),
+        ...powerShellRequiredFileLines(invocation.requiredFiles ?? []),
         `$profileCommand = Resolve-ProfileCommand ${quotePowerShell(invocation.command)}`,
         `$profileArguments = @(${powerShellArguments}) + @($args)`,
         '$allArguments = $profileCommand.Prefix + $profileArguments',
