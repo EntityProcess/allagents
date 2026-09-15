@@ -17,8 +17,9 @@ import { stubHomeDir } from '../../helpers/env.js';
 
 // Mock git module before importing marketplace (needed for addMarketplace tests)
 mock.module('../../../src/core/git.js', () => ({
-  cloneTo: mock((_url: string, dest: string) => {
+  cloneTo: mock((url: string, dest: string) => {
     mkdirSync(dest, { recursive: true });
+    writeFileSync(join(dest, 'origin.txt'), url);
     return Promise.resolve();
   }),
   gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
@@ -466,6 +467,57 @@ describe('addMarketplace with scope', () => {
     // Verify user registry was NOT written to
     const userRegistryPath = getRegistryPath();
     expect(existsSync(userRegistryPath)).toBe(false);
+  });
+
+  it('keeps project and user remote caches independently owned', async () => {
+    const userResult = await addMarketplace(
+      'owner/source-a',
+      'shared',
+      undefined,
+      false,
+      { scope: 'user', workspacePath: tmpProject },
+    );
+    const projectResult = await addMarketplace(
+      'owner/source-b',
+      'shared',
+      undefined,
+      false,
+      { scope: 'project', workspacePath: tmpProject },
+    );
+
+    const userRegistry = await loadRegistryFromPath(getRegistryPath());
+    const projectRegistry = await loadRegistryFromPath(
+      getProjectRegistryPath(tmpProject),
+    );
+    const userEntry = userRegistry.marketplaces.shared;
+    const projectEntry = projectRegistry.marketplaces.shared;
+
+    expect(userResult.success).toBe(true);
+    expect(projectResult.success).toBe(true);
+    expect(userEntry.path).not.toBe(projectEntry.path);
+    expect(userEntry.source.location).toBe('owner/source-a');
+    expect(projectEntry.source.location).toBe('owner/source-b');
+    expect(readFileSync(join(userEntry.path, 'origin.txt'), 'utf-8')).toBe(
+      'https://github.com/owner/source-a.git',
+    );
+    expect(readFileSync(join(projectEntry.path, 'origin.txt'), 'utf-8')).toBe(
+      'https://github.com/owner/source-b.git',
+    );
+
+    const removal = await removeMarketplace('shared', {
+      scope: 'project',
+      workspacePath: tmpProject,
+    });
+    const userRegistryAfterRemoval = await loadRegistryFromPath(
+      getRegistryPath(),
+    );
+
+    expect(removal.success).toBe(true);
+    expect(existsSync(projectEntry.path)).toBe(false);
+    expect(existsSync(userEntry.path)).toBe(true);
+    expect(userRegistryAfterRemoval.marketplaces.shared.source.location).toBe(
+      'owner/source-a',
+    );
   });
 
   it('refuses to overwrite a corrupt project registry', async () => {

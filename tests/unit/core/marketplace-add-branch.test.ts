@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -82,6 +84,17 @@ describe('addMarketplace branch support', () => {
     rmSync(testHome, { recursive: true, force: true });
   });
 
+  function materializeClone(
+    url: string,
+    dest: string,
+    ref?: string,
+  ): Promise<void> {
+    cloneCalls.push({ url, dest, ref });
+    mkdirSync(dest, { recursive: true });
+    writeFileSync(join(dest, 'origin.txt'), url);
+    return Promise.resolve();
+  }
+
   it('should error when non-default branch is specified without --name', async () => {
     const result = await addMarketplace(
       'https://github.com/owner/repo/tree/feat/v2',
@@ -152,6 +165,193 @@ describe('addMarketplace branch support', () => {
       'repo-a',
       'repo-b',
     ]);
+  });
+
+  it('publishes the requested remote source when replacing a managed cache', async () => {
+    cloneToMock.mockImplementation(materializeClone);
+
+    await addMarketplace('owner/source-a', 'shared');
+    const result = await addMarketplace('owner/source-b', 'shared');
+    const registry = await loadRegistry();
+    const cachePath = registry.marketplaces.shared.path;
+
+    expect(result.success).toBe(true);
+    expect(registry.marketplaces.shared.source.location).toBe('owner/source-b');
+    expect(readFileSync(join(cachePath, 'origin.txt'), 'utf-8')).toBe(
+      'https://github.com/owner/source-b.git',
+    );
+    expect(cloneCalls).toHaveLength(2);
+  });
+
+  it('publishes a remote cache under its canonical manifest name', async () => {
+    cloneToMock.mockImplementation(
+      (url: string, dest: string, ref?: string) => {
+        cloneCalls.push({ url, dest, ref });
+        mkdirSync(join(dest, '.claude-plugin'), { recursive: true });
+        writeFileSync(
+          join(dest, '.claude-plugin', 'marketplace.json'),
+          JSON.stringify({ name: 'canonical-name', plugins: [] }),
+        );
+        writeFileSync(join(dest, 'origin.txt'), url);
+        return Promise.resolve();
+      },
+    );
+
+    const result = await addMarketplace('owner/source-a');
+    const registry = await loadRegistry();
+
+    expect(result.success).toBe(true);
+    expect(parse(registry.marketplaces['canonical-name'].path).base).toBe(
+      'canonical-name',
+    );
+    expect(
+      readFileSync(
+        join(registry.marketplaces['canonical-name'].path, 'origin.txt'),
+        'utf-8',
+      ),
+    ).toBe('https://github.com/owner/source-a.git');
+  });
+
+  it('preserves the previous remote when replacement cloning fails', async () => {
+    cloneToMock.mockImplementation(materializeClone);
+    await addMarketplace('owner/source-a', 'shared');
+    cloneToMock.mockImplementation(() =>
+      Promise.reject(new Error('replacement clone failed')),
+    );
+
+    const result = await addMarketplace('owner/source-b', 'shared');
+    const registry = await loadRegistry();
+
+    expect(result.success).toBe(false);
+    expect(registry.marketplaces.shared.source.location).toBe('owner/source-a');
+    expect(
+      readFileSync(join(registry.marketplaces.shared.path, 'origin.txt'), 'utf-8'),
+    ).toBe('https://github.com/owner/source-a.git');
+  });
+
+  it('restores the previous remote when the registry save fails', async () => {
+    cloneToMock.mockImplementation(materializeClone);
+    await addMarketplace('owner/source-a', 'shared');
+    cloneToMock.mockImplementation(
+      (url: string, dest: string, ref?: string) => {
+        const clone = materializeClone(url, dest, ref);
+        chmodSync(join(testHome, '.allagents'), 0o500);
+        return clone;
+      },
+    );
+
+    try {
+      await expect(
+        addMarketplace('owner/source-b', 'shared'),
+      ).rejects.toThrow();
+    } finally {
+      chmodSync(join(testHome, '.allagents'), 0o700);
+    }
+
+    const registry = await loadRegistry();
+    expect(registry.marketplaces.shared.source.location).toBe('owner/source-a');
+    expect(
+      readFileSync(join(registry.marketplaces.shared.path, 'origin.txt'), 'utf-8'),
+    ).toBe('https://github.com/owner/source-a.git');
+  });
+
+  it('reports incomplete clone cleanup without masking the clone error', async () => {
+    const cacheRoot = join(
+      testHome,
+      '.allagents',
+      'plugins',
+      'marketplaces',
+    );
+    cloneToMock.mockImplementation((_url: string, dest: string) => {
+      mkdirSync(dest, { recursive: true });
+      writeFileSync(join(dest, 'partial.txt'), 'partial');
+      chmodSync(cacheRoot, 0o500);
+      return Promise.reject(new Error('replacement clone failed'));
+    });
+
+    const result = await addMarketplace(
+      'owner/source-b',
+      'shared',
+    ).finally(() => chmodSync(cacheRoot, 0o700));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('replacement clone failed');
+    expect(result.warnings?.[0]).toContain('incomplete marketplace clone');
+  });
+
+  it('reports a retained backup after a successful replacement', async () => {
+    cloneToMock.mockImplementation(materializeClone);
+    const first = await addMarketplace('owner/source-a', 'shared');
+    chmodSync(first.marketplace!.path, 0o500);
+
+    let backupPath: string | undefined;
+    try {
+      const result = await addMarketplace('owner/source-b', 'shared');
+      const cacheRoot = parse(result.marketplace!.path).dir;
+      backupPath = readdirSync(cacheRoot)
+        .map((entry) => join(cacheRoot, entry))
+        .find((entry) => parse(entry).base.startsWith('.backup-'));
+
+      expect(result.success).toBe(true);
+      expect(result.warnings?.[0]).toContain(
+        "previous marketplace cache for 'shared'",
+      );
+      expect(backupPath).toBeDefined();
+    } finally {
+      if (backupPath && existsSync(backupPath)) {
+        chmodSync(backupPath, 0o700);
+      }
+    }
+  });
+
+  it('preserves the previous remote when staged cache publication fails', async () => {
+    cloneToMock.mockImplementation(materializeClone);
+    await addMarketplace('owner/source-a', 'shared');
+    cloneToMock.mockImplementation(
+      (url: string, dest: string, ref?: string) => {
+        cloneCalls.push({ url, dest, ref });
+        return Promise.resolve();
+      },
+    );
+
+    const result = await addMarketplace('owner/source-b', 'shared');
+    const registry = await loadRegistry();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Failed to publish marketplace cache');
+    expect(registry.marketplaces.shared.source.location).toBe('owner/source-a');
+    expect(
+      readFileSync(join(registry.marketplaces.shared.path, 'origin.txt'), 'utf-8'),
+    ).toBe('https://github.com/owner/source-a.git');
+  });
+
+  it('preserves the previous remote when staged validation fails', async () => {
+    cloneToMock.mockImplementation(materializeClone);
+    await addMarketplace('https://git.example/source-a/repo.git');
+    cloneToMock.mockImplementation(
+      (url: string, dest: string, ref?: string) => {
+        cloneCalls.push({ url, dest, ref });
+        mkdirSync(join(dest, '.claude-plugin'), { recursive: true });
+        writeFileSync(
+          join(dest, '.claude-plugin', 'marketplace.json'),
+          JSON.stringify({ name: '../../..', plugins: [] }),
+        );
+        return Promise.resolve();
+      },
+    );
+
+    const result = await addMarketplace(
+      'https://git.example/source-b/repo.git',
+    );
+    const registry = await loadRegistry();
+
+    expect(result.success).toBe(false);
+    expect(registry.marketplaces.repo.source.location).toBe(
+      'https://git.example/source-a/repo.git',
+    );
+    expect(
+      readFileSync(join(registry.marketplaces.repo.path, 'origin.txt'), 'utf-8'),
+    ).toBe('https://git.example/source-a/repo.git');
   });
 
   it('should clone with branch when --name is provided', async () => {
@@ -386,7 +586,7 @@ describe('addMarketplace branch support', () => {
     expect(existsSync(cloneCalls[0].dest)).toBe(false);
   });
 
-  it('should not delete a pre-existing cache with an unsafe manifest name', async () => {
+  it('preserves a pre-existing cache when the staged manifest is unsafe', async () => {
     const cachePath = join(
       testHome,
       '.allagents',
@@ -394,12 +594,19 @@ describe('addMarketplace branch support', () => {
       'marketplaces',
       'unsafe-manifest',
     );
-    mkdirSync(join(cachePath, '.claude-plugin'), { recursive: true });
-    writeFileSync(
-      join(cachePath, '.claude-plugin', 'marketplace.json'),
-      JSON.stringify({ name: '../../..', plugins: [] }),
-    );
+    mkdirSync(cachePath, { recursive: true });
     writeFileSync(join(cachePath, 'marker.txt'), 'keep');
+    cloneToMock.mockImplementation(
+      (url: string, dest: string, ref?: string) => {
+        cloneCalls.push({ url, dest, ref });
+        mkdirSync(join(dest, '.claude-plugin'), { recursive: true });
+        writeFileSync(
+          join(dest, '.claude-plugin', 'marketplace.json'),
+          JSON.stringify({ name: '../../..', plugins: [] }),
+        );
+        return Promise.resolve();
+      },
+    );
 
     const result = await addMarketplace('owner/unsafe-manifest');
 

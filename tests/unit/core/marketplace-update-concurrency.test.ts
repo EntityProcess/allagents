@@ -218,9 +218,10 @@ describe('updateMarketplace concurrency', () => {
     );
   });
 
-  it('keeps removal authoritative when an in-flight named update finishes afterward', async () => {
+  it('serializes removal after an in-flight update of the same cache', async () => {
     const pullReached = deferred();
     const resumePull = deferred();
+    const removalReachedCacheLock = deferred();
     const update = updateMarketplace('test-mp-a', undefined, {
       createGit: () => createMockGit(),
       pull: async () => {
@@ -230,26 +231,23 @@ describe('updateMarketplace concurrency', () => {
     });
 
     await pullReached.promise;
+    const removal = removeMarketplace(
+      'test-mp-a',
+      {},
+      { beforeCacheLock: () => removalReachedCacheLock.resolve() },
+    );
+    await removalReachedCacheLock.promise;
 
-    const removeResult = await removeMarketplace('test-mp-a');
-    const registryAfterRemoval = readRegistry(registryPath);
-    expect(removeResult.success).toBe(true);
-    expect(registryAfterRemoval.marketplaces['test-mp-a']).toBeUndefined();
-    expect(existsSync(marketplacePathA)).toBe(false);
+    expect(readRegistry(registryPath).marketplaces['test-mp-a']).toBeDefined();
+    expect(existsSync(marketplacePathA)).toBe(true);
 
     resumePull.resolve();
-    const updateResult = await update;
+    const [updateResult, removeResult] = await Promise.all([update, removal]);
     const finalRegistry = readRegistry(registryPath);
 
-    expect(updateResult).toEqual([
-      {
-        name: 'test-mp-a',
-        success: false,
-        error:
-          "Marketplace 'test-mp-a' changed during update. The registry was not overwritten; retry the command.",
-      },
-    ]);
-    expect(finalRegistry).toEqual(registryAfterRemoval);
+    expect(updateResult).toEqual([{ name: 'test-mp-a', success: true }]);
+    expect(removeResult.success).toBe(true);
+    expect(finalRegistry.marketplaces['test-mp-a']).toBeUndefined();
     expect(existsSync(marketplacePathA)).toBe(false);
   });
 });

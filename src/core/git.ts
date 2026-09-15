@@ -22,7 +22,7 @@ export function createGitEnv(): NodeJS.ProcessEnv {
   };
 }
 
-function createGit(baseDir?: string) {
+export function createGit(baseDir?: string) {
   return simpleGit(baseDir, {
     timeout: { block: CLONE_TIMEOUT_MS },
     config: [

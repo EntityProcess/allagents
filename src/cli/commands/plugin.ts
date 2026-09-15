@@ -262,27 +262,34 @@ const marketplaceListCmd = command({
         console.error(`Error: ${msg}`);
         process.exit(1);
       }
+      const userRegistryPath = getRegistryPath();
+      const projectRegistryPath = getProjectRegistryPath(process.cwd());
+      const loadMarketplaceVersion = (marketplace: ScopedMarketplaceEntry) =>
+        getMarketplaceVersion(
+          marketplace,
+          marketplace.scope === 'project' ? projectRegistryPath : userRegistryPath,
+        );
 
       let marketplaces: ScopedMarketplaceEntry[];
       let overrideNames: string[] = [];
 
       if (!scope) {
         // Default: show all scopes merged
-        const scopedResult = await listMarketplacesWithScope(getRegistryPath(), getProjectRegistryPath(process.cwd()));
+        const scopedResult = await listMarketplacesWithScope(userRegistryPath, projectRegistryPath);
         marketplaces = scopedResult.entries;
         overrideNames = scopedResult.overrides;
       } else if (scope === 'user') {
-        const registry = await loadRegistryFromPath(getRegistryPath());
+        const registry = await loadRegistryFromPath(userRegistryPath);
         marketplaces = Object.values(registry.marketplaces).map((mp) => ({ ...mp, scope: 'user' as const }));
       } else {
-        const registry = await loadRegistryFromPath(getProjectRegistryPath(process.cwd()));
+        const registry = await loadRegistryFromPath(projectRegistryPath);
         marketplaces = Object.values(registry.marketplaces).map((mp) => ({ ...mp, scope: 'project' as const }));
       }
 
       if (isJsonMode()) {
         const enriched = await Promise.all(
           marketplaces.map(async (mp) => {
-            const version = await getMarketplaceVersion(mp);
+            const version = await loadMarketplaceVersion(mp);
             return {
               ...mp,
               ...(version && {
@@ -333,7 +340,7 @@ const marketplaceListCmd = command({
         console.log(`  ❯ ${mp.name} (${mp.scope})`);
         console.log(`    Source: ${sourceLabel}`);
 
-        const version = await getMarketplaceVersion(mp);
+        const version = await loadMarketplaceVersion(mp);
         if (version) {
           const ts = version.date.toISOString().replace('T', ' ').slice(0, 16);
           console.log(`    Version: ${version.hash} (${ts})`);
