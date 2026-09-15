@@ -99,7 +99,19 @@ describe('mergeSyncResults', () => {
     expect(merged.messages).toEqual(['msg1', 'msg2']);
   });
 
-  test('merges nativeResult from both results', () => {
+  test('merges ordered native lifecycle effects from both scopes', () => {
+    const resource = {
+      kind: 'plugin' as const,
+      requestedIdentity: 'plugin@repo',
+      resolvedIdentity: 'plugin@repo',
+      context: {
+        client: 'claude',
+        scope: 'user' as const,
+        nativeScope: 'user',
+        root: '/home/test',
+      },
+      provenance: {},
+    };
     const a: SyncResult = {
       success: true,
       pluginResults: [],
@@ -108,35 +120,29 @@ describe('mergeSyncResults', () => {
       totalSkipped: 0,
       totalGenerated: 0,
       nativeResult: {
-        marketplacesAdded: ['org/repo-a'],
-        pluginsInstalled: [{ plugin: 'pluginA@repo-a', client: 'claude' }],
-        pluginsFailed: [],
-        skipped: [],
+        success: true,
+        effects: [{ action: 'installed', resource }],
       },
     };
     const b: SyncResult = {
-      success: true,
+      success: false,
       pluginResults: [],
       totalCopied: 0,
-      totalFailed: 0,
+      totalFailed: 1,
       totalSkipped: 0,
       totalGenerated: 0,
       nativeResult: {
-        marketplacesAdded: ['org/repo-b'],
-        pluginsInstalled: [{ plugin: 'pluginB@repo-b', client: 'copilot' }],
-        pluginsFailed: [{ plugin: 'pluginC@repo-c', error: 'not found' }],
-        skipped: ['local-plugin'],
+        success: false,
+        effects: [{ action: 'failed', resource, error: 'not found' }],
       },
     };
     const merged = mergeSyncResults(a, b);
     expect(merged.nativeResult).toEqual({
-      marketplacesAdded: ['org/repo-a', 'org/repo-b'],
-      pluginsInstalled: [
-        { plugin: 'pluginA@repo-a', client: 'claude' },
-        { plugin: 'pluginB@repo-b', client: 'copilot' },
+      success: false,
+      effects: [
+        { action: 'installed', resource },
+        { action: 'failed', resource, error: 'not found' },
       ],
-      pluginsFailed: [{ plugin: 'pluginC@repo-c', error: 'not found' }],
-      skipped: ['local-plugin'],
     });
   });
 
@@ -148,12 +154,7 @@ describe('mergeSyncResults', () => {
       totalFailed: 0,
       totalSkipped: 0,
       totalGenerated: 0,
-      nativeResult: {
-        marketplacesAdded: ['org/repo'],
-        pluginsInstalled: [{ plugin: 'plugin@repo', client: 'claude' }],
-        pluginsFailed: [],
-        skipped: [],
-      },
+      nativeResult: { success: true, effects: [] },
     };
     const b: SyncResult = {
       success: true,
@@ -163,8 +164,7 @@ describe('mergeSyncResults', () => {
       totalSkipped: 0,
       totalGenerated: 0,
     };
-    const merged = mergeSyncResults(a, b);
-    expect(merged.nativeResult).toEqual(a.nativeResult);
+    expect(mergeSyncResults(a, b).nativeResult).toEqual(a.nativeResult);
   });
 
   test('merges purgedPaths from both results', () => {

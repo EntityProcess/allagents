@@ -8,11 +8,15 @@ const { autocompleteMultiselect } = p;
  * Build a flat options list for searchable client selection.
  * Each option includes the skills path as a hint.
  */
-export function buildClientOptions(): { value: ClientType; label: string; hint?: string }[] {
-  return ClientTypeSchema.options.map((c) => ({
-    value: c,
-    label: c,
-    hint: CLIENT_MAPPINGS[c].skillsPath,
+export function buildClientOptions(): {
+  value: string;
+  label: string;
+  hint: string;
+}[] {
+  return ClientTypeSchema.options.map((client) => ({
+    value: client,
+    label: client,
+    hint: CLIENT_MAPPINGS[client].skillsPath,
   }));
 }
 

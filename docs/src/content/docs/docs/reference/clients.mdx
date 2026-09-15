@@ -3,11 +3,13 @@ title: Supported Clients
 description: AI coding assistant clients supported by AllAgents.
 ---
 
-AllAgents supports 23 AI coding assistants, organized into universal clients (sharing `.agents/skills/`) and provider-specific clients.
+AllAgents supports 25 AI coding assistants, organized into universal clients (sharing `.agents/skills/`) and provider-specific clients.
 
 ## Universal Clients
 
-These clients share the canonical `.agents/skills/` directory:
+These clients primarily share the canonical `.agents/skills/` directory. The
+Hooks column records artifacts AllAgents materializes; it is not a complete
+inventory of each runtime's native extension APIs.
 
 | Client | Skills | Agent File | Hooks | Commands | GitHub Overrides |
 |--------|--------|------------|-------|----------|------------------|
@@ -22,11 +24,14 @@ These clients share the canonical `.agents/skills/` directory:
 
 ## Provider-Specific Clients
 
-These clients use their own skills directory:
+These clients use their own skills directory. As above, Hooks lists
+AllAgents-managed destinations rather than every native extension mechanism:
 
 | Client | Skills | Agent File | Hooks | Commands |
 |--------|--------|------------|-------|----------|
 | Claude | `.claude/skills/` | `CLAUDE.md` | `.claude/hooks/` | `.claude/commands/` |
+| Pi | `.pi/skills/` | `AGENTS.md` | No—use Pi extensions | No |
+| OMP | `.omp/skills/` | `AGENTS.md` | `.omp/hooks/` | No |
 | Cursor | `.cursor/skills/` | `AGENTS.md` | No | No |
 | Factory | `.factory/skills/` | `AGENTS.md` | `.factory/hooks/` | No |
 | OpenClaw | `skills/` | `AGENTS.md` | No | No |
@@ -45,6 +50,42 @@ These clients use their own skills directory:
 :::note
 Skills are the cross-client way to share reusable prompts. GitHub overrides (`.github/prompts/`, `.github/agents/`, `.github/hooks/`, `copilot-instructions.md`) are copied to the workspace's `.github/` folder for Copilot/VSCode; package-only `.github/plugin/` metadata is omitted. Root `agents/` and `hooks/` also map to `.github/agents/` and `.github/hooks/` for Copilot. At project scope, plugin hook declarations from `hooks.json` or `hooks/hooks.json` are combined in `.github/hooks/allagents.json`. This translation does not require marketplace registration or `plugin.json`; a missing or disabled declaration adds no managed entries. AllAgents warns and omits a declaration that cannot be read or parsed, lacks the version-1 `hooks` object envelope, or—unless disabled—has a non-array event value. Skipping a declaration does not itself suppress other eligible plugin artifacts or valid declarations from other plugins. At user scope, root `hooks/` maps to `~/.copilot/hooks/`, while repository `.github/hooks/` remains project-scoped.
 :::
+
+### Pi
+
+File sync writes project skills to `.pi/skills/` and user skills to
+`~/.pi/agent/skills/`. Set `PI_CODING_AGENT_DIR` to relocate Pi's user agent
+root.
+
+Native install mode delegates plugin lifecycle to Pi's package manager. Pi
+0.85.1 through 0.85.x is supported. Package sources may be npm specs such as
+`npm:pi-extension`, Git repositories, or local paths. Project-native operations
+fail before mutation unless Pi's trusted settings outside the project boundary
+authorize that project. AllAgents inspects `pi-mcp-adapter` state but does not
+install or configure the adapter.
+
+Pi provides lifecycle interception through extensions discovered from
+`.pi/extensions/` and `~/.pi/agent/extensions/`, not through the portable
+plugin `hooks/` artifact. AllAgents therefore does not map `hooks/` into Pi;
+native Pi packages can supply extensions through Pi's package lifecycle.
+
+### OMP
+
+File sync writes project skills to `.omp/skills/`, user skills to
+`~/.omp/agent/skills/`, and OMP JS/TS hook factories to the corresponding
+`hooks/pre/` or `hooks/post/` discovery path. A factory placed directly in
+`hooks/` is not discovered.
+
+Native install mode requires OMP 18.1.17 or newer and a marketplace-backed
+plugin spec such as `compound-engineering@EveryInc/compound-engineering-plugin`.
+AllAgents registers the required marketplace and delegates the complete plugin
+lifecycle—including OMP-compatible hooks—to OMP. OMP accepts Claude-compatible
+marketplace catalogs, but Claude Code's command-based `hooks/hooks.json` format
+is not interchangeable with OMP's JS/TS hook factories.
+
+Ordinary OMP operations always address the unnamed profile: AllAgents removes
+inherited `OMP_PROFILE`, `PI_PROFILE`, and `PI_CONFIG_FILES` selectors while
+preserving the active HOME and XDG roots.
 
 ### VSCode
 

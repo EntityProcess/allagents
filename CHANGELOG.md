@@ -15,6 +15,14 @@
   **Migration**: Replace `pin:` with `ref:` in plugin objects and `--pin` with
   `--ref` in scripts. This is a clean cutover; the old names are not accepted.
 
+### Added
+
+- Pi and OMP as file-sync clients at project and user scope, including native
+  runtime skill paths and agent instructions.
+- Native Pi package and OMP marketplace-plugin lifecycle support for install,
+  update, uninstall, status, and list output, with fail-closed trust and
+  ownership checks.
+
 
 ## [1.0.0] - 2026-03-13
 

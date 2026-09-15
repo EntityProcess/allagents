@@ -85,6 +85,8 @@ export const ClientTypeSchema = z.enum([
   'claude',
   'copilot',
   'codex',
+  'pi',
+  'omp',
   'cursor',
   'opencode',
   'gemini',

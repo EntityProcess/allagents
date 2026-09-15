@@ -394,4 +394,54 @@ describe('syncUserWorkspace', () => {
       "Copilot user hook '.copilot/hooks/repository.json' shares a path with a repository .github/hooks artifact. Repository hooks are no longer synced at user scope; review this file manually if an older AllAgents version installed it. A root hooks/ artifact may still manage the same path.",
     );
   });
+
+  it('writes and purges Pi skills in an external selected agent root', async () => {
+    const externalRoot = await mkdtemp(
+      join(tmpdir(), 'allagents-pi-agent-test-'),
+    );
+    const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = externalRoot;
+
+    try {
+      const pluginDir = await createLocalPlugin('pi-plugin', 'pi-skill');
+      await writeUserConfig({
+        repositories: [],
+        plugins: [pluginDir],
+        clients: ['pi'],
+        syncMode: 'copy',
+      });
+
+      const first = await syncUserWorkspace();
+      const skillPath = join(externalRoot, 'skills', 'pi-skill');
+      expect(first.success).toBe(true);
+      expect(existsSync(join(skillPath, 'SKILL.md'))).toBe(true);
+
+      const state = JSON.parse(
+        await readFile(join(testDir, '.allagents', 'sync-state.json'), 'utf-8'),
+      );
+      expect(state.files.pi).toContain(
+        `${skillPath.replaceAll('\\', '/')}/`,
+      );
+      expect(state.files.pi.every((path: string) => !path.includes('../'))).toBe(
+        true,
+      );
+
+      await writeUserConfig({
+        repositories: [],
+        plugins: [],
+        clients: ['pi'],
+        syncMode: 'copy',
+      });
+      const second = await syncUserWorkspace();
+      expect(second.success).toBe(true);
+      expect(existsSync(skillPath)).toBe(false);
+    } finally {
+      if (priorAgentDir === undefined) {
+        delete process.env.PI_CODING_AGENT_DIR;
+      } else {
+        process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+      }
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
 });

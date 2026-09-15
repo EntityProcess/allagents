@@ -17,6 +17,7 @@ import {
   pluginInstallMeta,
   pluginListMeta,
   pluginUninstallMeta,
+  pluginUpdateMeta,
   pluginValidateMeta,
 } from './metadata/plugin.js';
 import { updateMeta } from './metadata/self.js';
@@ -34,6 +35,7 @@ const allCommands: AgentCommandMeta[] = [
   statusMeta,
   pluginInstallMeta,
   pluginUninstallMeta,
+  pluginUpdateMeta,
   marketplaceListMeta,
   marketplaceAddMeta,
   marketplaceRemoveMeta,

@@ -16,6 +16,7 @@ import {
   pluginValidateMeta,
   pluginInstallMeta,
   pluginUninstallMeta,
+  pluginUpdateMeta,
 } from '../../../src/cli/metadata/plugin.js';
 import { updateMeta } from '../../../src/cli/metadata/self.js';
 import {
@@ -34,6 +35,7 @@ const allCommands: AgentCommandMeta[] = [
   statusMeta,
   pluginInstallMeta,
   pluginUninstallMeta,
+  pluginUpdateMeta,
   marketplaceListMeta,
   marketplaceAddMeta,
   marketplaceRemoveMeta,
@@ -76,8 +78,8 @@ describe('extractAgentHelpFlag', () => {
 });
 
 describe('agent command metadata', () => {
-  test('contains exactly 19 commands', () => {
-    expect(allCommands.length).toBe(19);
+  test('contains exactly 20 commands', () => {
+    expect(allCommands.length).toBe(20);
   });
 
   test('all expected commands are present', () => {
@@ -92,6 +94,7 @@ describe('agent command metadata', () => {
       'plugin marketplace remove',
       'plugin marketplace update',
       'plugin uninstall',
+      'plugin update',
       'plugin validate',
       'self update',
       'skill add',
@@ -145,6 +148,22 @@ describe('agent command metadata', () => {
     const statusCmd = allCommands.find((c) => c.command === 'status')!;
     expect(statusCmd.positionals).toBeUndefined();
     expect(statusCmd.options).toBeUndefined();
+  });
+
+  test('describes ordinary Pi and OMP behavior without profile surfaces', () => {
+    const ordinaryMetadata = [
+      syncMeta,
+      statusMeta,
+      pluginListMeta,
+      pluginInstallMeta,
+      pluginUninstallMeta,
+      pluginUpdateMeta,
+    ];
+    const text = JSON.stringify(ordinaryMetadata);
+    expect(text).toContain('Pi');
+    expect(text).toContain('OMP');
+    expect(text.toLowerCase()).not.toContain('profile');
+    expect(allCommands.some((command) => command.command.includes('profile'))).toBe(false);
   });
 });
 

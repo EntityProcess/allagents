@@ -369,6 +369,19 @@ async function addPluginToUserConfig(
   }
 }
 
+export async function addUserPluginDeclaration(
+  plugin: string,
+  force?: boolean,
+): Promise<ModifyResult> {
+  await ensureUserWorkspace();
+  return addPluginToUserConfig(
+    plugin,
+    getUserWorkspaceConfigPath(),
+    undefined,
+    force,
+  );
+}
+
 /**
  * Set clients in user-level workspace config.
  * Creates the config file if it doesn't exist.

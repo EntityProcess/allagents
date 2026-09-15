@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docs](https://img.shields.io/badge/docs-allagents.dev-blue)](https://allagents.dev)
 
-Write AI agent skills once. Sync to 23 clients. Manage across multiple repos.
+Write AI agent skills once. Sync to 25 clients. Manage across multiple repos.
 
-AllAgents keeps your AI tooling (skills, agents, hooks, MCP servers) in one workspace and syncs it to every client your team uses — Claude, Copilot, Cursor, Codex, Gemini, and 18 more.
+AllAgents keeps your AI tooling (skills, agents, hooks, MCP servers) in one workspace and syncs it to every client your team uses — Claude, Copilot, Cursor, Codex, Gemini, and 20 more.
 
 ## Quick Start
 
@@ -55,7 +55,7 @@ Tools like `npx skills` and `npx plugins` install skills to one project for one 
 | **Config** | Imperative | Imperative | Declarative (`workspace.yaml`) |
 | **Scope** | Single project | Single project | Multi-repo workspace |
 | **Artifacts** | Skills | Skills, agents, hooks, commands, MCP | Skills, agents, hooks, commands, MCP |
-| **Clients** | 43 agents | 2 (Claude, Cursor) | 23 clients simultaneously |
+| **Clients** | 43 agents | 2 (Claude, Cursor) | 25 clients simultaneously |
 | **Team sharing** | Each dev runs install | Each dev runs install | Git-versioned — clone and go |
 | **Ongoing sync** | One-shot install | One-shot install | `allagents update` keeps everything current |
 | **Workspace awareness** | None | None | WORKSPACE-RULES injected so AI knows all repos and skills |
@@ -106,11 +106,11 @@ See the [full CLI reference](https://allagents.dev/docs/reference/cli/) for all 
 
 ## Supported Clients
 
-**23 AI coding assistants** across two tiers:
+**25 AI coding assistants** across two tiers:
 
 **Universal** (share `.agents/skills/`): Copilot, Codex, OpenCode, Gemini, Amp Code, VSCode, Replit, Kimi
 
-**Provider-specific**: Claude, Cursor, Factory, OpenClaw, Windsurf, Cline, Continue, Roo, Kilo, Trae, Augment, Zencoder, Junie, OpenHands, Kiro
+**Provider-specific**: Claude, Pi, OMP, Cursor, Factory, OpenClaw, Windsurf, Cline, Continue, Roo, Kilo, Trae, Augment, Zencoder, Junie, OpenHands, Kiro
 
 See the [client support matrix](https://allagents.dev/docs/reference/clients/) for paths, hooks, commands, and MCP support per client.
 

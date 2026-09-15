@@ -14,8 +14,31 @@ import { ClientTypeSchema } from '../../../src/models/workspace-config.js';
 describe('CLIENT_MAPPINGS', () => {
   test('defines project-level paths for all supported clients', () => {
     const expectedClients = [
-      'claude', 'copilot', 'codex', 'cursor', 'opencode', 'gemini', 'factory', 'ampcode', 'vscode',
-      'openclaw', 'windsurf', 'cline', 'continue', 'roo', 'kilo', 'trae', 'augment', 'zencoder', 'junie', 'openhands', 'kiro', 'replit', 'kimi',
+      'claude',
+      'copilot',
+      'codex',
+      'pi',
+      'omp',
+      'cursor',
+      'opencode',
+      'gemini',
+      'factory',
+      'ampcode',
+      'vscode',
+      'openclaw',
+      'windsurf',
+      'cline',
+      'continue',
+      'roo',
+      'kilo',
+      'trae',
+      'augment',
+      'zencoder',
+      'junie',
+      'openhands',
+      'kiro',
+      'replit',
+      'kimi',
       'universal',
     ];
     for (const client of expectedClients) {
@@ -45,6 +68,12 @@ describe('CLIENT_MAPPINGS', () => {
 
   test('codex uses provider-specific .codex/skills/ path', () => {
     expect(CLIENT_MAPPINGS.codex.skillsPath).toBe('.codex/skills/');
+  });
+
+  test('pi and OMP use native project skill paths', () => {
+    expect(CLIENT_MAPPINGS.pi.skillsPath).toBe('.pi/skills/');
+    expect(CLIENT_MAPPINGS.omp.skillsPath).toBe('.omp/skills/');
+    expect(CLIENT_MAPPINGS.omp.hooksPath).toBe('.omp/hooks/');
   });
 
   test('opencode uses provider-specific .opencode/skills/ path', () => {
@@ -137,6 +166,12 @@ describe('USER_CLIENT_MAPPINGS', () => {
 
   test('codex uses provider-specific ~/.codex/skills/ path', () => {
     expect(USER_CLIENT_MAPPINGS.codex.skillsPath).toBe('.codex/skills/');
+  });
+
+  test('pi and OMP use native default user skill paths', () => {
+    expect(USER_CLIENT_MAPPINGS.pi.skillsPath).toBe('.pi/agent/skills/');
+    expect(USER_CLIENT_MAPPINGS.omp.skillsPath).toBe('.omp/agent/skills/');
+    expect(USER_CLIENT_MAPPINGS.omp.hooksPath).toBe('.omp/agent/hooks/');
   });
 
   test('opencode uses provider-specific ~/.opencode/skills/ path', () => {

@@ -118,6 +118,8 @@ describe('native/types', () => {
             expect(JSON.parse(stdout)).toEqual({
               success: true,
               output: JSON.stringify({ runtime: 'node', args }),
+              exitCode: 0,
+              signal: null,
             });
           }
 
@@ -170,6 +172,8 @@ describe('native/types', () => {
           ).toEqual({
             success: true,
             output: JSON.stringify({ runtime: 'node', args }),
+            exitCode: 0,
+            signal: null,
           });
 
           const cwdFallbackProc = Bun.spawnSync(
@@ -206,35 +210,39 @@ describe('native/types', () => {
   });
 
   describe('mergeNativeSyncResults', () => {
-    test('merges two results', () => {
+    test('preserves ordered effects and aggregate failure', () => {
+      const resource = {
+        kind: 'plugin' as const,
+        requestedIdentity: 'p1@repo',
+        resolvedIdentity: 'p1@repo',
+        context: {
+          client: 'claude',
+          scope: 'project' as const,
+          nativeScope: 'project',
+          root: '/workspace',
+        },
+        provenance: {},
+      };
       const a: NativeSyncResult = {
-        marketplacesAdded: ['a/repo'],
-        pluginsInstalled: [{ plugin: 'p1@repo', client: 'claude' }],
-        pluginsFailed: [],
-        skipped: [],
+        success: true,
+        effects: [{ action: 'installed', resource }],
       };
       const b: NativeSyncResult = {
-        marketplacesAdded: ['b/repo'],
-        pluginsInstalled: [{ plugin: 'p2@repo', client: 'copilot' }],
-        pluginsFailed: [{ plugin: 'p3@repo', error: 'fail' }],
-        skipped: ['local-plugin'],
+        success: false,
+        effects: [{ action: 'failed', resource, error: 'fail' }],
       };
-      const merged = mergeNativeSyncResults([a, b]);
-      expect(merged.marketplacesAdded).toEqual(['a/repo', 'b/repo']);
-      expect(merged.pluginsInstalled).toEqual([
-        { plugin: 'p1@repo', client: 'claude' },
-        { plugin: 'p2@repo', client: 'copilot' },
-      ]);
-      expect(merged.pluginsFailed).toEqual([{ plugin: 'p3@repo', error: 'fail' }]);
-      expect(merged.skipped).toEqual(['local-plugin']);
+
+      expect(mergeNativeSyncResults([a, b])).toEqual({
+        success: false,
+        effects: [...a.effects, ...b.effects],
+      });
     });
 
-    test('returns empty result for empty array', () => {
-      const merged = mergeNativeSyncResults([]);
-      expect(merged.marketplacesAdded).toEqual([]);
-      expect(merged.pluginsInstalled).toEqual([]);
-      expect(merged.pluginsFailed).toEqual([]);
-      expect(merged.skipped).toEqual([]);
+    test('returns a successful empty result', () => {
+      expect(mergeNativeSyncResults([])).toEqual({
+        success: true,
+        effects: [],
+      });
     });
   });
 });

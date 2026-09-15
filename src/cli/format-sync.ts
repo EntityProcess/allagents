@@ -1,4 +1,8 @@
-import type { NativeSyncResult } from '../core/native/types.js';
+import {
+  toNativeEffectData,
+  type NativeEffectData,
+  type NativeSyncResult,
+} from '../core/native/types.js';
 import type { SyncResult, DeletedArtifact, PluginSyncResult } from '../core/sync.js';
 import type { CopyResult } from '../core/transform.js';
 import type { McpMergeResult } from '../core/vscode-mcp.js';
@@ -92,7 +96,10 @@ export function classifyCopyResults(copyResults: CopyResult[]): Map<string, Arti
     if (result.action !== 'copied') continue;
     if (seenDestinations.has(result.destination)) continue;
     seenDestinations.add(result.destination);
-    const classification = classifyDestination(result.destination);
+    const classification =
+      result.client && result.artifactType
+        ? { client: result.client, artifactType: result.artifactType }
+        : classifyDestination(result.destination);
     if (!classification) continue;
 
     const { artifactType } = classification;
@@ -268,33 +275,55 @@ export function formatMcpResult(
   return lines;
 }
 
+function nativeActionIcon(action: NativeEffectData['action']): string {
+  switch (action) {
+    case 'registered':
+    case 'installed':
+    case 'would-register':
+    case 'would-install':
+      return '+';
+    case 'updated':
+    case 'would-update':
+      return '\u2191';
+    case 'removed':
+    case 'would-remove':
+      return '-';
+    case 'failed':
+      return '\u2717';
+    case 'unknown':
+      return '?';
+    case 'configured-missing':
+    case 'disabled':
+    case 'unusable':
+    case 'retained':
+      return '!';
+    case 'unchanged':
+      return '=';
+  }
+}
+
+export function formatNativeEffectData(data: NativeEffectData): string {
+  const provider = `[${data.client}:${data.scope}]`;
+  const details = [
+    `kind=${data.kind}`,
+    `requested=${JSON.stringify(data.requestedIdentity)}`,
+    `resolved=${JSON.stringify(data.resolvedIdentity)}`,
+    `root=${JSON.stringify(data.root)}`,
+    `action=${data.action}`,
+    `phase=${data.phase}`,
+    `changed=${String(data.changed)}`,
+  ].join(' ');
+  return `  ${nativeActionIcon(data.action)} ${provider} ${details}${data.error ? ` error=${JSON.stringify(data.error)}` : ''}`;
+}
+
 /**
- * Format native CLI plugin sync results as display lines.
+ * Format typed native lifecycle results. Human and JSON rendering both consume
+ * toNativeEffectData so identity, scope, phase, root, and sanitized failures
+ * cannot drift between output modes.
  */
 export function formatNativeResult(nativeResult: NativeSyncResult): string[] {
-  const lines: string[] = [];
-
-  if (nativeResult.marketplacesAdded.length > 0) {
-    lines.push(
-      `Marketplaces registered: ${nativeResult.marketplacesAdded.join(', ')}`,
-    );
-  }
-
-  for (const { plugin, client } of nativeResult.pluginsInstalled) {
-    const cliName = client ? `${client} CLI` : 'native CLI';
-    lines.push(`  + ${plugin} (installed via ${cliName})`);
-  }
-
-  for (const { client, plugin, error } of nativeResult.pluginsFailed) {
-    const provider = client ? `[${client}] ` : '';
-    lines.push(`  \u2717 ${provider}${plugin}: ${error}`);
-  }
-
-  for (const plugin of nativeResult.skipped) {
-    lines.push(`  \u2298 ${plugin} (skipped \u2014 not a marketplace plugin)`);
-  }
-
-  return lines;
+  return nativeResult.effects.map((effect) =>
+    formatNativeEffectData(toNativeEffectData(effect)));
 }
 
 /**
@@ -404,11 +433,9 @@ export function buildSyncData(result: SyncResult) {
       ),
     }),
     ...(result.nativeResult && {
-      nativePlugins: {
-        installed: result.nativeResult.pluginsInstalled.map((p) => p.plugin),
-        failed: result.nativeResult.pluginsFailed,
-        skipped: result.nativeResult.skipped,
-        marketplacesAdded: result.nativeResult.marketplacesAdded,
+      nativeResources: {
+        success: result.nativeResult.success,
+        effects: result.nativeResult.effects.map(toNativeEffectData),
       },
     }),
     ...(result.managedRepoResults && result.managedRepoResults.length > 0 && {

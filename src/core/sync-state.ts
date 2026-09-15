@@ -1,9 +1,10 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { CONFIG_DIR, SYNC_STATE_FILE } from '../constants.js';
 import {
   SyncStateSchema,
+  type NativeResourceState,
+  type NativeStateResource,
   type SyncState,
   type SyncStateSource,
 } from '../models/sync-state.js';
@@ -20,7 +21,9 @@ export interface SyncStateData {
   files: Partial<Record<ClientType, string[]>>;
   codexHooks?: SyncState['codexHooks'];
   mcpServers?: Partial<Record<McpScope, string[]>>;
+  /** Legacy native identities, retained only for conservative migration. */
   nativePlugins?: Partial<Record<ClientType, string[]>>;
+  nativeResources?: NativeResourceState;
   vscodeWorkspaceHash?: string;
   vscodeWorkspaceRepos?: string[];
   skillsIndex?: string[];
@@ -35,6 +38,31 @@ export interface SyncStateData {
 export function getSyncStatePath(workspacePath: string): string {
   return join(workspacePath, CONFIG_DIR, SYNC_STATE_FILE);
 }
+async function readRawState(statePath: string): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(statePath, 'utf-8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeStateAtomically(
+  statePath: string,
+  state: SyncState,
+): Promise<void> {
+  const tempPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await writeFile(tempPath, JSON.stringify(state, null, 2), 'utf-8');
+    await rename(tempPath, statePath);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 
 /**
  * Load sync state from disk
@@ -45,20 +73,14 @@ export function getSyncStatePath(workspacePath: string): string {
 export async function loadSyncState(workspacePath: string): Promise<SyncState | null> {
   const statePath = getSyncStatePath(workspacePath);
 
-  if (!existsSync(statePath)) {
-    return null;
-  }
-
   try {
-    const content = await readFile(statePath, 'utf-8');
-    const parsed = JSON.parse(content);
+    const parsed = await readRawState(statePath);
+    if (!parsed) return null;
     const result = SyncStateSchema.safeParse(parsed);
-
     if (!result.success) {
-      // Corrupted state file - treat as no state (safe behavior)
+      // Unknown/corrupt state grants no deletion authority.
       return null;
     }
-
     return result.data;
   } catch {
     // Read or parse error - treat as no state
@@ -77,29 +99,45 @@ export async function saveSyncState(
 ): Promise<void> {
   const statePath = getSyncStatePath(workspacePath);
 
-  // Support both old signature (just files) and new signature (SyncStateData)
+  // Support the historical files-only signature.
   const normalizedData: SyncStateData = 'files' in data
     ? data as SyncStateData
     : { files: data as Partial<Record<ClientType, string[]>> };
-
-  const state: SyncState = {
+  const existing = (await readRawState(statePath)) ?? {};
+  const candidate: Record<string, unknown> = {
+    ...existing,
     version: 1,
     lastSync: new Date().toISOString(),
-    files: normalizedData.files as Record<ClientType, string[]>,
-    ...(normalizedData.codexHooks && { codexHooks: normalizedData.codexHooks }),
-    ...(normalizedData.mcpServers && { mcpServers: normalizedData.mcpServers }),
-    ...(normalizedData.nativePlugins && { nativePlugins: normalizedData.nativePlugins }),
-    ...(normalizedData.vscodeWorkspaceHash && { vscodeWorkspaceHash: normalizedData.vscodeWorkspaceHash }),
-    ...(normalizedData.vscodeWorkspaceRepos && { vscodeWorkspaceRepos: normalizedData.vscodeWorkspaceRepos }),
-    ...(normalizedData.skillsIndex && normalizedData.skillsIndex.length > 0 && { skillsIndex: normalizedData.skillsIndex }),
-    ...(normalizedData.sources &&
-      Object.keys(normalizedData.sources).length > 0 && { sources: normalizedData.sources }),
+    files: normalizedData.files,
   };
+
+  for (const key of [
+    'codexHooks',
+    'mcpServers',
+    'nativePlugins',
+    'nativeResources',
+    'vscodeWorkspaceHash',
+    'vscodeWorkspaceRepos',
+    'skillsIndex',
+    'sources',
+  ] as const) {
+    if (key in normalizedData) {
+      const value = normalizedData[key];
+      if (value === undefined) delete candidate[key];
+      else candidate[key] = value;
+    }
+  }
+
+  const parsed = SyncStateSchema.safeParse(candidate);
+  if (!parsed.success) {
+    throw new Error(`Refusing to write invalid sync state: ${parsed.error.message}`);
+  }
 
   await mkdir(dirname(statePath), { recursive: true });
   await ensureConfigGitignore(workspacePath);
-  await writeFile(statePath, JSON.stringify(state, null, 2), 'utf-8');
+  await writeStateAtomically(statePath, parsed.data);
 }
+
 
 /**
  * Get files that were previously synced for a specific client
@@ -136,17 +174,82 @@ export function getPreviouslySyncedMcpServers(
 }
 
 /**
- * Get native plugins previously installed for a specific client
- * @param state - Loaded sync state (or null)
- * @param client - Client type to get native plugins for
- * @returns Array of plugin names, empty if no state or no plugins for client
+ * Return exact native state records for one ordinary client/scope/context.
+ * Legacy string identities are intentionally excluded: they are not cleanup
+ * authority until live inspection and a desired declaration corroborate them.
  */
-export function getPreviouslySyncedNativePlugins(
+export function getNativeStateResources(
   state: SyncState | null,
   client: ClientType,
-): string[] {
-  if (!state?.nativePlugins) return [];
-  return state.nativePlugins[client] ?? [];
+  scope: 'user' | 'project',
+  context: string,
+): NativeStateResource[] {
+  return (state?.nativeResources?.resources ?? []).filter(
+    (resource) =>
+      resource.client === client &&
+      resource.scope === scope &&
+      resource.context === context,
+  );
+}
+
+export function nativeStateOwnership(
+  transition: NativeStateResource['transition'],
+): 'managed' | 'referenced' | 'uncertain' {
+  if (transition === 'referenced') return 'referenced';
+  if (
+    transition === 'managed' ||
+    transition === 'pending-install' ||
+    transition === 'pending-update' ||
+    transition === 'pending-remove' ||
+    transition === 'cleanup-failed'
+  ) {
+    return 'managed';
+  }
+  return 'uncertain';
+}
+
+export async function saveNativeStateResources(
+  workspacePath: string,
+  resources: NativeStateResource[],
+): Promise<void> {
+  const statePath = getSyncStatePath(workspacePath);
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(await readFile(statePath, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('expected an object');
+    }
+    raw = parsed as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw new Error(
+        `Refusing to patch malformed sync state: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const files = SyncStateSchema.shape.files.safeParse(raw.files);
+  if (!files.success) {
+    throw new Error(
+      `Refusing to patch native state because file ownership is invalid: ${files.error.message}`,
+    );
+  }
+  const candidate = SyncStateSchema.safeParse({
+    ...raw,
+    version: 1,
+    lastSync: new Date().toISOString(),
+    files: files.data,
+    nativeResources: { version: 1, resources },
+  });
+  if (!candidate.success) {
+    throw new Error(
+      `Refusing to patch native state because unrelated state is invalid: ${candidate.error.message}`,
+    );
+  }
+
+  await mkdir(dirname(statePath), { recursive: true });
+  await ensureConfigGitignore(workspacePath);
+  await writeStateAtomically(statePath, candidate.data);
 }
 
 /**

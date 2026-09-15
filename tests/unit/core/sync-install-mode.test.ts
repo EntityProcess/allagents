@@ -3,7 +3,11 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { syncWorkspace } from '../../../src/core/sync.js';
+import {
+  nativeContextIdentity,
+  nativeIdentityMatches,
+  syncWorkspace,
+} from '../../../src/core/sync.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../../../src/constants.js';
 
 async function createPlugin(baseDir: string, name: string, skillName: string): Promise<string> {
@@ -39,7 +43,7 @@ describe('syncWorkspace — install mode', () => {
     expect(existsSync(join(testDir, '.github', 'skills', 'test-skill'))).toBe(true);
   });
 
-  it('native-only client skips file copy for that client', async () => {
+  it('rejects unsupported explicit native sources without file fallback', async () => {
     await createPlugin(testDir, 'test-plugin', 'test-skill');
     await writeFile(
       join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
@@ -47,11 +51,9 @@ describe('syncWorkspace — install mode', () => {
     );
 
     const result = await syncWorkspace(testDir);
-    expect(result.success).toBe(true);
-    // Claude native: local plugin can't install natively -> falls back to file
-    expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill'))).toBe(true);
-    // Copilot file: files copied
-    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill'))).toBe(true);
+    expect(result.success).toBe(false);
+    expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill'))).toBe(false);
+    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill'))).toBe(false);
   });
 
   it('plugin-level install:file overrides client native', async () => {
@@ -67,7 +69,7 @@ describe('syncWorkspace — install mode', () => {
     expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill'))).toBe(true);
   });
 
-  it('non-marketplace plugin with native client falls back to file copy', async () => {
+  it('does not silently copy a local source requested as native', async () => {
     await createPlugin(testDir, 'local-plugin', 'local-skill');
     await writeFile(
       join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
@@ -75,12 +77,11 @@ describe('syncWorkspace — install mode', () => {
     );
 
     const result = await syncWorkspace(testDir);
-    expect(result.success).toBe(true);
-    // Non-marketplace can't install natively, falls back to file
-    expect(existsSync(join(testDir, '.claude', 'skills', 'local-skill'))).toBe(true);
+    expect(result.success).toBe(false);
+    expect(existsSync(join(testDir, '.claude', 'skills', 'local-skill'))).toBe(false);
   });
 
-  it('copilot native in project scope falls back to file copy', async () => {
+  it('rejects an unsupported native scope before copying', async () => {
     await createPlugin(testDir, 'test-plugin', 'test-skill');
     await writeFile(
       join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
@@ -88,12 +89,11 @@ describe('syncWorkspace — install mode', () => {
     );
 
     const result = await syncWorkspace(testDir);
-    expect(result.success).toBe(true);
-    // Copilot native with local plugin can't install natively -> falls back to file
-    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill'))).toBe(true);
+    expect(result.success).toBe(false);
+    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill'))).toBe(false);
   });
 
-  it('colon shorthand claude:native skips file copy for marketplace plugin', async () => {
+  it('colon shorthand native rejects an unsupported source before file mutation', async () => {
     await createPlugin(testDir, 'test-plugin', 'test-skill');
     await writeFile(
       join(testDir, CONFIG_DIR, WORKSPACE_CONFIG_FILE),
@@ -101,9 +101,60 @@ describe('syncWorkspace — install mode', () => {
     );
 
     const result = await syncWorkspace(testDir);
-    expect(result.success).toBe(true);
-    // Local plugin falls back to file copy even for native clients
-    expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill'))).toBe(true);
-    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill'))).toBe(true);
+    expect(result.success).toBe(false);
+    expect(existsSync(join(testDir, '.claude', 'skills', 'test-skill'))).toBe(false);
+    expect(existsSync(join(testDir, '.github', 'skills', 'test-skill'))).toBe(false);
+  });
+});
+
+describe('native lifecycle identity', () => {
+  it('matches qualified marketplace declarations exactly', () => {
+    expect(
+      nativeIdentityMatches(
+        'review@market-b',
+        'review@market-a',
+        'review@market-a',
+      ),
+    ).toBe(false);
+    expect(
+      nativeIdentityMatches(
+        'review@market-a',
+        'review@market-a',
+        'review@market-a',
+      ),
+    ).toBe(true);
+  });
+
+  it('matches Pi npm declarations by exact package identity', () => {
+    expect(
+      nativeIdentityMatches(
+        '@scope/review',
+        '@scope/review',
+        'npm:@scope/review@2.0.0',
+      ),
+    ).toBe(true);
+    expect(
+      nativeIdentityMatches(
+        '@other/review',
+        '@scope/review',
+        'npm:@scope/review@2.0.0',
+      ),
+    ).toBe(false);
+  });
+
+  it('includes every authoritative OMP root in durable context identity', () => {
+    const base = {
+      client: 'omp' as const,
+      scope: 'user' as const,
+      nativeScope: 'user' as const,
+      root: '/tmp/omp',
+      roots: { agent: '/tmp/omp', data: '/tmp/data-a' },
+    };
+    expect(nativeContextIdentity(base)).not.toBe(
+      nativeContextIdentity({
+        ...base,
+        roots: { agent: '/tmp/omp', data: '/tmp/data-b' },
+      }),
+    );
   });
 });

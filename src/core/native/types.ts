@@ -4,54 +4,320 @@ import { access, open } from 'node:fs/promises';
 import { delimiter, dirname, extname, resolve } from 'node:path';
 import readCmdShim from 'read-cmd-shim';
 
+export type NativeScope = 'user' | 'project';
+export type NativeResourceKind = 'plugin' | 'package';
+
+export interface NativeCommandOptions {
+  cwd?: string;
+  /**
+   * Overlay the inherited process environment. Undefined removes a variable,
+   * which is required when an ordinary client operation must neutralize an
+   * ambient profile selector.
+   */
+  env?: Readonly<Record<string, string | undefined>>;
+}
+
 export interface NativeCommandResult {
   success: boolean;
   output: string;
   error?: string;
+  exitCode?: number | null;
+  signal?: NodeJS.Signals | null;
 }
 
-export interface NativePluginInstalled {
-  plugin: string;
-  client?: string;
+export interface NativeOperationContext {
+  client: string;
+  scope: NativeScope;
+  nativeScope: string;
+  root: string;
+  cwd?: string;
+  env?: Readonly<Record<string, string | undefined>>;
+  roots?: Readonly<Record<string, string>>;
 }
 
-export interface NativePluginFailure {
-  plugin: string;
-  error: string;
-  client?: string;
+export function compareNativeVersions(
+  left: readonly number[],
+  right: readonly number[],
+): number {
+  for (let index = 0; index < 3; index++) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+export interface NativeResource {
+  kind: NativeResourceKind;
+  requestedIdentity: string;
+  resolvedIdentity: string;
+  context: NativeOperationContext;
+  provenance: Readonly<Record<string, string>>;
+}
+
+export interface NativeSourceResolution {
+  success: boolean;
+  resource?: NativeResource;
+  error?: string;
+}
+
+export type NativeObservationStatus =
+  | 'installed'
+  | 'configured-missing'
+  | 'disabled'
+  | 'unusable';
+
+export interface NativeResourceObservation {
+  resource: NativeResource;
+  status: NativeObservationStatus;
+  installedPath?: string;
+  error?: string;
+}
+
+export interface NativeInspectionResult {
+  success: boolean;
+  resources: NativeResource[];
+  error?: string;
+  /**
+   * Configured resources that are not safe to credit as installed. Adapters
+   * omit this when their native inventory has no richer observation model.
+   */
+  observations?: NativeResourceObservation[];
+}
+
+export interface NativeMutationResult {
+  success: boolean;
+  error?: string;
+  registrations?: string[];
+}
+
+export type NativeEffectAction =
+  | 'registered'
+  | 'installed'
+  | 'configured-missing'
+  | 'disabled'
+  | 'unusable'
+  | 'unchanged'
+  | 'updated'
+  | 'removed'
+  | 'retained'
+  | 'would-register'
+  | 'would-install'
+  | 'would-update'
+  | 'would-remove'
+  | 'failed'
+  | 'unknown';
+
+export type NativeEffectPhase =
+  | 'inspection'
+  | 'registration'
+  | 'install'
+  | 'update'
+  | 'remove'
+  | 'state';
+
+export interface NativeEffect {
+  action: NativeEffectAction;
+  resource: NativeResource;
+  phase?: NativeEffectPhase;
+  changed?: boolean;
+  error?: string;
+}
+
+export interface NativeEffectData {
+  action: NativeEffectAction;
+  phase: NativeEffectPhase;
+  changed: boolean;
+  client: string;
+  scope: NativeScope;
+  nativeScope: string;
+  kind: NativeResourceKind;
+  requestedIdentity: string;
+  resolvedIdentity: string;
+  root: string;
+  provenance: Readonly<Record<string, string>>;
+  error?: string;
+}
+
+function defaultEffectPhase(action: NativeEffectAction): NativeEffectPhase {
+  switch (action) {
+    case 'registered':
+    case 'would-register':
+      return 'registration';
+    case 'installed':
+    case 'would-install':
+      return 'install';
+    case 'updated':
+    case 'would-update':
+      return 'update';
+    case 'removed':
+    case 'would-remove':
+      return 'remove';
+    case 'retained':
+      return 'state';
+    default:
+      return 'inspection';
+  }
+}
+
+function defaultEffectChanged(action: NativeEffectAction): boolean {
+  return (
+    action === 'registered' ||
+    action === 'installed' ||
+    action === 'updated' ||
+    action === 'removed'
+  );
+}
+
+function stripNativeTerminalControls(value: string): string {
+  const safe: string[] = [];
+  let index = 0;
+  while (index < value.length) {
+    const code = value.charCodeAt(index);
+    if (code === 0x1b && value.charCodeAt(index + 1) === 0x5b) {
+      let end = index + 2;
+      while (
+        value.charCodeAt(end) >= 0x30 &&
+        value.charCodeAt(end) <= 0x3f
+      ) {
+        end++;
+      }
+      while (
+        value.charCodeAt(end) >= 0x20 &&
+        value.charCodeAt(end) <= 0x2f
+      ) {
+        end++;
+      }
+      const final = value.charCodeAt(end);
+      if (final >= 0x40 && final <= 0x7e) {
+        index = end + 1;
+        continue;
+      }
+    }
+
+    if (
+      code <= 0x08 ||
+      code === 0x0b ||
+      code === 0x0c ||
+      (code >= 0x0e && code <= 0x1f) ||
+      code === 0x7f
+    ) {
+      index++;
+      continue;
+    }
+    safe.push(value.charAt(index));
+    index++;
+  }
+  return safe.join('');
+}
+
+/**
+ * Keep native failures single-line and free of terminal control sequences so
+ * the same safe value can be emitted in human and structured output.
+ */
+export function sanitizeNativeError(error: string | undefined): string | undefined {
+  if (!error) return undefined;
+  const sanitized = stripNativeTerminalControls(error)
+    .replace(/\s*\r?\n\s*/g, ' ')
+    .trim();
+  return sanitized || undefined;
+}
+
+const SENSITIVE_PROVENANCE_KEY =
+  /(?:^|[-_.])(auth|credential|key|password|secret|signature|token)(?:$|[-_.])/i;
+
+export function sanitizeNativeProvenance(
+  provenance: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  const sanitized: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(provenance)) {
+    if (SENSITIVE_PROVENANCE_KEY.test(key)) continue;
+    let value = rawValue;
+    try {
+      const url = new URL(rawValue);
+      if (url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'ssh:') {
+        url.username = '';
+        url.password = '';
+        for (const queryKey of [...url.searchParams.keys()]) {
+          if (SENSITIVE_PROVENANCE_KEY.test(queryKey)) {
+            url.searchParams.delete(queryKey);
+          }
+        }
+        url.searchParams.sort();
+        url.hash = '';
+        value = url.toString();
+      }
+    } catch {
+      // Non-URL provenance is retained unless its key is sensitive.
+    }
+    sanitized[key] = value;
+  }
+  return sanitized;
+}
+
+export function toNativeEffectData(effect: NativeEffect): NativeEffectData {
+  const { resource } = effect;
+  const error = sanitizeNativeError(effect.error);
+  return {
+    action: effect.action,
+    phase: effect.phase ?? defaultEffectPhase(effect.action),
+    changed: effect.changed ?? defaultEffectChanged(effect.action),
+    client: resource.context.client,
+    scope: resource.context.scope,
+    nativeScope: resource.context.nativeScope,
+    kind: resource.kind,
+    requestedIdentity: resource.requestedIdentity,
+    resolvedIdentity: resource.resolvedIdentity,
+    root: resource.context.root,
+    provenance: sanitizeNativeProvenance(resource.provenance),
+    ...(error && { error }),
+  };
 }
 
 export interface NativeSyncResult {
-  marketplacesAdded: string[];
-  pluginsInstalled: NativePluginInstalled[];
-  pluginsFailed: NativePluginFailure[];
-  skipped: string[];
+  success: boolean;
+  effects: NativeEffect[];
 }
 
 export interface NativeClient {
-  /** Check if the CLI binary is available */
-  isAvailable(): Promise<boolean>;
+  readonly client: string;
 
-  /** Whether this client supports the given install scope */
-  supportsScope(scope: 'user' | 'project'): boolean;
+  /** Check whether the CLI and required lifecycle commands are available. */
+  isAvailable(context?: NativeOperationContext): Promise<boolean>;
 
-  /** Convert allagents plugin source to this client's spec format. Null = not marketplace-based. */
-  toPluginSpec(allagentsSource: string): string | null;
+  /** Whether this client supports the given AllAgents scope. */
+  supportsScope(scope: NativeScope): boolean;
 
-  /** Extract marketplace owner/repo from a plugin spec. Null = not marketplace-based. */
-  extractMarketplaceSource(pluginSpec: string): string | null;
+  /**
+   * Classify and normalize a configured source without mutating or fetching it.
+   * A failed result means explicit native installation is unsupported.
+   */
+  resolveSource(
+    source: string,
+    context: NativeOperationContext,
+    provenance?: Readonly<Record<string, string>>,
+  ): NativeSourceResolution;
 
-  /** Register a marketplace */
-  addMarketplace(source: string, options?: { cwd?: string }): Promise<NativeCommandResult>;
+  /** Inspect exact live native state for one selected client/scope/root. */
+  inspect(context: NativeOperationContext): Promise<NativeInspectionResult>;
 
-  /** Install a plugin */
-  installPlugin(spec: string, scope: 'user' | 'project', options?: { cwd?: string }): Promise<NativeCommandResult>;
+  /** Install one absent resource. */
+  install(
+    resource: NativeResource,
+    context: NativeOperationContext,
+  ): Promise<NativeMutationResult>;
 
-  /** Uninstall a plugin */
-  uninstallPlugin(spec: string, scope: 'user' | 'project', options?: { cwd?: string }): Promise<NativeCommandResult>;
+  /** Update only the selected resource. */
+  update(
+    resource: NativeResource,
+    current: NativeResource,
+    context: NativeOperationContext,
+  ): Promise<NativeMutationResult>;
 
-  /** High-level sync: register marketplaces + install plugins */
-  syncPlugins(plugins: string[], scope: 'user' | 'project', options?: { cwd?: string; dryRun?: boolean }): Promise<NativeSyncResult>;
+  /** Remove only the selected observed resource. */
+  remove(
+    resource: NativeResource,
+    context: NativeOperationContext,
+  ): Promise<NativeMutationResult>;
 }
 
 async function resolveWindowsBinary(
@@ -206,7 +472,7 @@ async function resolveWindowsCommand(
 export async function executeCommand(
   binary: string,
   args: string[],
-  options: { cwd?: string } = {},
+  options: NativeCommandOptions = {},
 ): Promise<NativeCommandResult> {
   let command = { binary, args };
   if (process.platform === 'win32') {
@@ -217,54 +483,62 @@ export async function executeCommand(
         success: false,
         output: '',
         error: `Failed to execute ${binary} CLI: ${err instanceof Error ? err.message : String(err)}`,
+        exitCode: null,
+        signal: null,
       };
     }
   }
 
   try {
+    const env = { ...process.env };
+    for (const [name, value] of Object.entries(options.env ?? {})) {
+      if (value === undefined) delete env[name];
+      else env[name] = value;
+    }
     const proc = spawn(command.binary, command.args, {
       cwd: options.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env,
     });
 
-    let stdout = '';
-    let stderr = '';
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
 
     proc.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
+      stdout.push(data);
     });
     proc.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
+      stderr.push(data);
     });
 
-    const [code] = (await once(proc, 'close')) as [number | null];
-    const trimmedStderr = stderr.trim();
+    const [code, signal] = (await once(proc, 'close')) as [
+      number | null,
+      NodeJS.Signals | null,
+    ];
+    const trimmedStderr = Buffer.concat(stderr).toString().trim();
     return {
       success: code === 0,
-      output: stdout.trim(),
+      output: Buffer.concat(stdout).toString().trim(),
       ...(trimmedStderr && { error: trimmedStderr }),
+      exitCode: code,
+      signal,
     };
   } catch (err) {
     return {
       success: false,
       output: '',
       error: `Failed to execute ${binary} CLI: ${err instanceof Error ? err.message : String(err)}`,
+      exitCode: null,
+      signal: null,
     };
   }
 }
 
-/**
- * Merge multiple NativeSyncResult objects into one.
- */
-export function mergeNativeSyncResults(results: NativeSyncResult[]): NativeSyncResult {
-  return results.reduce(
-    (acc, r) => ({
-      marketplacesAdded: [...acc.marketplacesAdded, ...r.marketplacesAdded],
-      pluginsInstalled: [...acc.pluginsInstalled, ...r.pluginsInstalled],
-      pluginsFailed: [...acc.pluginsFailed, ...r.pluginsFailed],
-      skipped: [...acc.skipped, ...r.skipped],
-    }),
-    { marketplacesAdded: [], pluginsInstalled: [], pluginsFailed: [], skipped: [] } as NativeSyncResult,
-  );
+export function mergeNativeSyncResults(
+  results: NativeSyncResult[],
+): NativeSyncResult {
+  return {
+    success: results.every((result) => result.success),
+    effects: results.flatMap((result) => result.effects),
+  };
 }

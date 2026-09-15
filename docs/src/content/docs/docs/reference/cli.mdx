@@ -30,6 +30,12 @@ When `--scope user` is used, sync targets the user-level workspace at `~/.allage
 
 Sync state is tracked in `.allagents/sync-state.json`.
 
+For clients configured with native install mode, sync first inspects the real
+client inventory, then delegates only the required scoped install, update, or
+removal. Pi package and OMP marketplace-plugin effects are included in human and
+JSON output. Native state is tracked separately from copied files so AllAgents
+only removes resources whose ownership it can corroborate.
+
 When `vscode` is in the `clients` list, sync also generates a `.code-workspace` file with repository paths resolved to absolute paths. See the [Workspaces guide](/docs/guides/workspaces/#vscode-workspace-generation) for details.
 
 ### status
@@ -216,6 +222,12 @@ allagents plugin install superpowers@marketplace --skill brainstorming --skill t
 ```
 
 When used, all other skills from the plugin are implicitly disabled. Skills can be added later with `skill add`.
+
+When the selected client uses native install mode, this command validates the
+runtime, source, scope, and live inventory before editing `workspace.yaml`.
+Supported native resources include Pi npm/Git/local packages and OMP
+marketplace plugins. Use `plugin@owner/marketplace-repository` for OMP so
+AllAgents can register and verify the marketplace before install.
 
 ### skill list
 
