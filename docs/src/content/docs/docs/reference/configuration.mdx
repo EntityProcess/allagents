@@ -235,6 +235,15 @@ current project. Profile names and launcher names are safe command basenames;
 machine paths, resolved revisions, generated launcher paths, and ownership
 state are not declaration fields.
 
+On Windows, every profile launcher is written as both `<name>.cmd` and
+`<name>.ps1`. Both retain the caller's working directory, selected profile
+environment, and client exit status. The PowerShell companion preserves literal
+arguments—including quotes and empty values—and safely unwraps standard Node-
+and Bun-backed package-manager `.cmd` shims. The Command Prompt companion keeps
+normal `cmd.exe` parsing, so `%`, `&`, `|`, and `^` require the same escaping as
+any other batch command. Invoke `<name>.ps1` explicitly from PowerShell when
+those characters must remain literal.
+
 MCP credentials must remain runtime references. Environment values and HTTP
 headers accept exact `${ENV_VAR}` references only, and credential-bearing
 command arguments must use the same exact form. Resolved secret values are
