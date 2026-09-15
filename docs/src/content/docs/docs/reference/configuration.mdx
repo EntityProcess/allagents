@@ -53,6 +53,38 @@ clients:
   - cursor
 ```
 
+### JSON Schema and editor validation
+
+AllAgents publishes separate, versioned schemas for the two workspace scopes:
+
+- [Project workspace schema](https://allagents.dev/schemas/v1/project-workspace.schema.json)
+  for `.allagents/workspace.yaml`. It rejects the global `profiles` field.
+- [User workspace schema](https://allagents.dev/schemas/v1/user-workspace.schema.json)
+  for `~/.allagents/workspace.yaml`. It includes global profiles and strict
+  client-specific settings.
+
+Add the matching YAML Language Server directive as the first line of each file:
+
+```yaml
+# yaml-language-server: $schema=https://allagents.dev/schemas/v1/project-workspace.schema.json
+repositories: []
+plugins: []
+clients: []
+```
+
+```yaml
+# yaml-language-server: $schema=https://allagents.dev/schemas/v1/user-workspace.schema.json
+profiles:
+  review:
+    clients:
+      - name: claude
+```
+
+The `v1` URLs are stable. A future breaking schema contract will use a new
+versioned directory. Runtime Zod validation remains authoritative; regenerate
+the committed schemas with `bun run schema:generate` after changing workspace
+input models, and verify drift with `bun run schema:check`.
+
 ### Client Install Modes
 
 A bare client name uses file sync. Native mode delegates compatible plugin
@@ -202,6 +234,15 @@ Relative local plugin sources resolve from the user's home directory, not the
 current project. Profile names and launcher names are safe command basenames;
 machine paths, resolved revisions, generated launcher paths, and ownership
 state are not declaration fields.
+
+On Windows, every profile launcher is written as both `<name>.cmd` and
+`<name>.ps1`. Both retain the caller's working directory, selected profile
+environment, and client exit status. The PowerShell companion preserves literal
+arguments—including quotes and empty values—and safely unwraps standard Node-
+and Bun-backed package-manager `.cmd` shims. The Command Prompt companion keeps
+normal `cmd.exe` parsing, so `%`, `&`, `|`, and `^` require the same escaping as
+any other batch command. Invoke `<name>.ps1` explicitly from PowerShell when
+those characters must remain literal.
 
 MCP credentials must remain runtime references. Environment values and HTTP
 headers accept exact `${ENV_VAR}` references only, and credential-bearing
@@ -550,6 +591,10 @@ plugins:
   - superpowers@obra/superpowers
 ```
 
-This file follows the same `plugins` format as the project-level workspace.yaml but does not support `workspace`, `repositories`, or `clients` fields. User-scoped plugins sync to user-level directories (`~/.claude/`, `~/.codex/`, etc.) and are available across all projects.
+The user file accepts the same ordinary workspace fields as a project file, and
+also accepts global `profiles`. Its `repositories`, `plugins`, and `clients`
+arrays default to empty, so it may contain only profiles. User-scoped ordinary
+plugins sync to user-level directories (`~/.claude/`, `~/.codex/`, etc.);
+profile lifecycle remains explicit and independent.
 
 Sync state for user-scoped plugins is tracked in `~/.allagents/sync-state.json`.

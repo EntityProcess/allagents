@@ -1,0 +1,1057 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://allagents.dev/schemas/v1/user-workspace.schema.json",
+  "title": "AllAgents user workspace",
+  "description": "Configuration for ~/.allagents/workspace.yaml, including global profiles.",
+  "$ref": "#/definitions/AllAgentsUserWorkspace",
+  "definitions": {
+    "AllAgentsUserWorkspace": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number"
+        },
+        "setup": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "run": {
+                    "$ref": "#/definitions/AllAgentsUserWorkspace/properties/setup/items/anyOf/0"
+                  },
+                  "platforms": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "aix",
+                        "android",
+                        "darwin",
+                        "freebsd",
+                        "haiku",
+                        "linux",
+                        "openbsd",
+                        "sunos",
+                        "win32",
+                        "cygwin",
+                        "netbsd"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "architectures": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "arm",
+                        "arm64",
+                        "ia32",
+                        "loong64",
+                        "mips",
+                        "mipsel",
+                        "ppc",
+                        "ppc64",
+                        "riscv64",
+                        "s390",
+                        "s390x",
+                        "x64"
+                      ]
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "run"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "workspace": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string"
+                      },
+                      "dest": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": true
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "files"
+          ],
+          "additionalProperties": true
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "skills": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "managed": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "clone",
+                      "sync"
+                    ]
+                  }
+                ]
+              },
+              "branch": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": true
+          },
+          "default": []
+        },
+        "plugins": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/0"
+                  },
+                  "clients": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "universal",
+                        "claude",
+                        "copilot",
+                        "codex",
+                        "pi",
+                        "omp",
+                        "cursor",
+                        "opencode",
+                        "gemini",
+                        "factory",
+                        "ampcode",
+                        "vscode",
+                        "openclaw",
+                        "windsurf",
+                        "cline",
+                        "continue",
+                        "roo",
+                        "kilo",
+                        "trae",
+                        "augment",
+                        "zencoder",
+                        "junie",
+                        "openhands",
+                        "kiro",
+                        "replit",
+                        "kimi"
+                      ]
+                    }
+                  },
+                  "install": {
+                    "type": "string",
+                    "enum": [
+                      "file",
+                      "native"
+                    ]
+                  },
+                  "exclude": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "skills": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "exclude": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "exclude"
+                        ],
+                        "additionalProperties": true
+                      }
+                    ]
+                  },
+                  "ref": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "default": []
+        },
+        "clients": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/clients/items"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:universal|claude|copilot|codex|pi|omp|cursor|opencode|gemini|factory|ampcode|vscode|openclaw|windsurf|cline|continue|roo|kilo|trae|augment|zencoder|junie|openhands|kiro|replit|kimi):(?:file|native)$"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/clients/items"
+                  },
+                  "install": {
+                    "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/install",
+                    "default": "file"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": true
+              }
+            ]
+          },
+          "default": []
+        },
+        "vscode": {
+          "type": "object",
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "syncMode": {
+          "type": "string",
+          "enum": [
+            "symlink",
+            "copy"
+          ]
+        },
+        "mcpProxy": {
+          "type": "object",
+          "properties": {
+            "clients": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "servers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "proxy": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "proxy"
+                ],
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": [
+            "clients"
+          ],
+          "additionalProperties": true
+        },
+        "mcpServers": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "http"
+                    ]
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "clients": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/clients/items"
+                    }
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "stdio"
+                    ]
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "clients": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/clients/items"
+                    }
+                  }
+                },
+                "required": [
+                  "command"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "disabledSkills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabledSkills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "profiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "clients": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "const": "claude"
+                        },
+                        "install": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/install",
+                          "default": "file"
+                        },
+                        "launcher": {
+                          "type": "string",
+                          "pattern": "^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|$))(?!.*\\.$)[a-z0-9][a-z0-9._-]{0,63}$"
+                        },
+                        "settings": {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "effortLevel": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh"
+                              ]
+                            },
+                            "fallbackModel": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "minItems": 1
+                            },
+                            "outputStyle": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "autoMemoryEnabled": {
+                              "type": "boolean"
+                            },
+                            "spinnerTipsEnabled": {
+                              "type": "boolean"
+                            },
+                            "autoUpdatesChannel": {
+                              "type": "string",
+                              "enum": [
+                                "stable",
+                                "latest"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false,
+                          "default": {}
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "const": "opencode"
+                        },
+                        "install": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/install"
+                        },
+                        "launcher": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/launcher"
+                        },
+                        "settings": {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "small_model": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "default_agent": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "username": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "share": {
+                              "type": "string",
+                              "enum": [
+                                "manual",
+                                "auto",
+                                "disabled"
+                              ]
+                            },
+                            "autoupdate": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "notify"
+                                }
+                              ]
+                            },
+                            "snapshot": {
+                              "type": "boolean"
+                            },
+                            "subagent_depth": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "logLevel": {
+                              "type": "string",
+                              "enum": [
+                                "DEBUG",
+                                "INFO",
+                                "WARN",
+                                "ERROR"
+                              ]
+                            },
+                            "disabled_providers": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "enabled_providers": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "additionalProperties": false,
+                          "default": {}
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "const": "copilot"
+                        },
+                        "install": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/install"
+                        },
+                        "launcher": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/launcher"
+                        },
+                        "settings": {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "theme": {
+                              "type": "string",
+                              "enum": [
+                                "default",
+                                "github",
+                                "dim",
+                                "high-contrast",
+                                "colorblind"
+                              ]
+                            },
+                            "autoUpdate": {
+                              "type": "boolean"
+                            },
+                            "autoUpdatesChannel": {
+                              "type": "string",
+                              "enum": [
+                                "stable",
+                                "prerelease"
+                              ]
+                            },
+                            "banner": {
+                              "type": "string",
+                              "enum": [
+                                "always",
+                                "once",
+                                "never"
+                              ]
+                            },
+                            "askUser": {
+                              "type": "boolean"
+                            },
+                            "includeCoAuthoredBy": {
+                              "type": "boolean"
+                            },
+                            "stream": {
+                              "type": "boolean"
+                            },
+                            "streamerMode": {
+                              "type": "boolean"
+                            },
+                            "toolSearch": {
+                              "type": "boolean"
+                            },
+                            "updateTerminalTitle": {
+                              "type": "boolean"
+                            },
+                            "respectGitignore": {
+                              "type": "boolean"
+                            },
+                            "disableAllHooks": {
+                              "type": "boolean"
+                            },
+                            "experimental": {
+                              "type": "boolean"
+                            },
+                            "bashEnv": {
+                              "type": "boolean"
+                            },
+                            "keepAlive": {
+                              "type": "string",
+                              "enum": [
+                                "on",
+                                "off",
+                                "busy"
+                              ]
+                            },
+                            "commandHistoryMaxSize": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 1000
+                            },
+                            "compactPaste": {
+                              "type": "boolean"
+                            },
+                            "mouse": {
+                              "type": "boolean"
+                            },
+                            "terminalProgress": {
+                              "type": "boolean"
+                            },
+                            "remote": {
+                              "type": "string",
+                              "enum": [
+                                "on",
+                                "off"
+                              ]
+                            },
+                            "remoteExport": {
+                              "type": "boolean"
+                            },
+                            "ide.autoConnect": {
+                              "type": "boolean"
+                            },
+                            "shellShortcut": {
+                              "type": "boolean"
+                            },
+                            "customAgents.defaultLocalOnly": {
+                              "type": "boolean"
+                            },
+                            "storeTokenPlaintext": {
+                              "type": "boolean"
+                            },
+                            "disabledMcpServers": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "enabledMcpServers": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "additionalProperties": false,
+                          "default": {}
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "const": "codex"
+                        },
+                        "install": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/install"
+                        },
+                        "launcher": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/launcher"
+                        },
+                        "settings": {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "model_reasoning_effort": {
+                              "type": "string",
+                              "enum": [
+                                "minimal",
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh"
+                              ]
+                            },
+                            "model_reasoning_summary": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "concise",
+                                "detailed",
+                                "none"
+                              ]
+                            },
+                            "model_verbosity": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "medium",
+                                "high"
+                              ]
+                            },
+                            "approval_policy": {
+                              "type": "string",
+                              "enum": [
+                                "on-request",
+                                "never"
+                              ]
+                            },
+                            "sandbox_mode": {
+                              "type": "string",
+                              "enum": [
+                                "read-only",
+                                "workspace-write",
+                                "danger-full-access"
+                              ]
+                            },
+                            "web_search": {
+                              "type": "string",
+                              "enum": [
+                                "disabled",
+                                "cached",
+                                "indexed",
+                                "live"
+                              ]
+                            },
+                            "personality": {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "friendly",
+                                "pragmatic"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false,
+                          "default": {}
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "enum": [
+                            "pi",
+                            "omp"
+                          ]
+                        },
+                        "install": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/install"
+                        },
+                        "launcher": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/launcher"
+                        },
+                        "settings": {
+                          "type": "object",
+                          "properties": {},
+                          "additionalProperties": false,
+                          "default": {}
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "enum": [
+                            "universal",
+                            "cursor",
+                            "gemini",
+                            "factory",
+                            "ampcode",
+                            "vscode",
+                            "openclaw",
+                            "windsurf",
+                            "cline",
+                            "continue",
+                            "roo",
+                            "kilo",
+                            "trae",
+                            "augment",
+                            "zencoder",
+                            "junie",
+                            "openhands",
+                            "kiro",
+                            "replit",
+                            "kimi"
+                          ]
+                        },
+                        "install": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/install"
+                        },
+                        "launcher": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/0/properties/launcher"
+                        },
+                        "settings": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/clients/items/anyOf/4/properties/settings",
+                          "default": {}
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "minItems": 1
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/0"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/0"
+                        },
+                        "ref": {
+                          "type": "string"
+                        },
+                        "install": {
+                          "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/install"
+                        },
+                        "clients": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/clients/items"
+                          }
+                        },
+                        "skills": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "exclude": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "exclude"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "source"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "default": []
+              },
+              "mcpServers": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "http"
+                          ]
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "headers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string",
+                            "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                          }
+                        },
+                        "clients": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/clients/items"
+                          }
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "stdio"
+                          ]
+                        },
+                        "command": {
+                          "type": "string"
+                        },
+                        "args": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "env": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "$ref": "#/definitions/AllAgentsUserWorkspace/properties/profiles/additionalProperties/properties/mcpServers/additionalProperties/anyOf/0/properties/headers/additionalProperties"
+                          }
+                        },
+                        "clients": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/AllAgentsUserWorkspace/properties/plugins/items/anyOf/1/properties/clients/items"
+                          }
+                        }
+                      },
+                      "required": [
+                        "command"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "clients"
+            ],
+            "additionalProperties": false
+          },
+          "propertyNames": {
+            "pattern": "^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|$))(?!.*\\.$)[a-z0-9][a-z0-9._-]{0,63}$"
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
