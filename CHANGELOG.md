@@ -32,6 +32,11 @@
 - OpenCode global profiles using additive `OPENCODE_CONFIG` and
   `OPENCODE_CONFIG_DIR` overrides, file-installed skills and commands, strict
   settings, MCP serialization, generated launchers, and ownership-safe cleanup.
+- Claude Code global profiles using isolated `CLAUDE_CONFIG_DIR` roots,
+  additive MCP configuration, strict settings, native marketplace/plugin
+  lifecycle, generated launchers, and ownership-safe cleanup.
+- Versioned user and project workspace JSON Schemas generated from the runtime
+  Zod models, with CI drift enforcement and YAML Language Server setup docs.
 
 
 ## [1.0.0] - 2026-03-13

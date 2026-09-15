@@ -399,6 +399,7 @@ function sameNativeIdentity(
   );
 }
 
+
 function findInstalledNativeResource(
   inspection: NativeInspectionResult,
   matches: (resource: NativeResource) => boolean,
@@ -576,6 +577,10 @@ function mcpDisclosures(
   }
   return Object.freeze(servers);
 }
+
+
+
+
 
 async function planRoot(
   client: ClientType,

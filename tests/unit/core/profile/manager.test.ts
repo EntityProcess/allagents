@@ -239,6 +239,7 @@ class MemoryProfileAdapter implements ProfileAdapter {
   async isRuntimeAvailable() {
     this.runtimeChecks++;
     return this.runtimeAvailable;
+
   }
 
   resolveNativeSource(
