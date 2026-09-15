@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, it, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { dump } from 'js-yaml';
@@ -373,6 +374,144 @@ function dependencies(...adapters: MemoryProfileAdapter[]): ProfileManagerDepend
 }
 
 describe('profile lifecycle manager', () => {
+  test.skipIf(process.platform !== 'win32')(
+    'installs and executes a generated Windows profile launcher through a nested command shim',
+    async () => {
+      const fixturePaths = await fixture();
+      const launcherBin = join(fixturePaths.home, 'profile bin with spaces');
+      const nativeBin = join(fixturePaths.home, 'native bin');
+      const workingDirectory = join(fixturePaths.home, 'working directory');
+      const recorder = join(fixturePaths.home, 'record argv.cjs');
+      const invoker = join(fixturePaths.home, 'invoke launcher.ps1');
+      await Promise.all([
+        mkdir(nativeBin, { recursive: true }),
+        mkdir(workingDirectory, { recursive: true }),
+      ]);
+      const canonicalWorkingDirectory = await realpath(workingDirectory);
+      await writeFile(
+        recorder,
+        [
+          "process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR }));",
+          'process.exit(23);',
+        ].join('\n'),
+        'utf8',
+      );
+      await writeFile(
+        join(nativeBin, 'pi.cmd'),
+        [
+          '@echo off',
+          'if "%~1"=="--version" (',
+          '  echo 0.85.1',
+          '  exit /b 0',
+          ')',
+          `"${process.execPath}" "${recorder}" %*`,
+          'exit /b %ERRORLEVEL%',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+      await writeFile(
+        invoker,
+        [
+          'param(',
+          '  [Parameter(Mandatory = $true, Position = 0)]',
+          '  [string] $Launcher,',
+          '  [Parameter(Position = 1, ValueFromRemainingArguments = $true)]',
+          '  [string[]] $Forwarded',
+          ')',
+          '& $Launcher @Forwarded',
+          'exit $LASTEXITCODE',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+      await writeWorkspace(fixturePaths.userConfigPath, {
+        work: {
+          clients: [{ name: 'pi', install: 'file', launcher: 'work' }],
+          plugins: [],
+        },
+      });
+      const pathKey =
+        Object.keys(process.env).find((name) => name.toLowerCase() === 'path') ?? 'PATH';
+      const environment = {
+        ...process.env,
+        [pathKey]: `${launcherBin};${nativeBin};${process.env[pathKey] ?? ''}`,
+      };
+      const options: ProfileRuntimeOptions = {
+        ...fixturePaths.options,
+        binDir: launcherBin,
+        environment,
+        platform: 'win32',
+      };
+      const agentDirectory = join(
+        fixturePaths.home,
+        '.allagents',
+        'profiles',
+        'work',
+        'clients',
+        'pi',
+        'agent',
+      );
+      const plan = await planProfileOperation('work', 'install', options);
+      expect((await applyProfilePlan(plan, options)).success).toBe(true);
+
+      const launcher = 'work.cmd';
+      function invoke(runtimeArguments: readonly string[]) {
+        const child = spawnSync(
+          'powershell.exe',
+          [
+            '-NoLogo',
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            invoker,
+            launcher,
+            ...runtimeArguments,
+          ],
+          {
+            cwd: workingDirectory,
+            env: environment,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        );
+        if (child.status !== 23) {
+          throw new Error(
+            `Expected Windows profile launcher exit 23, received ${String(child.status)}; stdout=${JSON.stringify(child.stdout.toString())}; stderr=${JSON.stringify(child.stderr.toString())}`,
+          );
+        }
+        return JSON.parse(child.stdout.toString()) as {
+          args: string[];
+          cwd: string;
+          agentDir: string;
+        };
+      }
+
+      expect(invoke([])).toEqual({
+        args: [],
+        cwd: canonicalWorkingDirectory,
+        agentDir: agentDirectory,
+      });
+      const arbitrary = [
+        'space value',
+        'double"quote',
+        "single'quote",
+        'literal&operator',
+        'literal|pipe',
+        'literal^caret',
+        'literal%PATH%',
+        'backslash\\"quote',
+        'trailing\\',
+        '',
+        'unicode-日本語',
+      ];
+      expect(invoke(arbitrary)).toEqual({
+        args: arbitrary,
+        cwd: canonicalWorkingDirectory,
+        agentDir: agentDirectory,
+      });
+    },
+  );
   it('honors plugin install precedence and client selectors before planning', async () => {
     const test = await fixture();
     const local = await pluginFixture(test.workspaceDirectory);
