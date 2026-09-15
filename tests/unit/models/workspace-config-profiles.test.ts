@@ -181,7 +181,7 @@ describe('profile workspace declarations', () => {
   it('accepts unsupported client names only with strict empty settings', () => {
     expect(
       UserWorkspaceConfigSchema.safeParse(
-        userConfigWithProfile({ clients: [{ name: 'claude', settings: {} }] }),
+        userConfigWithProfile({ clients: [{ name: 'cursor', settings: {} }] }),
       ).success,
     ).toBe(true);
     expect(
@@ -198,6 +198,41 @@ describe('profile workspace declarations', () => {
         }),
       ).success,
     ).toBe(false);
+  });
+
+  it('accepts only conservative documented Claude profile settings', () => {
+    const settings = {
+      model: 'sonnet',
+      effortLevel: 'xhigh',
+      fallbackModel: ['haiku'],
+      outputStyle: 'Explanatory',
+      autoMemoryEnabled: false,
+      spinnerTipsEnabled: false,
+      autoUpdatesChannel: 'stable',
+    };
+    const result = UserWorkspaceConfigSchema.parse(
+      userConfigWithProfile({
+        clients: [{ name: 'claude', settings }],
+      }),
+    );
+    expect(result.profiles?.research?.clients[0]?.settings).toEqual(settings);
+
+    for (const invalid of [
+      { unknown: true },
+      { effortLevel: 'max' },
+      { fallbackModel: [] },
+      { fallbackModel: [''] },
+      { autoUpdatesChannel: 'prerelease' },
+      { autoMemoryEnabled: 'false' },
+    ]) {
+      expect(
+        UserWorkspaceConfigSchema.safeParse(
+          userConfigWithProfile({
+            clients: [{ name: 'claude', settings: invalid }],
+          }),
+        ).success,
+      ).toBe(false);
+    }
   });
 
   it('accepts only documented OpenCode profile settings', () => {
@@ -286,6 +321,53 @@ describe('profile workspace declarations', () => {
         UserWorkspaceConfigSchema.safeParse(
           userConfigWithProfile({
             clients: [{ name: 'copilot', settings }],
+          }),
+        ).success,
+      ).toBe(false);
+    }
+  });
+
+  it('accepts only the conservative documented Codex profile settings', () => {
+    const result = UserWorkspaceConfigSchema.parse(
+      userConfigWithProfile({
+        clients: [
+          {
+            name: 'codex',
+            settings: {
+              model: 'gpt-5.6-sol',
+              model_reasoning_effort: 'xhigh',
+              model_reasoning_summary: 'concise',
+              model_verbosity: 'low',
+              approval_policy: 'on-request',
+              sandbox_mode: 'workspace-write',
+              web_search: 'indexed',
+              personality: 'pragmatic',
+            },
+          },
+        ],
+      }),
+    );
+    expect(result.profiles?.research?.clients[0]?.settings).toEqual({
+      model: 'gpt-5.6-sol',
+      model_reasoning_effort: 'xhigh',
+      model_reasoning_summary: 'concise',
+      model_verbosity: 'low',
+      approval_policy: 'on-request',
+      sandbox_mode: 'workspace-write',
+      web_search: 'indexed',
+      personality: 'pragmatic',
+    });
+    for (const settings of [
+      { unknown: true },
+      { approval_policy: 'untrusted' },
+      { sandbox_mode: 'full' },
+      { web_search: true },
+      { model_reasoning_effort: 'extreme' },
+    ]) {
+      expect(
+        UserWorkspaceConfigSchema.safeParse(
+          userConfigWithProfile({
+            clients: [{ name: 'codex', settings }],
           }),
         ).success,
       ).toBe(false);

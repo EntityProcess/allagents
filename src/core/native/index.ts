@@ -21,7 +21,14 @@ export {
   sanitizeNativeProvenance,
   toNativeEffectData,
 } from './types.js';
-export { ClaudeNativeClient } from './claude.js';
+export {
+  ClaudeNativeClient,
+  parseClaudeMarketplaceInventory,
+  parseClaudePluginId,
+  parseClaudePluginInventory,
+  type ClaudeMarketplaceRegistrationInspection,
+  type ClaudeNativeClientOptions,
+} from './claude.js';
 export {
   CopilotNativeClient,
   parseCopilotPluginId,
@@ -29,6 +36,14 @@ export {
   type CopilotMarketplaceRegistrationInspection,
   type CopilotNativeClientOptions,
 } from './copilot.js';
+export {
+  CodexNativeClient,
+  parseCodexMarketplaceInventory,
+  parseCodexPluginId,
+  parseCodexPluginInventory,
+  type CodexMarketplaceRegistrationInspection,
+  type CodexNativeClientOptions,
+} from './codex.js';
 export {
   OmpNativeClient,
   inspectOmpMarketplaceRegistry,

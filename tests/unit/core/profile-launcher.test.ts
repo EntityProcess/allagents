@@ -159,6 +159,59 @@ describe('profile launchers', () => {
     });
   });
 
+  it('refuses to launch when an adapter-required profile file is missing', async () => {
+    const root = await temporaryRoot();
+    const binRoot = join(root, 'bin');
+    const requiredFile = join(root, 'review.config.toml');
+    const marker = join(root, 'ran');
+    const recorder = join(root, 'record.cjs');
+    await writeFile(
+      recorder,
+      "require('node:fs').writeFileSync(process.argv[2], 'ran');",
+      'utf8',
+    );
+    await installProfileLaunchers({
+      binRoot,
+      basename: 'review',
+      invocation: {
+        command: process.execPath,
+        args: [recorder, marker],
+        env: {},
+        requiredFiles: [requiredFile],
+      },
+    });
+
+    const blocked = spawn(join(binRoot, 'review'), [], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    const stderr: Buffer[] = [];
+    blocked.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+    const [blockedCode] = (await once(blocked, 'close')) as [number | null];
+    expect(blockedCode).toBe(1);
+    expect(Buffer.concat(stderr).toString()).toContain(
+      'Profile launcher prerequisite is missing',
+    );
+    await expect(readFile(marker, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+
+    await writeFile(requiredFile, '');
+    const allowed = spawn(join(binRoot, 'review'), [], {
+      stdio: 'ignore',
+    });
+    const [allowedCode] = (await once(allowed, 'close')) as [number | null];
+    expect(allowedCode).toBe(0);
+    expect(await readFile(marker, 'utf8')).toBe('ran');
+    expect(() =>
+      renderProfileLaunchers('unsafe', {
+        command: 'codex',
+        args: [],
+        env: {},
+        requiredFiles: ['relative.toml'],
+      }),
+    ).toThrow('must be absolute');
+  });
+
   it('forwards arbitrary POSIX arguments, cwd, environment, and exit status', async () => {
     const root = await temporaryRoot();
     const binRoot = join(root, 'bin');
