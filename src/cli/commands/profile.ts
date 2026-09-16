@@ -19,7 +19,9 @@ import type {
 } from '../../core/profile/index.js';
 import {
   buildProfileData,
+  buildProfileListData,
   buildProfilePlanData,
+  formatProfileList,
   formatProfilePlan,
   formatProfileResult,
 } from '../format-profile.js';
@@ -28,6 +30,7 @@ import { isJsonMode, jsonOutput } from '../json-output.js';
 import type { JsonEnvelope } from '../json-output.js';
 import {
   profileInstallMeta,
+  profileListMeta,
   profileRemoveMeta,
   profileStatusMeta,
 } from '../metadata/profile.js';
@@ -300,6 +303,33 @@ async function executeMutation(
   return result.success ? 0 : 1;
 }
 
+async function executeList(
+  dependencies: ProfileCommandDependencies,
+  runtime: ProfileCommandRuntime,
+): Promise<number> {
+  const results = await dependencies.getProfileStatuses({});
+  const failedProfiles = results
+    .filter((result) => result.error !== undefined)
+    .map((result) => result.profile)
+    .sort((left, right) => left.localeCompare(right));
+  const success = failedProfiles.length === 0;
+  const error = success
+    ? undefined
+    : `Failed to inspect profiles: ${failedProfiles.join(', ')}`;
+  if (runtime.isJson()) {
+    runtime.printJson({
+      success,
+      command: 'profile list',
+      data: buildProfileListData(results),
+      ...(error && { error }),
+    });
+    return success ? 0 : 1;
+  }
+  for (const line of formatProfileList(results)) runtime.print(line);
+  if (error) runtime.printError(`Error: ${terminalSafe(error)}`);
+  return success ? 0 : 1;
+}
+
 async function executeStatus(
   name: string | undefined,
   dependencies: ProfileCommandDependencies,
@@ -380,6 +410,16 @@ export function createProfileCommand(
       ),
   });
 
+  const listCmd = command({
+    name: 'list',
+    description: buildDescription(profileListMeta),
+    args: {},
+    handler: () =>
+      handleCommand('profile list', runtime, () =>
+        executeList(dependencies, runtime),
+      ),
+  });
+
   const statusCmd = command({
     name: 'status',
     description: buildDescription(profileStatusMeta),
@@ -422,6 +462,7 @@ export function createProfileCommand(
     description: 'Manage global Pi and OMP profiles',
     cmds: {
       install: installCmd,
+      list: listCmd,
       status: statusCmd,
       remove: removeCmd,
     },

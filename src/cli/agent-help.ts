@@ -23,6 +23,7 @@ import {
 import { updateMeta } from './metadata/self.js';
 import {
   profileInstallMeta,
+  profileListMeta,
   profileRemoveMeta,
   profileStatusMeta,
 } from './metadata/profile.js';
@@ -55,6 +56,7 @@ const allCommands: AgentCommandMeta[] = [
   skillsUpdateMeta,
   updateMeta,
   profileInstallMeta,
+  profileListMeta,
   profileStatusMeta,
   profileRemoveMeta,
 ];

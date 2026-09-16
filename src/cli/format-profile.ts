@@ -117,6 +117,25 @@ function formatPlanClients(plan: ProfilePlan): string[] {
   return lines;
 }
 
+function orderedProfileStatuses(
+  results: readonly ProfileStatusResult[],
+): ProfileStatusResult[] {
+  return results
+    .map((result) => ({
+      ...result,
+      clients: [...result.clients].sort((left, right) =>
+        left.localeCompare(right),
+      ),
+      launchers: [...result.launchers].sort(
+        (left, right) =>
+          left.client.localeCompare(right.client) ||
+          left.name.localeCompare(right.name) ||
+          left.path.localeCompare(right.path),
+      ),
+    }))
+    .sort((left, right) => left.profile.localeCompare(right.profile));
+}
+
 
 /** Build the stable JSON payload for a dry-run plan. */
 export function buildProfilePlanData(plan: ProfilePlan): Record<string, unknown> {
@@ -168,6 +187,14 @@ export function buildProfileData(result: ProfileResult): Record<string, unknown>
   return data;
 }
 
+/** Build the stable JSON payload for the read-only profile inventory. */
+export function buildProfileListData(
+  results: readonly ProfileStatusResult[],
+): Record<string, unknown> {
+  const profiles = orderedProfileStatuses(results).map(buildProfileData);
+  return { profiles, total: profiles.length };
+}
+
 /** Format a deterministic, display-safe plan without inspecting runtime secrets. */
 export function formatProfilePlan(plan: ProfilePlan): string[] {
   const lines = [
@@ -181,6 +208,38 @@ export function formatProfilePlan(plan: ProfilePlan): string[] {
     for (const step of plan.steps) lines.push(...formatPlanStep(step));
   }
   appendWarnings(lines, plan.warnings);
+  return lines;
+}
+
+/** Format the compact, deterministic read-only profile inventory. */
+export function formatProfileList(
+  results: readonly ProfileStatusResult[],
+): string[] {
+  const profiles = orderedProfileStatuses(results);
+  if (profiles.length === 0) return ['No profiles found.'];
+
+  const lines = [`Profiles (${profiles.length}):`];
+  for (const profile of profiles) {
+    lines.push(
+      `  ${terminalSafe(profile.profile)}: ${terminalSafe(profile.status)}`,
+    );
+    lines.push(
+      `    Declared: ${profile.declared ? 'yes' : 'no'}; Installed: ${profile.installed ? 'yes' : 'no'}`,
+    );
+    lines.push(
+      `    Clients: ${profile.clients.length > 0 ? profile.clients.map((client) => terminalSafe(client)).join(', ') : 'none'}`,
+    );
+    if (profile.launchers.length === 0) {
+      lines.push('    Launchers: none');
+      continue;
+    }
+    lines.push('    Launchers:');
+    for (const launcher of profile.launchers) {
+      lines.push(
+        `      ${terminalSafe(launcher.client)} ${terminalSafe(launcher.name)}: ${terminalSafe(launcher.path)} (${launcher.onPath ? 'on PATH' : 'not on PATH'})`,
+      );
+    }
+  }
   return lines;
 }
 

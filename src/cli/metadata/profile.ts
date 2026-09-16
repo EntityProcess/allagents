@@ -136,49 +136,67 @@ export const profileInstallMeta: AgentCommandMeta = {
   jsonFields: profileMutationJsonFields,
 };
 
+const profileStatusOutput = {
+  profile: 'string',
+  operation: 'status',
+  status: 'string',
+  declared: 'boolean',
+  installed: 'boolean',
+  declarationDigest: 'string?',
+  stateDigest: 'string?',
+  clients: ['string'],
+  steps: [
+    {
+      status:
+        'created | updated | removed | unchanged | referenced | retained | failed',
+      client: 'string?',
+      kind: 'string?',
+      identity: 'string?',
+      error: 'string?',
+    },
+  ],
+  launchers: [
+    {
+      client: 'string',
+      name: 'string',
+      path: 'string',
+      onPath: 'boolean',
+    },
+  ],
+  warnings: ['string'],
+  error: 'string?',
+};
+
+export const profileListMeta: AgentCommandMeta = {
+  command: 'profile list',
+  description: 'List declared and installed global profiles',
+  whenToUse:
+    'When you need a read-only inventory of every declared or installed profile, its clients, and launcher PATH status',
+  examples: ['allagents profile list', 'allagents --json profile list'],
+  expectedOutput:
+    'Lists every declared and declaration-missing installed profile with overall state, clients, and launcher paths without changing user files.',
+  outputSchema: {
+    profiles: [profileStatusOutput],
+    total: 'number',
+  },
+  jsonFields: profileStatusJsonFields,
+  skipUpdateCheck: true,
+};
+
 export const profileStatusMeta: AgentCommandMeta = {
   command: 'profile status',
   description: 'Inspect declared and installed global profiles',
   whenToUse:
-    'When you need read-only profile state, per-resource status, or launcher PATH diagnostics',
+    'When you need detailed read-only profile state, per-resource status, or launcher PATH diagnostics',
   examples: [
     'allagents profile status work',
     'allagents profile status',
     'allagents --json profile status work',
   ],
   expectedOutput:
-    'Reports declared and installed state, resource statuses, warnings, and whether the profile launcher directory is available on PATH without changing user files.',
+    'Reports declared and installed state, detailed resource statuses, warnings, and whether the profile launcher directory is available on PATH without changing user files.',
   positionals: profileNamePositional,
-  outputSchema: {
-    profile: 'string',
-    operation: 'status',
-    status: 'string',
-    declared: 'boolean',
-    installed: 'boolean',
-    declarationDigest: 'string?',
-    stateDigest: 'string?',
-    clients: ['string'],
-    steps: [
-      {
-        status:
-          'created | updated | removed | unchanged | referenced | retained | failed',
-        client: 'string?',
-        kind: 'string?',
-        identity: 'string?',
-        error: 'string?',
-      },
-    ],
-    launchers: [
-      {
-        client: 'string',
-        name: 'string',
-        path: 'string',
-        onPath: 'boolean',
-      },
-    ],
-    warnings: ['string'],
-    error: 'string?',
-  },
+  outputSchema: profileStatusOutput,
   jsonFields: profileStatusJsonFields,
 };
 

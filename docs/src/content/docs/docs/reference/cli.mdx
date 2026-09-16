@@ -53,6 +53,7 @@ When `vscode` is in the `clients` list, sync also generates a `.code-workspace` 
 
 ```bash
 allagents profile install <name> [--yes] [--dry-run] [--offline]
+allagents profile list
 allagents profile status [name]
 allagents profile remove <name> [--yes] [--dry-run] [--offline]
 ```
@@ -63,9 +64,16 @@ scripts and JSON mode must pass `--yes`. `--dry-run` emits the same resolved
 plan without writing profile state, client files, native package state, or
 launchers.
 
-`status` reports declared, installed, missing, drifted, partial, unsupported,
-and declaration-missing resources. Omitting the name opens a selector only on
-an interactive terminal; non-interactive and JSON callers must provide it.
+`list` inventories every declared profile plus installed profiles whose
+declaration is missing. It never opens a selector or changes files or native
+state. Human and JSON output include overall status, declared and installed
+state, clients, and each launcher's client, name, absolute path, and PATH
+status.
+
+`status` remains the detailed single-profile diagnostic for declared,
+installed, missing, drifted, partial, unsupported, and declaration-missing
+resources. Omitting the name opens a selector only on an interactive terminal;
+non-interactive and JSON callers must provide it.
 
 Removal works from ownership state even after the declaration is deleted. It
 deletes only unchanged managed resources, releases referenced resources, and

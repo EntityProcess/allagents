@@ -96,6 +96,7 @@ clients:
 | `allagents plugin uninstall <spec>` | Remove a plugin |
 | `allagents plugin list` | List installed plugins and skills with source, scope, and clients |
 | `allagents profile install <name> --yes` | Install a declared global profile |
+| `allagents profile list` | List declared and installed profiles with clients and launchers |
 | `allagents profile status [name]` | Inspect declared and installed profiles |
 | `allagents profile remove <name> --yes` | Remove unchanged managed profile resources |
 | `allagents skill add <name>` | Add a skill from a repo (plural `skills` alias supported) |
