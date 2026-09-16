@@ -5,9 +5,10 @@ import type {
   ProfileResourceRelationship,
   ProfileState,
 } from '../../models/profile-state.js';
-import type {
-  ClientType,
-  ProfileDeclaration,
+import {
+  ProfileNameSchema,
+  type ClientType,
+  type ProfileDeclaration,
 } from '../../models/workspace-config.js';
 import {
   assertSafeProfilePath,
@@ -1099,19 +1100,25 @@ export async function getProfileStatuses(
 ): Promise<readonly ProfileStatusResult[]> {
   const runtime = resolveProfileRuntimeOptions(options);
   const workspace = await readOptionalProfileWorkspace(runtime, dependencies);
-  const names = Object.keys(workspace.profiles ?? {});
+  const names = new Set(Object.keys(workspace.profiles ?? {}));
   const profilesRoot = join(runtime.homeDir, '.allagents', 'profiles');
   try {
     for (const entry of await readdir(profilesRoot, { withFileTypes: true })) {
-      if (entry.isDirectory() && !names.includes(entry.name))
-        names.push(entry.name);
+      if (
+        entry.isDirectory() &&
+        ProfileNameSchema.safeParse(entry.name).success
+      ) {
+        names.add(entry.name);
+      }
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   const results: ProfileStatusResult[] = [];
-  for (const name of names)
-    results.push(await getProfileStatus(name, options, dependencies));
+  for (const name of names) {
+    const result = await getProfileStatus(name, options, dependencies);
+    if (result.declared || result.installed) results.push(result);
+  }
   return results;
 }
 

@@ -40,6 +40,8 @@ export interface AgentCommandMeta extends CommandMeta {
    * rejected with a sorted suggestion list and exit code 2.
    */
   jsonFields?: readonly string[];
+  /** Skip the automatic update check for commands that must be strictly read-only. */
+  skipUpdateCheck?: true;
 }
 
 /**

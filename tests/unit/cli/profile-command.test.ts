@@ -14,6 +14,7 @@ import {
 } from '../../../src/cli/format-profile.js';
 import {
   profileInstallMeta,
+  profileListMeta,
   profileRemoveMeta,
   profileStatusMeta,
 } from '../../../src/cli/metadata/profile.js';
@@ -163,6 +164,74 @@ function statusResult(): ProfileStatusResult {
   };
 }
 
+function orphanStatusResult(): ProfileStatusResult {
+  return {
+    profile: 'orphan',
+    operation: 'status',
+    status: 'declaration-missing',
+    declared: false,
+    installed: true,
+    stateDigest: digest,
+    clients: ['pi'],
+    steps: [],
+    launchers: [
+      {
+        client: 'pi',
+        name: 'orphan',
+        path: '/home/test/.local/bin/orphan',
+        onPath: true,
+      },
+    ],
+    warnings: [],
+  };
+}
+
+function bareStatusResult(): ProfileStatusResult {
+  return {
+    profile: 'bare',
+    operation: 'status',
+    status: 'missing',
+    declared: true,
+    installed: false,
+    declarationDigest: digest,
+    clients: [],
+    steps: [],
+    launchers: [],
+    warnings: [],
+  };
+}
+
+function listedStatusResult(): ProfileStatusResult {
+  return {
+    ...statusResult(),
+    clients: ['pi', 'claude'],
+    launchers: [
+      {
+        client: 'pi',
+        name: 'work',
+        path: '/home/test/.local/bin/work',
+        onPath: false,
+      },
+      {
+        client: 'claude',
+        name: 'review',
+        path: '/home/test/.local/bin/review',
+        onPath: true,
+      },
+    ],
+  };
+}
+
+function failedStatusResult(): ProfileStatusResult {
+  return {
+    ...bareStatusResult(),
+    profile: 'broken',
+    status: 'unsupported',
+    clients: ['pi'],
+    error: 'pi CLI is unavailable or unsupported',
+  };
+}
+
 interface Harness {
   readonly runtime: ProfileCommandRuntime;
   readonly output: string[];
@@ -245,7 +314,12 @@ async function runProfile(
 
 describe('profile command', () => {
   test('declares complete help metadata and JSON field allowlists', () => {
-    for (const meta of [profileInstallMeta, profileStatusMeta, profileRemoveMeta]) {
+    for (const meta of [
+      profileInstallMeta,
+      profileListMeta,
+      profileStatusMeta,
+      profileRemoveMeta,
+    ]) {
       expect(meta.description).not.toBe('');
       expect(meta.whenToUse).not.toBe('');
       expect(meta.examples.length).toBeGreaterThan(0);
@@ -411,6 +485,248 @@ describe('profile command', () => {
     expect(harness.output).toHaveLength(0);
   });
 
+  test('lists declared and declaration-missing profiles deterministically without mutation or selection', async () => {
+    const core = createDependencies({
+      getProfileStatuses: async () => [
+        listedStatusResult(),
+        orphanStatusResult(),
+        bareStatusResult(),
+      ],
+    });
+    const harness = createRuntime({ interactive: true, selection: 'work' });
+
+    await runProfile(['list'], core.dependencies, harness.runtime);
+
+    expect(core.planCalls()).toBe(0);
+    expect(core.applyCalls()).toBe(0);
+    expect(harness.selections).toHaveLength(0);
+    expect(harness.confirmations).toHaveLength(0);
+    expect(harness.output).toEqual([
+      'Profiles (3):',
+      '  bare: missing',
+      '    Declared: yes; Installed: no',
+      '    Clients: none',
+      '    Launchers: none',
+      '  orphan: declaration-missing',
+      '    Declared: no; Installed: yes',
+      '    Clients: pi',
+      '    Launchers:',
+      '      pi orphan: /home/test/.local/bin/orphan (on PATH)',
+      '  work: installed',
+      '    Declared: yes; Installed: yes',
+      '    Clients: claude, pi',
+      '    Launchers:',
+      '      claude review: /home/test/.local/bin/review (on PATH)',
+      '      pi work: /home/test/.local/bin/work (not on PATH)',
+    ]);
+  });
+
+  test('emits literal sorted profile and launcher fields in the list JSON envelope', async () => {
+    const core = createDependencies({
+      getProfileStatuses: async () => [
+        listedStatusResult(),
+        orphanStatusResult(),
+        bareStatusResult(),
+      ],
+    });
+    const harness = createRuntime({ json: true });
+
+    await runProfile(['list'], core.dependencies, harness.runtime);
+
+    expect(harness.envelopes).toEqual([
+      {
+        success: true,
+        command: 'profile list',
+        data: {
+          profiles: [
+            {
+              profile: 'bare',
+              operation: 'status',
+              status: 'missing',
+              steps: [],
+              warnings: [],
+              declared: true,
+              installed: false,
+              clients: [],
+              launchers: [],
+              declarationDigest: digest,
+            },
+            {
+              profile: 'orphan',
+              operation: 'status',
+              status: 'declaration-missing',
+              steps: [],
+              warnings: [],
+              declared: false,
+              installed: true,
+              clients: ['pi'],
+              launchers: [
+                {
+                  client: 'pi',
+                  name: 'orphan',
+                  path: '/home/test/.local/bin/orphan',
+                  onPath: true,
+                },
+              ],
+              stateDigest: digest,
+            },
+            {
+              profile: 'work',
+              operation: 'status',
+              status: 'installed',
+              steps: [
+                {
+                  client: 'pi',
+                  kind: 'file',
+                  identity: '/home/test/.pi/agent/profiles/work/settings.json',
+                  status: 'unchanged',
+                },
+              ],
+              warnings: [],
+              declared: true,
+              installed: true,
+              clients: ['claude', 'pi'],
+              launchers: [
+                {
+                  client: 'claude',
+                  name: 'review',
+                  path: '/home/test/.local/bin/review',
+                  onPath: true,
+                },
+                {
+                  client: 'pi',
+                  name: 'work',
+                  path: '/home/test/.local/bin/work',
+                  onPath: false,
+                },
+              ],
+              declarationDigest: digest,
+              stateDigest: digest,
+            },
+          ],
+          total: 3,
+        },
+      },
+    ]);
+    expect(harness.output).toHaveLength(0);
+  });
+
+  test('prints the empty profile inventory', async () => {
+    const core = createDependencies({
+      getProfileStatuses: async () => [],
+    });
+    const harness = createRuntime();
+
+    await runProfile(['list'], core.dependencies, harness.runtime);
+
+    expect(harness.output).toEqual(['No profiles found.']);
+    expect(harness.errors).toHaveLength(0);
+  });
+
+  test('returns a failed JSON envelope without dropping an incomplete inventory', async () => {
+    const core = createDependencies({
+      getProfileStatuses: async () => [
+        listedStatusResult(),
+        failedStatusResult(),
+      ],
+    });
+    const harness = createRuntime({ json: true });
+
+    await expect(
+      runProfile(['list'], core.dependencies, harness.runtime),
+    ).rejects.toMatchObject({ code: 1 });
+
+    expect(harness.envelopes).toEqual([
+      {
+        success: false,
+        command: 'profile list',
+        data: {
+          profiles: [
+            {
+              profile: 'broken',
+              operation: 'status',
+              status: 'unsupported',
+              steps: [],
+              warnings: [],
+              declared: true,
+              installed: false,
+              clients: ['pi'],
+              launchers: [],
+              declarationDigest: digest,
+              error: 'pi CLI is unavailable or unsupported',
+            },
+            {
+              profile: 'work',
+              operation: 'status',
+              status: 'installed',
+              steps: [
+                {
+                  client: 'pi',
+                  kind: 'file',
+                  identity: '/home/test/.pi/agent/profiles/work/settings.json',
+                  status: 'unchanged',
+                },
+              ],
+              warnings: [],
+              declared: true,
+              installed: true,
+              clients: ['claude', 'pi'],
+              launchers: [
+                {
+                  client: 'claude',
+                  name: 'review',
+                  path: '/home/test/.local/bin/review',
+                  onPath: true,
+                },
+                {
+                  client: 'pi',
+                  name: 'work',
+                  path: '/home/test/.local/bin/work',
+                  onPath: false,
+                },
+              ],
+              declarationDigest: digest,
+              stateDigest: digest,
+            },
+          ],
+          total: 2,
+        },
+        error: 'Failed to inspect profiles: broken',
+      },
+    ]);
+  });
+
+  test('renders the complete human inventory before reporting incomplete inspection', async () => {
+    const core = createDependencies({
+      getProfileStatuses: async () => [
+        listedStatusResult(),
+        failedStatusResult(),
+      ],
+    });
+    const harness = createRuntime();
+
+    await expect(
+      runProfile(['list'], core.dependencies, harness.runtime),
+    ).rejects.toMatchObject({ code: 1 });
+
+    expect(harness.output).toEqual([
+      'Profiles (2):',
+      '  broken: unsupported',
+      '    Declared: yes; Installed: no',
+      '    Clients: pi',
+      '    Launchers: none',
+      '  work: installed',
+      '    Declared: yes; Installed: yes',
+      '    Clients: claude, pi',
+      '    Launchers:',
+      '      claude review: /home/test/.local/bin/review (on PATH)',
+      '      pi work: /home/test/.local/bin/work (not on PATH)',
+    ]);
+    expect(harness.errors).toEqual([
+      'Error: Failed to inspect profiles: broken',
+    ]);
+  });
+
   test('status is read-only and reports launcher PATH diagnostics', async () => {
     const core = createDependencies();
     const harness = createRuntime();
@@ -425,6 +741,21 @@ describe('profile command', () => {
     expect(core.applyCalls()).toBe(0);
     expect(harness.output.join('\n')).toContain('Launcher PATH:');
     expect(harness.output.join('\n')).toContain('is not on PATH');
+  });
+
+  test('status still selects a profile when an interactive name is omitted', async () => {
+    const core = createDependencies();
+    const harness = createRuntime({
+      interactive: true,
+      selection: 'work',
+    });
+
+    await runProfile(['status'], core.dependencies, harness.runtime);
+
+    expect(harness.selections).toEqual(['Select a profile to inspect']);
+    expect(core.planCalls()).toBe(0);
+    expect(core.applyCalls()).toBe(0);
+    expect(harness.output.join('\n')).toContain('Profile work: installed');
   });
 
   test('interactive missing names select declared or installed profiles', async () => {
@@ -525,6 +856,7 @@ describe('profile root registration', () => {
     };
     expect(parsed.commands.map((entry) => entry.command)).toEqual([
       'profile install',
+      'profile list',
       'profile status',
       'profile remove',
     ]);

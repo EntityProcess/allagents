@@ -47,6 +47,8 @@ const { args: argsNoJson, json, jsonFields } = extractJsonFlag(rawArgs);
 const { args: argsNoJq, jqExpr } = extractJqFlag(argsNoJson);
 const { args: argsAfterAgentHelp, agentHelp } = extractAgentHelpFlag(argsNoJq);
 const finalArgs = normalizeSkillArgs(argsAfterAgentHelp);
+const commandPath = finalArgs.filter((arg) => !arg.startsWith('-')).join(' ');
+const commandMeta = findMetaByCommand(commandPath);
 
 // `--jq` requires `--json` so we have an envelope to pipe through.
 if (jqExpr && !json) {
@@ -55,13 +57,9 @@ if (jqExpr && !json) {
 }
 
 // Validate `--json=<fields>` against the meta allowlist for the invoked command.
-// `findMetaByCommand` looks up by the canonical command path (singular form),
-// matching what's in the metas after the rename.
 let validatedFields: string[] | undefined;
 if (jsonFields) {
-  const commandPath = finalArgs.filter((a) => !a.startsWith('-')).join(' ');
-  const meta = findMetaByCommand(commandPath);
-  const result = validateJsonFields(jsonFields, meta);
+  const result = validateJsonFields(jsonFields, commandMeta);
   validatedFields = result ? [...result] : undefined;
 }
 
@@ -70,11 +68,10 @@ setJsonMode(json, {
   ...(jqExpr && { jqExpr }),
 });
 
-// Kick off update check for non-json, non-agent-help invocations.
-// Reads from local cache (fast), spawns a detached child to refresh if stale.
-// The notice is printed before command output so it's immediately visible.
+// Kick off the update check for ordinary non-JSON invocations unless the
+// resolved command metadata marks the command as strictly read-only.
 const isWizard = finalArgs.length === 0 && process.stdout.isTTY && !json;
-if (!agentHelp && !json && !isWizard) {
+if (!agentHelp && !json && !isWizard && !commandMeta?.skipUpdateCheck) {
   const notice = await getUpdateNotice(packageJson.version);
   if (notice) process.stderr.write(`${notice}\n\n`);
 }

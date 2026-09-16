@@ -1018,6 +1018,57 @@ describe('profile lifecycle manager', () => {
     ).rejects.toThrow();
   });
 
+  it('excludes empty and invalid profile directories without losing declared or installed profiles', async () => {
+    const test = await fixture();
+    await writeWorkspace(test.userConfigPath, {
+      orphan: { clients: [{ name: 'pi' }], plugins: [] },
+    });
+    const pi = new MemoryProfileAdapter('pi', test.home);
+    const deps = dependencies(pi);
+    const install = await planProfileOperation(
+      'orphan',
+      'install',
+      test.options,
+      deps,
+    );
+    expect((await applyProfilePlan(install, test.options, deps)).success).toBe(
+      true,
+    );
+
+    await writeWorkspace(test.userConfigPath, {
+      declared: { clients: [{ name: 'pi' }], plugins: [] },
+    });
+    const profilesRoot = join(test.home, '.allagents', 'profiles');
+    await mkdir(join(profilesRoot, 'empty'), { recursive: true });
+    const invalidRoot = join(profilesRoot, 'Invalid Profile');
+    await mkdir(invalidRoot, { recursive: true });
+    await writeFile(join(invalidRoot, 'state.json'), '{broken', 'utf8');
+
+    const statuses = await getProfileStatuses(test.options, deps);
+
+    expect(
+      statuses.map(({ profile, status, declared, installed }) => ({
+        profile,
+        status,
+        declared,
+        installed,
+      })),
+    ).toEqual([
+      {
+        profile: 'declared',
+        status: 'missing',
+        declared: true,
+        installed: false,
+      },
+      {
+        profile: 'orphan',
+        status: 'declaration-missing',
+        declared: false,
+        installed: true,
+      },
+    ]);
+  });
+
   it('removes runtime artifacts inside an AllAgents-owned profile root', async () => {
     const test = await fixture();
     await writeWorkspace(test.userConfigPath, {
