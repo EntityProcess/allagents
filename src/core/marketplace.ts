@@ -27,7 +27,18 @@ import {
   isFilesystemRoot,
   parseGitHubUrl,
 } from '../utils/plugin-path.js';
-import { GitCloneError, cloneTo, createGit, gitHubUrl, pull } from './git.js';
+import {
+  checkRepositoryHealth,
+  GitCloneError,
+  cloneTo,
+  createGit,
+  gitHubUrl,
+  pull,
+  resolveRemoteRevision,
+  type RemoteRevisionResult,
+  type RepositoryHealthResult,
+} from './git.js';
+import { UpdateContext } from './update-context.js';
 import { fetchPlugin } from './plugin.js';
 import type { FetchResult, UpdateResult } from './plugin.js';
 
@@ -1310,6 +1321,20 @@ interface MarketplaceUpdateDeps {
   createGit(path: string): MarketplaceUpdateGitClient;
   pull(path: string): Promise<void>;
   now(): Date;
+  resolveRemoteRevision(
+    source: string,
+    requestedRef?: string,
+  ): Promise<RemoteRevisionResult>;
+  checkRepositoryHealth(
+    repoPath: string,
+    expected: { source: string; ref?: string; head: string },
+  ): Promise<RepositoryHealthResult>;
+}
+
+interface MarketplaceApplyFact {
+  preCommit?: string;
+  postCommit?: string;
+  changed: boolean;
 }
 
 /**
@@ -1320,6 +1345,7 @@ export async function updateMarketplace(
   name?: string,
   workspacePath?: string,
   deps: Partial<MarketplaceUpdateDeps> = {},
+  context?: UpdateContext,
 ): Promise<UpdateResult[]> {
   const userRegistry = await loadRegistry();
   let projectRegistry: MarketplaceRegistry | undefined;
@@ -1366,7 +1392,14 @@ export async function updateMarketplace(
   const results: UpdateResult[] = [];
 
   if (name && toUpdateScoped.length === 0) {
-    return [{ name, success: false, error: `Marketplace '${name}' not found` }];
+    return [
+      {
+        name,
+        success: false,
+        error: `Marketplace '${name}' not found`,
+        ...(context && { changed: false }),
+      },
+    ];
   }
 
   for (const registration of toUpdateScoped) {
@@ -1383,6 +1416,7 @@ export async function updateMarketplace(
         success: false,
         error:
           removal.error ?? 'Unsafe marketplace registration was not updated.',
+        ...(context && { changed: false }),
       });
       continue;
     }
@@ -1392,6 +1426,7 @@ export async function updateMarketplace(
       results.push({
         name: marketplace.name,
         success: true,
+        ...(context && { changed: false }),
       });
       continue;
     }
@@ -1411,6 +1446,7 @@ export async function updateMarketplace(
         name: marketplace.name,
         success: migration.success,
         ...(migration.error && { error: migration.error }),
+        ...(context && { changed: migration.success }),
       });
       continue;
     }
@@ -1433,6 +1469,7 @@ export async function updateMarketplace(
             name: marketplace.name,
             success: false,
             error: `Marketplace '${registration.key}' changed during update. The registry was not overwritten; retry the command.`,
+            ...(context && { changed: false }),
           };
         }
 
@@ -1441,49 +1478,148 @@ export async function updateMarketplace(
             name: marketplace.name,
             success: false,
             error: `Marketplace directory not found: ${marketplace.path}`,
+            ...(context && { changed: false }),
           };
         }
 
         try {
           // Check if location includes a branch (only for github type; git type has no branch in location)
-          const storedBranch =
+          const parsedLocation =
             marketplace.source.type === 'github'
-              ? parseLocation(marketplace.source.location).branch
+              ? parseLocation(marketplace.source.location)
               : undefined;
-          const git = (deps.createGit ?? createGit)(marketplace.path);
+          const storedBranch = parsedLocation?.branch;
+          const remoteSource = parsedLocation
+            ? gitHubUrl(parsedLocation.owner, parsedLocation.repo)
+            : marketplace.source.location;
 
-          let targetBranch: string;
-          if (storedBranch) {
-            // Branch-specific marketplace: use stored branch directly
-            targetBranch = storedBranch;
-          } else {
-            // Default branch marketplace: detect default branch
-            targetBranch = 'main';
+          let remote: RemoteRevisionResult | undefined;
+          if (context) {
             try {
-              const ref = await git.raw([
-                'symbolic-ref',
-                'refs/remotes/origin/HEAD',
-                '--short',
-              ]);
-              const trimmed = ref.trim();
-              targetBranch = trimmed.startsWith('origin/')
-                ? trimmed.slice('origin/'.length)
-                : trimmed;
+              const resolveRevision =
+                deps.resolveRemoteRevision ?? resolveRemoteRevision;
+              remote = await context.getRemote(
+                remoteSource,
+                storedBranch,
+                () => resolveRevision(remoteSource, storedBranch),
+              );
             } catch {
-              try {
-                const showOutput = await git.raw(['remote', 'show', 'origin']);
-                const match = showOutput.match(/HEAD branch:\s*(\S+)/);
-                if (match?.[1]) {
-                  targetBranch = match[1];
-                }
-              } catch {
-                // Network unavailable; fall back to 'main'
-              }
+              remote = { status: 'unresolved', reason: 'failed' };
             }
           }
 
-          await git.checkout(targetBranch);
-          await (deps.pull ?? pull)(marketplace.path);
+          const expectedRef =
+            remote?.status === 'resolved' ? remote.ref : storedBranch;
+          const identity = {
+            path: marketplace.path,
+            source: remoteSource,
+            ...(expectedRef !== undefined && { ref: expectedRef }),
+          };
+          let applyFact: MarketplaceApplyFact | undefined;
+
+          if (context && remote?.status === 'resolved') {
+            let health: RepositoryHealthResult;
+            try {
+              const checkHealth =
+                deps.checkRepositoryHealth ?? checkRepositoryHealth;
+              health = await context.getHealth(identity, () =>
+                checkHealth(marketplace.path, {
+                  source: remoteSource,
+                  ref: remote.ref,
+                  head: remote.commit,
+                }),
+              );
+            } catch (error) {
+              health = {
+                status: 'unhealthy',
+                reason: 'inspection-failed',
+                error:
+                  error instanceof Error ? error : new Error(String(error)),
+              };
+            }
+            if (health.status === 'healthy') {
+              applyFact = {
+                preCommit: remote.commit,
+                postCommit: remote.commit,
+                changed: false,
+              };
+            }
+          }
+
+          const applyUpdate = async (): Promise<MarketplaceApplyFact> => {
+            const git = (deps.createGit ?? createGit)(marketplace.path);
+            let preCommit: string | undefined;
+            if (context) {
+              try {
+                const value = (await git.raw(['rev-parse', 'HEAD'])).trim();
+                preCommit = value || undefined;
+              } catch {
+                preCommit = undefined;
+              }
+            }
+
+            let targetBranch: string;
+            if (storedBranch) {
+              // Branch-specific marketplace: use stored branch directly
+              targetBranch = storedBranch;
+            } else {
+              // Default branch marketplace: detect default branch
+              targetBranch = 'main';
+              try {
+                const ref = await git.raw([
+                  'symbolic-ref',
+                  'refs/remotes/origin/HEAD',
+                  '--short',
+                ]);
+                const trimmed = ref.trim();
+                targetBranch = trimmed.startsWith('origin/')
+                  ? trimmed.slice('origin/'.length)
+                  : trimmed;
+              } catch {
+                try {
+                  const showOutput = await git.raw([
+                    'remote',
+                    'show',
+                    'origin',
+                  ]);
+                  const match = showOutput.match(/HEAD branch:\s*(\S+)/);
+                  if (match?.[1]) {
+                    targetBranch = match[1];
+                  }
+                } catch {
+                  // Network unavailable; fall back to 'main'
+                }
+              }
+            }
+
+            await git.checkout(targetBranch);
+            await (deps.pull ?? pull)(marketplace.path);
+
+            let postCommit: string | undefined;
+            if (context) {
+              try {
+                const value = (await git.raw(['rev-parse', 'HEAD'])).trim();
+                postCommit = value || undefined;
+              } catch {
+                postCommit = undefined;
+              }
+            }
+            return {
+              ...(preCommit !== undefined && { preCommit }),
+              ...(postCommit !== undefined && { postCommit }),
+              changed: context
+                ? !preCommit ||
+                  !postCommit ||
+                  preCommit.toLowerCase() !== postCommit.toLowerCase()
+                : false,
+            };
+          };
+
+          if (!applyFact) {
+            applyFact = context
+              ? await context.getApply(identity, applyUpdate)
+              : await applyUpdate();
+          }
 
           const lastUpdated = deps.now
             ? deps.now().toISOString()
@@ -1505,19 +1641,28 @@ export async function updateMarketplace(
                     name: marketplace.name,
                     success: false,
                     error: `Marketplace '${registration.key}' changed during update. The registry was not overwritten; retry the command.`,
+                    ...(context && { changed: false }),
                   },
                 };
               }
               if (latestEntry.lastUpdated !== registration.entry.lastUpdated) {
                 return {
                   changed: false,
-                  result: { name: marketplace.name, success: true },
+                  result: {
+                    name: marketplace.name,
+                    success: true,
+                    ...(context && { changed: applyFact.changed }),
+                  },
                 };
               }
               latestEntry.lastUpdated = lastUpdated;
               return {
                 changed: true,
-                result: { name: marketplace.name, success: true },
+                result: {
+                  name: marketplace.name,
+                  success: true,
+                  ...(context && { changed: applyFact.changed }),
+                },
               };
             },
           );
@@ -1526,6 +1671,7 @@ export async function updateMarketplace(
             name: marketplace.name,
             success: false,
             error: error instanceof Error ? error.message : 'Unknown error',
+            ...(context && { changed: false }),
           };
         }
       },

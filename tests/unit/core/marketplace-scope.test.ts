@@ -35,6 +35,15 @@ mock.module('../../../src/core/git.js', () => ({
     }
   },
   pull: mock(() => Promise.resolve()),
+  resolveRemoteRevision: mock(() =>
+    Promise.resolve({ status: 'unresolved' as const, reason: 'failed' as const }),
+  ),
+  checkRepositoryHealth: mock(() =>
+    Promise.resolve({
+      status: 'unhealthy' as const,
+      reason: 'inspection-failed' as const,
+    }),
+  ),
 }));
 
 mock.module('simple-git', () => ({
