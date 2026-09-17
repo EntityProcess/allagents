@@ -385,6 +385,119 @@ describe('plugin update e2e', () => {
   );
 
   test(
+    'deduplicates embedded marketplace checks across plugin update scopes',
+    () => {
+      const remote = createRemoteMarketplace(rootDir);
+      const addResult = runCli(
+        workspaceDir,
+        homeDir,
+        [
+          'plugin',
+          'marketplace',
+          'add',
+          remote.source,
+          '--scope',
+          'user',
+        ],
+        { gitConfig: remote.gitConfig },
+      );
+      expect(addResult.exitCode).toBe(0);
+      for (const scope of ['user', 'project']) {
+        const installResult = runCli(
+          workspaceDir,
+          homeDir,
+          [
+            'plugin',
+            'install',
+            'demo@remote-marketplace',
+            '--scope',
+            scope,
+          ],
+          { gitConfig: remote.gitConfig },
+        );
+        expect(installResult.exitCode).toBe(0);
+      }
+
+      const registryPath = join(
+        homeDir,
+        '.allagents',
+        'marketplaces.json',
+      );
+      const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+      const entry = registry.marketplaces['remote-marketplace'];
+      entry.lastUpdated = '2000-01-01T00:00:00.000Z';
+      writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+      runGit(entry.path, [
+        'remote',
+        'set-url',
+        'origin',
+        'https://github.com/uat/plugin-marketplace.git',
+      ]);
+      const cacheHead = runGit(entry.path, ['rev-parse', 'HEAD']);
+      const tracePath = join(rootDir, 'plugin-update-all-noop-trace.jsonl');
+
+      const updateResult = runCli(
+        workspaceDir,
+        homeDir,
+        ['plugin', 'update', 'demo@remote-marketplace', '--scope', 'all'],
+        {
+          gitWrapperDir: remote.gitWrapperDir,
+          tracePath,
+        },
+      );
+
+      expect(updateResult).toMatchObject({ exitCode: 0 });
+      expect(updateResult.stderr).toBe('');
+      expect(JSON.parse(updateResult.stdout)).toMatchObject({
+        success: true,
+        command: 'plugin update',
+        data: {
+          results: [
+            {
+              plugin: 'demo@remote-marketplace',
+              success: true,
+              action: 'updated',
+            },
+            {
+              plugin: 'demo@remote-marketplace',
+              success: true,
+              action: 'updated',
+            },
+          ],
+          updated: 2,
+          skipped: 0,
+          failed: 0,
+          syncResults: {
+            project: { failed: 0 },
+            user: { failed: 0 },
+          },
+        },
+      });
+      expect(
+        countGitCommands(
+          tracePath,
+          'ls-remote',
+          'https://github.com/uat/plugin-marketplace.git',
+        ),
+      ).toBe(1);
+      expect(countGitCommands(tracePath, 'pull')).toBe(2);
+      expect(countGitCommands(tracePath, 'fetch')).toBe(4);
+      expect(countGitCommands(tracePath, 'clone')).toBe(0);
+
+      const updatedRegistry = JSON.parse(readFileSync(registryPath, 'utf8'));
+      const updatedEntry =
+        updatedRegistry.marketplaces['remote-marketplace'];
+      expect(updatedEntry.lastUpdated).not.toBe(
+        '2000-01-01T00:00:00.000Z',
+      );
+      expect(runGit(updatedEntry.path, ['rev-parse', 'HEAD'])).toBe(
+        cacheHead,
+      );
+    },
+    15_000,
+  );
+
+  test(
     'deduplicates no-op remote marketplace checks across registry consumers',
     () => {
       const remote = createRemoteMarketplace(rootDir);

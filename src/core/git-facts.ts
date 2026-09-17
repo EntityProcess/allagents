@@ -2,6 +2,7 @@ import type { GitCloneError } from './git-errors.js';
 import {
   canonicalizeGitSource,
   normalizeGitRef,
+  parseGitRefIdentity,
 } from '../utils/git-source.js';
 
 
@@ -97,17 +98,25 @@ export async function resolveRemoteRevision(
   dependencies: GitFactRuntimeDependencies,
 ): Promise<RemoteRevisionResult> {
   const git = dependencies.createGit();
-  const ref = normalizeGitRef(requestedRef);
-  const immutablePin = ref && /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(ref);
+  const refIdentity = parseGitRefIdentity(requestedRef);
+  const ref = refIdentity?.name;
+  const immutablePin =
+    refIdentity?.kind === undefined &&
+    ref !== undefined &&
+    /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(ref);
   const args = ref
     ? immutablePin
       ? [source]
-      : [
-          source,
-          `refs/heads/${ref}`,
-          `refs/tags/${ref}`,
-          `refs/tags/${ref}^{}`,
-        ]
+      : refIdentity.kind === 'branch'
+        ? [source, `refs/heads/${ref}`]
+        : refIdentity.kind === 'tag'
+          ? [source, `refs/tags/${ref}`, `refs/tags/${ref}^{}`]
+          : [
+              source,
+              `refs/heads/${ref}`,
+              `refs/tags/${ref}`,
+              `refs/tags/${ref}^{}`,
+            ]
     : ['--symref', source, 'HEAD'];
 
   let output: string;
@@ -175,15 +184,18 @@ export async function resolveRemoteRevision(
       : { status: 'unresolved', reason: 'not-advertised' };
   }
 
-  const branch = uniqueAdvertisementValue(
-    advertisements,
-    `refs/heads/${ref}`,
-  );
-  const tag = uniqueAdvertisementValue(advertisements, `refs/tags/${ref}`);
-  const peeledTag = uniqueAdvertisementValue(
-    advertisements,
-    `refs/tags/${ref}^{}`,
-  );
+  const branch =
+    refIdentity?.kind === 'tag'
+      ? undefined
+      : uniqueAdvertisementValue(advertisements, `refs/heads/${ref}`);
+  const tag =
+    refIdentity?.kind === 'branch'
+      ? undefined
+      : uniqueAdvertisementValue(advertisements, `refs/tags/${ref}`);
+  const peeledTag =
+    refIdentity?.kind === 'branch'
+      ? undefined
+      : uniqueAdvertisementValue(advertisements, `refs/tags/${ref}^{}`);
   if (
     branch === null ||
     tag === null ||
@@ -193,8 +205,14 @@ export async function resolveRemoteRevision(
     return { status: 'unresolved', reason: 'ambiguous' };
   }
   const commit = branch ?? peeledTag ?? tag;
+  const resolvedRef =
+    refIdentity?.kind === 'branch'
+      ? `refs/heads/${ref}`
+      : refIdentity?.kind === 'tag'
+        ? `refs/tags/${ref}`
+        : ref;
   return commit
-    ? { status: 'resolved', commit, ref }
+    ? { status: 'resolved', commit, ref: resolvedRef }
     : { status: 'unresolved', reason: 'not-advertised' };
 }
 
@@ -270,22 +288,30 @@ export async function checkRepositoryHealth(
       return { status: 'unhealthy', reason: 'head-mismatch', head };
     }
 
-    const expectedRef = normalizeGitRef(expected.ref);
+    const expectedIdentity = parseGitRefIdentity(expected.ref);
+    const expectedRef = expectedIdentity?.name;
     let actualRef: string | undefined;
     if (expectedRef) {
-      try {
-        actualRef = normalizeGitRef(
-          await git.raw(['symbolic-ref', '--quiet', '--short', 'HEAD']),
-        );
-        if (actualRef !== expectedRef) {
-          return {
-            status: 'unhealthy',
-            reason: 'ref-mismatch',
-            head,
-            ...(actualRef && { ref: actualRef }),
-          };
+      if (expectedIdentity.kind !== 'tag') {
+        try {
+          actualRef = normalizeGitRef(
+            await git.raw(['symbolic-ref', '--quiet', '--short', 'HEAD']),
+          );
+          if (actualRef !== expectedRef) {
+            return {
+              status: 'unhealthy',
+              reason: 'ref-mismatch',
+              head,
+              ...(actualRef && { ref: actualRef }),
+            };
+          }
+        } catch {
+          if (expectedIdentity.kind === 'branch') {
+            return { status: 'unhealthy', reason: 'ref-mismatch', head };
+          }
         }
-      } catch {
+      }
+      if (!actualRef) {
         let tagHead: string;
         try {
           tagHead = (
@@ -303,7 +329,10 @@ export async function checkRepositoryHealth(
         if (tagHead !== head) {
           return { status: 'unhealthy', reason: 'ref-mismatch', head };
         }
-        actualRef = expectedRef;
+        actualRef =
+          expectedIdentity.kind === 'tag'
+            ? `refs/tags/${expectedRef}`
+            : expectedRef;
       }
     }
 

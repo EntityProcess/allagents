@@ -721,6 +721,11 @@ export async function executeSkillUpdatePlan(
       unit.deleted.length === 0 &&
       unit.removedInstallationIds.length === 0
     ) {
+      for (const installation of unit.installations) {
+        if (plan.selectedScopes.includes(installation.scope)) {
+          scopesToSync.add(installation.scope);
+        }
+      }
       results.push(execution(unit, 'updated'));
       continue;
     }

@@ -658,6 +658,7 @@ describe('skill update CLI e2e', () => {
         status: 'updated',
         skillCounts: { updated: 4, removed: 0, retained: 0 },
       });
+      expect(payload.data.syncedScopes).toEqual(['project', 'user']);
       expect(await countGitCommands(tracePath, 'ls-remote')).toBe(1);
       expect(await countGitCommands(tracePath, 'clone')).toBe(0);
       expect(await countGitCommands(tracePath, 'fetch')).toBe(0);

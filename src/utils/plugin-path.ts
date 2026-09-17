@@ -66,7 +66,6 @@ export interface ParsedPluginSource {
  * @returns true if source is a GitHub URL or shorthand
  */
 export function isGitHubUrl(source: string): boolean {
-  if (parseGitHubSource(source)) return true;
   // Explicit GitHub patterns
   const explicitPatterns = [
     /^https?:\/\/github\.com\//,

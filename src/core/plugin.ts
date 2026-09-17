@@ -653,15 +653,23 @@ async function fetchPluginForUpdate(
   );
 
   if (!fact.success) {
+    const retainedCommit = fact.postCommit ?? fact.preCommit;
+    if (!retainedCommit) {
+      return {
+        success: false,
+        action: 'skipped',
+        cachePath,
+        changed: false,
+        error: `Failed to update cached plugin: ${fact.error instanceof Error ? fact.error.message : String(fact.error)}`,
+      };
+    }
     return {
       success: true,
       action: 'skipped',
       cachePath,
       changed: false,
       ...(branch && { resolvedRef: branch }),
-      ...((fact.postCommit ?? fact.preCommit) && {
-        resolvedSha: fact.postCommit ?? fact.preCommit,
-      }),
+      resolvedSha: retainedCommit,
     };
   }
 

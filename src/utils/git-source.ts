@@ -90,20 +90,48 @@ export function canonicalizeGitSource(source: string): string {
     : source.trim();
 }
 
-/** Normalize caller spellings without changing ref case or path segments. */
-export function normalizeGitRef(ref: string | undefined): string | undefined {
+export type GitRefKind = 'branch' | 'tag';
+
+export interface GitRefIdentity {
+  name: string;
+  kind?: GitRefKind;
+}
+
+/** Preserve explicit branch/tag qualification while normalizing aliases. */
+export function parseGitRefIdentity(
+  ref: string | undefined,
+): GitRefIdentity | undefined {
   const value = ref?.trim();
   if (!value) return undefined;
-  return value
-    .replace(/^refs\/remotes\/origin\//, '')
-    .replace(/^refs\/(?:heads|tags)\//, '')
-    .replace(/^origin\//, '');
+  if (value.startsWith('refs/heads/')) {
+    return { name: value.slice('refs/heads/'.length), kind: 'branch' };
+  }
+  if (value.startsWith('refs/tags/')) {
+    return { name: value.slice('refs/tags/'.length), kind: 'tag' };
+  }
+  if (value.startsWith('refs/remotes/origin/')) {
+    return {
+      name: value.slice('refs/remotes/origin/'.length),
+      kind: 'branch',
+    };
+  }
+  if (value.startsWith('origin/')) {
+    return { name: value.slice('origin/'.length), kind: 'branch' };
+  }
+  return { name: value };
+}
+
+/** Normalize caller spellings without changing ref case or path segments. */
+export function normalizeGitRef(ref: string | undefined): string | undefined {
+  return parseGitRefIdentity(ref)?.name;
 }
 
 /** Collision-safe key for one physical remote and requested ref. */
 export function gitSourceKey(source: string, ref?: string): string {
+  const identity = parseGitRefIdentity(ref);
   return JSON.stringify([
     canonicalizeGitSource(source),
-    normalizeGitRef(ref) ?? null,
+    identity?.kind ?? null,
+    identity?.name ?? null,
   ]);
 }

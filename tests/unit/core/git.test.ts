@@ -95,8 +95,44 @@ describe('resolveRemoteRevision', () => {
     ).resolves.toEqual({
       status: 'resolved',
       commit: SHA_A,
-      ref: 'main',
+      ref: 'refs/heads/main',
     });
+  });
+
+  it('preserves qualified branch and tag namespaces', async () => {
+    const qualifiedTag = gitFacts(`${SHA_A}\trefs/heads/release\n`);
+    const qualifiedBranch = gitFacts(`${SHA_A}\trefs/tags/release\n`);
+
+    await expect(
+      resolveRemoteRevision(
+        'https://github.com/acme/tools',
+        'refs/tags/release',
+        qualifiedTag.dependencies,
+      ),
+    ).resolves.toEqual({
+      status: 'unresolved',
+      reason: 'not-advertised',
+    });
+    expect(qualifiedTag.listRemote).toHaveBeenCalledWith([
+      'https://github.com/acme/tools',
+      'refs/tags/release',
+      'refs/tags/release^{}',
+    ]);
+
+    await expect(
+      resolveRemoteRevision(
+        'https://github.com/acme/tools',
+        'refs/heads/release',
+        qualifiedBranch.dependencies,
+      ),
+    ).resolves.toEqual({
+      status: 'unresolved',
+      reason: 'not-advertised',
+    });
+    expect(qualifiedBranch.listRemote).toHaveBeenCalledWith([
+      'https://github.com/acme/tools',
+      'refs/heads/release',
+    ]);
   });
 
   it('resolves lightweight and peeled annotated tags to commit objects', async () => {

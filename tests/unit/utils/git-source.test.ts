@@ -54,6 +54,14 @@ describe('Git source identity', () => {
     ).toBe(gitSourceKey('https://github.com/acme/tools', 'origin/main'));
   });
 
+  it('keeps explicit branches and tags in separate identities', () => {
+    expect(
+      gitSourceKey('https://github.com/acme/tools', 'refs/heads/release'),
+    ).not.toBe(
+      gitSourceKey('https://github.com/acme/tools', 'refs/tags/release'),
+    );
+  });
+
   it('keeps distinct sources and refs distinct', () => {
     const keys = [
       gitSourceKey('https://github.com/acme/tools', 'main'),

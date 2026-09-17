@@ -603,7 +603,7 @@ describe('inspectRemoteSkillUpdateUnit', () => {
 });
 
 describe('executeSkillUpdatePlan', () => {
-  it('bypasses every transaction dependency for a healthy exact-inspection no-op', async () => {
+  it('bypasses mutation but preserves action-driven sync for a healthy exact-inspection no-op', async () => {
     const plan = await buildSkillUpdatePreflight(
       {
         installations: [
@@ -650,12 +650,12 @@ describe('executeSkillUpdatePlan', () => {
     expect(reconcileUnit).not.toHaveBeenCalled();
     expect(advanceNode).not.toHaveBeenCalled();
     expect(restoreNode).not.toHaveBeenCalled();
-    expect(syncScope).not.toHaveBeenCalled();
+    expect(syncScope).toHaveBeenCalledWith('project', { offline: true });
     expect(result.units[0]).toMatchObject({
       status: 'updated',
       skillCounts: { updated: 1, removed: 0, retained: 0 },
     });
-    expect(result.syncedScopes).toEqual([]);
+    expect(result.syncedScopes).toEqual(['project']);
   });
 
   it('runs the established transaction for an equal SHA without positive health', async () => {

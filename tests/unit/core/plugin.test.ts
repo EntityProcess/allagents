@@ -425,6 +425,40 @@ describe('updatePlugin', () => {
     });
   });
 
+  it('fails when a pull error leaves no usable cached revision', async () => {
+    const url = 'https://github.com/external/corrupt-cache';
+    const pull = mock(async () => {
+      throw new Error('not a repository');
+    });
+
+    const result = await updatePlugin(
+      url,
+      {
+        ...updateDeps,
+        fetchFn: undefined,
+        updateFetchDeps: {
+          existsSync: () => true,
+          pull,
+          resolveHeadSha: async () => {
+            throw new Error('bad revision HEAD');
+          },
+          resolveRemoteRevision: async () => ({
+            status: 'unresolved' as const,
+            reason: 'failed' as const,
+          }),
+        },
+      },
+      new UpdateContext(),
+    );
+
+    expect(result).toMatchObject({
+      plugin: url,
+      success: false,
+      action: 'failed',
+      changed: false,
+    });
+  });
+
   it('should return error when marketplace not found', async () => {
     const result = await updatePlugin('plugin@unknown-marketplace', updateDeps);
     expect(result.success).toBe(false);
