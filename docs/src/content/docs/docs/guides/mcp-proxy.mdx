@@ -8,12 +8,12 @@ Some MCP servers use HTTP transport with OAuth authentication, but not every AI 
 ## Quick Start
 
 The fastest way to try MCP proxy is to scaffold the ready-made
-[`examples/workspaces/mcp-proxy`](https://github.com/EntityProcess/allagents/tree/main/examples/workspaces/mcp-proxy)
+[`examples/workspaces/mcp-proxy`](https://github.com/allagentsdev/allagents/tree/main/examples/workspaces/mcp-proxy)
 workspace with `allagents workspace init --from`:
 
 ```bash
 allagents workspace init ./mcp-proxy-demo \
-  --from EntityProcess/allagents/examples/workspaces/mcp-proxy
+  --from allagentsdev/allagents/examples/workspaces/mcp-proxy
 cd ./mcp-proxy-demo
 ```
 
@@ -29,7 +29,7 @@ repositories: []
 plugins:
   # Real HTTP MCP server from the official AllAgents marketplace.
   # Ships a `.mcp.json` that points at https://mcp.deepwiki.com/mcp
-  - EntityProcess/allagents/plugins/deepwiki
+  - allagentsdev/allagents/plugins/deepwiki
 
 clients:
   - claude

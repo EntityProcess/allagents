@@ -1,6 +1,6 @@
 # Plugin Skills Subcommand
 
-**Issue:** [#101](https://github.com/EntityProcess/allagents/issues/101)
+**Issue:** [#101](https://github.com/allagentsdev/allagents/issues/101)
 **Date:** 2026-02-09
 
 ## Problem

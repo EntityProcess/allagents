@@ -54,7 +54,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EntityProcess/allagents.git"
+    "url": "git+https://github.com/allagentsdev/allagents.git"
   },
   "homepage": "https://allagents.dev",
   "dependencies": {

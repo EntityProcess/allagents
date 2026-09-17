@@ -14,7 +14,7 @@
 #
 # Usage (scaffold a fresh copy anywhere):
 #   allagents workspace init ./mcp-proxy-demo \
-#     --from EntityProcess/allagents/examples/workspaces/mcp-proxy
+#     --from allagentsdev/allagents/examples/workspaces/mcp-proxy
 #   cd ./mcp-proxy-demo
 #
 # Or run in-place inside this repo:
@@ -34,7 +34,7 @@ plugins:
   # Real HTTP MCP server from the official AllAgents marketplace.
   # The deepwiki plugin ships a `.mcp.json` that declares:
   #   { "deepwiki": { "type": "http", "url": "https://mcp.deepwiki.com/mcp" } }
-  - EntityProcess/allagents/plugins/deepwiki
+  - allagentsdev/allagents/plugins/deepwiki
 
 clients:
   - claude

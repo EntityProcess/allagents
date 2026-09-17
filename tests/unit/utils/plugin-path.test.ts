@@ -85,8 +85,8 @@ describe('isGitHubUrl', () => {
 
 describe('parseGitHubUrl', () => {
   it('should parse standard GitHub URLs', () => {
-    const result = parseGitHubUrl('https://github.com/EntityProcess/allagents');
-    expect(result).toEqual({ owner: 'EntityProcess', repo: 'allagents' });
+    const result = parseGitHubUrl('https://github.com/allagentsdev/allagents');
+    expect(result).toEqual({ owner: 'allagentsdev', repo: 'allagents' });
   });
 
   it('should parse URLs with .git extension', () => {
@@ -304,8 +304,8 @@ describe('parsePluginSource', () => {
 
 describe('getPluginCachePath', () => {
   it('should generate cache path with owner and repo', () => {
-    const result = getPluginCachePath('EntityProcess', 'allagents');
-    const expectedPath = join('.allagents', 'plugins', 'marketplaces', 'EntityProcess-allagents');
+    const result = getPluginCachePath('allagentsdev', 'allagents');
+    const expectedPath = join('.allagents', 'plugins', 'marketplaces', 'allagentsdev-allagents');
     expect(result).toContain(expectedPath);
   });
 
