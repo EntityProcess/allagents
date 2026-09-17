@@ -42,14 +42,14 @@ The origin research proposed new public outcomes and zero-write marketplace no-o
 - **Core performance delivery:** Implement remote revision gating, deduplicated checks, and internal change tracking without changing current scope-sync eligibility. (session-settled: user-directed — chosen over changed-scope gating and a durable pending-sync marker: preserving retry semantics avoids adding cross-invocation state to a performance change.) Governs R1-R13.
 - **Preserve successful update reporting:** A verified unchanged source still reports the existing `updated` action/status, and a marketplace still advances its successful-check timestamp. (session-settled: user-directed — chosen over a new `up-to-date` outcome: compatibility is more important than distinguishing content changes in the public contract.) Governs R5-R8 and R13.
 - **Fallback before degraded cached success:** An unavailable or ambiguous cheap check falls back to the existing exact update or inspection path. (session-settled: user-directed — chosen over immediately failing the command: the check is an optimization and must not become a new availability dependency.) Governs R3, R7, and R10.
-- **Benchmark ratios only at zero injected latency:** Deterministic operation counts are permanent test coverage. Runtime median/p95 ratios gate only the 0 ms profile; 50 ms and 200 ms profiles report raw timings and operation counts without a ratio gate. (session-settled: user-directed — chosen to avoid a timing gate whose injected latency dominates both binaries.) Governs R12.
+- **Gate exact Git work; report timing:** Permanent E2E and the manually dispatched benchmark gate exact no-op Git operations plus normalized public output and filesystem compatibility. All 0 ms, 50 ms, and 200 ms timing ratios remain report-only because measured fresh-process startup dominates the eliminated local Git work. (session-settled: user-directed — chosen over retaining an unattainable wall-clock ratio or amplifying an artificial workload.) Governs R12.
 
 ### Requirements
 
 **Remote work and mutation**
 
 - R1. A plugin or marketplace operation checks each canonical remote source and requested ref at most once per CLI invocation or TUI action before deciding whether a managed checkout needs a pull.
-- R2. A skill refresh unit bypasses temporary clone, discovery, reconciliation, checkout advancement, commit, and sync only when every connected node is remotely equal and its managed checkout is healthy.
+- R2. A skill refresh unit bypasses temporary clone, discovery, reconciliation, checkout advancement, and commit only when every connected node is remotely equal and its managed checkout is healthy; existing action-driven scope sync remains unchanged.
 - R3. An ambiguous or failed cheap revision check falls back to the existing exact pull or temporary-inspection path; inability to optimize must never be interpreted as equality.
 - R4. One remote check may feed several consumers and scopes, but each distinct managed checkout produces its own apply result and ownership-preserving domain projection.
 
@@ -65,17 +65,17 @@ The origin research proposed new public outcomes and zero-write marketplace no-o
 - R9. Preserve skill deletion preflight, interactive and non-interactive retention, cancellation-before-mutation, rollback order, out-of-scope shared-cache blocking, exact inspected revision advancement, and offline sync.
 - R10. A fast path requires a valid managed Git checkout with the canonical expected origin/ref, expected HEAD, clean tracked and untracked state, and all domain-owned readable roots represented by the current inventory. Uncertain health selects the existing exact behavior without introducing repair, reset, or failure semantics.
 - R11. Apply the optimization consistently to direct plugin update, direct marketplace update, embedded marketplace plugin update, CLI project/user/all scopes, TUI single/update-all/status entry points, and skill update; non-update install and resolution callers retain their legacy path when no operation context is supplied.
-- R12. Prove exact operation counts with controlled local bare remotes and permanent built-CLI E2E coverage. Provide a manual benchmark with pinned baseline/candidate builds, at least 100 timed samples per scenario/profile, raw samples, and 0 ms, 50 ms, and 200 ms controlled Git-command cost profiles; enforce no-op median/p95 ratios only at 0 ms.
+- R12. Prove exact operation counts with controlled local bare remotes and permanent built-CLI E2E coverage. Provide a manually dispatched benchmark with pinned baseline/candidate builds, at least 100 timed samples per scenario/profile, raw samples, and 0 ms, 50 ms, and 200 ms controlled Git-command cost profiles; gate exact candidate Git work plus normalized output/filesystem compatibility and report every timing ratio without pass/fail.
 - R13. After any successful marketplace registry write, invalidate the long-lived TUI cache even when content is unchanged.
 
 ### Success Criteria
 
 - An unchanged cached direct plugin performs one remote revision check and no pull or clone while retaining its current public `updated` result and existing action-driven sync behavior.
 - An unchanged remote marketplace performs one remote revision check and no checkout/pull; it still writes the successful-check timestamp to the owning registry.
-- An all-equal healthy skill unit performs one check per physical node and no temporary clone, discovery, reconciliation, checkout advance, commit, or sync while retaining its current public result shape.
+- An all-equal healthy skill unit performs one check per physical node and no temporary clone, discovery, reconciliation, checkout advance, or commit while retaining its current public result and action-driven sync behavior.
 - A changed plugin, marketplace, or skill source follows the existing apply, deletion, rollback, and full-scope sync behavior.
 - Public human and JSON output remains schema-compatible; internal change facts never leak into serialized output unless the user approves that contract separately.
-- In the manual benchmark's controlled 0 ms no-op profiles with at least 100 post-warmup samples per scenario, candidate median runtime is at most 50% of the current-main baseline and p95 is at most 70%. The 50 ms and 200 ms profiles report raw timings and deterministic operation counts without ratio enforcement.
+- The manually dispatched benchmark uses at least 100 post-warmup samples per scenario/profile, gates one remote check with no clone/pull/fetch/checkout/reset plus normalized output/filesystem compatibility, and reports 0 ms, 50 ms, and 200 ms timing ratios without timing-based pass/fail.
 
 ### Acceptance Examples
 
@@ -189,7 +189,7 @@ flowchart LR
 ### System-Wide Impact
 
 - **CLI and agents:** Human output, `--json`, exit codes, and agent-help schemas stay stable. Automation still sees successful no-op checks as existing update outcomes.
-- **Filesystem state:** Direct plugin no-ops avoid persistent checkout work while retaining existing scope synchronization. Skill no-ops avoid persistent checkout and sync work. Marketplace no-ops retain the registry timestamp write required by compatibility.
+- **Filesystem state:** Direct plugin and skill no-ops avoid persistent checkout work while retaining existing scope synchronization. Marketplace no-ops retain the registry timestamp write required by compatibility.
 - **Dependency direction:** CLI/TUI callers create a neutral context and pass it into domain updaters; domain updaters consume context/Git/identity helpers. The leaf identity helper and Git module never import plugin, marketplace, skill, or CLI/TUI modules.
 - **Scope ownership:** Remote and physical checkout facts can be shared, but each consumer independently derives public output and writes only its owning registry. External-plugin `changed` is the OR of successful marketplace and external-checkout physical changes without changing current public precedence or sync eligibility.
 - **TUI lifecycle:** Each single, update-all, and status-triggered action gets a fresh operation context, bypasses stale process-global fetch entries, invalidates its data cache after any marketplace registry write, and releases context maps at action completion.
@@ -202,13 +202,13 @@ flowchart LR
 - **Long-lived caches can become stale.** Update operations bypass the process-global plugin fetch cache, contexts are action-scoped, and a sequential-action test advances the remote between actions.
 - **A registry-only no-op still changes TUI-visible data.** Invalidate TUI cache after the write even though `changed` is false.
 - **Public `updated` no longer implies content changed.** That is existing semantics and a user-directed compatibility decision. Keep existing action-driven scope sync rather than introducing brittle cross-invocation pending-sync state in this delivery.
-- **Timing ratios under injected latency mislead.** Gate no-op median/p95 only at 0 ms. Treat 50 ms and 200 ms profiles as report-only evidence with raw samples and deterministic operation counts.
+- **Fresh-process startup dominates local no-op timing.** Keep the long-running benchmark under manual dispatch. Gate deterministic Git work and normalized compatibility; report all timing ratios as evidence without gaming the workload to meet an arbitrary wall-clock threshold.
 - **Health scanning can replace one bottleneck with another.** Memoize one repository/domain health result per checkout/action and include fanout/scaling metadata so work grows with physical checkouts, not consumer count.
 - **Git-module mock shape can break indirectly.** Keep fact logic behind an unmocked injected seam, preserve the `src/core/git.ts` facade, and ensure full-module mocks expose imports required by their consumers.
 - **Origin research and this plan intentionally differ.** Executors must follow this Product Contract's compatibility decisions rather than reintroducing the deferred result redesign.
 ### Sources and Research
 
-- `docs/plans/2026-09-16-plugin-skill-update-performance-research.md` — baseline behavior, comparator evidence, source-graph findings, and benchmark thresholds.
+- `docs/plans/2026-09-16-plugin-skill-update-performance-research.md` — baseline behavior, comparator evidence, source-graph findings, and original benchmark hypotheses.
 - `src/core/git.ts` — existing non-interactive Git environment and `listRemote` precedent.
 - `src/core/plugin.ts` — fetch promise cache, plugin update mapping, and direct/embedded/external update branches.
 - `src/core/marketplace.ts` — registry ownership, branch detection, pull, timestamp, and save behavior.
@@ -336,10 +336,10 @@ flowchart LR
 - **Execution note:** Add failing operation-count and safety tests at both gates before moving the transaction boundary.
 - **Patterns to follow:** `buildPhysicalRefreshUnits`, root-first `inspectSkillUpdateUnit`, `revisionByNode`, reverse checkout restoration, and `scopesToSync` in the existing skill pipeline.
 - **Test scenarios:**
-  - Covers AE3. All represented nodes remotely equal and healthy skip clone/discovery and every mutation dependency.
+  - Covers AE3. All represented nodes remotely equal and healthy skip clone/discovery and every checkout/configuration mutation dependency while retaining selected-scope sync.
   - One changed, dirty, repository-unhealthy, domain-root-unhealthy, or unresolved represented node sends the entire connected unit through exact inspection.
   - Covers AE4. Ambiguous remote resolution and unadvertised pins fall back to current exact inspection.
-  - Exact inspection returning equal SHAs skips reconcile, advance, commit, and sync only when preflight health passed and no deletion/configuration impact exists.
+  - Exact inspection returning equal SHAs skips reconcile, advance, and commit only when preflight health passed and no deletion/configuration impact exists; selected scopes retain their existing offline sync behavior.
   - Dirty equal-SHA post-inspection state continues through the established transaction.
   - Equal SHAs plus an approved upstream deletion still reconcile and commit that deletion.
   - Changed revision still reconciles before checkout advancement, commits, and syncs each changed selected scope once offline.
@@ -363,8 +363,8 @@ flowchart LR
   2. Make the benchmark accept already-built baseline and candidate CLI paths plus optional explicit commit IDs. Record Bun, Git, OS, build mode, source graph, warmup, percentile algorithm, failure/outlier policy, and raw samples.
   3. Run at least 100 timed post-warmup samples per scenario/profile in fresh CLI processes. Re-arm each fixture outside the timed interval.
   4. Report representative plugin-marketplace and skill no-op fanout scenarios with explicit physical-source, checkout, consumer, and scope metadata.
-  5. Run 0 ms, 50 ms, and 200 ms controlled Git-command delay profiles. Enforce R12 median/p95 ratios only at 0 ms; report 50 ms and 200 ms raw timings and operation counts without ratio failure.
-  6. Keep runtime measurement outside the unit test suite; keep exact operation-count and compatibility assertions in permanent E2E coverage.
+  5. Run 0 ms, 50 ms, and 200 ms controlled Git-command delay profiles. Gate exact candidate no-op Git operations and normalized public output/filesystem compatibility at every profile; report all runtime ratios without timing-based failure.
+  6. Keep the long-running benchmark under manual dispatch outside the unit/CI test suite; keep exact operation-count and compatibility assertions in permanent E2E coverage.
 - **Patterns to follow:** Existing E2E temporary workspace setup, local Git identity scoped to fixtures, built CLI invocation, filesystem outcome assertions, and raw-data-first benchmark reporting.
 - **Test scenarios:**
   - Marketplace no-op fanout retains human/JSON results and timestamp semantics, performs one source check, and performs no pull.
@@ -372,8 +372,8 @@ flowchart LR
   - Existing changed plugin, marketplace, and skill fixtures retain output, deletion, rollback, and scope-sync behavior.
   - Remote failure with a usable cache retains current non-fatal output/exit behavior.
   - Public JSON fixtures contain no new fields or enum values.
-  - No-op scenarios meet median/p95 targets at 0 ms; 50 ms and 200 ms profiles remain raw report-only evidence.
-- **Verification:** Built baseline and candidate CLIs produce compatible observable results, deterministic operation counts, raw reproducible samples, and 0 ms threshold reports for representative no-op scenarios.
+  - No-op scenarios meet exact Git-work and normalized compatibility gates; 0 ms, 50 ms, and 200 ms runtime ratios remain raw report-only evidence.
+- **Verification:** Built baseline and candidate CLIs produce compatible observable results, exact candidate no-op Git work, deterministic operation counts, and raw reproducible timing samples for representative scenarios.
 ## Verification Contract
 
 | Gate | Command or evidence | Proves |
@@ -387,7 +387,7 @@ flowchart LR
 | End-to-end | `bun test tests/e2e/plugin-update.test.ts tests/e2e/skill-update.test.ts` | Built command behavior, JSON compatibility, filesystem results, scopes, and local Git integration. |
 | Types | `bun run typecheck` | Internal result/context additions and every caller migrate cleanly. |
 | Lint | `bun run lint` | Repository style and static checks pass. |
-| Runtime evidence | `bun run bench:update -- --baseline <built-cli> --candidate <built-cli>` | At least 100 samples per scenario/profile, raw samples, source/consumer metadata, deterministic operation counts, 0 ms no-op thresholds, and report-only 50 ms/200 ms profiles. |
+| Runtime evidence | Manually dispatch `bun run bench:update -- --baseline <built-cli> --candidate <built-cli>` | At least 100 samples per scenario/profile, raw samples, source/consumer metadata, exact candidate Git-work and normalized compatibility gates, and report-only timing ratios. |
 | Manual E2E | Run the built `plugin update --scope all` and `skill update --scope all --yes` commands in a temporary workspace with local bare remotes. | Human output, timestamps, no-op work elimination, existing action-driven sync behavior, and non-interactive deletion retention match the contract. |
 
 Implementation starts from a fresh worktree based on the then-current `origin/main`. Record baseline and candidate commits and use the same machine, fixture, process model, build mode, source graph, warmup, percentile algorithm, and failure policy. Local bare-remotes prove deterministic process/filesystem work; injected latency profiles make the added remote negotiation visible rather than claiming internet RTT fidelity.
@@ -404,7 +404,7 @@ Implementation starts from a fresh worktree based on the then-current `origin/ma
 - Physical outcomes are cached only by complete identity and never own consumer output, registry persistence, or sync projection.
 - Changed, dirty, ambiguous, local, offline, missing-cache, deletion, cancellation, out-of-scope, rollback, and sync-failure paths preserve their documented behavior.
 - Focused unit tests, E2E tests, build, typecheck, lint, benchmark, and manual built-CLI scenarios satisfy the Verification Contract.
-- Runtime evidence meets R12 and includes raw samples, pinned baseline/candidate provenance, source/consumer metadata, deterministic operation counts, 0 ms threshold results, and report-only high-latency profiles.
+- Runtime evidence meets R12 and includes raw samples, pinned baseline/candidate provenance, source/consumer metadata, exact candidate Git-work and normalized compatibility results, and report-only timing ratios.
 - No experimental helper, duplicate normalizer/result model, dead branch, compatibility shim outside approved internal fields, stale operation cache, or throwaway fixture remains.
 - Any unavoidable additional observable compatibility change is escalated to the user and incorporated into this Product Contract before implementation continues.
 
@@ -414,4 +414,4 @@ Implementation starts from a fresh worktree based on the then-current `origin/ma
 - **U2:** Plugin/marketplace cores avoid equal-source pulls and expose reliable internal change facts without serialized or persistence contract drift.
 - **U3:** CLI/TUI actions share checks within one action, invalidate written TUI state, and preserve existing action-driven scope sync and public output.
 - **U4:** Skill units bypass both unchanged stages only under the complete safety predicate and preserve every existing transaction transition.
-- **U5:** Built-CLI E2E, deterministic operation counts, and reproducible multi-profile manual timing evidence prove compatibility and the 0 ms no-op performance target.
+- **U5:** Built-CLI E2E, deterministic operation counts, and reproducible manually dispatched multi-profile timing evidence prove compatibility and the exact no-op work target.

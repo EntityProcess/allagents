@@ -31,9 +31,9 @@ Options:
   -h, --help                 Show this help
 
 Latency is injected before local Git remote commands. It is a controlled command-cost
-profile, not a claim of network fidelity. Runtime gates apply only to 0 ms no-op
-scenarios: candidate median <= 50% and p95 <= 70% of baseline. The 50/200 ms
-profiles always report raw timings and deterministic operation counts without gates.
+profile, not a claim of network fidelity. Exact candidate no-op operation counts,
+normalized public output, and normalized filesystem state are gated. Runtime ratios
+for the 0 ms, 50 ms, and 200 ms profiles are report-only evidence.
 `;
 
 type ScenarioName = 'plugin' | 'skill';
@@ -59,12 +59,22 @@ interface Sample {
   exitCode: number;
   gitOperations: GitCounts;
   stdoutSha256: string;
+  stateSha256: string;
 }
 
 interface FixtureContext {
   root: string;
   template: string;
   wrapperDir: string;
+}
+
+interface IterationContext {
+  root: string;
+  cwd: string;
+  home: string;
+  cache: string;
+  trace: string;
+  args: string[];
 }
 
 const decoder = new TextDecoder();
@@ -208,7 +218,7 @@ function prepareIteration(
   fixture: FixtureContext,
   scenario: ScenarioName,
   serial: number,
-): { root: string; cwd: string; home: string; trace: string; args: string[] } {
+): IterationContext {
   const root = join(fixture.root, 'iterations', `${scenario}-${serial}`);
   const home = join(root, 'home');
   const cwd = join(root, 'workspace');
@@ -246,6 +256,7 @@ function prepareIteration(
       root,
       cwd,
       home,
+      cache,
       trace,
       args: ['--json', 'plugin', 'marketplace', 'update'],
     };
@@ -258,6 +269,7 @@ function prepareIteration(
     root,
     cwd,
     home,
+    cache,
     trace,
     args: ['--json', 'skill', 'update', '--scope', 'all', '--yes'],
   };
@@ -277,6 +289,60 @@ function gitCounts(trace: string): GitCounts {
     }
   }
   return counts;
+}
+
+function normalizeIterationValue(value: unknown, root: string): string {
+  return JSON.stringify(value).replaceAll(root, '<ITERATION_ROOT>');
+}
+
+function captureState(
+  scenario: ScenarioName,
+  iteration: IterationContext,
+): unknown {
+  const head = runGit(iteration.cache, ['rev-parse', 'HEAD']);
+  if (scenario === 'plugin') {
+    const registry = JSON.parse(
+      readFileSync(
+        join(iteration.home, '.allagents', 'marketplaces.json'),
+        'utf8',
+      ),
+    ) as {
+      marketplaces: Record<
+        string,
+        {
+          name: string;
+          source: unknown;
+          path: string;
+          lastUpdated?: string;
+        }
+      >;
+    };
+    const entries = Object.fromEntries(
+      Object.entries(registry.marketplaces).map(([key, entry]) => [
+        key,
+        {
+          name: entry.name,
+          source: entry.source,
+          path: entry.path.replaceAll(iteration.root, '<ITERATION_ROOT>'),
+          lastUpdatedAdvanced:
+            typeof entry.lastUpdated === 'string' &&
+            entry.lastUpdated !== '2000-01-01T00:00:00.000Z',
+        },
+      ]),
+    );
+    return { head, entries };
+  }
+  return {
+    head,
+    projectConfig: readFileSync(
+      join(iteration.cwd, '.allagents', 'workspace.yaml'),
+      'utf8',
+    ),
+    userConfig: readFileSync(
+      join(iteration.home, '.allagents', 'workspace.yaml'),
+      'utf8',
+    ),
+  };
 }
 
 function hash(value: string): string {
@@ -314,20 +380,30 @@ function runSample(
   const durationMs = performance.now() - start;
   const stdout = decoder.decode(result.stdout);
   const stderr = decoder.decode(result.stderr);
+  let payload: { success?: boolean };
   try {
-    const payload = JSON.parse(stdout) as { success?: boolean };
+    payload = JSON.parse(stdout) as { success?: boolean };
     if (result.exitCode !== 0 || payload.success !== true) {
-      fail(`${basename(cli)} ${scenario} failed (${result.exitCode}): ${stdout}${stderr}`);
+      fail(
+        `${basename(cli)} ${scenario} failed (${result.exitCode}): ${stdout}${stderr}`,
+      );
     }
   } catch (error) {
-    if (error instanceof SyntaxError) fail(`${basename(cli)} ${scenario} emitted invalid JSON: ${stdout}${stderr}`);
+    if (error instanceof SyntaxError) {
+      fail(
+        `${basename(cli)} ${scenario} emitted invalid JSON: ${stdout}${stderr}`,
+      );
+    }
     throw error;
   }
   const sample = {
     durationMs,
     exitCode: result.exitCode,
     gitOperations: gitCounts(iteration.trace),
-    stdoutSha256: hash(stdout),
+    stdoutSha256: hash(normalizeIterationValue(payload, iteration.root)),
+    stateSha256: hash(
+      normalizeIterationValue(captureState(scenario, iteration), iteration.root),
+    ),
   };
   rmSync(iteration.root, { recursive: true, force: true });
   return sample;
@@ -341,16 +417,35 @@ function percentile(values: number[], fraction: number): number {
 
 function summarize(samples: Sample[]) {
   const durations = samples.map((sample) => sample.durationMs);
-  const signatures = samples.map((sample) => JSON.stringify(sample.gitOperations));
+  const operationSignatures = samples.map((sample) =>
+    JSON.stringify(sample.gitOperations),
+  );
   return {
     count: samples.length,
     minMs: Math.min(...durations),
     medianMs: percentile(durations, 0.5),
     p95Ms: percentile(durations, 0.95),
     maxMs: Math.max(...durations),
-    operationCountsDeterministic: new Set(signatures).size === 1,
-    operationCountSignatures: [...new Set(signatures)].map((signature) => JSON.parse(signature)),
+    operationCountsDeterministic:
+      new Set(operationSignatures).size === 1,
+    operationCountSignatures: [...new Set(operationSignatures)].map(
+      (signature) => JSON.parse(signature),
+    ),
+    outputSignatures: [...new Set(samples.map((sample) => sample.stdoutSha256))],
+    stateSignatures: [...new Set(samples.map((sample) => sample.stateSha256))],
   };
+}
+
+function exactCandidateWork(samples: Sample[]): boolean {
+  return samples.every(
+    (sample) =>
+      sample.gitOperations['ls-remote'] === 1 &&
+      sample.gitOperations.clone === 0 &&
+      sample.gitOperations.pull === 0 &&
+      sample.gitOperations.fetch === 0 &&
+      sample.gitOperations.checkout === 0 &&
+      sample.gitOperations.reset === 0,
+  );
 }
 
 function inferCommit(cli: string): string | null {
@@ -387,24 +482,62 @@ try {
   const results = [];
   for (const scenario of options.scenarios) {
     for (const profileMs of options.profiles) {
-      const baselineWarmups = Array.from({ length: options.warmups }, () =>
-        runSample(options.baseline, fixture, scenario, profileMs, serial++),
-      );
-      const candidateWarmups = Array.from({ length: options.warmups }, () =>
-        runSample(options.candidate, fixture, scenario, profileMs, serial++),
-      );
-      const baselineSamples = Array.from({ length: options.samples }, () =>
-        runSample(options.baseline, fixture, scenario, profileMs, serial++),
-      );
-      const candidateSamples = Array.from({ length: options.samples }, () =>
-        runSample(options.candidate, fixture, scenario, profileMs, serial++),
-      );
+      const baselineWarmups: Sample[] = [];
+      const candidateWarmups: Sample[] = [];
+      for (let index = 0; index < options.warmups; index++) {
+        const order =
+          index % 2 === 0
+            ? [
+                [options.baseline, baselineWarmups],
+                [options.candidate, candidateWarmups],
+              ] as const
+            : [
+                [options.candidate, candidateWarmups],
+                [options.baseline, baselineWarmups],
+              ] as const;
+        for (const [cli, samples] of order) {
+          samples.push(runSample(cli, fixture, scenario, profileMs, serial++));
+        }
+      }
+      const baselineSamples: Sample[] = [];
+      const candidateSamples: Sample[] = [];
+      for (let index = 0; index < options.samples; index++) {
+        const order =
+          index % 2 === 0
+            ? [
+                [options.baseline, baselineSamples],
+                [options.candidate, candidateSamples],
+              ] as const
+            : [
+                [options.candidate, candidateSamples],
+                [options.baseline, baselineSamples],
+              ] as const;
+        for (const [cli, samples] of order) {
+          samples.push(runSample(cli, fixture, scenario, profileMs, serial++));
+        }
+      }
       const baselineSummary = summarize(baselineSamples);
       const candidateSummary = summarize(candidateSamples);
-      const evaluated = options.compare && profileMs === 0;
+      const evaluated = options.compare;
       const medianRatio = candidateSummary.medianMs / baselineSummary.medianMs;
       const p95Ratio = candidateSummary.p95Ms / baselineSummary.p95Ms;
-      const passed = !evaluated || (medianRatio <= 0.5 && p95Ratio <= 0.7);
+      const exactWork = exactCandidateWork(candidateSamples);
+      const outputCompatible =
+        baselineSummary.outputSignatures.length === 1 &&
+        candidateSummary.outputSignatures.length === 1 &&
+        baselineSummary.outputSignatures[0] ===
+          candidateSummary.outputSignatures[0];
+      const stateCompatible =
+        baselineSummary.stateSignatures.length === 1 &&
+        candidateSummary.stateSignatures.length === 1 &&
+        baselineSummary.stateSignatures[0] ===
+          candidateSummary.stateSignatures[0];
+      const passed =
+        !evaluated ||
+        (candidateSummary.operationCountsDeterministic &&
+          exactWork &&
+          outputCompatible &&
+          stateCompatible);
       if (!passed) gateFailed = true;
       results.push({
         scenario,
@@ -415,13 +548,22 @@ try {
           : { physicalSources: 1, physicalCheckouts: 1, consumers: 2, consumerKind: 'skill installations', scopes: ['project', 'user'] },
         baseline: { summary: baselineSummary, warmups: baselineWarmups, samples: baselineSamples },
         candidate: { summary: candidateSummary, warmups: candidateWarmups, samples: candidateSamples },
-        comparison: {
+        verification: {
           evaluated,
-          policy: profileMs === 0 ? 'median <= 0.50 and p95 <= 0.70 for no-op scenarios' : 'report-only',
+          policy:
+            'candidate performs one ls-remote and no clone/pull/fetch/checkout/reset; normalized public output and filesystem state match baseline',
+          exactCandidateWork: exactWork,
+          outputCompatible,
+          stateCompatible,
+          passed: evaluated ? passed : null,
+        },
+        comparison: {
+          evaluated: false,
+          policy: 'report-only',
           ...(options.compare ? {} : { disabledReason: '--no-compare' }),
           medianRatio,
           p95Ratio,
-          passed: evaluated ? passed : null,
+          passed: null,
         },
       });
     }
@@ -449,11 +591,14 @@ try {
       profilesMs: options.profiles,
       freshCliProcessPerSample: true,
       fixtureRearmedOutsideTimedInterval: true,
+      sampleOrder: 'paired AB/BA, alternating the first CLI per pair',
       percentileAlgorithm: 'nearest-rank on ascending samples; index=max(0, ceil(p*n)-1)',
       failurePolicy: 'fail fast on non-zero exit or invalid/unsuccessful JSON; no retries',
       outlierPolicy: 'no samples excluded',
       latencyInjection: { operations: remoteOperations, fidelity: 'controlled local command delay, not network emulation' },
-      gatePolicy: '0 ms no-op scenarios only; 50/200 ms profiles are report-only',
+      gatePolicy:
+        'exact Git work plus normalized output/state compatibility; all runtime ratios are report-only',
+      manualDispatchOnly: true,
       comparisonEnabled: options.compare,
     },
     results,
