@@ -24,6 +24,7 @@ import {
   type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
 import { resetFetchCache, updatePlugin } from '../../../core/plugin.js';
+import { UpdateContext } from '../../../core/update-context.js';
 import { formatVerboseSyncLines } from '../../format-sync.js';
 import { parseMarketplaceManifest } from '../../../utils/marketplace-manifest-parser.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
@@ -34,6 +35,8 @@ import type { TuiCache } from '../cache.js';
 import { removeInstalledSkill } from '../../skill-removal.js';
 import {
   buildSkillUpdateInventory,
+  createSkillUpdateNodePrecheck,
+  type SkillUpdateNodePrecheckDependencies,
   executePreparedSkillUpdate,
   inspectSkillUpdateUnit,
   resolveNonInteractiveSkillUpdateDecisions,
@@ -49,11 +52,14 @@ import {
 const { select, text, confirm, multiselect, autocomplete } = p;
 
 /**
- * Create dependencies for updatePlugin.
- * Tracks which marketplaces have been updated to avoid redundant fetches.
+ * Create dependencies for updatePlugin. Physical work is shared by the action
+ * context while each consumer retains its own marketplace result and write.
  */
-function createUpdateDeps(workspacePath?: string) {
-  const updatedMarketplaces = new Set<string>();
+function createUpdateDeps(
+  updateContext: UpdateContext,
+  workspacePath?: string,
+  cache?: TuiCache,
+) {
   return {
     parsePluginSpec,
     getMarketplaceRegistration: (name: string, sourceLocation?: string) =>
@@ -61,12 +67,14 @@ function createUpdateDeps(workspacePath?: string) {
     validateMarketplaceAccess: getMarketplaceAccessError,
     parseMarketplaceManifest,
     updateMarketplace: async (name: string) => {
-      if (updatedMarketplaces.has(name)) {
-        return [{ name, success: true }];
-      }
-      const result = await updateMarketplace(name, workspacePath);
-      if (result[0]?.success) {
-        updatedMarketplaces.add(name);
+      const result = await updateMarketplace(
+        name,
+        workspacePath,
+        {},
+        updateContext,
+      );
+      if (result.some((entry) => entry.success)) {
+        cache?.invalidate();
       }
       return result;
     },
@@ -169,35 +177,46 @@ async function runUpdatePlugin(
   context: TuiContext,
   cache?: TuiCache,
 ): Promise<void> {
-  const s = p.spinner();
-  s.start('Updating plugin...');
+  const updateContext = new UpdateContext();
+  try {
+    const s = p.spinner();
+    s.start('Updating plugin...');
 
-  const workspacePath = scope === 'project' ? context.workspacePath ?? undefined : undefined;
-  const result = await updatePlugin(pluginSource, createUpdateDeps(workspacePath));
+    const workspacePath =
+      scope === 'project' ? context.workspacePath ?? undefined : undefined;
+    const result = await updatePlugin(
+      pluginSource,
+      createUpdateDeps(updateContext, workspacePath, cache),
+      updateContext,
+    );
 
-  if (!result.success) {
-    s.stop('Update failed');
-    p.note(result.error ?? 'Unknown error', 'Error');
-    return;
+    if (!result.success) {
+      s.stop('Update failed');
+      p.note(result.error ?? 'Unknown error', 'Error');
+      return;
+    }
+
+    if (result.action !== 'updated') {
+      s.stop('Already up to date');
+      p.note(`- ${pluginSource} (${result.action})`, 'Update');
+      return;
+    }
+
+    // Preserve the action-driven sync contract, including no-op updates and
+    // later-invocation retries after a sync failure.
+    s.message('Updating...');
+    if (scope === 'project' && context.workspacePath) {
+      await syncWorkspace(context.workspacePath);
+    } else {
+      await syncUserWorkspace();
+    }
+    s.stop('Updated');
+    cache?.invalidate();
+
+    p.note(`\u2713 ${pluginSource} (${result.action})`, 'Update');
+  } finally {
+    updateContext.dispose();
   }
-
-  if (result.action !== 'updated') {
-    s.stop('Already up to date');
-    p.note(`- ${pluginSource} (${result.action})`, 'Update');
-    return;
-  }
-
-  // Sync after update
-  s.message('Updating...');
-  if (scope === 'project' && context.workspacePath) {
-    await syncWorkspace(context.workspacePath);
-  } else {
-    await syncUserWorkspace();
-  }
-  s.stop('Updated');
-  cache?.invalidate();
-
-  p.note(`\u2713 ${pluginSource} (${result.action})`, 'Update');
 }
 
 /**
@@ -206,6 +225,26 @@ async function runUpdatePlugin(
 export async function runUpdateAllPlugins(
   context: TuiContext,
   cache?: TuiCache,
+  skillPrecheckDependencies: SkillUpdateNodePrecheckDependencies = {},
+): Promise<void> {
+  const updateContext = new UpdateContext();
+  try {
+    await runUpdateAllPluginsWithContext(
+      context,
+      updateContext,
+      cache,
+      skillPrecheckDependencies,
+    );
+  } finally {
+    updateContext.dispose();
+  }
+}
+
+async function runUpdateAllPluginsWithContext(
+  context: TuiContext,
+  updateContext: UpdateContext,
+  cache?: TuiCache,
+  skillPrecheckDependencies: SkillUpdateNodePrecheckDependencies = {},
 ): Promise<void> {
   const s = p.spinner();
   s.start('Gathering plugins...');
@@ -236,8 +275,12 @@ export async function runUpdateAllPlugins(
 
   s.message(`Updating ${pluginsToUpdate.length} plugin(s)...`);
 
-  const projectDeps = createUpdateDeps(context.workspacePath ?? undefined);
-  const userDeps = createUpdateDeps();
+  const projectDeps = createUpdateDeps(
+    updateContext,
+    context.workspacePath ?? undefined,
+    cache,
+  );
+  const userDeps = createUpdateDeps(updateContext, undefined, cache);
 
   const results: Array<{ plugin: string; action: string; error?: string }> = [];
   let needsProjectSync = false;
@@ -282,7 +325,13 @@ export async function runUpdateAllPlugins(
         selectedScopes: scopes,
         failures,
       },
-      { inspectUnit: inspectSkillUpdateUnit },
+      {
+        inspectUnit: inspectSkillUpdateUnit,
+        precheckNode: createSkillUpdateNodePrecheck(
+          updateContext,
+          skillPrecheckDependencies,
+        ),
+      },
     );
 
     for (const installation of installations) {
@@ -311,6 +360,7 @@ export async function runUpdateAllPlugins(
     const result = await updatePlugin(
       spec,
       scope === 'project' ? projectDeps : userDeps,
+      updateContext,
     );
     const entry: { plugin: string; action: string; error?: string } = {
       plugin: spec,
@@ -939,10 +989,16 @@ async function runMarketplaceDetail(
     }
 
     if (action === 'update') {
+      const updateContext = new UpdateContext();
       try {
         const s = p.spinner();
         s.start('Updating marketplace...');
-        const results = await updateMarketplace(marketplaceName);
+        const results = await updateMarketplace(
+          marketplaceName,
+          undefined,
+          {},
+          updateContext,
+        );
         const summary = results
           .map(
             (r) =>
@@ -955,6 +1011,8 @@ async function runMarketplaceDetail(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         p.note(message, 'Error');
+      } finally {
+        updateContext.dispose();
       }
 
       continue;

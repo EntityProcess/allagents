@@ -120,6 +120,41 @@ describe('plugin update e2e', () => {
     ]);
   });
 
+
+  test('keeps direct marketplace update JSON free of internal fields', () => {
+    const addResult = runCli(workspaceDir, homeDir, [
+      'plugin',
+      'marketplace',
+      'add',
+      marketplaceDir,
+      '--scope',
+      'project',
+    ]);
+    expect(addResult.exitCode).toBe(0);
+
+    const updateResult = runCli(workspaceDir, homeDir, [
+      'plugin',
+      'marketplace',
+      'update',
+      'project-marketplace',
+    ]);
+
+    expect(updateResult.exitCode).toBe(0);
+    expect(JSON.parse(updateResult.stdout)).toEqual({
+      success: true,
+      command: 'plugin marketplace update',
+      data: {
+        results: [
+          {
+            name: 'project-marketplace',
+            success: true,
+          },
+        ],
+        succeeded: 1,
+        failed: 0,
+      },
+    });
+  });
   test('keeps user-scoped marketplace updates isolated from the workspace', () => {
     const addResult = runCli(workspaceDir, homeDir, [
       'plugin',

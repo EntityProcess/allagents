@@ -29,6 +29,7 @@ import {
   type SkillUpdateInstallation,
   type SkillUpdateInventoryFailure,
   type SkillUpdatePreflight,
+  type SkillUpdateNodePrecheck,
   type SkillUpdateScope,
   type SkillUpdateUnitInput,
   type UnitInspection,
@@ -908,6 +909,79 @@ async function skillUpdateDomainRootsReadable(
   return readable.every(Boolean);
 }
 
+export interface SkillUpdateNodePrecheckDependencies {
+  resolveRemoteRevision?: typeof resolveRemoteRevision;
+  checkRepositoryHealth?: typeof checkRepositoryHealth;
+  domainRootsReadable?: (
+    node: CheckoutNode,
+    unit: SkillUpdateUnitInput,
+  ) => Promise<boolean>;
+}
+
+/**
+ * Build the non-mutating node check used before exact skill inspection.
+ * Callers provide their action context so plugin and skill consumers share
+ * remote and checkout-health facts without sharing domain projections.
+ */
+export function createSkillUpdateNodePrecheck(
+  context: UpdateContext,
+  dependencies: SkillUpdateNodePrecheckDependencies = {},
+): (
+  node: CheckoutNode,
+  unit: SkillUpdateUnitInput,
+) => Promise<SkillUpdateNodePrecheck> {
+  const resolveRemote =
+    dependencies.resolveRemoteRevision ?? resolveRemoteRevision;
+  const checkHealth =
+    dependencies.checkRepositoryHealth ?? checkRepositoryHealth;
+  const checkDomainRoots =
+    dependencies.domainRootsReadable ?? skillUpdateDomainRootsReadable;
+
+  return async (node, unit) => {
+    let remote: RemoteRevisionResult;
+    try {
+      remote = await context.getRemote(node.remoteUrl, node.ref, () =>
+        resolveRemote(node.remoteUrl, node.ref),
+      );
+    } catch {
+      remote = { status: 'unresolved', reason: 'failed' };
+    }
+
+    const expectedRef = remote.status === 'resolved' ? remote.ref : node.ref;
+    const identity = {
+      path: node.cachePath,
+      source: node.remoteUrl,
+      ...(expectedRef !== undefined && { ref: expectedRef }),
+    };
+    const [health, domainRootsHealthy] = await Promise.all([
+      context
+        .getHealth(identity, () =>
+          checkHealth(node.cachePath, {
+            source: node.remoteUrl,
+            ...(expectedRef !== undefined && { ref: expectedRef }),
+            head: node.currentSha,
+          }),
+        )
+        .catch(
+          (error): RepositoryHealthResult => ({
+            status: 'unhealthy',
+            reason: 'inspection-failed',
+            error: error instanceof Error ? error : new Error(String(error)),
+          }),
+        ),
+      checkDomainRoots(node, unit).catch(() => false),
+    ]);
+    return {
+      remoteEqual:
+        remote.status === 'resolved' &&
+        remote.commit.toLowerCase() === node.currentSha.toLowerCase(),
+      repositoryHealthy:
+        remote.status === 'resolved' && health.status === 'healthy',
+      domainRootsHealthy,
+    };
+  };
+}
+
 
 export async function prepareSkillUpdate(
   options: PrepareSkillUpdateOptions,
@@ -918,12 +992,6 @@ export async function prepareSkillUpdate(
   )(options.workspacePath, options.scopes);
   const context = new UpdateContext();
   try {
-    const resolveRemote =
-      dependencies.resolveRemoteRevision ?? resolveRemoteRevision;
-    const checkHealth =
-      dependencies.checkRepositoryHealth ?? checkRepositoryHealth;
-    const checkDomainRoots =
-      dependencies.domainRootsReadable ?? skillUpdateDomainRootsReadable;
     const plan = await buildSkillUpdatePreflight(
       {
         installations: inventory.installations,
@@ -933,53 +1001,7 @@ export async function prepareSkillUpdate(
       },
       {
         inspectUnit: dependencies.inspectUnit ?? inspectSkillUpdateUnit,
-        precheckNode: async (node, unit) => {
-          let remote: RemoteRevisionResult;
-          try {
-            remote = await context.getRemote(
-              node.remoteUrl,
-              node.ref,
-              () => resolveRemote(node.remoteUrl, node.ref),
-            );
-          } catch {
-            remote = { status: 'unresolved', reason: 'failed' };
-          }
-
-          const expectedRef =
-            remote.status === 'resolved' ? remote.ref : node.ref;
-          const identity = {
-            path: node.cachePath,
-            source: node.remoteUrl,
-            ...(expectedRef !== undefined && { ref: expectedRef }),
-          };
-          const [health, domainRootsHealthy] = await Promise.all([
-            context
-              .getHealth(identity, () =>
-                checkHealth(node.cachePath, {
-                  source: node.remoteUrl,
-                  ...(expectedRef !== undefined && { ref: expectedRef }),
-                  head: node.currentSha,
-                }),
-              )
-              .catch(
-                (error): RepositoryHealthResult => ({
-                  status: 'unhealthy',
-                  reason: 'inspection-failed',
-                  error:
-                    error instanceof Error ? error : new Error(String(error)),
-                }),
-              ),
-            checkDomainRoots(node, unit).catch(() => false),
-          ]);
-          return {
-            remoteEqual:
-              remote.status === 'resolved' &&
-              remote.commit.toLowerCase() === node.currentSha.toLowerCase(),
-            repositoryHealthy:
-              remote.status === 'resolved' && health.status === 'healthy',
-            domainRootsHealthy,
-          };
-        },
+        precheckNode: createSkillUpdateNodePrecheck(context, dependencies),
       },
     );
     return { inventory, plan };
