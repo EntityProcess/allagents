@@ -14,7 +14,7 @@ export interface GitFactDependencies {
   createGit?: (baseDir?: string) => GitFactClient;
 }
 
-export interface GitFactRuntimeDependencies {
+interface GitFactRuntimeDependencies {
   createGit: (baseDir?: string) => GitFactClient;
   cloneTimeoutMs: number;
   classifyError(

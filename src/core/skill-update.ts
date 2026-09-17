@@ -707,13 +707,13 @@ export async function executeSkillUpdatePlan(
       }
     }
 
-    const inspectedRevisionByNode = new Map(
+    const revisionByNode = new Map(
       unit.inspectedNodes.map((entry) => [entry.nodeId, entry.sha]),
     );
     const allNodesUnchanged =
       unit.nodes.length > 0 &&
       unit.nodes.every(
-        (node) => inspectedRevisionByNode.get(node.id) === node.currentSha,
+        (node) => revisionByNode.get(node.id) === node.currentSha,
       );
     if (
       unit.safeToBypassTransaction === true &&
@@ -725,9 +725,6 @@ export async function executeSkillUpdatePlan(
       continue;
     }
 
-    const revisionByNode = new Map(
-      unit.inspectedNodes.map((entry) => [entry.nodeId, entry.sha]),
-    );
     const orderedNodes = unit.nodes
       .filter((node) => revisionByNode.has(node.id))
       .sort((left, right) => {

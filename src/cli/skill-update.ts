@@ -173,18 +173,13 @@ export interface PrepareSkillUpdateOptions {
   filters?: string[];
 }
 
-export interface PrepareSkillUpdateDependencies {
+export interface PrepareSkillUpdateDependencies
+  extends SkillUpdateNodePrecheckDependencies {
   buildInventory?: (
     workspacePath: string,
     selectedScopes?: SkillUpdateScope[],
   ) => Promise<SkillUpdateInventory>;
   inspectUnit?: (unit: SkillUpdateUnitInput) => Promise<UnitInspection>;
-  resolveRemoteRevision?: typeof resolveRemoteRevision;
-  checkRepositoryHealth?: typeof checkRepositoryHealth;
-  domainRootsReadable?: (
-    node: CheckoutNode,
-    unit: SkillUpdateUnitInput,
-  ) => Promise<boolean>;
 }
 
 export interface PreparedSkillUpdate {
@@ -938,6 +933,7 @@ export function createSkillUpdateNodePrecheck(
     dependencies.domainRootsReadable ?? skillUpdateDomainRootsReadable;
 
   return async (node, unit) => {
+    const domainRootsPromise = checkDomainRoots(node, unit).catch(() => false);
     let remote: RemoteRevisionResult;
     try {
       remote = await context.getRemote(node.remoteUrl, node.ref, () =>
@@ -969,7 +965,7 @@ export function createSkillUpdateNodePrecheck(
             error: error instanceof Error ? error : new Error(String(error)),
           }),
         ),
-      checkDomainRoots(node, unit).catch(() => false),
+      domainRootsPromise,
     ]);
     return {
       remoteEqual:

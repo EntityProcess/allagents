@@ -22,6 +22,7 @@ import {
   parseMarketplaceManifest,
   resolvePluginSourcePath,
 } from '../utils/marketplace-manifest-parser.js';
+import { normalizeGitRef } from '../utils/git-source.js';
 import {
   getPluginCachePath,
   isFilesystemRoot,
@@ -1571,10 +1572,7 @@ export async function updateMarketplace(
                   'refs/remotes/origin/HEAD',
                   '--short',
                 ]);
-                const trimmed = ref.trim();
-                targetBranch = trimmed.startsWith('origin/')
-                  ? trimmed.slice('origin/'.length)
-                  : trimmed;
+                targetBranch = normalizeGitRef(ref) ?? ref.trim();
               } catch {
                 try {
                   const showOutput = await git.raw([
