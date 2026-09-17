@@ -6,7 +6,7 @@ import {
   expect,
   test,
 } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { chmodSync, existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,6 +28,7 @@ interface SkillUpdateFixture {
   remote: string;
   cache: string;
   gitConfig: string;
+  gitWrapperDir: string;
   initialSha: string;
   updatedSha: string;
 }
@@ -61,7 +62,10 @@ beforeAll(() => {
   }
 });
 
-function cliEnv(fixture: SkillUpdateFixture): Record<string, string> {
+function cliEnv(
+  fixture: SkillUpdateFixture,
+  extra: Record<string, string> = {},
+): Record<string, string> {
   return {
     ...process.env,
     ALLAGENTS_TEST_HOME: fixture.home,
@@ -71,13 +75,20 @@ function cliEnv(fixture: SkillUpdateFixture): Record<string, string> {
     GIT_CONFIG_GLOBAL: fixture.gitConfig,
     GIT_TERMINAL_PROMPT: '0',
     NO_COLOR: '1',
+    ALLAGENTS_TEST_REAL_GIT: Bun.which('git') ?? 'git',
+    PATH: `${fixture.gitWrapperDir}:${process.env.PATH ?? ''}`,
+    ...extra,
   } as Record<string, string>;
 }
 
-function runCli(fixture: SkillUpdateFixture, args: string[]): CliResult {
+function runCli(
+  fixture: SkillUpdateFixture,
+  args: string[],
+  extraEnv: Record<string, string> = {},
+): CliResult {
   const proc = Bun.spawnSync([cliEntry, ...args], {
     cwd: fixture.workspace,
-    env: cliEnv(fixture),
+    env: cliEnv(fixture, extraEnv),
     stderr: 'pipe',
     stdout: 'pipe',
   });
@@ -360,6 +371,7 @@ async function createFixture(): Promise<SkillUpdateFixture> {
     'uat-skill-update-e2e',
   );
   const gitConfig = join(root, 'gitconfig');
+  const gitWrapperDir = join(root, 'bin');
 
   await mkdir(join(workspace, '.allagents'), { recursive: true });
   await mkdir(home, { recursive: true });
@@ -385,6 +397,13 @@ async function createFixture(): Promise<SkillUpdateFixture> {
     gitConfig,
     `[protocol "file"]\n\tallow = always\n[url "file://${remote}"]\n\tinsteadOf = https://github.com/uat/skill-update-e2e.git\n`,
   );
+  await mkdir(gitWrapperDir, { recursive: true });
+  const gitWrapper = join(gitWrapperDir, 'git');
+  await writeFile(
+    gitWrapper,
+    '#!/bin/sh\ncase " $* " in\n  *" remote get-url "*) GIT_CONFIG_GLOBAL=/dev/null exec "$ALLAGENTS_TEST_REAL_GIT" "$@" ;;\n  *" ls-remote "*)\n    if [ -n "$ALLAGENTS_TEST_FAKE_REMOTE_SHA" ]; then\n      output=$("$ALLAGENTS_TEST_REAL_GIT" "$@") || exit $?\n      printf "%s\\n" "$output" | sed "s/[0-9a-f]\\{40\\}/$ALLAGENTS_TEST_FAKE_REMOTE_SHA/g"\n      exit 0\n    fi\n    ;;\nesac\nexec "$ALLAGENTS_TEST_REAL_GIT" "$@"\n',
+  );
+  chmodSync(gitWrapper, 0o755);
 
   await mkdir(join(cache, '..'), { recursive: true });
   const clone = Bun.spawnSync(
@@ -438,6 +457,7 @@ async function createFixture(): Promise<SkillUpdateFixture> {
     upstream,
     remote,
     cache,
+    gitWrapperDir,
     gitConfig,
     initialSha,
     updatedSha,
@@ -446,6 +466,21 @@ async function createFixture(): Promise<SkillUpdateFixture> {
 
 async function cacheSha(fixture: SkillUpdateFixture): Promise<string> {
   return (await simpleGit(fixture.cache).revparse(['HEAD'])).trim();
+}
+
+async function countGitCommands(
+  tracePath: string,
+  command: string,
+): Promise<number> {
+  const events = (await readFile(tracePath, 'utf8'))
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { event?: string; argv?: string[] });
+  return events.filter(
+    (event) =>
+      (event.event === 'start' || event.event === 'child_start') &&
+      event.argv?.some((argument) => argument === command),
+  ).length;
 }
 
 async function checkoutSha(path: string): Promise<string> {
@@ -577,6 +612,114 @@ describe('skill update CLI e2e', () => {
       ),
     );
   });
+
+  test(
+    'bypasses temp inspection and mutation for an equal healthy shared source',
+    async () => {
+      const fixture = await createFixture();
+      fixtures.push(fixture);
+      const upstream = simpleGit(fixture.upstream);
+      await upstream.reset(['--hard', fixture.initialSha]);
+      await upstream.push(['--force', 'origin', 'main']);
+      await writeUserConfig(fixture, [
+        {
+          source: 'uat/skill-update-e2e',
+          skills: ['keep', 'gone'],
+        },
+      ]);
+      const projectConfigPath = join(
+        fixture.workspace,
+        '.allagents',
+        'workspace.yaml',
+      );
+      const userConfigPath = join(
+        fixture.home,
+        '.allagents',
+        'workspace.yaml',
+      );
+      const projectConfig = await readFile(projectConfigPath, 'utf8');
+      const userConfig = await readFile(userConfigPath, 'utf8');
+      const keepPath = join(fixture.cache, 'skills', 'keep', 'SKILL.md');
+      const keep = await readFile(keepPath, 'utf8');
+      const tracePath = join(fixture.root, 'skill-noop-trace.jsonl');
+
+      const result = runCli(
+        fixture,
+        ['--json', 'skill', 'update', '--scope', 'all', '--yes'],
+        { GIT_TRACE2_EVENT: tracePath },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe('');
+      const payload = JSON.parse(result.stdout);
+      expect(payload.success).toBe(true);
+      expect(payload.data.results).toHaveLength(1);
+      expect(payload.data.results[0]).toMatchObject({
+        status: 'updated',
+        skillCounts: { updated: 4, removed: 0, retained: 0 },
+      });
+      expect(await countGitCommands(tracePath, 'ls-remote')).toBe(1);
+      expect(await countGitCommands(tracePath, 'clone')).toBe(0);
+      expect(await countGitCommands(tracePath, 'fetch')).toBe(0);
+      expect(await countGitCommands(tracePath, 'pull')).toBe(0);
+      expect(await countGitCommands(tracePath, 'checkout')).toBe(0);
+      expect(await countGitCommands(tracePath, 'reset')).toBe(0);
+      expect(await cacheSha(fixture)).toBe(fixture.initialSha);
+      expect(await readFile(projectConfigPath, 'utf8')).toBe(projectConfig);
+      expect(await readFile(userConfigPath, 'utf8')).toBe(userConfig);
+      expect(await readFile(keepPath, 'utf8')).toBe(keep);
+    },
+    15_000,
+  );
+
+  test(
+    'skips persistent mutation when exact fallback inspection is still equal',
+    async () => {
+      const fixture = await createFixture();
+      fixtures.push(fixture);
+      const upstream = simpleGit(fixture.upstream);
+      await upstream.reset(['--hard', fixture.initialSha]);
+      await upstream.push(['--force', 'origin', 'main']);
+      const configPath = join(
+        fixture.workspace,
+        '.allagents',
+        'workspace.yaml',
+      );
+      const config = await readFile(configPath, 'utf8');
+      const keepPath = join(fixture.cache, 'skills', 'keep', 'SKILL.md');
+      const keep = await readFile(keepPath, 'utf8');
+      const tracePath = join(fixture.root, 'skill-equal-fallback-trace.jsonl');
+
+      const result = runCli(
+        fixture,
+        ['--json', 'skill', 'update', '--scope', 'project', '--yes'],
+        {
+          ALLAGENTS_TEST_FAKE_REMOTE_SHA:
+            '1111111111111111111111111111111111111111',
+          GIT_TRACE2_EVENT: tracePath,
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe('');
+      const payload = JSON.parse(result.stdout);
+      expect(payload.success).toBe(true);
+      expect(payload.data.results).toHaveLength(1);
+      expect(payload.data.results[0]).toMatchObject({
+        status: 'updated',
+        skillCounts: { updated: 2, removed: 0, retained: 0 },
+      });
+      expect(await countGitCommands(tracePath, 'ls-remote')).toBe(1);
+      expect(await countGitCommands(tracePath, 'clone')).toBe(1);
+      expect(await countGitCommands(tracePath, 'fetch')).toBe(0);
+      expect(await countGitCommands(tracePath, 'pull')).toBe(0);
+      expect(await countGitCommands(tracePath, 'reset')).toBe(0);
+      expect(await cacheSha(fixture)).toBe(fixture.initialSha);
+      expect(await readFile(configPath, 'utf8')).toBe(config);
+      expect(await readFile(keepPath, 'utf8')).toBe(keep);
+    },
+    15_000,
+  );
 
   test('non-interactive mode retains deleted skills and preserves the shared cache', async () => {
     const fixture = await createFixture();

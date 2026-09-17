@@ -19,6 +19,7 @@
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
     "test:e2e": "bun test tests/e2e",
+    "bench:update": "bun run scripts/benchmark-update-noop.ts",
     "smoke:mcp-oauth": "bun run scripts/smoke-mcp-oauth.ts",
     "dev:mcp-server": "bun run scripts/dev-mcp-server.ts",
     "schema:generate": "bun run scripts/generate-workspace-schemas.ts",
