@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { constants, existsSync } from 'node:fs';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve } from 'node:path';
 import { normalize, sep } from 'node:path';
@@ -13,6 +13,12 @@ import {
   parseLocation,
   parsePluginSpec,
 } from '../core/marketplace.js';
+import {
+  checkRepositoryHealth,
+  resolveRemoteRevision,
+  type RemoteRevisionResult,
+  type RepositoryHealthResult,
+} from '../core/git.js';
 import { getPluginName, resetFetchCache } from '../core/plugin.js';
 import {
   type CheckoutNode,
@@ -32,6 +38,7 @@ import {
   matchesSkillUpdateFilter,
   resolveCheckoutSubpath,
 } from '../core/skill-update.js';
+import { UpdateContext } from '../core/update-context.js';
 import {
   type DiscoveredSkillEntry,
   discoverSkillEntriesFromPluginRoot,
@@ -48,6 +55,7 @@ import {
   getEffectivePluginSource,
   getPluginSource,
 } from '../models/workspace-config.js';
+import { canonicalizeGitSource } from '../utils/git-source.js';
 import { parseMarketplaceManifest } from '../utils/marketplace-manifest-parser.js';
 import {
   formatPluginSource,
@@ -162,6 +170,20 @@ export interface PrepareSkillUpdateOptions {
   workspacePath: string;
   scopes: SkillUpdateScope[];
   filters?: string[];
+}
+
+export interface PrepareSkillUpdateDependencies {
+  buildInventory?: (
+    workspacePath: string,
+    selectedScopes?: SkillUpdateScope[],
+  ) => Promise<SkillUpdateInventory>;
+  inspectUnit?: (unit: SkillUpdateUnitInput) => Promise<UnitInspection>;
+  resolveRemoteRevision?: typeof resolveRemoteRevision;
+  checkRepositoryHealth?: typeof checkRepositoryHealth;
+  domainRootsReadable?: (
+    node: CheckoutNode,
+    unit: SkillUpdateUnitInput,
+  ) => Promise<boolean>;
 }
 
 export interface PreparedSkillUpdate {
@@ -849,32 +871,123 @@ export async function inspectSkillUpdateUnit(
   }
 }
 
-export async function prepareSkillUpdate(
-  options: PrepareSkillUpdateOptions,
-): Promise<PreparedSkillUpdate> {
-  const inventory = await buildSkillUpdateInventory(
-    options.workspacePath,
-    options.scopes,
+async function skillUpdateDomainRootsReadable(
+  node: CheckoutNode,
+  unit: SkillUpdateUnitInput,
+): Promise<boolean> {
+  const roots = new Set<string>();
+  let includesMarketplace = false;
+  for (const installation of unit.installations) {
+    if (installation.rootNodeId === node.id) {
+      try {
+        roots.add(
+          resolveCheckoutSubpath(node.cachePath, installation.rootSubpath),
+        );
+      } catch {
+        return false;
+      }
+    }
+    if (installation.marketplace?.nodeId === node.id) {
+      roots.add(node.cachePath);
+      includesMarketplace = true;
+    }
+  }
+  if (roots.size === 0) return false;
+  if (includesMarketplace) {
+    const manifest = await parseMarketplaceManifest(node.cachePath);
+    if (!manifest.success || manifest.warnings.length > 0) return false;
+  }
+  const readable = await Promise.all(
+    [...roots].map((root) =>
+      access(root, constants.R_OK | constants.X_OK).then(
+        () => true,
+        () => false,
+      ),
+    ),
   );
-  const plan = await buildSkillUpdatePreflight(
-    {
-      installations: inventory.installations,
-      selectedScopes: options.scopes,
-      failures: inventory.failures,
-      ...(options.filters && { filters: options.filters }),
-    },
-    { inspectUnit: inspectSkillUpdateUnit },
-  );
-  return { inventory, plan };
+  return readable.every(Boolean);
 }
 
-function normalizeRemoteUrl(url: string): string {
-  const parsed = parseGitHubUrl(url);
-  if (parsed && !url.startsWith('/') && !url.startsWith('file:')) {
-    return `github:${parsed.owner.toLocaleLowerCase()}/${parsed.repo.toLocaleLowerCase()}`;
+
+export async function prepareSkillUpdate(
+  options: PrepareSkillUpdateOptions,
+  dependencies: PrepareSkillUpdateDependencies = {},
+): Promise<PreparedSkillUpdate> {
+  const inventory = await (
+    dependencies.buildInventory ?? buildSkillUpdateInventory
+  )(options.workspacePath, options.scopes);
+  const context = new UpdateContext();
+  try {
+    const resolveRemote =
+      dependencies.resolveRemoteRevision ?? resolveRemoteRevision;
+    const checkHealth =
+      dependencies.checkRepositoryHealth ?? checkRepositoryHealth;
+    const checkDomainRoots =
+      dependencies.domainRootsReadable ?? skillUpdateDomainRootsReadable;
+    const plan = await buildSkillUpdatePreflight(
+      {
+        installations: inventory.installations,
+        selectedScopes: options.scopes,
+        failures: inventory.failures,
+        ...(options.filters && { filters: options.filters }),
+      },
+      {
+        inspectUnit: dependencies.inspectUnit ?? inspectSkillUpdateUnit,
+        precheckNode: async (node, unit) => {
+          let remote: RemoteRevisionResult;
+          try {
+            remote = await context.getRemote(
+              node.remoteUrl,
+              node.ref,
+              () => resolveRemote(node.remoteUrl, node.ref),
+            );
+          } catch {
+            remote = { status: 'unresolved', reason: 'failed' };
+          }
+
+          const expectedRef =
+            remote.status === 'resolved' ? remote.ref : node.ref;
+          const identity = {
+            path: node.cachePath,
+            source: node.remoteUrl,
+            ...(expectedRef !== undefined && { ref: expectedRef }),
+          };
+          const [health, domainRootsHealthy] = await Promise.all([
+            context
+              .getHealth(identity, () =>
+                checkHealth(node.cachePath, {
+                  source: node.remoteUrl,
+                  ...(expectedRef !== undefined && { ref: expectedRef }),
+                  head: node.currentSha,
+                }),
+              )
+              .catch(
+                (error): RepositoryHealthResult => ({
+                  status: 'unhealthy',
+                  reason: 'inspection-failed',
+                  error:
+                    error instanceof Error ? error : new Error(String(error)),
+                }),
+              ),
+            checkDomainRoots(node, unit).catch(() => false),
+          ]);
+          return {
+            remoteEqual:
+              remote.status === 'resolved' &&
+              remote.commit.toLowerCase() === node.currentSha.toLowerCase(),
+            repositoryHealthy:
+              remote.status === 'resolved' && health.status === 'healthy',
+            domainRootsHealthy,
+          };
+        },
+      },
+    );
+    return { inventory, plan };
+  } finally {
+    context.dispose();
   }
-  return url.replace(/[\\/]$/, '').replace(/\.git$/, '');
 }
+
 
 async function assertExpectedOrigin(node: CheckoutNode): Promise<void> {
   // `git remote get-url` applies url.<base>.insteadOf rewriting. Read the
@@ -884,7 +997,9 @@ async function assertExpectedOrigin(node: CheckoutNode): Promise<void> {
     ['config', '--get', 'remote.origin.url'],
     node.cachePath,
   );
-  if (normalizeRemoteUrl(origin) !== normalizeRemoteUrl(node.remoteUrl)) {
+  if (
+    canonicalizeGitSource(origin) !== canonicalizeGitSource(node.remoteUrl)
+  ) {
     throw new Error(
       `Refusing to update ${node.cachePath}: origin '${origin}' does not match expected remote '${node.remoteUrl}'`,
     );

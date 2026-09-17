@@ -113,6 +113,8 @@ export interface SkillUpdateUnit extends SkillUpdateUnitInput {
   removedInstallationIds: string[];
   blockedByOutOfScope: boolean;
   error?: string;
+  /** Positive preflight proof required to skip an otherwise safe no-op transaction. */
+  safeToBypassTransaction?: true;
 }
 
 export interface SkillUpdatePreflight {
@@ -135,8 +137,18 @@ export interface SkillUpdateInventoryFailure {
   error: string;
 }
 
+export interface SkillUpdateNodePrecheck {
+  remoteEqual: boolean;
+  repositoryHealthy: boolean;
+  domainRootsHealthy: boolean;
+}
+
 export interface BuildSkillUpdatePreflightDeps {
   inspectUnit: (unit: SkillUpdateUnitInput) => Promise<UnitInspection>;
+  precheckNode?: (
+    node: CheckoutNode,
+    unit: SkillUpdateUnitInput,
+  ) => Promise<SkillUpdateNodePrecheck>;
 }
 
 export interface CreateGitHubSkillUpdateInstallationInput {
@@ -490,6 +502,7 @@ export async function buildSkillUpdatePreflight(
       failure.nodeIds.some((nodeId) => nodeIds.has(nodeId)),
     );
     let inspection: UnitInspection;
+    let safeToBypassTransaction = false;
     if (sharedFailures.length > 0) {
       inspection = {
         outcome: 'failed',
@@ -500,15 +513,53 @@ export async function buildSkillUpdatePreflight(
           .join('; '),
       };
     } else {
-      try {
-        inspection = await deps.inspectUnit(unit);
-      } catch (error) {
+      const prechecks = deps.precheckNode
+        ? await Promise.all(
+            unit.nodes.map(async (node) => {
+              try {
+                return await deps.precheckNode?.(node, unit);
+              } catch {
+                return undefined;
+              }
+            }),
+          )
+        : [];
+      safeToBypassTransaction =
+        prechecks.length === unit.nodes.length &&
+        prechecks.every(
+          (fact) => fact?.repositoryHealthy && fact.domainRootsHealthy,
+        );
+      const canSkipInspection =
+        safeToBypassTransaction &&
+        prechecks.every((fact) => fact?.remoteEqual);
+
+      if (canSkipInspection) {
         inspection = {
-          outcome: 'failed',
-          nodes: [],
-          installations: [],
-          error: error instanceof Error ? error.message : String(error),
+          outcome: 'resolved',
+          nodes: unit.nodes.map((node) => ({
+            nodeId: node.id,
+            sha: node.currentSha,
+          })),
+          installations: unit.installations.map((installation) => ({
+            installationId: installation.id,
+            outcome: 'resolved',
+            skills: installation.skills.map(({ name, subpath }) => ({
+              name,
+              subpath,
+            })),
+          })),
         };
+      } else {
+        try {
+          inspection = await deps.inspectUnit(unit);
+        } catch (error) {
+          inspection = {
+            outcome: 'failed',
+            nodes: [],
+            installations: [],
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
       }
     }
 
@@ -568,6 +619,7 @@ export async function buildSkillUpdatePreflight(
       removedInstallationIds:
         outcome === 'failed' ? [] : removedInstallationIds,
       blockedByOutOfScope,
+      ...(safeToBypassTransaction && { safeToBypassTransaction: true }),
       ...(error && { error }),
     });
   }
@@ -653,6 +705,24 @@ export async function executeSkillUpdatePlan(
         results.push(execution(unit, 'retained'));
         continue;
       }
+    }
+
+    const inspectedRevisionByNode = new Map(
+      unit.inspectedNodes.map((entry) => [entry.nodeId, entry.sha]),
+    );
+    const allNodesUnchanged =
+      unit.nodes.length > 0 &&
+      unit.nodes.every(
+        (node) => inspectedRevisionByNode.get(node.id) === node.currentSha,
+      );
+    if (
+      unit.safeToBypassTransaction === true &&
+      allNodesUnchanged &&
+      unit.deleted.length === 0 &&
+      unit.removedInstallationIds.length === 0
+    ) {
+      results.push(execution(unit, 'updated'));
+      continue;
     }
 
     const revisionByNode = new Map(
