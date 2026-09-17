@@ -18,7 +18,7 @@ import {
   type RemoteRevisionResult,
   type RepositoryHealthResult,
 } from './git.js';
-import { UpdateContext } from './update-context.js';
+import type { UpdateContext } from './update-context.js';
 
 /**
  * Information about a cached plugin

@@ -19,6 +19,7 @@ const cloneCalls: Array<{ url: string; dest: string; ref?: string }> = [];
 
 // Mock the git module
 mock.module('../../../src/core/git.js', () => ({
+  createGit: () => ({}),
   cloneTo: mock((url: string, dest: string, ref?: string) => {
     cloneCalls.push({ url, dest, ref });
     // Create the directory to simulate clone

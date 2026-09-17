@@ -17,6 +17,7 @@ import { stubHomeDir } from '../../helpers/env.js';
 
 // Mock git module before importing marketplace (needed for addMarketplace tests)
 mock.module('../../../src/core/git.js', () => ({
+  createGit: () => ({}),
   cloneTo: mock((url: string, dest: string) => {
     mkdirSync(dest, { recursive: true });
     writeFileSync(join(dest, 'origin.txt'), url);

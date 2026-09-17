@@ -21,6 +21,7 @@ mock.module('simple-git', () => ({
 }));
 
 mock.module('../../../src/core/git.js', () => ({
+  createGit: () => ({}),
   pull: mock(() => Promise.resolve()),
   cloneTo: mock((url: string, path: string, branch?: string) => {
     cloneToCalls.push({ url, path, branch });

@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import {
   checkRepositoryHealth,
-  createGitEnv,
-  GitCloneError,
   resolveRemoteRevision,
-} from '../../../src/core/git.js';
+} from '../../../src/core/git-facts.js';
+import { createGitEnv } from '../../../src/core/git-client.js';
 
 describe('createGitEnv', () => {
   const originalHome = process.env.HOME;
@@ -47,10 +46,24 @@ function gitFacts(listRemoteOutput: string | Error) {
     return listRemoteOutput;
   });
   const raw = mock(async (_args: string[]) => '');
+  const classifyError = mock((error: unknown, source: string) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return Object.assign(new Error(`Classified Git failure: ${message}`), {
+      name: 'GitCloneError',
+      url: source,
+      isTimeout: false,
+      isAuthError: message.includes('Permission denied'),
+    });
+  });
   return {
-    dependencies: { createGit: () => ({ listRemote, raw }) },
+    dependencies: {
+      createGit: () => ({ listRemote, raw }),
+      cloneTimeoutMs: 300_000,
+      classifyError,
+    },
     listRemote,
     raw,
+    classifyError,
   };
 }
 
@@ -140,8 +153,10 @@ describe('resolveRemoteRevision', () => {
   });
 
   it('preserves classified authentication and transport failure details', async () => {
-    const auth = gitFacts(new Error('Permission denied (publickey)'));
-    const transport = gitFacts(new Error('connection reset by peer'));
+    const authError = new Error('Permission denied (publickey)');
+    const transportError = new Error('connection reset by peer');
+    const auth = gitFacts(authError);
+    const transport = gitFacts(transportError);
 
     const authResult = await resolveRemoteRevision(
       'git@github.com:acme/private.git',
@@ -156,11 +171,23 @@ describe('resolveRemoteRevision', () => {
 
     expect(authResult.status).toBe('unresolved');
     expect(authResult.reason).toBe('failed');
-    expect(authResult.error).toBeInstanceOf(GitCloneError);
-    expect(authResult.error?.isAuthError).toBe(true);
+    expect(authResult.error).toMatchObject({
+      name: 'GitCloneError',
+      isAuthError: true,
+    });
+    expect(auth.classifyError).toHaveBeenCalledWith(
+      authError,
+      'git@github.com:acme/private.git',
+      300_000,
+    );
     expect(transportResult.status).toBe('unresolved');
     expect(transportResult.reason).toBe('failed');
     expect(transportResult.error?.message).toContain('connection reset by peer');
+    expect(transport.classifyError).toHaveBeenCalledWith(
+      transportError,
+      'https://github.com/acme/tools',
+      300_000,
+    );
   });
 });
 

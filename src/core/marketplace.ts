@@ -38,7 +38,7 @@ import {
   type RemoteRevisionResult,
   type RepositoryHealthResult,
 } from './git.js';
-import { UpdateContext } from './update-context.js';
+import type { UpdateContext } from './update-context.js';
 import { fetchPlugin } from './plugin.js';
 import type { FetchResult, UpdateResult } from './plugin.js';
 
