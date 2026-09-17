@@ -4,35 +4,89 @@ import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dump, load } from 'js-yaml';
 import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
+import {
+  checkRepositoryHealth as checkRepositoryHealthFact,
+  resolveRemoteRevision as resolveRemoteRevisionFact,
+} from '../../../src/core/git-facts.js';
+import { classifyError } from '../../../src/core/git-errors.js';
 
-// Bun module mocks update live bindings and persist across test files. Keep the
-// unrelated pull export functional so this verification stub cannot disable
+// Bun module mocks update live bindings and persist across test files. Keep
+// unrelated Git exports functional so this verification stub cannot disable
 // later integration tests that exercise real cached repositories.
-async function pullWithGit(path: string): Promise<void> {
-  const result = Bun.spawnSync(['git', '-C', path, 'pull'], {
-    env: {
-      ...process.env,
-      GIT_LFS_SKIP_SMUDGE: '1',
-      GIT_TERMINAL_PROMPT: '0',
+function runWithGit(path: string | undefined, args: string[]): string {
+  const result = Bun.spawnSync(
+    ['git', ...(path ? ['-C', path] : []), ...args],
+    {
+      env: {
+        ...process.env,
+        GIT_LFS_SKIP_SMUDGE: '1',
+        GIT_TERMINAL_PROMPT: '0',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
     },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  );
   if (result.exitCode !== 0) {
     throw new Error(
-      `git pull failed in ${path}: ${result.stderr.toString().trim()}`,
+      `git ${args.join(' ')} failed${path ? ` in ${path}` : ''}: ${result.stderr.toString().trim()}`,
     );
   }
+  return result.stdout.toString();
+}
+
+function createGitClient(path?: string) {
+  return {
+    listRemote: async (args: string[]) =>
+      runWithGit(path, ['ls-remote', ...args]),
+    raw: async (args: string[]) => runWithGit(path, args),
+    checkout: async (branch: string) => {
+      runWithGit(path, ['checkout', branch]);
+    },
+  };
+}
+
+async function cloneToWithGit(
+  url: string,
+  destination: string,
+  ref?: string,
+): Promise<void> {
+  runWithGit(undefined, [
+    'clone',
+    '--depth',
+    '1',
+    ...(ref ? ['--branch', ref] : []),
+    '--',
+    url,
+    destination,
+  ]);
+}
+
+async function pullWithGit(path: string): Promise<void> {
+  runWithGit(path, ['pull']);
 }
 
 // Mock git module to avoid network calls in verifyGitHubUrlExists
 mock.module('../../../src/core/git.js', () => ({
+  createGit: createGitClient,
   repoExists: async () => true,
   cloneToTemp: async () => '',
-  cloneTo: async () => {},
+  cloneTo: cloneToWithGit,
   pull: pullWithGit,
   refExists: async () => false,
   cleanupTempDir: async () => {},
+  resolveRemoteRevision: (source: string, requestedRef?: string) =>
+    resolveRemoteRevisionFact(source, requestedRef, {
+      createGit: createGitClient,
+      cloneTimeoutMs: 300_000,
+      classifyError,
+    }),
+  checkRepositoryHealth: (
+    path: string,
+    expected: { source: string; ref?: string; head: string },
+  ) =>
+    checkRepositoryHealthFact(path, expected, {
+      createGit: createGitClient,
+    }),
   gitHubUrl: (owner: string, repo: string) => `https://github.com/${owner}/${repo}.git`,
   GitCloneError: class GitCloneError extends Error {
     url: string;

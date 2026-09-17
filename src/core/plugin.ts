@@ -8,7 +8,17 @@ import {
   validatePluginSource,
 } from '../utils/plugin-path.js';
 import { getHomeDir } from '../constants.js';
-import { cloneTo, gitHubUrl, GitCloneError, pull } from './git.js';
+import {
+  checkRepositoryHealth,
+  cloneTo,
+  gitHubUrl,
+  GitCloneError,
+  pull,
+  resolveRemoteRevision,
+  type RemoteRevisionResult,
+  type RepositoryHealthResult,
+} from './git.js';
+import type { UpdateContext } from './update-context.js';
 
 /**
  * Information about a cached plugin
@@ -33,6 +43,8 @@ export interface FetchResult {
   resolvedRef?: string;
   /** Resolved commit SHA of the cached working tree, if known. */
   resolvedSha?: string;
+  /** Internal physical-content fact for update orchestration. */
+  changed?: boolean;
 }
 
 /**
@@ -53,6 +65,18 @@ export interface FetchDeps {
   mkdir?: typeof mkdir;
   cloneTo?: typeof cloneTo;
   pull?: typeof pull;
+}
+
+export interface PluginUpdateFetchDeps extends FetchDeps {
+  resolveHeadSha?: (repoPath: string) => Promise<string | undefined>;
+  resolveRemoteRevision?: (
+    source: string,
+    requestedRef?: string,
+  ) => Promise<RemoteRevisionResult>;
+  checkRepositoryHealth?: (
+    repoPath: string,
+    expected: { source: string; ref?: string; head: string },
+  ) => Promise<RepositoryHealthResult>;
 }
 
 /**
@@ -335,6 +359,8 @@ export interface UpdateResult {
   name: string;
   success: boolean;
   error?: string;
+  /** Internal physical-content fact for update orchestration. */
+  changed?: boolean;
 }
 
 /**
@@ -403,6 +429,8 @@ export interface InstalledPluginUpdateResult {
   success: boolean;
   action: 'updated' | 'skipped' | 'failed';
   error?: string;
+  /** Internal physical-content fact for update orchestration. */
+  changed?: boolean;
 }
 
 /**
@@ -416,11 +444,245 @@ export interface UpdatePluginDeps {
   } | null>;
   validateMarketplaceAccess: (marketplace: { name: string; path: string; source: { type: 'github' | 'git' | 'local'; location: string } }) => string | undefined;
   parseMarketplaceManifest: (path: string) => Promise<{ success: boolean; data?: { plugins: Array<{ name: string; source: string | { url: string } }> } }>;
-  updateMarketplace: (name: string) => Promise<Array<{ name: string; success: boolean; error?: string }>>;
+  updateMarketplace: (name: string) => Promise<Array<{ name: string; success: boolean; error?: string; changed?: boolean }>>;
   /** Optional fetch function for testing - defaults to fetchPlugin */
   fetchFn?: (url: string) => Promise<FetchResult>;
+  /** Optional dependencies for the context-aware direct update path. */
+  updateFetchDeps?: PluginUpdateFetchDeps;
 }
 
+interface PluginApplyFact {
+  success: boolean;
+  changed: boolean;
+  preCommit?: string;
+  postCommit?: string;
+  durationMs?: number;
+  error?: unknown;
+}
+
+async function fetchPluginForUpdate(
+  url: string,
+  dependencies: PluginUpdateFetchDeps,
+  context: UpdateContext,
+): Promise<FetchResult> {
+  const validation = validatePluginSource(url);
+  if (!validation.valid) {
+    return {
+      success: false,
+      action: 'skipped',
+      cachePath: '',
+      changed: false,
+      ...(validation.error && { error: validation.error }),
+    };
+  }
+
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) {
+    return {
+      success: false,
+      action: 'skipped',
+      cachePath: '',
+      changed: false,
+      error:
+        'Invalid GitHub URL format. Expected: https://github.com/owner/repo',
+    };
+  }
+
+  const { owner, repo, branch } = parsed;
+  const cachePath = getPluginCachePath(owner, repo, branch);
+  const source = gitHubUrl(owner, repo);
+  const existsSyncFn = dependencies.existsSync ?? existsSync;
+  const pullFn = dependencies.pull ?? pull;
+  const mkdirFn = dependencies.mkdir ?? mkdir;
+  const cloneToFn = dependencies.cloneTo ?? cloneTo;
+  const resolveHead = dependencies.resolveHeadSha ?? resolveHeadSha;
+  const resolveRemote =
+    dependencies.resolveRemoteRevision ?? resolveRemoteRevision;
+  const checkHealth =
+    dependencies.checkRepositoryHealth ?? checkRepositoryHealth;
+  const readHead = async (): Promise<string | undefined> => {
+    try {
+      return await resolveHead(cachePath);
+    } catch {
+      return undefined;
+    }
+  };
+
+  if (!existsSyncFn(cachePath)) {
+    const fact = await context.getApply(
+      {
+        path: cachePath,
+        source,
+        ...(branch !== undefined && { ref: branch }),
+      },
+      async (): Promise<PluginApplyFact> => {
+        try {
+          await mkdirFn(dirname(cachePath), { recursive: true });
+          const start = performance.now();
+          await cloneToFn(source, cachePath, branch);
+          const durationMs = Math.round(performance.now() - start);
+          const postCommit = await readHead();
+          return {
+            success: true,
+            changed: true,
+            ...(postCommit !== undefined && { postCommit }),
+            durationMs,
+          };
+        } catch (error) {
+          return { success: false, changed: false, error };
+        }
+      },
+    );
+
+    if (fact.success) {
+      return {
+        success: true,
+        action: 'fetched',
+        cachePath,
+        changed: true,
+        ...(fact.durationMs !== undefined && { durationMs: fact.durationMs }),
+        ...(branch && { resolvedRef: branch }),
+        ...(fact.postCommit && { resolvedSha: fact.postCommit }),
+      };
+    }
+
+    const error = fact.error;
+    if (error instanceof GitCloneError) {
+      if (error.isAuthError) {
+        return {
+          success: false,
+          action: 'skipped',
+          cachePath,
+          changed: false,
+          error: `Authentication failed for ${owner}/${repo}.\n  Check your SSH keys or git credentials.`,
+        };
+      }
+      if (error.isTimeout) {
+        return {
+          success: false,
+          action: 'skipped',
+          cachePath,
+          changed: false,
+          error: `Clone timed out for ${owner}/${repo}.\n  Check your network connection.`,
+        };
+      }
+    }
+    return {
+      success: false,
+      action: 'skipped',
+      cachePath,
+      changed: false,
+      error: `Failed to fetch plugin: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  let remote: RemoteRevisionResult;
+  try {
+    remote = await context.getRemote(source, branch, () =>
+      resolveRemote(source, branch),
+    );
+  } catch {
+    remote = { status: 'unresolved', reason: 'failed' };
+  }
+
+  const expectedRef = remote.status === 'resolved' ? remote.ref : branch;
+  const identity = {
+    path: cachePath,
+    source,
+    ...(expectedRef !== undefined && { ref: expectedRef }),
+  };
+  if (remote.status === 'resolved') {
+    let health: RepositoryHealthResult;
+    try {
+      health = await context.getHealth(identity, () =>
+        checkHealth(cachePath, {
+          source,
+          ref: remote.ref,
+          head: remote.commit,
+        }),
+      );
+    } catch (error) {
+      health = {
+        status: 'unhealthy',
+        reason: 'inspection-failed',
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+    if (health.status === 'healthy') {
+      return {
+        success: true,
+        action: 'updated',
+        cachePath,
+        changed: false,
+        ...(branch && { resolvedRef: branch }),
+        resolvedSha: remote.commit,
+      };
+    }
+  }
+
+  const fact = await context.getApply(
+    identity,
+    async (): Promise<PluginApplyFact> => {
+      const preCommit = await readHead();
+      try {
+        const start = performance.now();
+        await pullFn(cachePath);
+        const durationMs = Math.round(performance.now() - start);
+        const postCommit = await readHead();
+        return {
+          success: true,
+          ...(preCommit !== undefined && { preCommit }),
+          ...(postCommit !== undefined && { postCommit }),
+          changed:
+            !preCommit ||
+            !postCommit ||
+            preCommit.toLowerCase() !== postCommit.toLowerCase(),
+          durationMs,
+        };
+      } catch (error) {
+        const postCommit = await readHead();
+        return {
+          success: false,
+          ...(preCommit !== undefined && { preCommit }),
+          ...(postCommit !== undefined && { postCommit }),
+          changed: false,
+          error,
+        };
+      }
+    },
+  );
+
+  if (!fact.success) {
+    const retainedCommit = fact.postCommit ?? fact.preCommit;
+    if (!retainedCommit) {
+      return {
+        success: false,
+        action: 'skipped',
+        cachePath,
+        changed: false,
+        error: `Failed to update cached plugin: ${fact.error instanceof Error ? fact.error.message : String(fact.error)}`,
+      };
+    }
+    return {
+      success: true,
+      action: 'skipped',
+      cachePath,
+      changed: false,
+      ...(branch && { resolvedRef: branch }),
+      resolvedSha: retainedCommit,
+    };
+  }
+
+  return {
+    success: true,
+    action: 'updated',
+    cachePath,
+    changed: fact.changed,
+    ...(fact.durationMs !== undefined && { durationMs: fact.durationMs }),
+    ...(branch && { resolvedRef: branch }),
+    ...(fact.postCommit && { resolvedSha: fact.postCommit }),
+  };
+}
 /**
  * Update a single plugin by pulling from remote.
  * Handles both marketplace-embedded and external plugins.
@@ -431,8 +693,13 @@ export interface UpdatePluginDeps {
 export async function updatePlugin(
   pluginSpec: string,
   deps: UpdatePluginDeps,
+  context?: UpdateContext,
 ): Promise<InstalledPluginUpdateResult> {
-  const fetchFn = deps.fetchFn ?? fetchPlugin;
+  const fetchForUpdate =
+    context && !deps.fetchFn
+      ? (url: string) =>
+          fetchPluginForUpdate(url, deps.updateFetchDeps ?? {}, context)
+      : (deps.fetchFn ?? fetchPlugin);
 
   // Handle plugin@marketplace format
   const parsed = deps.parsePluginSpec(pluginSpec);
@@ -440,12 +707,18 @@ export async function updatePlugin(
     // Might be a GitHub URL or local path
     if (pluginSpec.startsWith('https://github.com/')) {
       // External GitHub URL - update the cached repo
-      const result = await fetchFn(pluginSpec);
+      const result = await fetchForUpdate(pluginSpec);
       return {
         plugin: pluginSpec,
         success: result.success,
-        action: result.action === 'updated' ? 'updated' : result.success ? 'skipped' : 'failed',
+        action:
+          result.action === 'updated'
+            ? 'updated'
+            : result.success
+              ? 'skipped'
+              : 'failed',
         ...(result.error && { error: result.error }),
+        ...(context && { changed: result.success ? (result.changed ?? false) : false }),
       };
     }
 
@@ -454,11 +727,13 @@ export async function updatePlugin(
       plugin: pluginSpec,
       success: true,
       action: 'skipped',
+      ...(context && { changed: false }),
     };
   }
 
   // Get marketplace info (with source location fallback for owner/repo format)
-  const sourceLocation = parsed.owner && parsed.repo ? `${parsed.owner}/${parsed.repo}` : undefined;
+  const sourceLocation =
+    parsed.owner && parsed.repo ? `${parsed.owner}/${parsed.repo}` : undefined;
   const registration = await deps.getMarketplaceRegistration(
     parsed.marketplaceName,
     sourceLocation,
@@ -469,6 +744,7 @@ export async function updatePlugin(
       success: false,
       action: 'failed',
       error: `Marketplace not found: ${parsed.marketplaceName}`,
+      ...(context && { changed: false }),
     };
   }
   const marketplace = registration.entry;
@@ -480,6 +756,7 @@ export async function updatePlugin(
       success: false,
       action: 'failed',
       error: accessError,
+      ...(context && { changed: false }),
     };
   }
 
@@ -498,12 +775,15 @@ export async function updatePlugin(
       success: result?.success ?? false,
       action: result?.success ? 'updated' : 'failed',
       ...(result?.error && { error: result.error }),
+      ...(context && {
+        changed: result?.success ? (result.changed ?? false) : false,
+      }),
     };
   }
 
   // Find plugin entry in manifest
   const pluginEntry = manifestResult.data.plugins.find(
-    (p) => p.name === parsed.plugin,
+    (candidate) => candidate.name === parsed.plugin,
   );
 
   if (!pluginEntry) {
@@ -515,6 +795,9 @@ export async function updatePlugin(
       success: result?.success ?? false,
       action: result?.success ? 'updated' : 'failed',
       ...(result?.error && { error: result.error }),
+      ...(context && {
+        changed: result?.success ? (result.changed ?? false) : false,
+      }),
     };
   }
 
@@ -528,23 +811,40 @@ export async function updatePlugin(
       success: result?.success ?? false,
       action: result?.success ? 'updated' : 'failed',
       ...(result?.error && { error: result.error }),
+      ...(context && {
+        changed: result?.success ? (result.changed ?? false) : false,
+      }),
     };
   }
 
   // External plugin - update both marketplace (for manifest changes) and the cached repo
   const url = pluginEntry.source.url;
+  let marketplaceChanged = false;
 
   // Update the marketplace first (in case manifest changed)
   if (marketplace.source.type === 'github') {
-    await deps.updateMarketplace(marketplaceKey);
+    const marketplaceResult = (await deps.updateMarketplace(marketplaceKey))[0];
+    marketplaceChanged =
+      marketplaceResult?.success === true &&
+      marketplaceResult.changed === true;
   }
 
-  // Update the external plugin cache
-  const fetchResult = await fetchFn(url);
+  // Update the external plugin cache. Its public result remains authoritative.
+  const fetchResult = await fetchForUpdate(url);
   return {
     plugin: pluginSpec,
     success: fetchResult.success,
-    action: fetchResult.action === 'updated' ? 'updated' : fetchResult.success ? 'skipped' : 'failed',
+    action:
+      fetchResult.action === 'updated'
+        ? 'updated'
+        : fetchResult.success
+          ? 'skipped'
+          : 'failed',
     ...(fetchResult.error && { error: fetchResult.error }),
+    ...(context && {
+      changed:
+        marketplaceChanged ||
+        (fetchResult.success && fetchResult.changed === true),
+    }),
   };
 }

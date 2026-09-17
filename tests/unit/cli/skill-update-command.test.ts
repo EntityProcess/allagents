@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,7 @@ import {
   inspectSkillUpdateUnit,
   moveSkillUpdateCheckout,
   normalizeSkillUpdateScopes,
+  prepareSkillUpdate,
   resolveNonInteractiveSkillUpdateDecisions,
   skillUpdateExitCode,
   skillUpdateSummary,
@@ -74,6 +75,133 @@ describe('skill update command adapters', () => {
       'user',
     ]);
     expect(normalizeSkillUpdateScopes(undefined)).toEqual(['project']);
+  });
+
+  test('prechecks each healthy equal inventory node without exact inspection', async () => {
+    const node = {
+      id: '/cache/acme-skills',
+      cachePath: '/cache/acme-skills',
+      remoteUrl: 'https://github.com/acme/skills.git',
+      role: 'root' as const,
+      currentSha: 'old-sha',
+    };
+    const inspectUnit = mock(async () => {
+      throw new Error('exact inspection should not run');
+    });
+    const resolveRemoteRevision = mock(async () => ({
+      status: 'resolved' as const,
+      commit: node.currentSha,
+      ref: 'main',
+    }));
+    const checkRepositoryHealth = mock(async () => ({
+      status: 'healthy' as const,
+      head: node.currentSha,
+      ref: 'main',
+    }));
+    const domainRootsReadable = mock(async () => true);
+
+    const prepared = await prepareSkillUpdate(
+      { workspacePath: '/workspace', scopes: ['project'] },
+      {
+        buildInventory: async () => ({
+          installations: [
+            {
+              id: 'project:0',
+              scope: 'project',
+              configIndex: 0,
+              rawSource: 'acme/skills',
+              effectiveSource: 'acme/skills',
+              pluginName: 'skills',
+              rootNodeId: node.id,
+              rootSubpath: '',
+              nodes: [node],
+              skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
+            },
+          ],
+          skippedLocalSources: [],
+          failures: [],
+          directRemoteConsumers: [],
+        }),
+        inspectUnit,
+        resolveRemoteRevision,
+        checkRepositoryHealth,
+        domainRootsReadable,
+      },
+    );
+
+    expect(resolveRemoteRevision).toHaveBeenCalledTimes(1);
+    expect(checkRepositoryHealth).toHaveBeenCalledTimes(1);
+    expect(domainRootsReadable).toHaveBeenCalledTimes(1);
+    expect(inspectUnit).not.toHaveBeenCalled();
+    expect(prepared.plan.units[0]).toMatchObject({
+      outcome: 'resolved',
+      safeToBypassTransaction: true,
+      deleted: [],
+    });
+  });
+
+  test('falls back to exact inspection when an inventory-represented root is unreadable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'allagents-skill-precheck-'));
+    const node = {
+      id: root,
+      cachePath: root,
+      remoteUrl: 'https://github.com/acme/skills.git',
+      role: 'root' as const,
+      currentSha: 'old-sha',
+    };
+    const inspectUnit = mock(async () => ({
+      outcome: 'resolved' as const,
+      nodes: [{ nodeId: node.id, sha: node.currentSha }],
+      installations: [
+        {
+          installationId: 'project:0',
+          outcome: 'resolved' as const,
+          skills: [{ name: 'keep', subpath: 'keep' }],
+        },
+      ],
+    }));
+    try {
+      const prepared = await prepareSkillUpdate(
+        { workspacePath: '/workspace', scopes: ['project'] },
+        {
+          buildInventory: async () => ({
+            installations: [
+              {
+                id: 'project:0',
+                scope: 'project',
+                configIndex: 0,
+                rawSource: 'acme/skills',
+                effectiveSource: 'acme/skills',
+                pluginName: 'skills',
+                rootNodeId: node.id,
+                rootSubpath: 'missing',
+                nodes: [node],
+                skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
+              },
+            ],
+            skippedLocalSources: [],
+            failures: [],
+            directRemoteConsumers: [],
+          }),
+          inspectUnit,
+          resolveRemoteRevision: async () => ({
+            status: 'resolved',
+            commit: node.currentSha,
+            ref: 'main',
+          }),
+          checkRepositoryHealth: async () => ({
+            status: 'healthy',
+            head: node.currentSha,
+            ref: 'main',
+          }),
+        },
+      );
+
+      expect(inspectUnit).toHaveBeenCalledTimes(1);
+      expect(prepared.plan.units[0]?.safeToBypassTransaction).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test('retains deletion units in every non-interactive mode, including --yes', () => {

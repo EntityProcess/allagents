@@ -19,6 +19,17 @@ import { stubHomeDir } from '../../../helpers/env.js';
 const executeCommandCalls: Array<{ binary: string; args: string[] }> = [];
 
 // Mock executeCommand to intercept native CLI calls
+const compareNativeVersions = (
+  left: readonly number[],
+  right: readonly number[],
+): number => {
+  for (let index = 0; index < 3; index++) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+};
+
 mock.module('../../../../src/core/native/types.js', () => ({
   executeCommand: mock(async (binary: string, args: string[]) => {
     executeCommandCalls.push({ binary, args });
@@ -54,6 +65,12 @@ mock.module('../../../../src/core/native/types.js', () => ({
     success: results.every((result) => result.success),
     effects: results.flatMap((result) => result.effects),
   }),
+  compareNativeVersions,
+  sanitizeNativeError: (error: string | undefined) => error,
+  sanitizeNativeProvenance: (
+    provenance: Readonly<Record<string, string>>,
+  ) => provenance,
+  toNativeEffectData: (effect: unknown) => effect,
 }));
 
 // Mock git operations
@@ -62,6 +79,10 @@ mock.module('../../../../src/core/git.js', () => ({
     ...process.env,
     GIT_TERMINAL_PROMPT: '0',
     GIT_LFS_SKIP_SMUDGE: '1',
+  }),
+  createGit: () => ({
+    raw: mock(() => Promise.resolve('origin/main')),
+    checkout: mock(() => Promise.resolve()),
   }),
   pull: mock(() => Promise.resolve()),
   cloneTo: mock((_url: string, path: string) => {
@@ -75,6 +96,15 @@ mock.module('../../../../src/core/git.js', () => ({
   repoExists: mock(() => Promise.resolve(true)),
   refExists: mock(() => Promise.resolve(true)),
   cleanupTempDir: mock(() => Promise.resolve()),
+  resolveRemoteRevision: mock(() =>
+    Promise.resolve({ status: 'unresolved' as const, reason: 'failed' as const }),
+  ),
+  checkRepositoryHealth: mock(() =>
+    Promise.resolve({
+      status: 'unhealthy' as const,
+      reason: 'inspection-failed' as const,
+    }),
+  ),
 }));
 
 // Mock simple-git

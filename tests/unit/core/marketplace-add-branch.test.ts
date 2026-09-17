@@ -19,6 +19,7 @@ const cloneCalls: Array<{ url: string; dest: string; ref?: string }> = [];
 
 // Mock the git module
 mock.module('../../../src/core/git.js', () => ({
+  createGit: () => ({}),
   cloneTo: mock((url: string, dest: string, ref?: string) => {
     cloneCalls.push({ url, dest, ref });
     // Create the directory to simulate clone
@@ -47,6 +48,15 @@ mock.module('../../../src/core/git.js', () => ({
   }),
   classifyError: (err: Error) => err,
   cleanupTempDir: mock(() => Promise.resolve()),
+  resolveRemoteRevision: mock(() =>
+    Promise.resolve({ status: 'unresolved' as const, reason: 'failed' as const }),
+  ),
+  checkRepositoryHealth: mock(() =>
+    Promise.resolve({
+      status: 'unhealthy' as const,
+      reason: 'inspection-failed' as const,
+    }),
+  ),
 }));
 
 // Mock simple-git for updateMarketplace (it uses simpleGit directly)

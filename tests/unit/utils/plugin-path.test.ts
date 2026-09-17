@@ -73,6 +73,8 @@ describe('isGitHubUrl', () => {
 
   it('should reject non-GitHub URLs', () => {
     expect(isGitHubUrl('https://gitlab.com/owner/repo')).toBe(false);
+    expect(isGitHubUrl('git@github.com:owner/repo.git')).toBe(false);
+    expect(isGitHubUrl('ssh://git@github.com/owner/repo.git')).toBe(false);
     expect(isGitHubUrl('/local/path')).toBe(false);
     expect(isGitHubUrl('./relative/path')).toBe(false);
     expect(isGitHubUrl('../relative/path')).toBe(false);
@@ -229,6 +231,7 @@ describe('normalizePluginPath', () => {
     expect(normalizePluginPath(url)).toBe(url);
   });
 
+
   it('should leave absolute paths unchanged', () => {
     const path = '/absolute/path/to/plugin';
     expect(normalizePluginPath(path)).toBe(path);
@@ -280,6 +283,7 @@ describe('parsePluginSource', () => {
     expect(result.repo).toBe('repo');
     expect(result.branch).toBe('v1.2.0');
   });
+
 
   it('should parse local absolute paths', () => {
     const result = parsePluginSource('/absolute/path');

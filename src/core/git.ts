@@ -1,38 +1,34 @@
-import simpleGit from 'simple-git';
+import {
+  CLONE_TIMEOUT_MS,
+  createGit,
+  createGitEnv,
+} from './git-client.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, normalize, resolve, sep } from 'node:path';
+import {
+  checkRepositoryHealth as checkRepositoryHealthFact,
+  resolveRemoteRevision as resolveRemoteRevisionFact,
+  type GitFactClient,
+  type GitFactDependencies,
+  type RemoteRevisionFailureReason,
+  type RemoteRevisionResult,
+  type RepositoryHealthExpectation,
+  type RepositoryHealthReason,
+  type RepositoryHealthResult,
+} from './git-facts.js';
 import { GitCloneError, classifyError } from './git-errors.js';
 
-export { GitCloneError, classifyError };
-
-const DEFAULT_CLONE_TIMEOUT_MS = 300_000;
-const CLONE_TIMEOUT_MS = (() => {
-  const raw = process.env.ALLAGENTS_CLONE_TIMEOUT_MS;
-  if (!raw) return DEFAULT_CLONE_TIMEOUT_MS;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLONE_TIMEOUT_MS;
-})();
-
-export function createGitEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    GIT_TERMINAL_PROMPT: '0',
-    GIT_LFS_SKIP_SMUDGE: '1',
-  };
-}
-
-export function createGit(baseDir?: string) {
-  return simpleGit(baseDir, {
-    timeout: { block: CLONE_TIMEOUT_MS },
-    config: [
-      'filter.lfs.required=false',
-      'filter.lfs.smudge=',
-      'filter.lfs.clean=',
-      'filter.lfs.process=',
-    ],
-  }).env(createGitEnv());
-}
+export { createGit, createGitEnv, GitCloneError, classifyError };
+export type {
+  GitFactClient,
+  GitFactDependencies,
+  RemoteRevisionFailureReason,
+  RemoteRevisionResult,
+  RepositoryHealthExpectation,
+  RepositoryHealthReason,
+  RepositoryHealthResult,
+};
 
 /**
  * Build an HTTPS GitHub URL from owner/repo.
@@ -124,6 +120,36 @@ export async function refExists(
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve one advertised remote ref without fetching or mutating a checkout.
+ * Ambiguous and unverifiable inputs stay unresolved so callers can fall back.
+ */
+export async function resolveRemoteRevision(
+  source: string,
+  requestedRef?: string,
+  dependencies: GitFactDependencies = {},
+): Promise<RemoteRevisionResult> {
+  return resolveRemoteRevisionFact(source, requestedRef, {
+    createGit: dependencies.createGit ?? createGit,
+    cloneTimeoutMs: CLONE_TIMEOUT_MS,
+    classifyError,
+  });
+}
+
+/**
+ * Inspect reusable checkout facts using read-only Git commands.
+ * Domain-specific files and roots remain the caller's responsibility.
+ */
+export async function checkRepositoryHealth(
+  repoPath: string,
+  expected: RepositoryHealthExpectation,
+  dependencies: GitFactDependencies = {},
+): Promise<RepositoryHealthResult> {
+  return checkRepositoryHealthFact(repoPath, expected, {
+    createGit: dependencies.createGit ?? createGit,
+  });
 }
 
 /**

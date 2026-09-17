@@ -43,6 +43,7 @@ import {
   type InstalledPluginInfo,
 } from '../../core/user-workspace.js';
 import { updatePlugin, type InstalledPluginUpdateResult } from '../../core/plugin.js';
+import { UpdateContext } from '../../core/update-context.js';
 import { getAllSkillsFromPlugins } from '../../core/skills.js';
 import {
   getWorkspaceStatus,
@@ -600,6 +601,7 @@ const marketplaceUpdateCmd = command({
     name: positional({ type: optional(string), displayName: 'name' }),
   },
   handler: async ({ name }) => {
+    const updateContext = new UpdateContext();
     try {
       if (!isJsonMode()) {
         console.log(
@@ -610,7 +612,12 @@ const marketplaceUpdateCmd = command({
         console.log();
       }
 
-      const results = await updateMarketplace(name, process.cwd());
+      const results = await updateMarketplace(
+        name,
+        process.cwd(),
+        {},
+        updateContext,
+      );
 
       if (isJsonMode()) {
         const succeeded = results.filter((r) => r.success).length;
@@ -618,7 +625,15 @@ const marketplaceUpdateCmd = command({
         jsonOutput({
           success: failed === 0,
           command: 'plugin marketplace update',
-          data: { results, succeeded, failed },
+          data: {
+            results: results.map((result) => ({
+              name: result.name,
+              success: result.success,
+              ...(result.error && { error: result.error }),
+            })),
+            succeeded,
+            failed,
+          },
           ...(failed > 0 && { error: `${failed} marketplace(s) failed to update` }),
         });
         if (failed > 0) {
@@ -661,6 +676,8 @@ const marketplaceUpdateCmd = command({
         process.exit(1);
       }
       throw error;
+    } finally {
+      updateContext.dispose();
     }
   },
 });
@@ -1515,6 +1532,7 @@ const pluginUpdateCmd = command({
     scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Installation scope: "project" (default), "user", or "all"' }),
   },
   handler: async ({ plugin, scope }) => {
+    const updateContext = new UpdateContext();
     try {
       if (
         scope &&
@@ -1658,31 +1676,17 @@ const pluginUpdateCmd = command({
 
       // Update each plugin
       const results: InstalledPluginUpdateResult[] = [];
-      const updatedMarketplaces = {
-        project: new Set<string>(),
-        user: new Set<string>(),
-      };
       const createUpdateDeps = (pluginScope: 'project' | 'user') => {
-        const workspacePath = pluginScope === 'project' ? process.cwd() : undefined;
-        const updatedForScope = updatedMarketplaces[pluginScope];
-
+        const workspacePath =
+          pluginScope === 'project' ? process.cwd() : undefined;
         return {
           parsePluginSpec,
           getMarketplaceRegistration: (name: string, sourceLocation?: string) =>
             findMarketplaceRegistration(name, sourceLocation, workspacePath),
           validateMarketplaceAccess: getMarketplaceAccessError,
           parseMarketplaceManifest,
-          updateMarketplace: async (name: string) => {
-            // Skip if already updated in this scope during this run
-            if (updatedForScope.has(name)) {
-              return [{ name, success: true }];
-            }
-            const result = await updateMarketplace(name, workspacePath);
-            if (result[0]?.success) {
-              updatedForScope.add(name);
-            }
-            return result;
-          },
+          updateMarketplace: (name: string) =>
+            updateMarketplace(name, workspacePath, {}, updateContext),
         };
       };
       const depsByScope = {
@@ -1698,7 +1702,11 @@ const pluginUpdateCmd = command({
               success: true,
               action: 'skipped' as const,
             }
-          : await updatePlugin(pluginSpec, depsByScope[pluginScope]);
+          : await updatePlugin(
+              pluginSpec,
+              depsByScope[pluginScope],
+              updateContext,
+            );
         if (result.action === 'updated') updatedScopes.add(pluginScope);
         results.push(result);
 
@@ -1851,6 +1859,8 @@ const pluginUpdateCmd = command({
         process.exit(1);
       }
       throw error;
+    } finally {
+      updateContext.dispose();
     }
   },
 });

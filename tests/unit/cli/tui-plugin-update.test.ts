@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { dump } from 'js-yaml';
 import { getPluginCachePath } from '../../../src/utils/plugin-path.js';
+import {
+  addMarketplace,
+  listMarketplaces,
+} from '../../../src/core/marketplace.js';
+import { TuiCache } from '../../../src/cli/tui/cache.js';
 
 const noteMock = mock((_message: string, _title?: string) => {});
 const spinner = {
@@ -11,6 +16,8 @@ const spinner = {
   message: mock((_message?: string) => {}),
   stop: mock((_message?: string) => {}),
 };
+const selectResponses: string[] = [];
+const selectMock = mock(async () => selectResponses.shift() ?? '__back__');
 
 mock.module('@clack/prompts', () => ({
   autocomplete: mock(async () => ''),
@@ -18,13 +25,13 @@ mock.module('@clack/prompts', () => ({
   isCancel: () => false,
   multiselect: mock(async () => []),
   note: noteMock,
-  select: mock(async () => ''),
+  select: selectMock,
   spinner: () => spinner,
   text: mock(async () => ''),
 }));
 
 // The prompt module must be mocked before loading the TUI action.
-const { runUpdateAllPlugins } = await import(
+const { runBrowseMarketplaces, runPlugins, runUpdateAllPlugins } = await import(
   '../../../src/cli/tui/actions/plugins.js'
 );
 
@@ -45,6 +52,7 @@ const originalEnvironment = {
   XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
   XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
   XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+  GIT_TRACE2_EVENT: process.env.GIT_TRACE2_EVENT,
 };
 
 function runGit(path: string, args: string[]): string {
@@ -188,6 +196,7 @@ async function createUpdateFixture(
     cache,
     genericCache,
     skillRepository,
+    gitConfig,
     genericRepository,
     context: {
       hasWorkspace: true,
@@ -214,7 +223,29 @@ afterEach(() => {
   spinner.start.mockClear();
   spinner.message.mockClear();
   spinner.stop.mockClear();
+  selectResponses.length = 0;
+  selectMock.mockClear();
 });
+
+async function countGitCommands(
+  tracePath: string,
+  command: string,
+  source?: string,
+): Promise<number> {
+  const trace = await readFile(tracePath, 'utf-8');
+  const events = trace
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { event?: string; argv?: string[] });
+  return events.filter((event) => {
+    const invocation = event.argv?.join(' ') ?? '';
+    return (
+      (event.event === 'start' || event.event === 'child_start') &&
+      invocation.includes(command) &&
+      (!source || invocation.includes(source))
+    );
+  }).length;
+}
 
 describe('interactive plugin updates', () => {
   test(
@@ -398,6 +429,192 @@ describe('interactive plugin updates', () => {
         expect(
           await readFile(join(fixture.cache, SKILL_PATH), 'utf-8'),
         ).toContain('# standalone v1');
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+
+  test(
+    'shares one remote check inside an action and uses a fresh context for the next action',
+    async () => {
+      const fixture = await createUpdateFixture({ includeGeneric: true });
+      const tracePath = join(fixture.root, 'git-trace.jsonl');
+      try {
+        await mkdir(join(process.env.HOME!, '.allagents'), { recursive: true });
+        await writeFile(
+          join(process.env.HOME!, '.allagents/workspace.yaml'),
+          dump({
+            version: 2,
+            repositories: [],
+            clients: ['claude'],
+            plugins: [GENERIC_SOURCE],
+          }),
+        );
+        process.env.GIT_TRACE2_EVENT = tracePath;
+
+        await runUpdateAllPlugins(fixture.context);
+
+        expect(
+          await countGitCommands(
+            tracePath,
+            'ls-remote',
+            'https://github.com/example/plugins.git',
+          ),
+        ).toBe(1);
+        noteMock.mockClear();
+        const genericShaV2 = await advanceRemote(
+          fixture.genericRepository.upstream,
+          GENERIC_SKILL_PATH,
+          '---\nname: generic\ndescription: generic skill\n---\n# generic v2\n',
+          'v2',
+        );
+
+        await runUpdateAllPlugins(fixture.context);
+
+        expect(
+          await countGitCommands(
+            tracePath,
+            'ls-remote',
+            'https://github.com/example/plugins.git',
+          ),
+        ).toBe(2);
+        expect(runGit(fixture.genericCache, ['rev-parse', 'HEAD'])).toBe(
+          genericShaV2,
+        );
+        expect(noteMock.mock.calls[0]?.[0]).toContain(
+          `✓ ${GENERIC_SOURCE} (updated)`,
+        );
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+
+
+
+  test(
+    'bypasses exact standalone inspection when the managed node is equal and healthy',
+    async () => {
+      const fixture = await createUpdateFixture({ includeGeneric: false });
+      const tracePath = join(fixture.root, 'standalone-precheck-trace.jsonl');
+      try {
+        process.env.GIT_TRACE2_EVENT = tracePath;
+
+        await runUpdateAllPlugins(fixture.context, undefined, {
+          checkRepositoryHealth: async (_path, expected) => ({
+            status: 'healthy',
+            head: expected.head,
+            ...(expected.ref && { ref: expected.ref }),
+          }),
+        });
+
+        expect(await countGitCommands(tracePath, 'ls-remote')).toBe(1);
+        expect(await countGitCommands(tracePath, 'clone')).toBe(0);
+        expect(noteMock).toHaveBeenCalledWith(
+          '✓ setup-matt-pocock-skills (updated)\n\nUpdated: 1  Skipped: 0  Failed: 0',
+          'Update Results',
+        );
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+  test(
+    'uses fresh contexts for sequential status-routed single-plugin actions',
+    async () => {
+      const fixture = await createUpdateFixture({ includeGeneric: true });
+      const tracePath = join(fixture.root, 'single-git-trace.jsonl');
+      try {
+        process.env.GIT_TRACE2_EVENT = tracePath;
+        selectResponses.push(
+          `project:${GENERIC_SOURCE}`,
+          'update',
+          'back',
+          '__back__',
+        );
+
+        await runPlugins(fixture.context);
+
+        expect(await countGitCommands(tracePath, 'ls-remote')).toBe(1);
+        const genericShaV2 = await advanceRemote(
+          fixture.genericRepository.upstream,
+          GENERIC_SKILL_PATH,
+          '---\nname: generic\ndescription: generic skill\n---\n# generic v2\n',
+          'v2',
+        );
+        selectResponses.push(
+          `project:${GENERIC_SOURCE}`,
+          'update',
+          'back',
+          '__back__',
+        );
+
+        await runPlugins(fixture.context);
+
+        expect(await countGitCommands(tracePath, 'ls-remote')).toBe(2);
+        expect(runGit(fixture.genericCache, ['rev-parse', 'HEAD'])).toBe(
+          genericShaV2,
+        );
+        expect(noteMock.mock.calls.at(-1)?.[0]).toBe(
+          `✓ ${GENERIC_SOURCE} (updated)`,
+        );
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+  test(
+    'invalidates TUI state after a successful no-op marketplace registry write',
+    async () => {
+      const fixture = await createUpdateFixture();
+      try {
+        const marketplaceRepository = await createRemote(
+          fixture.root,
+          'marketplace',
+          {
+            '.claude-plugin/marketplace.json': JSON.stringify({
+              name: 'shared-marketplace',
+              plugins: [
+                {
+                  name: 'demo',
+                  source: './plugins/demo',
+                },
+              ],
+            }),
+            'plugins/demo/skills/demo/SKILL.md':
+              '---\nname: demo\ndescription: demo\n---\n# demo\n',
+          },
+        );
+        await writeFile(
+          fixture.gitConfig,
+          `[url "file://${fixture.skillRepository.remote}"]\n\tinsteadOf = https://github.com/mattpocock/skills.git\n[url "file://${fixture.genericRepository.remote}"]\n\tinsteadOf = https://github.com/example/plugins.git\n[url "file://${marketplaceRepository.remote}"]\n\tinsteadOf = https://github.com/example/marketplace.git\n`,
+        );
+        const added = await addMarketplace(
+          'https://github.com/example/marketplace',
+        );
+        expect(added.success).toBe(true);
+
+        const cache = new TuiCache();
+        cache.setMarketplaces(await listMarketplaces());
+        const invalidate = mock(cache.invalidate.bind(cache));
+        cache.invalidate = invalidate;
+        selectResponses.push(
+          'shared-marketplace',
+          'update',
+          'back',
+          '__back__',
+        );
+
+        await runBrowseMarketplaces(fixture.context, cache);
+
+        expect(invalidate).toHaveBeenCalledTimes(1);
+        expect(noteMock.mock.calls[0]?.[0]).toBe('✓ shared-marketplace');
+        expect(noteMock.mock.calls[0]?.[0]).not.toContain('changed');
       } finally {
         await rm(fixture.root, { recursive: true, force: true });
       }

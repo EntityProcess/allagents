@@ -1,6 +1,14 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { fetchPlugin, resetFetchCache, updatePlugin, type FetchDeps, type UpdatePluginDeps } from '../../../src/core/plugin.js';
+import {
+  fetchPlugin,
+  resetFetchCache,
+  seedFetchCache,
+  updatePlugin,
+  type FetchDeps,
+  type UpdatePluginDeps,
+} from '../../../src/core/plugin.js';
 import { GitCloneError } from '../../../src/core/git.js';
+import { UpdateContext } from '../../../src/core/update-context.js';
 
 // Create mock functions for dependency injection
 const existsSyncMock = mock(() => false);
@@ -219,6 +227,238 @@ describe('updatePlugin', () => {
     expect(result.action).toBe('skipped');
   });
 
+  it('keeps the existing skipped label when a direct plugin cache is first created', async () => {
+    const fetchFn = mock(async () => ({
+      success: true,
+      action: 'fetched' as const,
+      cachePath: '/mock/cache/path',
+    }));
+
+    const result = await updatePlugin('https://github.com/external/new-repo', {
+      ...updateDeps,
+      fetchFn,
+    });
+
+    expect(result).toEqual({
+      plugin: 'https://github.com/external/new-repo',
+      success: true,
+      action: 'skipped',
+    });
+  });
+
+  it('preserves missing-cache public semantics and marks a successful clone changed', async () => {
+    const url = 'https://github.com/external/missing-repo';
+    const cloneTo = mock(async () => undefined);
+
+    const result = await updatePlugin(
+      url,
+      {
+        ...updateDeps,
+        fetchFn: undefined,
+        updateFetchDeps: {
+          existsSync: () => false,
+          mkdir: async () => undefined,
+          cloneTo,
+          resolveHeadSha: async () => 'a'.repeat(40),
+        },
+      },
+      new UpdateContext(),
+    );
+
+    expect(result).toEqual({
+      plugin: url,
+      success: true,
+      action: 'skipped',
+      changed: true,
+    });
+    expect(cloneTo).toHaveBeenCalledTimes(1);
+  });
+
+  it('bypasses a stale global seed and skips pull for a healthy equal direct update', async () => {
+    const url = 'https://github.com/external/equal-repo';
+    seedFetchCache(url, '/stale/global/cache');
+    const pull = mock(async () => undefined);
+    const resolveRemoteRevision = mock(async () => ({
+      status: 'resolved' as const,
+      commit: 'a'.repeat(40),
+      ref: 'main',
+    }));
+    const checkRepositoryHealth = mock(async () => ({
+      status: 'healthy' as const,
+      head: 'a'.repeat(40),
+      ref: 'main',
+    }));
+
+    const result = await updatePlugin(
+      url,
+      {
+        ...updateDeps,
+        fetchFn: undefined,
+        updateFetchDeps: {
+          existsSync: () => true,
+          pull,
+          resolveRemoteRevision,
+          checkRepositoryHealth,
+        },
+      },
+      new UpdateContext(),
+    );
+
+    expect(result).toEqual({
+      plugin: url,
+      success: true,
+      action: 'updated',
+      changed: false,
+    });
+    expect(resolveRemoteRevision).toHaveBeenCalledTimes(1);
+    expect(checkRepositoryHealth).toHaveBeenCalledTimes(1);
+    expect(pull).not.toHaveBeenCalled();
+  });
+
+  it('derives a direct update change from fallback pre and post commits', async () => {
+    const url = 'https://github.com/external/changed-repo';
+    seedFetchCache(url, '/stale/global/cache');
+    let head = 'a'.repeat(40);
+    const pull = mock(async () => {
+      head = 'b'.repeat(40);
+    });
+
+    const result = await updatePlugin(
+      url,
+      {
+        ...updateDeps,
+        fetchFn: undefined,
+        updateFetchDeps: {
+          existsSync: () => true,
+          pull,
+          resolveHeadSha: async () => head,
+          resolveRemoteRevision: async () => ({
+            status: 'resolved' as const,
+            commit: 'b'.repeat(40),
+            ref: 'main',
+          }),
+          checkRepositoryHealth: async () => ({
+            status: 'unhealthy' as const,
+            reason: 'head-mismatch' as const,
+            head,
+          }),
+        },
+      },
+      new UpdateContext(),
+    );
+
+    expect(result).toEqual({
+      plugin: url,
+      success: true,
+      action: 'updated',
+      changed: true,
+    });
+    expect(pull).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks an equal unresolved direct fallback unchanged', async () => {
+    const url = 'https://github.com/external/equal-fallback';
+    seedFetchCache(url, '/stale/global/cache');
+    const pull = mock(async () => undefined);
+
+    const result = await updatePlugin(
+      url,
+      {
+        ...updateDeps,
+        fetchFn: undefined,
+        updateFetchDeps: {
+          existsSync: () => true,
+          pull,
+          resolveHeadSha: async () => 'a'.repeat(40),
+          resolveRemoteRevision: async () => ({
+            status: 'unresolved' as const,
+            reason: 'failed' as const,
+          }),
+        },
+      },
+      new UpdateContext(),
+    );
+
+    expect(result).toEqual({
+      plugin: url,
+      success: true,
+      action: 'updated',
+      changed: false,
+    });
+    expect(pull).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a failed usable-cache fallback non-fatal and unchanged', async () => {
+    const url = 'https://github.com/external/fallback-failure';
+    seedFetchCache(url, '/stale/global/cache');
+    const pull = mock(async () => {
+      throw new Error('not something we can merge');
+    });
+
+    const result = await updatePlugin(
+      url,
+      {
+        ...updateDeps,
+        fetchFn: undefined,
+        updateFetchDeps: {
+          existsSync: () => true,
+          pull,
+          resolveHeadSha: async () => 'a'.repeat(40),
+          resolveRemoteRevision: async () => ({
+            status: 'unresolved' as const,
+            reason: 'failed' as const,
+          }),
+          checkRepositoryHealth: async () => ({
+            status: 'unhealthy' as const,
+            reason: 'inspection-failed' as const,
+          }),
+        },
+      },
+      new UpdateContext(),
+    );
+
+    expect(result).toEqual({
+      plugin: url,
+      success: true,
+      action: 'skipped',
+      changed: false,
+    });
+  });
+
+  it('fails when a pull error leaves no usable cached revision', async () => {
+    const url = 'https://github.com/external/corrupt-cache';
+    const pull = mock(async () => {
+      throw new Error('not a repository');
+    });
+
+    const result = await updatePlugin(
+      url,
+      {
+        ...updateDeps,
+        fetchFn: undefined,
+        updateFetchDeps: {
+          existsSync: () => true,
+          pull,
+          resolveHeadSha: async () => {
+            throw new Error('bad revision HEAD');
+          },
+          resolveRemoteRevision: async () => ({
+            status: 'unresolved' as const,
+            reason: 'failed' as const,
+          }),
+        },
+      },
+      new UpdateContext(),
+    );
+
+    expect(result).toMatchObject({
+      plugin: url,
+      success: false,
+      action: 'failed',
+      changed: false,
+    });
+  });
+
   it('should return error when marketplace not found', async () => {
     const result = await updatePlugin('plugin@unknown-marketplace', updateDeps);
     expect(result.success).toBe(false);
@@ -236,6 +476,81 @@ describe('updatePlugin', () => {
     const result = await updatePlugin('external-plugin@test-marketplace', updateDeps);
     expect(result.success).toBe(true);
     expect(result.action).toBe('updated');
+  });
+
+  it('keeps the external checkout result authoritative when marketplace refresh fails', async () => {
+    const updateMarketplace = mock(async (name: string) => [
+      { name, success: false, error: 'marketplace failed' },
+    ]);
+    const fetchFn = mock(async () => ({
+      success: true,
+      action: 'updated' as const,
+      cachePath: '/mock/cache/path',
+    }));
+
+    const result = await updatePlugin('external-plugin@test-marketplace', {
+      ...updateDeps,
+      updateMarketplace,
+      fetchFn,
+    });
+
+    expect(result).toEqual({
+      plugin: 'external-plugin@test-marketplace',
+      success: true,
+      action: 'updated',
+    });
+  });
+
+  it('keeps an external checkout failure authoritative after marketplace refresh succeeds', async () => {
+    const fetchFn = mock(async () => ({
+      success: false,
+      action: 'skipped' as const,
+      cachePath: '/mock/cache/path',
+      error: 'external failed',
+    }));
+
+    const result = await updatePlugin('external-plugin@test-marketplace', {
+      ...updateDeps,
+      fetchFn,
+    });
+
+    expect(result).toEqual({
+      plugin: 'external-plugin@test-marketplace',
+      success: false,
+      action: 'failed',
+      error: 'external failed',
+    });
+  });
+
+  it('ORs successful marketplace change into an authoritative external failure', async () => {
+    const updateMarketplace = mock(async (name: string) => [
+      { name, success: true, changed: true },
+    ]);
+    const fetchFn = mock(async () => ({
+      success: false,
+      action: 'skipped' as const,
+      cachePath: '/mock/cache/path',
+      changed: false,
+      error: 'external failed',
+    }));
+
+    const result = await updatePlugin(
+      'external-plugin@test-marketplace',
+      {
+        ...updateDeps,
+        updateMarketplace,
+        fetchFn,
+      },
+      new UpdateContext(),
+    );
+
+    expect(result).toEqual({
+      plugin: 'external-plugin@test-marketplace',
+      success: false,
+      action: 'failed',
+      error: 'external failed',
+      changed: true,
+    });
   });
 
   it('should update the exact registry key after source fallback lookup', async () => {

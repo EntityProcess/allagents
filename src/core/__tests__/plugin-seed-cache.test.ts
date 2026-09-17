@@ -28,6 +28,7 @@ describe('seedFetchCache', () => {
     expect(result.success).toBe(true);
     expect(result.action).toBe('skipped');
     expect(result.cachePath).toBe(marketplacePath);
+    expect(result.changed).toBeUndefined();
   });
 
   it('accepts full GitHub URL format', async () => {

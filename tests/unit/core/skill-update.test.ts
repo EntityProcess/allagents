@@ -194,6 +194,141 @@ describe('buildSkillUpdatePreflight', () => {
     ]);
   });
 
+  it('skips exact inspection only when every physical node is equal and healthy', async () => {
+    const dependency: CheckoutNode = {
+      id: '/cache/dependency',
+      cachePath: '/cache/dependency',
+      remoteUrl: 'https://github.com/acme/dependency.git',
+      role: 'dependency',
+      currentSha: 'dependency-sha',
+    };
+    const inspectUnit = mock(async () => resolved('project:0', ['keep']));
+    const precheckNode = mock(async () => ({
+      remoteEqual: true,
+      repositoryHealthy: true,
+      domainRootsHealthy: true,
+    }));
+
+    const result = await buildSkillUpdatePreflight(
+      {
+        installations: [
+          installation({
+            nodes: [dependency, projectNode],
+            skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
+          }),
+        ],
+        selectedScopes: ['project'],
+      },
+      { inspectUnit, precheckNode },
+    );
+
+    expect(precheckNode).toHaveBeenCalledTimes(2);
+    expect(inspectUnit).not.toHaveBeenCalled();
+    expect(result.units[0]).toMatchObject({
+      outcome: 'resolved',
+      safeToBypassTransaction: true,
+      inspectedNodes: [
+        { nodeId: dependency.id, sha: dependency.currentSha },
+        { nodeId: projectNode.id, sha: projectNode.currentSha },
+      ],
+      deleted: [],
+    });
+    expect(result.units[0]?.survivors.map((skill) => skill.subpath)).toEqual([
+      'keep',
+    ]);
+  });
+
+  for (const [name, badFact] of [
+    [
+      'changed',
+      {
+        remoteEqual: false,
+        repositoryHealthy: true,
+        domainRootsHealthy: true,
+      },
+    ],
+    [
+      'unresolved',
+      {
+        remoteEqual: false,
+        repositoryHealthy: false,
+        domainRootsHealthy: true,
+      },
+    ],
+    [
+      'repository-unhealthy',
+      {
+        remoteEqual: true,
+        repositoryHealthy: false,
+        domainRootsHealthy: true,
+      },
+    ],
+    [
+      'domain-root-unhealthy',
+      {
+        remoteEqual: true,
+        repositoryHealthy: true,
+        domainRootsHealthy: false,
+      },
+    ],
+  ] as const) {
+    it(`falls the whole connected unit back to exact inspection for one ${name} node`, async () => {
+      const dependency: CheckoutNode = {
+        id: '/cache/dependency',
+        cachePath: '/cache/dependency',
+        remoteUrl: 'https://github.com/acme/dependency.git',
+        role: 'dependency',
+        currentSha: 'dependency-sha',
+      };
+      const inspectUnit = mock(
+        async (): Promise<UnitInspection> => ({
+          outcome: 'resolved',
+          nodes: [
+            { nodeId: dependency.id, sha: dependency.currentSha },
+            { nodeId: projectNode.id, sha: projectNode.currentSha },
+          ],
+          installations: [
+            {
+              installationId: 'project:0',
+              outcome: 'resolved',
+              skills: [{ name: 'keep', subpath: 'keep' }],
+            },
+          ],
+        }),
+      );
+      const precheckNode = mock(async (node: CheckoutNode) =>
+        node.id === dependency.id
+          ? badFact
+          : {
+              remoteEqual: true,
+              repositoryHealthy: true,
+              domainRootsHealthy: true,
+            },
+      );
+
+      const result = await buildSkillUpdatePreflight(
+        {
+          installations: [
+            installation({
+              nodes: [dependency, projectNode],
+              skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
+            }),
+          ],
+          selectedScopes: ['project'],
+        },
+        { inspectUnit, precheckNode },
+      );
+
+      expect(precheckNode).toHaveBeenCalledTimes(2);
+      expect(inspectUnit).toHaveBeenCalledTimes(1);
+      expect(result.units[0]?.safeToBypassTransaction).toBe(
+        badFact.repositoryHealthy && badFact.domainRootsHealthy
+          ? true
+          : undefined,
+      );
+    });
+  }
+
   it('fails closed when discovery fails', async () => {
     const result = await buildSkillUpdatePreflight(
       {
@@ -243,6 +378,11 @@ describe('buildSkillUpdatePreflight', () => {
 
   it('fails a shared component closed without inspecting or mutating it', async () => {
     const inspectUnit = mock(async () => resolved('project:0', ['keep']));
+    const precheckNode = mock(async () => ({
+      remoteEqual: true,
+      repositoryHealthy: true,
+      domainRootsHealthy: true,
+    }));
     const result = await buildSkillUpdatePreflight(
       {
         installations: [installation()],
@@ -257,10 +397,11 @@ describe('buildSkillUpdatePreflight', () => {
           },
         ],
       },
-      { inspectUnit },
+      { inspectUnit, precheckNode },
     );
 
     expect(inspectUnit).not.toHaveBeenCalled();
+    expect(precheckNode).not.toHaveBeenCalled();
     expect(result.units).toHaveLength(1);
     expect(result.units[0]).toMatchObject({
       id: projectNode.id,
@@ -462,6 +603,192 @@ describe('inspectRemoteSkillUpdateUnit', () => {
 });
 
 describe('executeSkillUpdatePlan', () => {
+  it('bypasses mutation but preserves action-driven sync for a healthy exact-inspection no-op', async () => {
+    const plan = await buildSkillUpdatePreflight(
+      {
+        installations: [
+          installation({
+            skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
+          }),
+        ],
+        selectedScopes: ['project'],
+      },
+      {
+        precheckNode: async () => ({
+          remoteEqual: false,
+          repositoryHealthy: true,
+          domainRootsHealthy: true,
+        }),
+        inspectUnit: async () => ({
+          outcome: 'resolved',
+          nodes: [{ nodeId: projectNode.id, sha: projectNode.currentSha }],
+          installations: [
+            {
+              installationId: 'project:0',
+              outcome: 'resolved',
+              skills: [{ name: 'keep', subpath: 'keep' }],
+            },
+          ],
+        }),
+      },
+    );
+    const reconcileUnit = mock(async () => ({
+      commit: mock(async () => {}),
+      rollback: mock(async () => {}),
+    }));
+    const advanceNode = mock(async () => {});
+    const restoreNode = mock(async () => {});
+    const syncScope = mock(async () => ({ success: true }));
+
+    const result = await executeSkillUpdatePlan(plan, {}, {
+      reconcileUnit,
+      advanceNode,
+      restoreNode,
+      syncScope,
+    });
+
+    expect(reconcileUnit).not.toHaveBeenCalled();
+    expect(advanceNode).not.toHaveBeenCalled();
+    expect(restoreNode).not.toHaveBeenCalled();
+    expect(syncScope).toHaveBeenCalledWith('project', { offline: true });
+    expect(result.units[0]).toMatchObject({
+      status: 'updated',
+      skillCounts: { updated: 1, removed: 0, retained: 0 },
+    });
+    expect(result.syncedScopes).toEqual(['project']);
+  });
+
+  it('runs the established transaction for an equal SHA without positive health', async () => {
+    const plan = await buildSkillUpdatePreflight(
+      {
+        installations: [
+          installation({
+            skills: [{ name: 'keep', subpath: 'keep', enabled: true }],
+          }),
+        ],
+        selectedScopes: ['project'],
+      },
+      {
+        inspectUnit: async () => ({
+          outcome: 'resolved',
+          nodes: [{ nodeId: projectNode.id, sha: projectNode.currentSha }],
+          installations: [
+            {
+              installationId: 'project:0',
+              outcome: 'resolved',
+              skills: [{ name: 'keep', subpath: 'keep' }],
+            },
+          ],
+        }),
+      },
+    );
+    const calls: string[] = [];
+
+    const result = await executeSkillUpdatePlan(plan, {}, {
+      reconcileUnit: async () => {
+        calls.push('reconcile');
+        return {
+          commit: async () => {
+            calls.push('commit');
+          },
+          rollback: async () => {},
+        };
+      },
+      advanceNode: async () => {
+        calls.push('advance');
+      },
+      restoreNode: async () => {},
+      syncScope: async () => {
+        calls.push('sync');
+        return { success: true };
+      },
+    });
+
+    expect(calls).toEqual(['reconcile', 'advance', 'commit', 'sync']);
+    expect(result.units[0]?.status).toBe('updated');
+  });
+
+  it('does not bypass an approved deletion at an equal inspected SHA', async () => {
+    const plan = await buildSkillUpdatePreflight(
+      { installations: [installation()], selectedScopes: ['project'] },
+      {
+        precheckNode: async () => ({
+          remoteEqual: false,
+          repositoryHealthy: true,
+          domainRootsHealthy: true,
+        }),
+        inspectUnit: async () => ({
+          outcome: 'resolved',
+          nodes: [{ nodeId: projectNode.id, sha: projectNode.currentSha }],
+          installations: [
+            {
+              installationId: 'project:0',
+              outcome: 'resolved',
+              skills: [{ name: 'keep', subpath: 'keep' }],
+            },
+          ],
+        }),
+      },
+    );
+    const reconcileUnit = mock(async () => ({
+      commit: mock(async () => {}),
+      rollback: mock(async () => {}),
+    }));
+
+    const result = await executeSkillUpdatePlan(
+      plan,
+      { [projectNode.id]: 'remove' },
+      {
+        reconcileUnit,
+        advanceNode: async () => {},
+        restoreNode: async () => {},
+        syncScope: async () => ({ success: true }),
+      },
+    );
+
+    expect(reconcileUnit).toHaveBeenCalledTimes(1);
+    expect(result.units[0]?.status).toBe('removed');
+  });
+
+  it('does not bypass authoritative installation removal with no deleted skills', async () => {
+    const plan: Parameters<typeof executeSkillUpdatePlan>[0] = {
+      selectedScopes: ['project'],
+      units: [
+        {
+          id: projectNode.id,
+          nodes: [projectNode],
+          installations: [
+            installation({
+              skills: [],
+            }),
+          ],
+          outcome: 'resolved',
+          inspectedNodes: [
+            { nodeId: projectNode.id, sha: projectNode.currentSha },
+          ],
+          deleted: [],
+          survivors: [],
+          removedInstallationIds: ['project:0'],
+          blockedByOutOfScope: false,
+          safeToBypassTransaction: true,
+        },
+      ],
+    };
+    const reconcileUnit = mock(async () => ({
+      commit: mock(async () => {}),
+      rollback: mock(async () => {}),
+    }));
+
+    await executeSkillUpdatePlan(plan, {}, {
+      reconcileUnit,
+      advanceNode: async () => {},
+      restoreNode: async () => {},
+      syncScope: async () => ({ success: true }),
+    });
+
+    expect(reconcileUnit).toHaveBeenCalledTimes(1);
+  });
+
   it('collects decisions before mutation, leaves retained units untouched, and syncs offline once', async () => {
     const secondNode: CheckoutNode = {
       id: '/cache/healthy',

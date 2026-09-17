@@ -8,6 +8,7 @@ import {
   gitHubUrl,
   repoExists,
 } from '../core/git.js';
+import { parseGitHubSource } from './git-source.js';
 
 /**
  * Plugin source types
@@ -120,6 +121,9 @@ export function isGitHubUrl(source: string): boolean {
 export function parseGitHubUrl(
   url: string,
 ): { owner: string; repo: string; branch?: string; subpath?: string } | null {
+  if (/^(?:git@github\.com:|ssh:\/\/git@github\.com\/)/i.test(url)) {
+    return parseGitHubSource(url);
+  }
   // Normalize URL
   let normalized = url;
 
