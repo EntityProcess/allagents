@@ -237,14 +237,18 @@ async function countGitCommands(
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as { event?: string; argv?: string[] });
-  return events.filter((event) => {
+  const matchingEvents = events.filter((event) => {
     const invocation = event.argv?.join(' ') ?? '';
     return (
       (event.event === 'start' || event.event === 'child_start') &&
       invocation.includes(command) &&
       (!source || invocation.includes(source))
     );
-  }).length;
+  });
+  if (matchingEvents.length === 0 && command === 'ls-remote') {
+    console.error(`No ${command} event found in trace:\n${trace}`);
+  }
+  return matchingEvents.length;
 }
 
 describe('interactive plugin updates', () => {
@@ -597,7 +601,7 @@ describe('interactive plugin updates', () => {
         const added = await addMarketplace(
           'https://github.com/example/marketplace',
         );
-        expect(added.success).toBe(true);
+        expect(added).toMatchObject({ success: true });
 
         const cache = new TuiCache();
         cache.setMarketplaces(await listMarketplaces());
