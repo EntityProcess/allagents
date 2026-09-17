@@ -8,6 +8,7 @@ import {
   gitHubUrl,
   repoExists,
 } from '../core/git.js';
+import { parseGitHubSource } from './git-source.js';
 
 /**
  * Plugin source types
@@ -65,6 +66,7 @@ export interface ParsedPluginSource {
  * @returns true if source is a GitHub URL or shorthand
  */
 export function isGitHubUrl(source: string): boolean {
+  if (parseGitHubSource(source)) return true;
   // Explicit GitHub patterns
   const explicitPatterns = [
     /^https?:\/\/github\.com\//,
@@ -120,6 +122,9 @@ export function isGitHubUrl(source: string): boolean {
 export function parseGitHubUrl(
   url: string,
 ): { owner: string; repo: string; branch?: string; subpath?: string } | null {
+  if (/^(?:git@github\.com:|ssh:\/\/git@github\.com\/)/i.test(url)) {
+    return parseGitHubSource(url);
+  }
   // Normalize URL
   let normalized = url;
 

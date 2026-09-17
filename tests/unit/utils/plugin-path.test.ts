@@ -229,6 +229,11 @@ describe('normalizePluginPath', () => {
     expect(normalizePluginPath(url)).toBe(url);
   });
 
+  it('leaves GitHub SSH remotes unchanged instead of treating them as local paths', () => {
+    const source = 'git@github.com:Acme/Tools.git';
+    expect(normalizePluginPath(source, '/base/dir')).toBe(source);
+  });
+
   it('should leave absolute paths unchanged', () => {
     const path = '/absolute/path/to/plugin';
     expect(normalizePluginPath(path)).toBe(path);
@@ -279,6 +284,19 @@ describe('parsePluginSource', () => {
     expect(result.owner).toBe('owner');
     expect(result.repo).toBe('repo');
     expect(result.branch).toBe('v1.2.0');
+  });
+
+  it('parses GitHub SSH remotes through the shared source identity', () => {
+    const source = 'ssh://git@github.com/Acme/Tools.git';
+    const result = parsePluginSource(source);
+
+    expect(result).toMatchObject({
+      type: 'github',
+      original: source,
+      normalized: source,
+      owner: 'acme',
+      repo: 'tools',
+    });
   });
 
   it('should parse local absolute paths', () => {
