@@ -3,8 +3,9 @@
  * Publish allagents to npm with retry-safe behavior.
  *
  * The GitHub Actions Publish workflow calls this script after checking out a
- * release tag. If the package version is already on npm, the script skips the
- * immutable publish step and only ensures the requested dist-tag points at it.
+ * release tag. A new publish assigns the requested dist-tag atomically. If the
+ * package version is already on npm, the script verifies that tag without
+ * attempting a second mutation that npm trusted publishing cannot authorize.
  *
  * Usage:
  *   bun scripts/publish.ts next
@@ -84,17 +85,17 @@ function assertNoDowngrade(name: string, currentVersion: string | undefined, nex
   }
 }
 
-async function ensureDistTag(name: string, version: string, npmTag: NpmTag) {
+async function assertDistTagMatches(name: string, version: string, npmTag: NpmTag) {
   const tags = await getDistTags(name);
   assertNoDowngrade(name, tags[npmTag], version, npmTag);
 
-  if (tags[npmTag] === version) {
-    console.log(`   ✓ ${name}@${npmTag} already points to ${version}`);
-    return;
+  if (tags[npmTag] !== version) {
+    throw new Error(
+      `${name}@${version} is already published, but ${npmTag} points to ${tags[npmTag] ?? 'nothing'}. Update the npm dist-tag manually.`,
+    );
   }
 
-  console.log(`   → Setting ${name}@${npmTag} to ${version}`);
-  await $`npm dist-tag add ${name}@${version} ${npmTag}`;
+  console.log(`   ✓ ${name}@${npmTag} already points to ${version}`);
 }
 
 async function main() {
@@ -107,11 +108,10 @@ async function main() {
   const publishedVersion = await getPublishedVersion(name, version);
   if (publishedVersion === version) {
     console.log(`   ✓ ${name}@${version} is already published`);
+    await assertDistTagMatches(name, version, npmTag);
   } else {
     await $`npm publish --tag ${npmTag}`.env({ ...process.env, ALLOW_PUBLISH: "1" });
   }
-
-  await ensureDistTag(name, version, npmTag);
   console.log("\n✅ Package published.");
 }
 
