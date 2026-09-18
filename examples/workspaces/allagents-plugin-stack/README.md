@@ -17,7 +17,7 @@ Scaffold a fresh copy anywhere:
 
 ```bash
 allagents workspace init ./allagents-plugin-stack-demo \
-  --from EntityProcess/allagents/examples/workspaces/allagents-plugin-stack
+  --from allagentsdev/allagents/examples/workspaces/allagents-plugin-stack
 cd ./allagents-plugin-stack-demo
 ```
 

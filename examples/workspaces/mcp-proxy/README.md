@@ -21,7 +21,7 @@ this also runs the initial sync):
 
 ```bash
 allagents workspace init ./mcp-proxy-demo \
-  --from EntityProcess/allagents/examples/workspaces/mcp-proxy
+  --from allagentsdev/allagents/examples/workspaces/mcp-proxy
 cd ./mcp-proxy-demo
 ```
 

@@ -20,7 +20,7 @@ describe('parseWorkspaceConfig', () => {
 repositories:
   - path: ../allagents
     source: github
-    repo: EntityProcess/allagents
+    repo: allagentsdev/allagents
     description: primary project
 
 plugins:

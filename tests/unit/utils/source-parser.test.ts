@@ -12,7 +12,7 @@ describe('extractOrgFromSource', () => {
 
     it('should extract org from full GitHub URLs', () => {
       expect(extractOrgFromSource('https://github.com/anthropic/claude-code')).toBe('anthropic');
-      expect(extractOrgFromSource('github.com/EntityProcess/allagents')).toBe('EntityProcess');
+      expect(extractOrgFromSource('github.com/allagentsdev/allagents')).toBe('allagentsdev');
       expect(extractOrgFromSource('https://github.com/org/repo/tree/main/path')).toBe('org');
     });
 

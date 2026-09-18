@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
  * directly: on Windows, os.homedir() ignores HOME and resolves via
  * USERPROFILE, so it isn't affected by shells (e.g. Git Bash/MSYS) that
  * mistranslate a misconfigured HOME into a bare drive root like "C:\\"
- * (see EntityProcess/allagents#433).
+ * (see allagentsdev/allagents#433).
  */
 export function getHomeDir(): string {
   // Bun caches os.homedir() for the process, so tests cannot isolate user state

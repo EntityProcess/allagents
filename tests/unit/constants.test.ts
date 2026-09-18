@@ -39,7 +39,7 @@ describe('getHomeDir', () => {
       // Reproduces the Git-Bash/MSYS failure mode: a misconfigured HOME=/c gets
       // translated to the literal Windows path "C:\\" for the spawned node process.
       // Trusting it would make every user-scope sync operation treat the whole
-      // drive as "home" (see EntityProcess/allagents#433).
+      // drive as "home" (see allagentsdev/allagents#433).
       process.env.HOME = 'C:\\';
       process.env.USERPROFILE = 'C:\\Users\\realuser';
 
