@@ -118,6 +118,34 @@ export const mcpGetMeta: AgentCommandMeta = {
   ],
 };
 
+export const mcpAuthMeta: AgentCommandMeta = {
+  command: 'mcp auth',
+  description: 'Authorize an HTTP MCP server from a local or remote browser',
+  whenToUse:
+    'When an OAuth-enabled MCP server is running on a headless or remote machine and the browser cannot reach its loopback callback',
+  examples: [
+    'allagents mcp auth https://mcp.tradingview.com/mcp',
+    'allagents mcp auth https://mcp.internal.corp --header Authorization=Bearer-token',
+  ],
+  expectedOutput:
+    'Prints an authorization URL, prompts for the full loopback callback URL, validates the callback state, and caches OAuth credentials. Exit 0 on success, 1 on cancellation or failure.',
+  positionals: [
+    {
+      name: 'serverUrl',
+      type: 'string',
+      required: true,
+      description: 'Remote HTTP MCP server URL',
+    },
+  ],
+  options: [
+    {
+      flag: '--header',
+      type: 'string',
+      description: 'HTTP header KEY=VALUE (repeatable)',
+    },
+  ],
+};
+
 export const mcpUpdateMeta: AgentCommandMeta = {
   command: 'mcp update',
   description: 'Sync MCP servers only, without touching other artifacts',

@@ -23,7 +23,17 @@ describe('mcp proxy command help', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('- proxy - Expose a remote HTTP MCP server locally over stdio');
+    expect(result.stdout).toContain(
+      '- auth - Authorize an HTTP MCP server from a local or remote browser',
+    );
     expect(result.stdout).not.toContain('- proxy-stdio -');
+  });
+
+  test('exposes auth through machine-readable agent help', () => {
+    const result = runCli(['--agent-help', 'mcp', 'auth']);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).command).toBe('mcp auth');
   });
 
   test('rejects proxy-stdio after the rename', () => {

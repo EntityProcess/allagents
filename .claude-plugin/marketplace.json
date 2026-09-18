@@ -16,6 +16,11 @@
       "name": "engineering",
       "description": "Reusable engineering workflow skills",
       "source": "./plugins/engineering"
+    },
+    {
+      "name": "tradingview",
+      "description": "Official TradingView market data and analytics",
+      "source": "./plugins/tradingview"
     }
   ]
 }

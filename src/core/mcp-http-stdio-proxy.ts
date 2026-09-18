@@ -18,7 +18,10 @@ import {
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type {
+  FetchLike,
+  Transport,
+} from '@modelcontextprotocol/sdk/shared/transport.js';
 import type {
   OAuthClientInformationMixed,
   OAuthClientMetadata,
@@ -38,6 +41,95 @@ import {
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 export const AUTH_URL_LOG_PREFIX = 'If the browser does not open, visit: ';
 
+export interface OAuthCallbackRequest {
+  authorizationUrl: URL;
+  redirectUrl: string;
+  state: string;
+}
+
+export type OAuthCallbackUrlReader = (
+  request: OAuthCallbackRequest,
+) => Promise<string>;
+
+type ParsedOAuthCallback =
+  | { code: string; authorizationError?: never }
+  | { code?: never; authorizationError: true };
+
+export class OAuthAuthorizationError extends Error {
+  constructor() {
+    super('OAuth authorization failed');
+    this.name = 'OAuthAuthorizationError';
+  }
+}
+
+function parseOAuthCallbackResponse(
+  callbackUrl: string,
+  redirectUrl: string,
+  expectedState: string,
+): ParsedOAuthCallback {
+  let callback: URL;
+  try {
+    callback = new URL(callbackUrl.trim());
+  } catch {
+    throw new Error('Invalid OAuth callback URL');
+  }
+
+  const expected = new URL(redirectUrl);
+  if (
+    callback.username ||
+    callback.password ||
+    callback.origin !== expected.origin ||
+    callback.pathname !== expected.pathname ||
+    callback.hash
+  ) {
+    throw new Error(
+      'OAuth callback URL does not match the registered redirect',
+    );
+  }
+
+  const states = callback.searchParams.getAll('state');
+  if (states.length !== 1 || states[0] !== expectedState) {
+    throw new Error('OAuth state validation failed');
+  }
+
+  const errors = callback.searchParams.getAll('error');
+  const codes = callback.searchParams.getAll('code');
+  if (errors.length === 1 && errors[0] && codes.length === 0) {
+    return { authorizationError: true };
+  }
+  if (errors.length > 0) {
+    throw new Error('Invalid OAuth authorization response');
+  }
+  if (codes.length !== 1 || !codes[0]) {
+    throw new Error('No OAuth authorization code received');
+  }
+  return { code: codes[0] };
+}
+
+export function validateOAuthCallbackUrl(
+  callbackUrl: string,
+  redirectUrl: string,
+  expectedState: string,
+): void {
+  parseOAuthCallbackResponse(callbackUrl, redirectUrl, expectedState);
+}
+
+export function parseOAuthCallbackUrl(
+  callbackUrl: string,
+  redirectUrl: string,
+  expectedState: string,
+): string {
+  const callback = parseOAuthCallbackResponse(
+    callbackUrl,
+    redirectUrl,
+    expectedState,
+  );
+  if (callback.authorizationError) {
+    throw new OAuthAuthorizationError();
+  }
+  return callback.code;
+}
+
 export function hashServerUrl(serverUrl: string): string {
   return createHash('sha256').update(serverUrl).digest('hex').slice(0, 16);
 }
@@ -51,13 +143,32 @@ function getCacheDir(serverUrl: string): string {
   );
 }
 
-function getRequestInit(
+function getMcpFetch(
+  serverUrl: string,
   headers: Record<string, string>,
-): RequestInit | undefined {
+): FetchLike | undefined {
   if (Object.keys(headers).length === 0) {
     return undefined;
   }
-  return { headers };
+
+  const serverOrigin = new URL(serverUrl).origin;
+  return async (input, init) => {
+    const requestUrl = new URL(input.toString());
+    if (requestUrl.origin !== serverOrigin) {
+      return fetch(input, init);
+    }
+
+    const mergedHeaders = new Headers(headers);
+    new Headers(init?.headers).forEach((value, key) =>
+      mergedHeaders.set(key, value),
+    );
+
+    return fetch(input, {
+      ...init,
+      headers: mergedHeaders,
+      redirect: 'error',
+    });
+  };
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -193,6 +304,7 @@ class FileOAuthClientProvider implements OAuthClientProvider {
   constructor(
     private readonly port: number,
     serverUrl: string,
+    private readonly callbackUrlReader?: OAuthCallbackUrlReader,
   ) {
     const cacheDir = getCacheDir(serverUrl);
     this.clientInfoPath = join(cacheDir, 'client-info.json');
@@ -260,7 +372,9 @@ class FileOAuthClientProvider implements OAuthClientProvider {
   }
 
   redirectToAuthorization(authorizationUrl: URL): void {
-    this.pendingAuth ??= this.waitForAuthorizationCode(authorizationUrl);
+    this.pendingAuth ??= this.callbackUrlReader
+      ? this.waitForPastedAuthorizationCode(authorizationUrl)
+      : this.waitForAuthorizationCode(authorizationUrl);
   }
 
   async saveCodeVerifier(codeVerifier: string): Promise<void> {
@@ -316,88 +430,93 @@ class FileOAuthClientProvider implements OAuthClientProvider {
     return this.pendingAuth;
   }
 
-  private waitForAuthorizationCode(authorizationUrl: URL): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const server = createServer(
-        (request: IncomingMessage, response: ServerResponse) => {
-          try {
-            const parsed = new URL(
-              request.url ?? '/',
-              `http://127.0.0.1:${this.port}`,
-            );
-            const code = parsed.searchParams.get('code');
-            const error = parsed.searchParams.get('error');
-            const state = parsed.searchParams.get('state');
-
-            if (code) {
-              if (state !== this.stateValue) {
-                response.writeHead(400, {
-                  'content-type': 'text/html; charset=utf-8',
-                });
-                response.end(
-                  '<html><body><h1>Authorization failed</h1><p>State validation failed.</p></body></html>',
-                );
-                server.close();
-                reject(new Error('OAuth state validation failed'));
-                return;
-              }
-              response.writeHead(200, {
-                'content-type': 'text/html; charset=utf-8',
-              });
-              response.end(
-                '<html><body><h1>Authorization complete</h1><p>You can close this window.</p></body></html>',
-              );
-              server.close();
-              resolve(code);
-              return;
-            }
-
-            const message = error ?? 'No authorization code received';
-            response.writeHead(400, {
-              'content-type': 'text/html; charset=utf-8',
-            });
-            response.end(
-              `<html><body><h1>Authorization failed</h1><p>${message}</p></body></html>`,
-            );
-            server.close();
-            reject(new Error(message));
-          } catch (error) {
-            server.close();
-            reject(error instanceof Error ? error : new Error(String(error)));
-          }
-        },
-      );
-
-      const timeout = setTimeout(() => {
-        server.close();
-        reject(new Error('Timed out waiting for OAuth authorization callback'));
-      }, AUTH_TIMEOUT_MS);
-
-      server.on('close', () => {
-        clearTimeout(timeout);
-      });
-      server.on('error', reject);
-      server.listen(this.port, '127.0.0.1', () => {
-        console.error('Opening browser for authorization...');
-        console.error(
-          `${AUTH_URL_LOG_PREFIX}${authorizationUrl.toString()}`,
-        );
-        // Test-only escape hatch: e2e tests fetch the URL themselves against a local
-        // dummy IdP, and skipping the real OS browser-open avoids ever launching one.
-        if (process.env.ALLAGENTS_MCP_OAUTH_NO_BROWSER === '1') {
-          console.error(
-            'Skipping automatic browser open (ALLAGENTS_MCP_OAUTH_NO_BROWSER=1).',
-          );
-        } else {
-          void tryOpenBrowser(authorizationUrl.toString());
-        }
-      });
+  private async waitForPastedAuthorizationCode(
+    authorizationUrl: URL,
+  ): Promise<string> {
+    if (!this.callbackUrlReader) {
+      throw new Error('OAuth callback URL reader is unavailable');
+    }
+    const callbackUrl = await this.callbackUrlReader({
+      authorizationUrl,
+      redirectUrl: this.redirectUriValue,
+      state: this.stateValue,
     });
+    return parseOAuthCallbackUrl(
+      callbackUrl,
+      this.redirectUriValue,
+      this.stateValue,
+    );
+  }
+
+  private waitForAuthorizationCode(authorizationUrl: URL): Promise<string> {
+    const { promise, resolve, reject } = Promise.withResolvers<string>();
+    const server = createServer(
+      (request: IncomingMessage, response: ServerResponse) => {
+        try {
+          const callbackUrl = new URL(
+            request.url ?? '/',
+            this.redirectUriValue,
+          ).toString();
+          const code = parseOAuthCallbackUrl(
+            callbackUrl,
+            this.redirectUriValue,
+            this.stateValue,
+          );
+
+          response.writeHead(200, {
+            'content-type': 'text/html; charset=utf-8',
+          });
+          response.end(
+            '<html><body><h1>Authorization complete</h1><p>You can close this window.</p></body></html>',
+          );
+          server.close();
+          resolve(code);
+        } catch (error) {
+          response.writeHead(400, {
+            'content-type': 'text/html; charset=utf-8',
+          });
+          response.end(
+            '<html><body><h1>Authorization failed</h1><p>The OAuth response was rejected.</p></body></html>',
+          );
+          server.close();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      },
+    );
+
+    const timeout = setTimeout(() => {
+      server.close();
+      reject(new Error('Timed out waiting for OAuth authorization callback'));
+    }, AUTH_TIMEOUT_MS);
+
+    server.on('close', () => {
+      clearTimeout(timeout);
+    });
+    server.on('error', reject);
+    server.listen(this.port, '127.0.0.1', () => {
+      console.error('Opening browser for authorization...');
+      console.error(`${AUTH_URL_LOG_PREFIX}${authorizationUrl.toString()}`);
+      console.error(
+        'Remote browser? Stop this MCP client, run `allagents mcp auth <serverUrl>` in a terminal, then reconnect.',
+      );
+      // Test-only escape hatch: e2e tests fetch the URL themselves against a local
+      // dummy IdP, and skipping the real OS browser-open avoids ever launching one.
+      if (process.env.ALLAGENTS_MCP_OAUTH_NO_BROWSER === '1') {
+        console.error(
+          'Skipping automatic browser open (ALLAGENTS_MCP_OAUTH_NO_BROWSER=1).',
+        );
+      } else {
+        void tryOpenBrowser(authorizationUrl.toString());
+      }
+    });
+
+    return promise;
   }
 }
 
 async function buildOAuthProvider(
   serverUrl: string,
+  callbackUrlReader?: OAuthCallbackUrlReader,
 ): Promise<FileOAuthClientProvider> {
   const cacheDir = getCacheDir(serverUrl);
   const cachedClientInfo = await readJsonFile<OAuthClientInformationMixed>(
@@ -409,7 +528,11 @@ async function buildOAuthProvider(
     port = await findFreePort();
   }
 
-  const provider = new FileOAuthClientProvider(port, serverUrl);
+  const provider = new FileOAuthClientProvider(
+    port,
+    serverUrl,
+    callbackUrlReader,
+  );
   await provider.load();
   return provider;
 }
@@ -427,11 +550,17 @@ function parseCallToolResponse(
   };
 }
 
+interface RemoteConnection {
+  client: Client;
+  transport: StreamableHTTPClientTransport;
+}
+
 async function connectRemoteTransport(
   serverUrl: string,
   headers: Record<string, string>,
-): Promise<Client> {
-  const provider = await buildOAuthProvider(serverUrl);
+  callbackUrlReader?: OAuthCallbackUrlReader,
+): Promise<RemoteConnection> {
+  const provider = await buildOAuthProvider(serverUrl, callbackUrlReader);
   const client = new Client(
     {
       name: 'AllAgents',
@@ -441,10 +570,10 @@ async function connectRemoteTransport(
   );
 
   const buildTransport = () => {
-    const requestInit = getRequestInit(headers);
+    const mcpFetch = getMcpFetch(serverUrl, headers);
     return new StreamableHTTPClientTransport(new URL(serverUrl), {
       authProvider: provider,
-      ...(requestInit && { requestInit }),
+      ...(mcpFetch && { fetch: mcpFetch }),
     });
   };
 
@@ -462,14 +591,31 @@ async function connectRemoteTransport(
     await client.connect(transport as unknown as Transport);
   }
 
-  return client;
+  return { client, transport };
+}
+
+export async function runHttpMcpOAuthLogin(
+  serverUrl: string,
+  callbackUrlReader: OAuthCallbackUrlReader,
+  headers: Record<string, string> = {},
+): Promise<void> {
+  const { client, transport } = await connectRemoteTransport(
+    serverUrl,
+    headers,
+    callbackUrlReader,
+  );
+  try {
+    await transport.terminateSession();
+  } finally {
+    await client.close();
+  }
 }
 
 export async function runHttpMcpStdioProxy(
   serverUrl: string,
   headers: Record<string, string> = {},
 ): Promise<void> {
-  const remote = await connectRemoteTransport(serverUrl, headers);
+  const { client: remote } = await connectRemoteTransport(serverUrl, headers);
   const local = new Server(
     {
       name: 'AllAgents',

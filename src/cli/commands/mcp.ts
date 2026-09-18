@@ -1,3 +1,4 @@
+import { isCancel, password } from '@clack/prompts';
 import {
   array,
   command,
@@ -19,7 +20,11 @@ import {
   removeWorkspaceMcpServer,
   setWorkspaceMcpServerProxy,
 } from '../../core/mcp-servers.js';
-import { runHttpMcpStdioProxy } from '../../core/mcp-http-stdio-proxy.js';
+import {
+  validateOAuthCallbackUrl,
+  runHttpMcpOAuthLogin,
+  runHttpMcpStdioProxy,
+} from '../../core/mcp-http-stdio-proxy.js';
 import { syncMcpOnly } from '../../core/mcp-sync.js';
 import {
   type ClientType,
@@ -30,12 +35,14 @@ import { formatMcpResult } from '../format-sync.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import {
+  mcpAuthMeta,
   mcpAddMeta,
   mcpGetMeta,
   mcpListMeta,
   mcpRemoveMeta,
   mcpUpdateMeta,
 } from '../metadata/mcp.js';
+import { terminalSafe } from '../terminal-output.js';
 
 // =============================================================================
 // Helpers
@@ -63,7 +70,7 @@ function exitWithError(command: string, error: string): never {
   if (isJsonMode()) {
     jsonOutput({ success: false, command, error });
   } else {
-    console.error(`Error: ${error}`);
+    console.error(`Error: ${terminalSafe(error)}`);
   }
   process.exit(1);
 }
@@ -334,6 +341,76 @@ const mcpRemoveCmd = command({
 });
 
 // =============================================================================
+// mcp auth
+// =============================================================================
+
+const mcpAuthCmd = command({
+  name: 'auth',
+  description: buildDescription(mcpAuthMeta),
+  args: {
+    serverUrl: positional({ type: string, displayName: 'serverUrl' }),
+    header: addArgs.header,
+  },
+  handler: async ({ serverUrl, header }) => {
+    if (isJsonMode()) {
+      exitWithError('mcp auth', 'OAuth login requires an interactive terminal');
+    }
+    if (!process.stdin.isTTY) {
+      exitWithError('mcp auth', 'OAuth login requires an interactive terminal');
+    }
+
+    const headerResult = parseKeyValuePairs(header, '--header');
+    if ('error' in headerResult) {
+      exitWithError('mcp auth', headerResult.error);
+    }
+
+    try {
+      await runHttpMcpOAuthLogin(
+        serverUrl,
+        async ({ authorizationUrl, redirectUrl, state }) => {
+          console.log('Open this URL in any browser:');
+          console.log(authorizationUrl.toString());
+          console.log(
+            `After approval, copy the full ${redirectUrl} URL from the browser address bar.`,
+          );
+
+          const callbackUrl = await password({
+            message: 'Paste the full OAuth callback URL',
+            validate: (value) => {
+              if (!value) {
+                return 'OAuth callback URL is required';
+              }
+              try {
+                validateOAuthCallbackUrl(value, redirectUrl, state);
+                return undefined;
+              } catch (error) {
+                return error instanceof Error
+                  ? error.message
+                  : 'Invalid OAuth callback URL';
+              }
+            },
+          });
+          if (isCancel(callbackUrl)) {
+            throw new Error('OAuth authorization cancelled');
+          }
+          return callbackUrl;
+        },
+        headerResult.values,
+      );
+    } catch (error) {
+      exitWithError(
+        'mcp auth',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+
+    console.log(
+      `\u2713 OAuth authorization complete for ${terminalSafe(serverUrl)}`,
+    );
+  },
+});
+
+// =============================================================================
 // mcp proxy
 // =============================================================================
 
@@ -505,6 +582,7 @@ export const mcpCmd = conciseSubcommands({
   name: 'mcp',
   description: 'Manage MCP servers for AI clients',
   cmds: {
+    auth: mcpAuthCmd,
     add: mcpAddCmd,
     proxy: mcpProxyCmd,
     remove: mcpRemoveCmd,

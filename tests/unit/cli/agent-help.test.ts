@@ -178,6 +178,11 @@ describe('findMetaByCommand', () => {
     expect(meta!.command).toBe('status');
   });
 
+  test('resolves the interactive MCP OAuth command', () => {
+    const meta = findMetaByCommand('mcp auth https://mcp.tradingview.com/mcp');
+    expect(meta?.command).toBe('mcp auth');
+  });
+
   test('resolves deprecated "workspace status" alias to status meta', () => {
     const meta = findMetaByCommand('workspace status');
     expect(meta).toBeDefined();

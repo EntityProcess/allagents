@@ -17,6 +17,11 @@
 
 ### Added
 
+- Added the official TradingView MCP plugin with OAuth-backed access to market
+  data, analytics, watchlists, alerts, news, and screeners.
+- Added `allagents mcp auth` for OAuth login from headless or remote machines,
+  with interactive callback URL paste and strict redirect/state validation.
+
 - Pi and OMP as file-sync clients at project and user scope, including native
   runtime skill paths and agent instructions.
 - Native Pi package and OMP marketplace-plugin lifecycle support for install,

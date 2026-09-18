@@ -3,6 +3,7 @@ import {
   createServer,
   type IncomingMessage,
   type Server as HttpServer,
+  type IncomingHttpHeaders,
   type ServerResponse,
 } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -43,6 +44,9 @@ export interface DummyMcpOAuthServer {
   idpIssuer: string;
   readonly authorizeCallCount: number;
   readonly tokenCallCounts: { authorization_code: number; refresh_token: number };
+  readonly idpRequestHeaders: ReadonlyArray<IncomingHttpHeaders>;
+  readonly mcpRequestHeaders: ReadonlyArray<IncomingHttpHeaders>;
+  readonly activeSessionCount: number;
   stop(): Promise<void>;
 }
 
@@ -114,6 +118,8 @@ export async function startDummyMcpOAuthServer(
     authorizeCallCount: 0,
     tokenCallCounts: { authorization_code: 0, refresh_token: 0 },
   };
+  const idpRequestHeaders: IncomingHttpHeaders[] = [];
+  const mcpRequestHeaders: IncomingHttpHeaders[] = [];
 
   let idpIssuer = '';
   let mcpUrl = '';
@@ -126,6 +132,7 @@ export async function startDummyMcpOAuthServer(
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
+    idpRequestHeaders.push({ ...req.headers });
     const url = new URL(req.url ?? '/', idpIssuer);
 
     if (req.method === 'GET' && url.pathname === '/.well-known/oauth-authorization-server') {
@@ -308,6 +315,7 @@ export async function startDummyMcpOAuthServer(
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
+    mcpRequestHeaders.push({ ...req.headers });
     const url = new URL(req.url ?? '/', mcpUrl);
 
     if (req.method === 'GET' && url.pathname === '/.well-known/oauth-protected-resource') {
@@ -362,6 +370,15 @@ export async function startDummyMcpOAuthServer(
     },
     get tokenCallCounts() {
       return counters.tokenCallCounts;
+    },
+    get idpRequestHeaders() {
+      return idpRequestHeaders;
+    },
+    get mcpRequestHeaders() {
+      return mcpRequestHeaders;
+    },
+    get activeSessionCount() {
+      return sessions.size;
     },
     async stop() {
       await Promise.all([...sessions.values()].map((transport) => transport.close()));

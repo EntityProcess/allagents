@@ -11,6 +11,11 @@
       "name": "deepwiki",
       "description": "AI-generated documentation for GitHub repositories",
       "source": "./plugins/deepwiki"
+    },
+    {
+      "name": "tradingview",
+      "description": "Official TradingView market data and analytics",
+      "source": "./plugins/tradingview"
     }
   ]
 }

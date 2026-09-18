@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hashServerUrl } from '../../src/core/mcp-http-stdio-proxy.ts';
+import {
+  hashServerUrl,
+  runHttpMcpOAuthLogin,
+} from '../../src/core/mcp-http-stdio-proxy.ts';
 import {
   type DummyMcpOAuthServer,
   FIXTURE_ANSWER,
@@ -80,6 +83,52 @@ describe('mcp proxy OAuth e2e', () => {
       expect(tokens.access_token).toBeTruthy();
     } finally {
       await connection.close();
+    }
+  }, 15000);
+
+  test('completes OAuth from a callback URL pasted on a headless host', async () => {
+    dummy = await startDummyMcpOAuthServer();
+    const previousTestHome = process.env.ALLAGENTS_TEST_HOME;
+    process.env.ALLAGENTS_TEST_HOME = homeDir;
+
+    try {
+      const resourceSecret = 'resource-server-only';
+      await runHttpMcpOAuthLogin(
+        dummy.mcpUrl,
+        async ({ authorizationUrl }) => {
+          const response = await fetch(authorizationUrl, {
+            redirect: 'manual',
+          });
+          expect(response.status).toBe(302);
+          const location = response.headers.get('location');
+          expect(location).toBeTruthy();
+          return new URL(location!, authorizationUrl).toString();
+        },
+        { 'x-resource-secret': resourceSecret },
+      );
+
+      expect(dummy.authorizeCallCount).toBe(1);
+      expect(dummy.tokenCallCounts.authorization_code).toBe(1);
+      expect(
+        dummy.mcpRequestHeaders.some(
+          (headers) => headers['x-resource-secret'] === resourceSecret,
+        ),
+      ).toBe(true);
+      expect(
+        dummy.idpRequestHeaders.every(
+          (headers) => headers['x-resource-secret'] === undefined,
+        ),
+      ).toBe(true);
+      expect(dummy.activeSessionCount).toBe(0);
+      const connection = await connectAndAutoAuthorize(dummy.mcpUrl, homeDir);
+      await connection.close();
+      expect(dummy.authorizeCallCount).toBe(1);
+    } finally {
+      if (previousTestHome === undefined) {
+        delete process.env.ALLAGENTS_TEST_HOME;
+      } else {
+        process.env.ALLAGENTS_TEST_HOME = previousTestHome;
+      }
     }
   }, 15000);
 

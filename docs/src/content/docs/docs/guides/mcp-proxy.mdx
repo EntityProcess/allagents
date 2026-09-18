@@ -143,7 +143,7 @@ Per-server `proxy` lists are additive — they extend the default `clients`, not
 
 ## OAuth & Token Cache
 
-The first time `allagents mcp proxy <url>` connects to a server that requires OAuth, it runs the standard authorization-code + PKCE flow: it registers a client with the server's authorization server (or reuses a cached registration), opens your browser to complete the login, and exchanges the resulting code for tokens.
+The first time `allagents mcp proxy <url>` connects to a server that requires OAuth, it runs the standard authorization-code + PKCE flow: it registers a client with the server's authorization server (or reuses a cached registration), opens your browser to complete the login, and exchanges the resulting code for tokens. On a headless or remote machine, authorize first with `allagents mcp auth <url>`.
 
 Client registration, tokens, and discovery metadata are cached per server under:
 
@@ -156,6 +156,26 @@ Client registration, tokens, and discovery metadata are cached per server under:
 ```
 
 Later connections reuse this cache — no browser prompt — and an expired access token is refreshed automatically using the cached refresh token, still without reopening a browser. If you ever need to force a fresh login for a specific server (e.g. a revoked token), delete that server's subdirectory and reconnect.
+
+### Headless or Remote Browser Login
+
+When the browser is on another device, its redirect to `127.0.0.1` cannot
+reach the AllAgents process. Run the interactive login directly:
+
+```bash
+allagents mcp auth https://mcp.tradingview.com/mcp
+```
+
+Open the printed authorization URL on any device. After approval, the browser
+may show that the loopback page cannot be reached; copy the complete callback
+URL from the address bar and paste it into the AllAgents prompt. AllAgents
+accepts only the registered loopback address with the exact OAuth state, then
+stores the resulting credentials in the same per-server cache used by
+`mcp proxy`. Restart or reconnect the MCP client afterward.
+
+Only clients selected by `mcpProxy` use this cache. Clients synced with a native
+HTTP configuration continue to use their own OAuth flow, so configure the
+target client for proxying before running `mcp auth`.
 
 ## Prerequisites
 
