@@ -8,6 +8,7 @@ import {
   rm,
   stat,
   symlink,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -1290,7 +1291,7 @@ describe('profile lifecycle manager', () => {
     expect(await readFile(externalToken, 'utf8')).toBe('keep');
     expect((await stat(join(profileRoot, 'state.json'))).isFile()).toBe(true);
 
-    await rm(oauthRoot, { force: true });
+    await unlink(oauthRoot);
     const retry = await planProfileOperation(
       'work',
       'remove',
