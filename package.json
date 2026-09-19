@@ -73,7 +73,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.5.13",
     "@types/bun": "1.4.2",
     "@types/js-yaml": "^4.0.9",
     "@types/micromatch": "^4.0.10",
