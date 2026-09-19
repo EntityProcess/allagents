@@ -12,6 +12,13 @@
   **Migration**: Remove `--proxy` from `mcp add` calls. Replace
   `allagents mcp auth <url>` with `allagents mcp reauth <configured-name>`.
 
+- **Structured CLI help**: Replaced the agent-specific `--agent-help` flag with
+  composable `--help --json` output at the root, command-group, and individual
+  command levels.
+
+  **Migration**: Replace `allagents --agent-help <command>` with
+  `allagents <command> --help --json`.
+
 - **Plugin Git ref terminology**: Renamed workspace plugin `pin` to `ref`, CLI
   `--pin` to `--ref`, and sync-state `pinnedRef` to `requestedRef`. Inline
   `owner/repo@ref` sources are unchanged.

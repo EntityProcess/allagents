@@ -3,6 +3,22 @@ title: CLI Commands
 description: Complete reference for AllAgents CLI commands.
 ---
 
+## Structured Help
+
+Add `--json` to any help invocation to return machine-readable command
+metadata instead of terminal-formatted help:
+
+```bash
+allagents --help --json
+allagents mcp --help --json
+allagents mcp add --help --json
+```
+
+Structured help includes usage guidance, options, examples, output schemas, and
+interaction requirements when available. `--help --json` and
+`--json --help` are equivalent when they follow the command path.
+Field selection with `--json=<fields>` is not supported for help output.
+
 ## Top-Level Commands
 
 ```bash
