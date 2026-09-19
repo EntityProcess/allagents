@@ -61,7 +61,7 @@
     "@clack/prompts": "^1.8.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "chalk": "^4.1.2",
-    "cmd-ts": "^0.14.3",
+    "cmd-ts": "^0.15.0",
     "execa": "^8.0.1",
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
@@ -78,7 +78,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/micromatch": "^4.0.10",
     "@types/node": "^22.0.0",
-    "ajv": "8.18.0",
+    "ajv": "8.20.0",
     "shx": "^0.4.0",
     "typescript": "^5.9.3",
     "zod-to-json-schema": "3.25.2"
