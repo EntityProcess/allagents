@@ -46,7 +46,6 @@
     "types": ["bun-types"],
 
     // Path mapping
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
