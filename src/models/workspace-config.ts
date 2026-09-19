@@ -390,7 +390,7 @@ export const ProfileSecretReferenceSchema = z
   .string()
   .regex(
     PROFILE_SECRET_REFERENCE_PATTERN,
-    'Expected an exact ${ENV_VAR} reference',
+    `Expected an exact \${ENV_VAR} reference`,
   );
 
 /**
@@ -639,7 +639,7 @@ const ProfileMcpArgumentsSchema = z.array(z.string()).superRefine(
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [index],
-        message: 'Secret arguments must be exact ${ENV_VAR} references',
+        message: `Secret arguments must be exact \${ENV_VAR} references`,
       });
     };
 

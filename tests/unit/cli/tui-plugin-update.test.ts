@@ -3,6 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { dump } from 'js-yaml';
+import {
+  resetUpdatePromptMocks,
+  updateNoteMock as noteMock,
+  updateSelectMock as selectMock,
+  updateSelectResponses as selectResponses,
+} from '../../helpers/clack-prompts-mock.js';
 import { getPluginCachePath } from '../../../src/utils/plugin-path.js';
 import {
   addMarketplace,
@@ -10,25 +16,6 @@ import {
 } from '../../../src/core/marketplace.js';
 import { TuiCache } from '../../../src/cli/tui/cache.js';
 
-const noteMock = mock((_message: string, _title?: string) => {});
-const spinner = {
-  start: mock((_message?: string) => {}),
-  message: mock((_message?: string) => {}),
-  stop: mock((_message?: string) => {}),
-};
-const selectResponses: string[] = [];
-const selectMock = mock(async () => selectResponses.shift() ?? '__back__');
-
-mock.module('@clack/prompts', () => ({
-  autocomplete: mock(async () => ''),
-  confirm: mock(async () => false),
-  isCancel: () => false,
-  multiselect: mock(async () => []),
-  note: noteMock,
-  select: selectMock,
-  spinner: () => spinner,
-  text: mock(async () => ''),
-}));
 
 // The prompt module must be mocked before loading the TUI action.
 const { runBrowseMarketplaces, runPlugins, runUpdateAllPlugins } = await import(
@@ -219,12 +206,7 @@ function restoreEnvironment(): void {
 
 afterEach(() => {
   restoreEnvironment();
-  noteMock.mockClear();
-  spinner.start.mockClear();
-  spinner.message.mockClear();
-  spinner.stop.mockClear();
-  selectResponses.length = 0;
-  selectMock.mockClear();
+  resetUpdatePromptMocks();
 });
 
 async function countGitCommands(

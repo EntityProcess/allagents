@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { stubHomeDir } from '../../helpers/env.js';
@@ -8,6 +8,28 @@ import { stubHomeDir } from '../../helpers/env.js';
 const pullCalls: Array<{ path: string }> = [];
 const simpleGitCalls: Array<{ method: string; args: unknown[] }> = [];
 let pullShouldFail = false;
+
+function defaultCloneTo(_url: string, path: string) {
+  mkdirSync(path, { recursive: true });
+  return Promise.resolve();
+}
+
+function materializeMarketplaceClone(name: string) {
+  return (_url: string, path: string) => {
+    mkdirSync(join(path, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(path, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name,
+        plugins: [{ name: 'my-plugin', source: './plugins/my-plugin' }],
+      }),
+    );
+    mkdirSync(join(path, 'plugins', 'my-plugin'), { recursive: true });
+    return Promise.resolve();
+  };
+}
+
+const cloneToMock = mock(defaultCloneTo);
 
 function createMockGit() {
   return {
@@ -38,10 +60,7 @@ mock.module('../../../src/core/git.js', () => ({
     if (pullShouldFail) return Promise.reject(new Error('network timeout'));
     return Promise.resolve();
   }),
-  cloneTo: mock((_url: string, path: string) => {
-    mkdirSync(path, { recursive: true });
-    return Promise.resolve();
-  }),
+  cloneTo: cloneToMock,
   cloneToTemp: mock(() => Promise.resolve('/tmp/fake')),
   gitHubUrl: (owner: string, repo: string) =>
     `https://github.com/${owner}/${repo}.git`,
@@ -62,8 +81,12 @@ mock.module('../../../src/core/git.js', () => ({
 
 const {
   resolvePluginSpecWithAutoRegister,
+  resetAutoRegisterCache,
   resetUpdatedMarketplaceCache,
 } = await import('../../../src/core/marketplace.js');
+const { resolveMarketplacePluginDeclaration } = await import(
+  '../../../src/core/workspace-modify.js'
+);
 
 describe('resolvePluginSpecWithAutoRegister auto-updates marketplace', () => {
   let restoreHomeDir: () => void;
@@ -76,6 +99,9 @@ describe('resolvePluginSpecWithAutoRegister auto-updates marketplace', () => {
     simpleGitCalls.length = 0;
     pullShouldFail = false;
     resetUpdatedMarketplaceCache();
+    resetAutoRegisterCache();
+    cloneToMock.mockClear();
+    cloneToMock.mockImplementation(defaultCloneTo);
   });
 
   afterEach(() => {
@@ -273,20 +299,7 @@ describe('resolvePluginSpecWithAutoRegister auto-updates marketplace', () => {
 
     // The auto-register path will clone the marketplace. We need the cloned
     // directory to contain the plugin so resolution succeeds.
-    const gitMod = await import('../../../src/core/git.js');
-    const cloneToMock = gitMod.cloneTo as ReturnType<typeof mock>;
-    cloneToMock.mockImplementation((_url: string, path: string) => {
-      mkdirSync(join(path, '.claude-plugin'), { recursive: true });
-      writeFileSync(
-        join(path, '.claude-plugin', 'marketplace.json'),
-        JSON.stringify({
-          name: 'fresh-mp',
-          plugins: [{ name: 'my-plugin', source: './plugins/my-plugin' }],
-        }),
-      );
-      mkdirSync(join(path, 'plugins', 'my-plugin'), { recursive: true });
-      return Promise.resolve();
-    });
+    cloneToMock.mockImplementation(materializeMarketplaceClone('fresh-mp'));
 
     const result = await resolvePluginSpecWithAutoRegister(
       'my-plugin@owner/fresh-mp',
@@ -295,5 +308,83 @@ describe('resolvePluginSpecWithAutoRegister auto-updates marketplace', () => {
     expect(result.success).toBe(true);
     // No pull should have happened — marketplace was just cloned fresh
     expect(pullCalls.length).toBe(0);
+  });
+
+  it('normalizes and auto-registers a GitHub marketplace URL in a plugin spec', async () => {
+    const registryDir = join(testHome, '.allagents');
+    mkdirSync(registryDir, { recursive: true });
+    writeFileSync(
+      join(registryDir, 'marketplaces.json'),
+      JSON.stringify({ version: 1, marketplaces: {} }, null, 2),
+    );
+    cloneToMock.mockImplementation(materializeMarketplaceClone('url-mp'));
+
+    const result = await resolvePluginSpecWithAutoRegister(
+      'my-plugin@https://github.com/owner/url-mp',
+    );
+    expect(result).toMatchObject({
+      success: true,
+      pluginName: 'my-plugin',
+      registeredAs: 'url-mp',
+    });
+
+    const shorthandResult = await resolvePluginSpecWithAutoRegister(
+      'my-plugin@owner/url-mp',
+    );
+    expect(shorthandResult.success).toBe(true);
+
+    const declarationResult = await resolveMarketplacePluginDeclaration({
+      source: 'my-plugin@https://github.com/owner/url-mp',
+      clients: ['omp'],
+      skills: ['one'],
+    });
+    expect(declarationResult).toEqual({
+      success: true,
+      declaration: {
+        source: 'my-plugin@url-mp',
+        clients: ['omp'],
+        skills: ['one'],
+      },
+      registeredAs: 'url-mp',
+    });
+    expect(cloneToMock).toHaveBeenCalledTimes(1);
+    expect(pullCalls).toHaveLength(0);
+    expect(
+      JSON.parse(
+        readFileSync(join(registryDir, 'marketplaces.json'), 'utf8'),
+      ).marketplaces['url-mp'].source,
+    ).toEqual({ type: 'github', location: 'owner/url-mp' });
+  });
+
+  it('does not reuse a same-name marketplace from a different source', async () => {
+    const existingPath = setupMarketplace('url-mp', [
+      { name: 'my-plugin', source: './plugins/my-plugin' },
+    ]);
+    setupRegistry({
+      'url-mp': {
+        name: 'url-mp',
+        source: { type: 'github', location: 'other/url-mp' },
+        path: existingPath,
+        lastUpdated: new Date().toISOString(),
+      },
+    });
+    cloneToMock.mockImplementation(materializeMarketplaceClone('url-mp'));
+
+    const result = await resolvePluginSpecWithAutoRegister(
+      'my-plugin@https://github.com/owner/url-mp',
+    );
+
+    expect(result.success).toBe(true);
+    expect(cloneToMock).toHaveBeenCalledTimes(1);
+    const registry = JSON.parse(
+      readFileSync(
+        join(testHome, '.allagents', 'marketplaces.json'),
+        'utf8',
+      ),
+    );
+    expect(registry.marketplaces['url-mp'].source).toEqual({
+      type: 'github',
+      location: 'owner/url-mp',
+    });
   });
 });

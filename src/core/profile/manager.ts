@@ -848,7 +848,7 @@ export async function getProfileStatus(
   let unsupported: string | undefined;
   for (const client of clients) {
     const adapter = (dependencies.getAdapter ?? getProfileAdapter)(client);
-    if (!adapter || !adapter.capabilities.status) {
+    if (!adapter?.capabilities.status) {
       unsupported = `Profile client '${client}' is unsupported`;
       continue;
     }

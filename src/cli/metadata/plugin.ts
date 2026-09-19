@@ -160,22 +160,24 @@ export const pluginValidateMeta: AgentCommandMeta = {
 
 export const pluginInstallMeta: AgentCommandMeta = {
   command: 'plugin install',
-  description: 'Install a file plugin or ordinary Pi/OMP native resource. Use --scope user for user-level install.',
+  description: 'Install a file plugin or ordinary Pi/OMP native resource with an explicit scope and client target.',
   whenToUse:
-    'To add a plugin declaration and sync it after native source, runtime, scope, trust, and live inventory preflight succeeds',
+    'To review or explicitly select a plugin installation target before native preflight, declaration write, and sync',
   examples: [
     'allagents plugin install my-plugin@official',
-    'allagents plugin install npm:pi-extension --scope user',
-    'allagents plugin install my-plugin@official --scope user',
+    'allagents plugin install npm:pi-extension --scope user --client pi --yes',
+    'allagents plugin install my-plugin@official --scope project --client claude,codex',
   ],
   expectedOutput:
-    'Fails before declaration edits or fetching when native preflight is invalid; otherwise reports the declaration and typed file/native sync outcomes.',
+    'Interactive human installs summarize and confirm the target; automation preserves the existing JSON and success output.',
   positionals: [
     { name: 'plugin', type: 'string', required: true, description: 'Plugin identifier (plugin@marketplace, GitHub URL, or local path)' },
   ],
   options: [
     { flag: '--scope', short: '-s', type: 'string', description: 'Installation scope: "project" (default) or "user"' },
-    { flag: '--force', short: '-f', type: 'boolean', description: 'Replace plugin if it already exists' },
+    { flag: '--client', short: '-c', type: 'string', description: 'Comma-separated clients for this plugin' },
+    { flag: '--yes', short: '-y', type: 'boolean', description: 'Skip final install confirmation' },
+    { flag: '--skill', type: 'string', description: 'Only enable a specific skill (repeatable)' },
   ],
   outputSchema: {
     plugin: 'string',

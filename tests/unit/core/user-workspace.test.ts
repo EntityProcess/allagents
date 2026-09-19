@@ -1,9 +1,29 @@
-import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import { mkdtemp, rm, readFile, mkdir, writeFile } from 'node:fs/promises';
+import {
+  describe,
+  expect,
+  test,
+  beforeEach,
+  afterEach,
+  spyOn,
+} from 'bun:test';
+import { existsSync } from 'node:fs';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { dump, load } from 'js-yaml';
+import type { WorkspaceConfig } from '../../../src/models/workspace-config.js';
 import {
   addUserPlugin,
+  addUserPluginForTarget,
   removeUserPlugin,
   getUserWorkspaceConfig,
   ensureUserWorkspace,
@@ -12,6 +32,7 @@ import {
   getInstalledProjectPlugins,
   setUserClients,
 } from '../../../src/core/user-workspace.js';
+import * as git from '../../../src/core/git.js';
 import { stubHomeDir } from '../../helpers/env.js';
 
 describe('user-workspace', () => {
@@ -183,6 +204,213 @@ describe('user-workspace', () => {
 
       const config = await getUserWorkspaceConfig();
       expect(config?.plugins ?? []).toEqual([]);
+    });
+  });
+
+  describe('addUserPluginForTarget', () => {
+    test('initializes a first config with selected clients and inherited string declaration', async () => {
+      const pluginDir = join(tempHome, 'target-plugin');
+      await mkdir(pluginDir, { recursive: true });
+
+      const result = await addUserPluginForTarget({
+        declaration: pluginDir,
+        clients: ['codex', 'cursor'],
+      });
+
+      expect(result.success).toBe(true);
+      const config = await getUserWorkspaceConfig();
+      expect(config?.clients).toEqual(['codex', 'cursor']);
+      expect(config?.plugins).toEqual([pluginDir]);
+    });
+
+    test('does not publish a first config when atomic staging fails', async () => {
+      const pluginDir = join(tempHome, 'target-plugin');
+      await mkdir(pluginDir, { recursive: true });
+      const configPath = getUserWorkspaceConfigPath();
+
+      const result = await addUserPluginForTarget(
+        { declaration: pluginDir, clients: ['codex', 'cursor'] },
+        {
+          beforeRename() {
+            throw new Error('injected first user write failure');
+          },
+        },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('injected first user write failure');
+      expect(existsSync(configPath)).toBe(false);
+      expect(await readdir(join(tempHome, '.allagents'))).toEqual([]);
+    });
+
+    test('persists a native-only declaration without treating its source as a local path', async () => {
+      const result = await addUserPluginForTarget({
+        declaration: { source: 'npm:pi-extension', install: 'native' },
+        clients: ['pi'],
+        sourceValidation: 'declaration',
+      });
+
+      expect(result.success).toBe(true);
+      const config = await getUserWorkspaceConfig();
+      expect(config?.clients).toEqual(['pi']);
+      expect(config?.plugins).toEqual([
+        { source: 'npm:pi-extension', install: 'native' },
+      ]);
+    });
+
+    test('stores an override without changing top-level clients or unrelated declarations', async () => {
+      const pluginDir = join(tempHome, 'target-plugin');
+      await mkdir(pluginDir, { recursive: true });
+      const configPath = getUserWorkspaceConfigPath();
+      await mkdir(join(tempHome, '.allagents'), { recursive: true });
+      const initial = {
+        repositories: [],
+        clients: ['codex'],
+        plugins: ['../keep'],
+      };
+      await writeFile(configPath, dump(initial, { lineWidth: -1 }), 'utf-8');
+
+      const result = await addUserPluginForTarget({
+        declaration: { source: pluginDir, clients: ['cursor'] },
+        clients: ['cursor'],
+      });
+
+      expect(result.success).toBe(true);
+      const config = load(
+        await readFile(configPath, 'utf-8'),
+      ) as WorkspaceConfig;
+      expect(config.clients).toEqual(initial.clients);
+      expect(config.plugins).toEqual([
+        '../keep',
+        { source: pluginDir, clients: ['cursor'] },
+      ]);
+    });
+
+    test('preserves object fields and clears clients on inherited reinstall', async () => {
+      const pluginDir = join(tempHome, 'target-plugin');
+      await mkdir(pluginDir, { recursive: true });
+      const configPath = getUserWorkspaceConfigPath();
+      await mkdir(join(tempHome, '.allagents'), { recursive: true });
+      await writeFile(
+        configPath,
+        dump({
+          repositories: [],
+          clients: ['codex'],
+          plugins: [
+            {
+              source: pluginDir,
+              clients: ['cursor'],
+              skills: ['public'],
+              install: 'native',
+              exclude: ['fixtures/**'],
+              ref: 'stable',
+            },
+            '../keep',
+          ],
+        }),
+        'utf-8',
+      );
+
+      const result = await addUserPluginForTarget({
+        declaration: pluginDir,
+        clients: ['codex'],
+      });
+
+      expect(result.success).toBe(true);
+      const config = load(
+        await readFile(configPath, 'utf-8'),
+      ) as WorkspaceConfig;
+      expect(config.clients).toEqual(['codex']);
+      expect(config.plugins).toEqual([
+        {
+          source: pluginDir,
+          skills: ['public'],
+          install: 'native',
+          exclude: ['fixtures/**'],
+          ref: 'stable',
+        },
+        '../keep',
+      ]);
+    });
+
+    test('replaces a semantic match in place and preserves object fields', async () => {
+      const repoExists = spyOn(git, 'repoExists').mockResolvedValue(true);
+      try {
+        const configPath = getUserWorkspaceConfigPath();
+        await mkdir(join(tempHome, '.allagents'), { recursive: true });
+        await writeFile(
+          configPath,
+          dump({
+            repositories: [],
+            clients: ['codex'],
+            plugins: [
+              {
+                source: 'https://github.com/owner/repo',
+                skills: { exclude: ['private'] },
+                install: 'native',
+                ref: 'stable',
+              },
+              'https://github.com/other/keep',
+            ],
+          }),
+          'utf-8',
+        );
+
+        const result = await addUserPluginForTarget({
+          declaration: {
+            source: 'https://github.com/owner/repo.git',
+            clients: ['cursor'],
+          },
+          clients: ['cursor'],
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.replaced).toBe(true);
+        const config = load(
+          await readFile(configPath, 'utf-8'),
+        ) as WorkspaceConfig;
+        expect(config.clients).toEqual(['codex']);
+        expect(config.plugins).toEqual([
+          {
+            source: 'https://github.com/owner/repo.git',
+            skills: { exclude: ['private'] },
+            install: 'native',
+            ref: 'stable',
+            clients: ['cursor'],
+          },
+          'https://github.com/other/keep',
+        ]);
+      } finally {
+        repoExists.mockRestore();
+      }
+    });
+
+    test('leaves original bytes and mode intact and removes the temp file on pre-rename failure', async () => {
+      const pluginDir = join(tempHome, 'target-plugin');
+      await mkdir(pluginDir, { recursive: true });
+      const configPath = getUserWorkspaceConfigPath();
+      await mkdir(join(tempHome, '.allagents'), { recursive: true });
+      const original =
+        'repositories: []\nplugins:\n  - ../keep\nclients:\n  - codex\n';
+      await writeFile(configPath, original, 'utf-8');
+      await chmod(configPath, 0o640);
+
+      const result = await addUserPluginForTarget(
+        { declaration: pluginDir, clients: ['codex'] },
+        {
+          beforeRename() {
+            throw new Error('injected user pre-rename failure');
+          },
+        },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('injected user pre-rename failure');
+      expect(await readFile(configPath, 'utf-8')).toBe(original);
+      expect((await stat(configPath)).mode & 0o777).toBe(0o640);
+      expect(await readdir(join(tempHome, '.allagents'))).toEqual([
+        'workspace.yaml',
+      ]);
     });
   });
 

@@ -5,6 +5,7 @@ import { dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   ClientEntry,
+  ClientType,
   PluginEntry,
   UserWorkspaceConfig,
   WorkspaceConfig,
@@ -23,20 +24,21 @@ import {
 } from '../utils/plugin-path.js';
 import { loadYaml } from '../utils/yaml.js';
 import { getAllagentsDir } from './marketplace.js';
-import {
-  isPluginSpec,
-  parsePluginSpec,
-  resolvePluginSpecWithAutoRegister,
-} from './marketplace.js';
+import { isPluginSpec, parsePluginSpec } from './marketplace.js';
 import {
   type ModifyResult,
+  type PluginInstallTarget,
+  type TargetedPluginWriteDependencies,
   ensureObjectPluginEntry,
   extractPluginNames,
   findPluginEntryByName,
+  mergeTargetedPluginEntry,
   pruneDisabledSkillsForPlugin,
+  resolveMarketplacePluginDeclaration,
   pruneEnabledSkillsForPlugin,
   resolveGitHubIdentity,
   upsertGitHubPluginSourceAllowlistInConfig,
+  writeWorkspaceConfigAtomically,
 } from './workspace-modify.js';
 import { parseUserWorkspaceConfigForEdit } from '../utils/workspace-parser.js';
 
@@ -82,7 +84,9 @@ export function isUserConfigPath(workspacePath: string): boolean {
  * Ensure user-level workspace.yaml exists with default config.
  * Creates it if missing, does not overwrite existing.
  */
-export async function ensureUserWorkspace(clients?: ClientEntry[]): Promise<void> {
+export async function ensureUserWorkspace(
+  clients?: ClientEntry[],
+): Promise<void> {
   const configPath = getUserWorkspaceConfigPath();
   if (existsSync(configPath)) return;
 
@@ -123,27 +127,71 @@ export async function addUserPlugin(
   plugin: string,
   force?: boolean,
 ): Promise<ModifyResult> {
-  await ensureUserWorkspace();
-  const configPath = getUserWorkspaceConfigPath();
+  return addValidatedUserPlugin(plugin, force);
+}
 
-  // Handle plugin@marketplace format
-  if (isPluginSpec(plugin)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(plugin);
-    if (!resolved.success) {
-      return { success: false, error: resolved.error || 'Unknown error' };
-    }
-    const normalizedPlugin = resolved.registeredAs
-      ? plugin.replace(/@[^@]+$/, `@${resolved.registeredAs}`)
-      : plugin;
+/**
+ * User-scope counterpart to addPluginForTarget.
+ */
+export async function addUserPluginForTarget(
+  target: PluginInstallTarget,
+  dependencies: TargetedPluginWriteDependencies = {},
+): Promise<ModifyResult> {
+  return addValidatedUserPlugin(
+    target.declaration,
+    true,
+    target.clients,
+    target.sourceValidation,
+    dependencies,
+  );
+}
+
+async function addValidatedUserPlugin(
+  declaration: PluginEntry,
+  force?: boolean,
+  initialClients?: readonly ClientType[],
+  sourceValidation: 'standard' | 'declaration' = 'standard',
+  dependencies?: TargetedPluginWriteDependencies,
+): Promise<ModifyResult> {
+  const plugin = getPluginSource(declaration);
+  const configPath = getUserWorkspaceConfigPath();
+  const initialConfig =
+    dependencies !== undefined && !existsSync(configPath)
+      ? {
+          repositories: [],
+          plugins: [],
+          clients: initialClients
+            ? [...initialClients]
+            : [...DEFAULT_USER_CLIENTS],
+        }
+      : undefined;
+  if (dependencies === undefined) await ensureUserWorkspace();
+
+  if (sourceValidation === 'declaration') {
     return addPluginToUserConfig(
-      normalizedPlugin,
+      declaration,
+      configPath,
+      undefined,
+      force,
+      dependencies,
+      initialConfig,
+    );
+  }
+  if (isPluginSpec(plugin)) {
+    const resolved = await resolveMarketplacePluginDeclaration(declaration);
+    if (!resolved.success) {
+      return resolved;
+    }
+    return addPluginToUserConfig(
+      resolved.declaration,
       configPath,
       resolved.registeredAs,
       force,
+      dependencies,
+      initialConfig,
     );
   }
 
-  // Handle GitHub URL
   if (isGitHubUrl(plugin)) {
     const validation = validatePluginSource(plugin);
     if (!validation.valid) {
@@ -160,7 +208,6 @@ export async function addUserPlugin(
       };
     }
   } else {
-    // Local path - verify it exists
     if (!existsSync(plugin)) {
       return {
         success: false,
@@ -175,7 +222,14 @@ export async function addUserPlugin(
     }
   }
 
-  return addPluginToUserConfig(plugin, configPath, undefined, force);
+  return addPluginToUserConfig(
+    declaration,
+    configPath,
+    undefined,
+    force,
+    dependencies,
+    initialConfig,
+  );
 }
 
 /**
@@ -302,65 +356,96 @@ export async function removeUserPluginsForMarketplace(
  * Add plugin entry to the user-level config file.
  */
 async function addPluginToUserConfig(
-  plugin: string,
+  plugin: PluginEntry,
   configPath: string,
   autoRegistered?: string,
   force?: boolean,
+  targetedDependencies?: TargetedPluginWriteDependencies,
+  initialConfig?: WorkspaceConfig,
 ): Promise<ModifyResult> {
   try {
-    const config = await parseUserWorkspaceConfigForEdit(configPath);
-
-    // Check for exact match
+    const config =
+      initialConfig ?? (await parseUserWorkspaceConfigForEdit(configPath));
+    const source = getPluginSource(plugin);
     const exactIndex = config.plugins.findIndex(
-      (entry) => getPluginSource(entry) === plugin,
+      (entry) => getPluginSource(entry) === source,
     );
-    if (exactIndex !== -1) {
-      if (!force) {
-        return {
-          success: false,
-          error: `Plugin already exists in user config: ${plugin}`,
-        };
-      }
-      // Force: remove the old one before adding the new one
-      config.plugins.splice(exactIndex, 1);
+    if (exactIndex !== -1 && !force) {
+      return {
+        success: false,
+        error: `Plugin already exists in user config: ${source}`,
+      };
     }
 
-    // Check for semantic duplicates (different strings resolving to same repo)
-    const newIdentity = await resolveGitHubIdentity(plugin);
+    let semanticIndex = -1;
+    const newIdentity = await resolveGitHubIdentity(source);
     if (newIdentity) {
-      let semanticIndex = -1;
       for (let i = 0; i < config.plugins.length; i++) {
+        if (i === exactIndex) continue;
         const existing = config.plugins[i];
         if (!existing) continue;
-        const existingSource = getPluginSource(existing);
-        const existingIdentity = await resolveGitHubIdentity(existingSource);
-        if (existingIdentity === newIdentity) {
+        if (
+          (await resolveGitHubIdentity(getPluginSource(existing))) ===
+          newIdentity
+        ) {
           semanticIndex = i;
           break;
         }
       }
-      if (semanticIndex !== -1) {
-        if (!force) {
-          const existingSource = getPluginSource(
-            config.plugins[semanticIndex] as PluginEntry,
-          );
-          return {
-            success: false,
-            error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
-          };
-        }
-        // Force: remove the semantic duplicate
-        config.plugins.splice(semanticIndex, 1);
-      }
     }
 
-    config.plugins.push(plugin);
-    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    if (semanticIndex !== -1 && !force) {
+      const existingSource = getPluginSource(
+        config.plugins[semanticIndex] as PluginEntry,
+      );
+      return {
+        success: false,
+        error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
+      };
+    }
+
+    let targetedReplaceIndex = -1;
+    if (targetedDependencies !== undefined) {
+      targetedReplaceIndex = exactIndex !== -1 ? exactIndex : semanticIndex;
+      const nextEntry = mergeTargetedPluginEntry(
+        targetedReplaceIndex === -1
+          ? undefined
+          : config.plugins[targetedReplaceIndex],
+        plugin,
+        source,
+        config.clients,
+      );
+      if (targetedReplaceIndex === -1) config.plugins.push(nextEntry);
+      else config.plugins[targetedReplaceIndex] = nextEntry;
+      await writeWorkspaceConfigAtomically(
+        configPath,
+        config,
+        'user',
+        targetedDependencies,
+      );
+    } else {
+      if (exactIndex !== -1) config.plugins.splice(exactIndex, 1);
+      const adjustedSemanticIndex =
+        exactIndex !== -1 && semanticIndex > exactIndex
+          ? semanticIndex - 1
+          : semanticIndex;
+      if (adjustedSemanticIndex !== -1) {
+        config.plugins.splice(adjustedSemanticIndex, 1);
+      }
+      config.plugins.push(plugin);
+      await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    }
+
     return {
       success: true,
       ...(autoRegistered && { autoRegistered }),
-      normalizedPlugin: plugin,
-      ...(force && { replaced: exactIndex !== -1 }),
+      normalizedPlugin: source,
+      ...(force && {
+        replaced:
+          targetedDependencies !== undefined
+            ? targetedReplaceIndex !== -1
+            : exactIndex !== -1,
+      }),
     };
   } catch (error) {
     return {
@@ -542,7 +627,10 @@ export async function removeUserDisabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in user workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -694,7 +782,10 @@ export async function removeUserEnabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in user workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -761,7 +852,8 @@ export async function setUserPluginSkillsMode(
       entry.skills = [...skillNames];
     } else {
       // For blocklist, clear the field if no exclusions (= all enabled)
-      entry.skills = skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
+      entry.skills =
+        skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
     }
 
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');

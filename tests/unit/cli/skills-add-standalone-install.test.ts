@@ -14,6 +14,7 @@ describe('installSkillFromSource', () => {
       success: true as const,
       pluginName: 'llm-wiki',
       syncResult: { copied: 1, failed: 0 },
+      location: { scope: 'project' as const, workspacePath: '/tmp/workspace' },
     }));
 
     const result = await installSkillFromSource(

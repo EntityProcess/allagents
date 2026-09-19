@@ -2,21 +2,40 @@ import { describe, expect, test } from 'bun:test';
 import { buildClientOptions } from '../../../../src/cli/tui/prompt-clients.js';
 
 describe('buildClientOptions', () => {
-  test('returns flat options list with all clients including universal', () => {
+  test('returns every client with project-scoped destination hints by default', () => {
     const options = buildClientOptions();
 
-    // Should have all clients
     expect(options.length).toBeGreaterThan(10);
+    expect(options.find((option) => option.value === 'universal')?.hint).toBe(
+      '.agents/skills/',
+    );
+    expect(options.find((option) => option.value === 'claude')?.hint).toBe(
+      '.claude/skills/',
+    );
+    expect(options.every((option) => option.hint.length > 0)).toBe(true);
+  });
 
-    // Universal should be present
-    expect(options.find((o) => o.value === 'universal')).toBeDefined();
+  test('uses user-scoped client mappings', () => {
+    const options = buildClientOptions('user');
 
-    // Claude should be present
-    expect(options.find((o) => o.value === 'claude')).toBeDefined();
+    expect(options.find((option) => option.value === 'copilot')?.hint).toBe(
+      '.copilot/skills/',
+    );
+    expect(options.find((option) => option.value === 'pi')?.hint).toBe(
+      '.pi/agent/skills/',
+    );
+  });
 
-    // Each option should have a hint (skills path)
-    for (const option of options) {
-      expect(option.hint).toBeDefined();
-    }
+  test('describes configured native clients without claiming a file destination', () => {
+    const options = buildClientOptions('project', [
+      { name: 'claude', install: 'native' },
+    ]);
+
+    expect(options.find((option) => option.value === 'claude')?.hint).toBe(
+      'Native install',
+    );
+    expect(options.find((option) => option.value === 'codex')?.hint).toBe(
+      '.codex/skills/',
+    );
   });
 });

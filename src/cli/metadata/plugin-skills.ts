@@ -232,6 +232,18 @@ export const skillsAddMeta: AgentCommandMeta = {
       description: 'Scope: "project" (default) or "user"',
     },
     {
+      flag: '--client',
+      short: '-c',
+      type: 'string',
+      description: 'Comma-separated clients for this skill source',
+    },
+    {
+      flag: '--yes',
+      short: '-y',
+      type: 'boolean',
+      description: 'Skip final install confirmation',
+    },
+    {
       flag: '--plugin',
       short: '-p',
       type: 'string',

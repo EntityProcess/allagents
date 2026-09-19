@@ -3590,7 +3590,7 @@ export async function seedFetchCacheFromMarketplaces(
     if (!result.success || !result.name) continue;
 
     const entry = await getMarketplace(result.name);
-    if (!entry || entry.source.type !== 'github') continue;
+    if (entry?.source.type !== 'github') continue;
     if (getMarketplaceAccessError(entry)) continue;
 
     // Seed the bare key (owner/repo without branch)
