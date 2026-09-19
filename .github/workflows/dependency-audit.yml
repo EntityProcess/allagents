@@ -2,7 +2,7 @@ name: Dependency Audit
 
 on:
   schedule:
-    - cron: "17 8 * * 1"
+    - cron: "17 8 * * *"
   pull_request:
     branches: [main]
     paths:

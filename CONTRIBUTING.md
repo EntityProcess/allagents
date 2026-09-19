@@ -53,8 +53,8 @@ bun run test
 Dependabot opens weekly grouped updates for the root Bun project, the
 documentation site, and GitHub Actions. GitHub does not currently provide
 Dependabot security updates for Bun, so the `Dependency Audit` workflow runs
-`bun audit --audit-level=moderate` against both lockfiles every Monday and on
-pull requests that change dependency manifests, lockfiles, or audit automation.
+`bun audit --audit-level=moderate` against both lockfiles every day and on pull
+requests that change dependency manifests, lockfiles, or audit automation.
 
 Before submitting a manual dependency update, run frozen installs and audits
 for both dependency trees:
