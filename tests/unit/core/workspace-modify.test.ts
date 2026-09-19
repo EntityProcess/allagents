@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach, mock } from 'bun:test';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -362,6 +363,25 @@ describe('addPluginForTarget', () => {
     const config = load(readFileSync(configPath, 'utf-8')) as WorkspaceConfig;
     expect(config.clients).toEqual(['claude', 'codex']);
     expect(config.plugins).toEqual([pluginDir]);
+  });
+
+  test('does not publish a first config when atomic staging fails', async () => {
+    rmSync(join(testDir, '.allagents'), { recursive: true, force: true });
+
+    const result = await addPluginForTarget(
+      { declaration: pluginDir, clients: ['claude', 'codex'] },
+      testDir,
+      {
+        beforeRename() {
+          throw new Error('injected first-write failure');
+        },
+      },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('injected first-write failure');
+    expect(existsSync(configPath)).toBe(false);
+    expect(readdirSync(join(testDir, '.allagents'))).toEqual([]);
   });
 
   test('persists a native-only declaration without treating its source as a local path', async () => {

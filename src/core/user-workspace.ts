@@ -157,8 +157,18 @@ async function addValidatedUserPlugin(
   dependencies?: TargetedPluginWriteDependencies,
 ): Promise<ModifyResult> {
   const plugin = getPluginSource(declaration);
-  await ensureUserWorkspace(initialClients ? [...initialClients] : undefined);
   const configPath = getUserWorkspaceConfigPath();
+  const initialConfig =
+    dependencies !== undefined && !existsSync(configPath)
+      ? {
+          repositories: [],
+          plugins: [],
+          clients: initialClients
+            ? [...initialClients]
+            : [...DEFAULT_USER_CLIENTS],
+        }
+      : undefined;
+  if (dependencies === undefined) await ensureUserWorkspace();
 
   if (sourceValidation === 'declaration') {
     return addPluginToUserConfig(
@@ -167,6 +177,7 @@ async function addValidatedUserPlugin(
       undefined,
       force,
       dependencies,
+      initialConfig,
     );
   }
   if (isPluginSpec(plugin)) {
@@ -187,6 +198,7 @@ async function addValidatedUserPlugin(
       resolved.registeredAs,
       force,
       dependencies,
+      initialConfig,
     );
   }
 
@@ -226,6 +238,7 @@ async function addValidatedUserPlugin(
     undefined,
     force,
     dependencies,
+    initialConfig,
   );
 }
 
@@ -358,9 +371,11 @@ async function addPluginToUserConfig(
   autoRegistered?: string,
   force?: boolean,
   targetedDependencies?: TargetedPluginWriteDependencies,
+  initialConfig?: WorkspaceConfig,
 ): Promise<ModifyResult> {
   try {
-    const config = await parseUserWorkspaceConfigForEdit(configPath);
+    const config =
+      initialConfig ?? (await parseUserWorkspaceConfigForEdit(configPath));
     const source = getPluginSource(plugin);
     const exactIndex = config.plugins.findIndex(
       (entry) => getPluginSource(entry) === source,

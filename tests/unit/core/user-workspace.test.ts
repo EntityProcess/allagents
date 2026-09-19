@@ -6,6 +6,7 @@ import {
   afterEach,
   spyOn,
 } from 'bun:test';
+import { existsSync } from 'node:fs';
 import {
   chmod,
   mkdir,
@@ -220,6 +221,26 @@ describe('user-workspace', () => {
       const config = await getUserWorkspaceConfig();
       expect(config?.clients).toEqual(['codex', 'cursor']);
       expect(config?.plugins).toEqual([pluginDir]);
+    });
+
+    test('does not publish a first config when atomic staging fails', async () => {
+      const pluginDir = join(tempHome, 'target-plugin');
+      await mkdir(pluginDir, { recursive: true });
+      const configPath = getUserWorkspaceConfigPath();
+
+      const result = await addUserPluginForTarget(
+        { declaration: pluginDir, clients: ['codex', 'cursor'] },
+        {
+          beforeRename() {
+            throw new Error('injected first user write failure');
+          },
+        },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('injected first user write failure');
+      expect(existsSync(configPath)).toBe(false);
+      expect(await readdir(join(tempHome, '.allagents'))).toEqual([]);
     });
 
     test('persists a native-only declaration without treating its source as a local path', async () => {

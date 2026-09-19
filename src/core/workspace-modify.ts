@@ -92,6 +92,7 @@ export async function writeWorkspaceConfigAtomically(
     `.${basename(configPath)}.${randomUUID()}.tmp`,
   );
   try {
+    await mkdir(directory, { recursive: true });
     await writeFile(temporaryPath, dump(config, { lineWidth: -1 }), {
       encoding: 'utf-8',
       flag: 'wx',
@@ -242,10 +243,17 @@ async function addValidatedPlugin(
 ): Promise<ModifyResult> {
   const plugin = getPluginSource(declaration);
   const configPath = join(workspacePath, CONFIG_DIR, WORKSPACE_CONFIG_FILE);
-  await ensureWorkspace(
-    workspacePath,
-    initialClients ? [...initialClients] : undefined,
-  );
+  const initialConfig =
+    dependencies !== undefined && !existsSync(configPath)
+      ? {
+          repositories: [],
+          plugins: [],
+          clients: initialClients
+            ? [...initialClients]
+            : [...DEFAULT_PROJECT_CLIENTS],
+        }
+      : undefined;
+  if (dependencies === undefined) await ensureWorkspace(workspacePath);
 
   if (sourceValidation === 'declaration') {
     return addPluginToConfig(
@@ -254,6 +262,7 @@ async function addValidatedPlugin(
       undefined,
       force,
       dependencies,
+      initialConfig,
     );
   }
 
@@ -281,6 +290,7 @@ async function addValidatedPlugin(
       resolved.registeredAs,
       force,
       dependencies,
+      initialConfig,
     );
   }
 
@@ -321,6 +331,7 @@ async function addValidatedPlugin(
     undefined,
     force,
     dependencies,
+    initialConfig,
   );
 }
 
@@ -347,9 +358,11 @@ async function addPluginToConfig(
   autoRegistered?: string,
   force?: boolean,
   targetedDependencies?: TargetedPluginWriteDependencies,
+  initialConfig?: WorkspaceConfig,
 ): Promise<ModifyResult> {
   try {
-    const config = await parseWorkspaceConfigForEdit(configPath);
+    const config =
+      initialConfig ?? (await parseWorkspaceConfigForEdit(configPath));
     const source = getPluginSource(plugin);
     const exactIndex = config.plugins.findIndex(
       (entry) => getPluginSource(entry) === source,

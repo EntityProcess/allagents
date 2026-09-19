@@ -2,12 +2,17 @@ import { join } from 'node:path';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { buildPluginSyncPlans } from '../core/sync.js';
 import {
+  mergeTargetedPluginEntry,
+  resolveGitHubIdentity,
+} from '../core/workspace-modify.js';
+import {
   getUserWorkspaceConfigPath,
   isUserConfigPath,
 } from '../core/user-workspace.js';
 import {
   ClientTypeSchema,
   getClientTypes,
+  getPluginSource,
   type ClientEntry,
   type ClientType,
   type PluginEntry,
@@ -18,7 +23,14 @@ export type InstallTargetDisposition = 'initialize' | 'inherit' | 'override';
 
 export interface InstallScopeState {
   readonly clients: readonly ClientEntry[];
+  readonly plugins?: readonly PluginEntry[];
 }
+
+export type InstallScopeStateLoader = () => Promise<InstallScopeState | null>;
+export type InstallScopeStateSource =
+  | InstallScopeState
+  | InstallScopeStateLoader
+  | null;
 
 export interface InstallTargetEnvironment {
   readonly json: boolean;
@@ -82,7 +94,7 @@ export interface ResolveInstallTargetOptions {
   readonly action: string;
   readonly payload: string;
   readonly scopeStates: Readonly<
-    Record<InstallScope, InstallScopeState | null>
+    Record<InstallScope, InstallScopeStateSource>
   >;
   readonly environment: InstallTargetEnvironment;
   readonly prompts?: InstallTargetPromptPort;
@@ -101,6 +113,7 @@ export interface ResolvedInstallTarget {
   readonly clients: readonly ClientType[];
   readonly disposition: InstallTargetDisposition;
   readonly prospectiveDeclaration: PluginEntry;
+  readonly selectedClientEntries: readonly ClientEntry[];
   readonly summary: InstallTargetSummary;
 }
 
@@ -209,6 +222,24 @@ function validateScope(value: string): InstallScope {
   return value;
 }
 
+async function findExistingDeclaration(
+  plugins: readonly PluginEntry[],
+  declaration: PluginEntry,
+): Promise<PluginEntry | undefined> {
+  const source = getPluginSource(declaration);
+  const exact = plugins.find((entry) => getPluginSource(entry) === source);
+  if (exact !== undefined) return exact;
+
+  const identity = await resolveGitHubIdentity(source);
+  if (!identity) return undefined;
+  for (const entry of plugins) {
+    if ((await resolveGitHubIdentity(getPluginSource(entry))) === identity) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
 export async function resolveInstallTarget(
   options: ResolveInstallTargetOptions,
 ): Promise<ResolvedInstallTarget | null> {
@@ -263,7 +294,9 @@ export async function resolveInstallTarget(
   }
 
   const configPath = scope === 'project' ? projectPath : userPath;
-  const state = options.scopeStates[scope];
+  const stateSource = options.scopeStates[scope];
+  const state =
+    typeof stateSource === 'function' ? await stateSource() : stateSource;
   const configuredEntries = state?.clients ?? [];
   const initialEntries =
     state?.clients ?? options.defaultClients?.[scope] ?? DEFAULT_CLIENTS[scope];
@@ -308,12 +341,28 @@ export async function resolveInstallTarget(
       : sameClients(configuredClients, clients)
         ? 'inherit'
         : 'override';
-  const prospectiveDeclaration = declarationForDisposition(
+  const targetedDeclaration = declarationForDisposition(
     options.declaration,
     clients,
     disposition,
   );
   const summaryClientEntries = state ? [...state.clients] : [...clients];
+  const existingDeclaration = await findExistingDeclaration(
+    state?.plugins ?? [],
+    options.declaration,
+  );
+  const prospectiveDeclaration = mergeTargetedPluginEntry(
+    existingDeclaration,
+    targetedDeclaration,
+    getPluginSource(options.declaration),
+    summaryClientEntries,
+  );
+  const selectedClientEntries = clients.map(
+    (client) =>
+      configuredEntries.find((entry) =>
+        typeof entry === 'string' ? entry === client : entry.name === client,
+      ) ?? client,
+  );
   const plan = buildPluginSyncPlans(
     [prospectiveDeclaration],
     summaryClientEntries,
@@ -352,6 +401,7 @@ export async function resolveInstallTarget(
     clients,
     disposition,
     prospectiveDeclaration,
+    selectedClientEntries,
     summary,
   };
 }

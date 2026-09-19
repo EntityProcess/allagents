@@ -156,19 +156,28 @@ export async function installSelectedPlugin(
     CONFIG_DIR,
     WORKSPACE_CONFIG_FILE,
   );
-  const projectConfig =
-    !isUserConfigPath(workspacePath) && existsSync(projectConfigPath)
-      ? await parseWorkspaceConfig(projectConfigPath)
-      : null;
-  const userConfig = await getUserWorkspaceConfig();
   const target = await resolveInstallTarget({
     workspacePath,
     declaration: pluginRef,
     action: 'Install plugin',
     payload: pluginRef,
     scopeStates: {
-      project: projectConfig ? { clients: projectConfig.clients } : null,
-      user: userConfig ? { clients: userConfig.clients } : null,
+      project: async () => {
+        if (
+          isUserConfigPath(workspacePath) ||
+          !existsSync(projectConfigPath)
+        ) {
+          return null;
+        }
+        const config = await parseWorkspaceConfig(projectConfigPath);
+        return { clients: config.clients, plugins: config.plugins };
+      },
+      user: async () => {
+        const config = await getUserWorkspaceConfig();
+        return config
+          ? { clients: config.clients, plugins: config.plugins }
+          : null;
+      },
     },
     environment: {
       json: false,
@@ -182,19 +191,7 @@ export async function installSelectedPlugin(
   if (!target) {
     return { status: 'cancelled' };
   }
-  const configuredClientEntries =
-    target.scope === 'project'
-      ? projectConfig?.clients
-      : userConfig?.clients;
-  const selectedClientEntries = target.clients.map(
-    (client) =>
-      configuredClientEntries?.find((entry) =>
-        typeof entry === 'string'
-          ? entry === client
-          : entry.name === client,
-      ) ?? client,
-  );
-
+  const selectedClientEntries = target.selectedClientEntries;
 
   const nativePreflightErrors = await preflightNativePluginDeclaration(
     target.prospectiveDeclaration,

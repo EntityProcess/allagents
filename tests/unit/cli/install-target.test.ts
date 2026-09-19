@@ -100,6 +100,66 @@ describe('resolveInstallTarget', () => {
     expect(calls.confirmations).toHaveLength(0);
   });
 
+  test('loads only the explicitly selected scope state', async () => {
+    let projectLoads = 0;
+    let userLoads = 0;
+    const project = await resolveInstallTarget(
+      options({
+        scope: 'project',
+        clients: ['universal'],
+        yes: true,
+        environment: {
+          json: true,
+          ci: false,
+          stdinIsTTY: true,
+          stdoutIsTTY: true,
+        },
+        scopeStates: {
+          project: async () => {
+            projectLoads += 1;
+            return { clients: ['universal'], plugins: [] };
+          },
+          user: async () => {
+            userLoads += 1;
+            throw new Error('user config must not be loaded');
+          },
+        },
+      }),
+    );
+
+    expect(project?.scope).toBe('project');
+    expect(projectLoads).toBe(1);
+    expect(userLoads).toBe(0);
+
+    const user = await resolveInstallTarget(
+      options({
+        scope: 'user',
+        clients: ['codex'],
+        yes: true,
+        environment: {
+          json: true,
+          ci: false,
+          stdinIsTTY: true,
+          stdoutIsTTY: true,
+        },
+        scopeStates: {
+          project: async () => {
+            projectLoads += 1;
+            throw new Error('project config must not be loaded');
+          },
+          user: async () => {
+            userLoads += 1;
+            return { clients: ['codex'], plugins: [] };
+          },
+        },
+      }),
+    );
+
+    expect(user?.scope).toBe('user');
+    expect(projectLoads).toBe(1);
+    expect(userLoads).toBe(1);
+  });
+
   test('uses interactive selections before configured defaults', async () => {
     const calls = makeCalls();
     const result = await resolveInstallTarget(
@@ -196,6 +256,43 @@ describe('resolveInstallTarget', () => {
       clients: ['claude'],
     });
     expect(override?.summary.effectiveMethods).toEqual([{ client: 'claude', method: 'file' }]);
+  });
+
+  test('preflights the merged semantic reinstall declaration', async () => {
+    const result = await resolveInstallTarget(
+      options({
+        environment: {
+          json: true,
+          ci: false,
+          stdinIsTTY: true,
+          stdoutIsTTY: true,
+        },
+        scope: 'project',
+        clients: ['claude'],
+        declaration: 'acme/plugin',
+        scopeStates: {
+          project: {
+            clients: ['claude'],
+            plugins: [
+              {
+                source: 'https://github.com/acme/plugin',
+                install: 'native',
+                exclude: ['generated'],
+              },
+            ],
+          },
+          user: null,
+        },
+        yes: true,
+      }),
+    );
+
+    expect(result?.prospectiveDeclaration).toEqual({
+      source: 'acme/plugin',
+      install: 'native',
+      exclude: ['generated'],
+    });
+    expect(result?.summary.effectiveMethods).toEqual([]);
   });
 
   test('treats the home project path as user scope and rejects explicit project scope', async () => {
