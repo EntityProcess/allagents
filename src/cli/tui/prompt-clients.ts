@@ -1,22 +1,34 @@
 import * as p from '@clack/prompts';
-import { ClientTypeSchema, type ClientEntry, type ClientType } from '../../models/workspace-config.js';
-import { CLIENT_MAPPINGS } from '../../models/client-mapping.js';
+import {
+  ClientTypeSchema,
+  getClientInstallMode,
+  type ClientEntry,
+  type ClientType,
+} from '../../models/workspace-config.js';
+import { getMapping } from '../../models/client-mapping.js';
+import type { InstallScope } from '../install-target.js';
 
 const { autocompleteMultiselect } = p;
 
 /**
  * Build a flat options list for searchable client selection.
- * Each option includes the skills path as a hint.
+ * Hints reflect the selected scope and configured native install modes.
  */
-export function buildClientOptions(): {
-  value: string;
+export function buildClientOptions(
+  scope: InstallScope = 'project',
+  clientEntries: readonly ClientEntry[] = [],
+): {
+  value: ClientType;
   label: string;
   hint: string;
 }[] {
   return ClientTypeSchema.options.map((client) => ({
     value: client,
     label: client,
-    hint: CLIENT_MAPPINGS[client].skillsPath,
+    hint:
+      getClientInstallMode([...clientEntries], client) === 'native'
+        ? 'Native install'
+        : getMapping(client, scope).skillsPath,
   }));
 }
 
@@ -28,33 +40,37 @@ export function isInteractive(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
+export interface PromptForClientsOptions {
+  readonly scope?: InstallScope;
+  readonly initialValues?: readonly ClientType[];
+  readonly clientEntries?: readonly ClientEntry[];
+}
+
 /**
  * Prompt the user to select AI clients using a searchable multiselect.
  * Returns selected clients, or null if cancelled.
- * In non-interactive mode, returns ['universal'] without prompting.
- * If user deselects everything, falls back to ['universal'].
+ * In non-interactive mode, retains the legacy universal default.
  */
-export async function promptForClients(): Promise<ClientEntry[] | null> {
+export async function promptForClients(
+  options: PromptForClientsOptions = {},
+): Promise<ClientEntry[] | null> {
   if (!isInteractive()) {
     return ['universal'];
   }
 
-  const options = buildClientOptions();
-
-  const selected = await autocompleteMultiselect({
+  const clientEntries = options.clientEntries ?? [];
+  const promptOptions = buildClientOptions(options.scope, clientEntries);
+  const selected = await autocompleteMultiselect<string>({
     message: 'Which AI clients do you use?',
-    options,
-    initialValues: ['universal', 'copilot', 'vscode'] as ClientType[],
-    required: false,
+    options: promptOptions,
+    initialValues: [
+      ...(options.initialValues ?? ['universal', 'copilot', 'vscode']),
+    ],
+    required: true,
   });
 
   if (p.isCancel(selected)) {
     return null;
-  }
-
-  // Fall back to universal if user deselected everything
-  if (selected.length === 0) {
-    return ['universal'];
   }
 
   return selected as ClientEntry[];
