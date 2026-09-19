@@ -151,6 +151,7 @@ function selectionCandidates(
         case 'status':
           return result.declared || result.installed;
       }
+      return false;
     })
     .sort((left, right) => left.profile.localeCompare(right.profile));
 }

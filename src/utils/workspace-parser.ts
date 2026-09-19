@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { load } from 'js-yaml';
 import {
   ProjectWorkspaceConfigSchema,
   UserWorkspaceConfigSchema,
@@ -8,6 +7,7 @@ import {
   type WorkspaceConfig,
 } from '../models/workspace-config.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
+import { loadYaml } from './yaml.js';
 
 const configName = `${CONFIG_DIR}/${WORKSPACE_CONFIG_FILE}`;
 
@@ -47,7 +47,10 @@ export function validateUserWorkspaceConfig(
 
 async function loadConfigFile(path: string): Promise<unknown> {
   try {
-    const parsed = load(await readFile(path, 'utf-8'));
+    const content = await readFile(path, 'utf-8');
+    if (!content.trim()) throw new Error(`${configName} is empty`);
+
+    const parsed = loadYaml(content);
     if (!parsed) throw new Error(`${configName} is empty`);
     return parsed;
   } catch (error) {

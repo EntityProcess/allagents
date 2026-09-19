@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { dump, load } from 'js-yaml';
+import { dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   ClientEntry,
@@ -21,6 +21,7 @@ import {
   validatePluginSource,
   verifyGitHubUrlExists,
 } from '../utils/plugin-path.js';
+import { loadYaml } from '../utils/yaml.js';
 import { getAllagentsDir } from './marketplace.js';
 import {
   isPluginSpec,
@@ -881,7 +882,7 @@ export async function getInstalledProjectPlugins(
 
   try {
     const content = await readFile(configPath, 'utf-8');
-    const config = load(content) as WorkspaceConfig;
+    const config = loadYaml(content) as WorkspaceConfig;
 
     const result: InstalledPluginInfo[] = [];
     for (const pluginEntry of config.plugins) {
