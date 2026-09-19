@@ -3,6 +3,7 @@ import {
   addManagedMcpServer,
   listManagedMcpServers,
   type McpAuthorizationInteraction,
+  McpUpdateError,
   reauthenticateManagedMcpServer,
   removeManagedMcpServer,
   updateManagedMcpServers,
@@ -305,6 +306,36 @@ function authorizationInteraction(
   };
 }
 
+async function handleMutationError(
+  choice: DestinationChoice,
+  error: unknown,
+  cache: TuiCache | undefined,
+  dependencies: McpTuiDependencies,
+): Promise<boolean> {
+  const { prompts, management } = dependencies;
+  if (!(error instanceof McpUpdateError)) {
+    prompts.note(errorMessage(error), 'Error');
+    return false;
+  }
+
+  cache?.invalidate();
+  prompts.note(errorMessage(error), 'Update Error');
+  while (true) {
+    const retry = await prompts.confirm({
+      message: 'Client configuration update failed. Retry update now?',
+    });
+    if (prompts.isCancel(retry) || !retry) return true;
+
+    try {
+      await management.updateManagedMcpServers(choice.destination);
+      prompts.note('Client configuration updated.', 'MCP Servers');
+      return true;
+    } catch (retryError) {
+      prompts.note(errorMessage(retryError), 'Update Error');
+    }
+  }
+}
+
 async function addServer(
   choice: DestinationChoice,
   existing: Record<string, McpServerConfig>,
@@ -390,7 +421,7 @@ async function addServer(
       'MCP Servers',
     );
   } catch (error) {
-    prompts.note(errorMessage(error), 'Error');
+    await handleMutationError(choice, error, cache, dependencies);
   }
 }
 
@@ -486,7 +517,8 @@ async function serverDetail(
         prompts.note(`Removed ${terminalSafe(name)}.`, 'MCP Servers');
         return;
       } catch (error) {
-        prompts.note(errorMessage(error), 'Error');
+        if (await handleMutationError(choice, error, cache, dependencies))
+          return;
       }
     }
   }
@@ -496,7 +528,7 @@ async function manageDestination(
   choice: DestinationChoice,
   cache: TuiCache | undefined,
   dependencies: McpTuiDependencies,
-): Promise<'back' | 'change'> {
+): Promise<'destination' | 'exit'> {
   const { prompts, management } = dependencies;
   while (true) {
     let servers: Record<string, McpServerConfig>;
@@ -504,39 +536,27 @@ async function manageDestination(
       servers = await management.listManagedMcpServers(choice.destination);
     } catch (error) {
       prompts.note(errorMessage(error), 'Error');
-      return 'change';
+      return 'destination';
     }
 
     const names = Object.keys(servers).sort();
     const selected = await prompts.select({
-      message: `MCP Servers [${destinationLabel(choice.destination)}]`,
+      message: `${choice.label} MCP Servers`,
       options: [
-        { label: '+ Add server', value: '__add__' },
-        { label: 'Update / reconcile', value: '__update__' },
         ...names.map((name) => ({
           label: terminalSafe(name),
           value: `server:${name}`,
           hint: 'url' in (servers[name] as McpServerConfig) ? 'HTTP' : 'stdio',
         })),
-        { label: 'Change destination', value: '__change__' },
+        { label: '+ Add server', value: '__add__' },
         { label: 'Back', value: '__back__' },
       ],
     });
 
-    if (prompts.isCancel(selected) || selected === '__back__') return 'back';
-    if (selected === '__change__') return 'change';
+    if (prompts.isCancel(selected)) return 'exit';
+    if (selected === '__back__') return 'destination';
     if (selected === '__add__') {
       await addServer(choice, servers, cache, dependencies);
-      continue;
-    }
-    if (selected === '__update__') {
-      try {
-        await management.updateManagedMcpServers(choice.destination);
-        cache?.invalidate();
-        prompts.note('MCP servers reconciled.', 'MCP Servers');
-      } catch (error) {
-        prompts.note(errorMessage(error), 'Error');
-      }
       continue;
     }
 
@@ -560,7 +580,7 @@ export async function runMcpServers(
     while (true) {
       const choice = await selectDestination(context, dependencies);
       if (!choice) return;
-      if ((await manageDestination(choice, cache, dependencies)) === 'back')
+      if ((await manageDestination(choice, cache, dependencies)) === 'exit')
         return;
     }
   } catch (error) {

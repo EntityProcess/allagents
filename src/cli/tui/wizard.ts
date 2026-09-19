@@ -39,7 +39,7 @@ export function buildMenuOptions(context: TuiContext) {
     [];
 
   if (context.needsSync) {
-    options.push({ label: 'Sync plugins', value: 'sync', hint: 'sync needed' });
+    options.push({ label: 'Update', value: 'sync', hint: 'update needed' });
   }
 
   options.push({ label: 'Workspace', value: 'workspace' });
@@ -64,7 +64,7 @@ function buildCompactSummary(context: TuiContext): string {
   parts.push(`${context.userPluginCount} user`);
   parts.push(`${context.marketplaceCount} marketplaces`);
   if (context.needsSync) {
-    parts.push(chalk.yellow('sync needed'));
+    parts.push(chalk.yellow('update needed'));
   }
   return parts.join(', ');
 }
@@ -87,9 +87,9 @@ function buildSummary(context: TuiContext): string {
   lines.push(`Marketplaces: ${context.marketplaceCount}`);
 
   if (context.needsSync) {
-    lines.push(`Sync: ${chalk.yellow('needed')}`);
+    lines.push(`Update: ${chalk.yellow('needed')}`);
   } else if (context.hasWorkspace) {
-    lines.push(`Sync: ${chalk.green('up to date')}`);
+    lines.push(`Update: ${chalk.green('up to date')}`);
   }
 
   return lines.join('\n');

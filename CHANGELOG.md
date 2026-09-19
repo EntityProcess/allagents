@@ -47,8 +47,9 @@
   through cached `npx`, so managed MCP connections do not require a global
   AllAgents installation.
 - Full MCP server management in the interactive TUI, including destination
-  selection, add, reauthenticate, update, and remove flows for project, user,
-  and named-profile declarations.
+  selection, listing, inspection, add, reauthenticate, and remove flows for
+  project, user, and named-profile declarations. Client configuration updates
+  automatically after mutations, with a contextual retry when an update fails.
 
 - Pi and OMP as file-sync clients at project and user scope, including native
   runtime skill paths and agent instructions.

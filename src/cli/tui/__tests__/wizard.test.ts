@@ -42,27 +42,28 @@ describe('buildMenuOptions', () => {
     }
   });
 
-  describe('sync option', () => {
-    it('should show sync when sync is needed', () => {
+  describe('update option', () => {
+    it('should show Update when an update is needed', () => {
       const context = makeContext({ hasWorkspace: true, needsSync: true });
       const values = actionValues(context);
       expect(values).toContain('sync');
     });
 
-    it('should show sync needed hint', () => {
+    it('should use Update terminology', () => {
       const context = makeContext({ hasWorkspace: true, needsSync: true });
       const options = buildMenuOptions(context);
-      const syncOption = options.find((o) => o.value === 'sync');
-      expect(syncOption?.hint).toBe('sync needed');
+      const updateOption = options.find((o) => o.value === 'sync');
+      expect(updateOption?.label).toBe('Update');
+      expect(updateOption?.hint).toBe('update needed');
     });
 
-    it('should NOT show sync when not needed', () => {
+    it('should NOT show Update when not needed', () => {
       const context = makeContext({ hasWorkspace: true, needsSync: false });
       const values = actionValues(context);
       expect(values).not.toContain('sync');
     });
 
-    it('should NOT show sync without workspace', () => {
+    it('should NOT show Update without workspace', () => {
       const context = makeContext({ hasWorkspace: false });
       const values = actionValues(context);
       expect(values).not.toContain('sync');

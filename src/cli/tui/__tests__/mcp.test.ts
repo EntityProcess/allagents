@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import type {
-  AddManagedMcpServerRequest,
-  McpDestinationSync,
+import {
+  type AddManagedMcpServerRequest,
+  type McpDestinationSync,
+  McpUpdateError,
 } from '../../../core/mcp-management.js';
 import type { McpDestination } from '../../../core/mcp-servers.js';
 import type {
@@ -139,6 +140,8 @@ function dependencies(options: {
   onAdd?: (request: AddManagedMcpServerRequest) => Promise<void> | void;
   onReauthenticate?: (destination: McpDestination, name: string) => void;
   onRemove?: (destination: McpDestination, name: string) => void;
+  removeError?: Error;
+  updateErrors?: Error[];
   onUpdate?: (destination: McpDestination) => void;
 }): McpTuiDependencies {
   const management: McpManagementApi = {
@@ -154,10 +157,13 @@ function dependencies(options: {
     },
     async removeManagedMcpServer(selected, name) {
       options.onRemove?.(selected, name);
+      if (options.removeError) throw options.removeError;
       return completedSync;
     },
     async updateManagedMcpServers(selected) {
       options.onUpdate?.(selected);
+      const error = options.updateErrors?.shift();
+      if (error) throw error;
       return completedSync;
     },
   };
@@ -187,7 +193,7 @@ describe('runMcpServers', () => {
       'http://127.0.0.1:3117/callback?code=complete&state=state';
     const callbackSignal = new AbortController().signal;
     const prompts = new ScriptedPrompts({
-      selects: ['profile:work', '__add__', 'http', '__back__'],
+      selects: ['profile:work', '__add__', 'http', '__back__', '__back__'],
       texts: [
         'remote',
         'https://mcp.example.test/path',
@@ -258,6 +264,60 @@ describe('runMcpServers', () => {
     ).toEqual(['project', 'user', 'profile:work', '__back__']);
   });
 
+  it('lists servers first and uses Back to return to the destination chooser', async () => {
+    const prompts = new ScriptedPrompts({
+      selects: ['project', '__back__', 'user', '__back__', '__back__'],
+    });
+
+    await runMcpServers(
+      context(),
+      undefined,
+      dependencies({
+        prompts,
+        servers: {
+          zeta: { type: 'stdio', command: 'zeta' },
+          alpha: { type: 'http', url: 'https://example.test/mcp' },
+        },
+      }),
+    );
+
+    const destinationRequests = prompts.selectRequests.filter(
+      (request) => request.message === 'MCP server destination',
+    );
+    expect(destinationRequests).toHaveLength(3);
+
+    const serverRequest = prompts.selectRequests.find(
+      (request) => request.message === 'Project MCP Servers',
+    );
+    expect(serverRequest?.options).toEqual([
+      { label: 'alpha', value: 'server:alpha', hint: 'HTTP' },
+      { label: 'zeta', value: 'server:zeta', hint: 'stdio' },
+      { label: '+ Add server', value: '__add__' },
+      { label: 'Back', value: '__back__' },
+    ]);
+  });
+
+  it('exits MCP management when the server-list prompt is cancelled', async () => {
+    const prompts = new ScriptedPrompts({
+      selects: ['user', CANCEL],
+    });
+
+    await runMcpServers(
+      context(false),
+      undefined,
+      dependencies({
+        prompts,
+        servers: { remote: { type: 'http', url: 'https://example.test/mcp' } },
+      }),
+    );
+
+    expect(prompts.selectRequests.map((request) => request.message)).toEqual([
+      'MCP server destination',
+      'User MCP Servers',
+    ]);
+    expect(prompts.notes).toEqual([]);
+  });
+
   it('offers reauthentication only for HTTP servers and calls management for HTTP', async () => {
     const prompts = new ScriptedPrompts({
       selects: [
@@ -267,6 +327,7 @@ describe('runMcpServers', () => {
         'server:remote',
         'reauthenticate',
         'back',
+        '__back__',
         '__back__',
       ],
     });
@@ -312,13 +373,12 @@ describe('runMcpServers', () => {
     expect(count()).toBe(1);
   });
 
-  it('confirms removal, updates through management, and invalidates after each mutation', async () => {
+  it('confirms removal and invalidates after the mutation', async () => {
     const prompts = new ScriptedPrompts({
-      selects: ['project', 'server:local', 'remove', '__update__', '__back__'],
+      selects: ['project', 'server:local', 'remove', '__back__', '__back__'],
       confirms: [true],
     });
     const removals: string[] = [];
-    const updates: McpDestination[] = [];
     const { cache, count } = cacheCounter();
 
     await runMcpServers(
@@ -331,22 +391,58 @@ describe('runMcpServers', () => {
           expect(selected.kind).toBe('project');
           removals.push(name);
         },
+      }),
+    );
+
+    expect(removals).toEqual(['local']);
+    expect(count()).toBe(1);
+  });
+
+  it('offers a retry when removal persisted but its client update failed', async () => {
+    const prompts = new ScriptedPrompts({
+      selects: ['project', 'server:local', 'remove', '__back__', '__back__'],
+      confirms: [true, true, true],
+    });
+    const updates: McpDestination[] = [];
+    const { cache, count } = cacheCounter();
+
+    await runMcpServers(
+      context(),
+      cache,
+      dependencies({
+        prompts,
+        servers: { local: { type: 'stdio', command: 'node' } },
+        removeError: new McpUpdateError(new Error('Client update failed')),
+        updateErrors: [new Error('Client update still failing')],
         onUpdate(selected) {
           updates.push(selected);
         },
       }),
     );
 
-    expect(removals).toEqual(['local']);
-    expect(updates).toHaveLength(1);
-    expect(updates[0]?.kind).toBe('project');
-    expect(count()).toBe(2);
+    expect(updates).toEqual([
+      expect.objectContaining({ kind: 'project' }),
+      expect.objectContaining({ kind: 'project' }),
+    ]);
+    expect(prompts.notes).toContainEqual({
+      message: 'Client update failed',
+      title: 'Update Error',
+    });
+    expect(prompts.notes).toContainEqual({
+      message: 'Client update still failing',
+      title: 'Update Error',
+    });
+    expect(prompts.notes).toContainEqual({
+      message: 'Client configuration updated.',
+      title: 'MCP Servers',
+    });
+    expect(count()).toBe(1);
   });
 
   it('does not mutate when add or removal prompts are cancelled', async () => {
     let addCalls = 0;
     const addPrompts = new ScriptedPrompts({
-      selects: ['user', '__add__', '__back__'],
+      selects: ['user', '__add__', '__back__', '__back__'],
       texts: [CANCEL],
     });
     await runMcpServers(
@@ -362,7 +458,14 @@ describe('runMcpServers', () => {
 
     let removeCalls = 0;
     const removePrompts = new ScriptedPrompts({
-      selects: ['user', 'server:local', 'remove', 'back', '__back__'],
+      selects: [
+        'user',
+        'server:local',
+        'remove',
+        'back',
+        '__back__',
+        '__back__',
+      ],
       confirms: [false],
     });
     await runMcpServers(
@@ -389,6 +492,7 @@ describe('runMcpServers', () => {
         'back',
         'server:secure-stdio',
         'back',
+        '__back__',
         '__back__',
       ],
     });

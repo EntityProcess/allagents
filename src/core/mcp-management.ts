@@ -46,6 +46,13 @@ export interface UpdateManagedMcpServersOptions {
   offline?: boolean;
 }
 
+export class McpUpdateError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'McpUpdateError';
+  }
+}
+
 function destinationDisplay(destination: McpDestination): string {
   switch (destination.kind) {
     case 'project':
@@ -187,7 +194,12 @@ export async function addManagedMcpServer(
     throw new Error(addResult.error ?? 'Unknown error');
   }
 
-  const sync = await updateManagedMcpServers(destination, { offline: true });
+  let sync: McpDestinationSync;
+  try {
+    sync = await updateManagedMcpServers(destination, { offline: true });
+  } catch (error) {
+    throw new McpUpdateError(error);
+  }
   return { config: addResult.config ?? config, sync };
 }
 
@@ -199,7 +211,11 @@ export async function removeManagedMcpServer(
   if (!removeResult.success) {
     throw new Error(removeResult.error ?? 'Unknown error');
   }
-  return updateManagedMcpServers(destination, { offline: true });
+  try {
+    return await updateManagedMcpServers(destination, { offline: true });
+  } catch (error) {
+    throw new McpUpdateError(error);
+  }
 }
 
 export async function reauthenticateManagedMcpServer(

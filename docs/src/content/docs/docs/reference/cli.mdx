@@ -466,11 +466,11 @@ resolves to user scope and explicit `--scope project` is rejected. Use
 `--scope` and `--profile` are mutually exclusive.
 
 Run `allagents` without arguments and choose **MCP Servers** to manage the same
-project, user, and named-profile destinations interactively. The TUI supports
-listing and inspecting declarations, adding HTTP or stdio servers,
-reauthenticating HTTP servers, reconciling generated client configuration, and
-removing declarations. Credential values remain hidden from summaries and
-selection screens.
+project, user, and named-profile destinations interactively. Each destination
+lists its servers directly, with add, inspect, reauthenticate, and remove
+actions. Client configuration updates automatically after mutations; if an
+update fails after the declaration changes, the TUI offers a contextual retry.
+Credential values remain hidden from summaries and selection screens.
 
 Codex and Copilot materialize the selected destination at these exact paths:
 
@@ -482,7 +482,8 @@ Codex and Copilot materialize the selected destination at these exact paths:
 
 ### mcp add
 
-Add a new MCP server to the selected destination and immediately reconcile it.
+Add a new MCP server to the selected destination and immediately update its
+client configuration.
 For HTTP servers, AllAgents connects first, completes OAuth when required, and
 routes selected clients through its built-in MCP client.
 
