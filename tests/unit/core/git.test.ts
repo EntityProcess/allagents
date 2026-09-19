@@ -1,9 +1,15 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import {
   checkRepositoryHealth,
   resolveRemoteRevision,
 } from '../../../src/core/git-facts.js';
 import { createGitEnv } from '../../../src/core/git-client.js';
+
+const gitPolicyProbe = join(import.meta.dir, '..', '..', 'helpers', 'git-client-policy.ts');
 
 describe('createGitEnv', () => {
   const originalHome = process.env.HOME;
@@ -34,6 +40,53 @@ describe('createGitEnv', () => {
       GIT_TERMINAL_PROMPT: '0',
       GIT_LFS_SKIP_SMUDGE: '1',
     });
+  });
+});
+
+describe('createGit', () => {
+  let repoPath: string;
+
+  beforeEach(() => {
+    repoPath = mkdtempSync(join(tmpdir(), 'allagents-git-client-'));
+    execFileSync('git', ['init', repoPath], {
+      env: { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined },
+      stdio: 'ignore',
+    });
+  });
+
+  afterEach(() => {
+    rmSync(repoPath, { recursive: true, force: true });
+  });
+
+  it('accepts an inherited credential helper configuration', () => {
+    const result = Bun.spawnSync([process.execPath, gitPolicyProbe, repoPath], {
+      env: {
+        ...process.env,
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'credential.helper',
+        GIT_CONFIG_VALUE_0: 'store',
+      },
+      stderr: 'pipe',
+    });
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('rejects an inherited protocol override', () => {
+    const result = Bun.spawnSync([process.execPath, gitPolicyProbe, repoPath], {
+      env: {
+        ...process.env,
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'protocol.file.allow',
+        GIT_CONFIG_VALUE_0: 'always',
+      },
+      stderr: 'pipe',
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain(
+      'not permitted without enabling allowUnsafeProtocolOverride',
+    );
   });
 });
 

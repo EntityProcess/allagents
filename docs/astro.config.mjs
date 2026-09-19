@@ -24,15 +24,15 @@ export default defineConfig({
       sidebar: [
         {
           label: 'Getting Started',
-          autogenerate: { directory: 'docs/getting-started' },
+          items: [{ autogenerate: { directory: 'docs/getting-started' } }],
         },
         {
           label: 'Guides',
-          autogenerate: { directory: 'docs/guides' },
+          items: [{ autogenerate: { directory: 'docs/guides' } }],
         },
         {
           label: 'Reference',
-          autogenerate: { directory: 'docs/reference' },
+          items: [{ autogenerate: { directory: 'docs/reference' } }],
         },
       ],
     }),

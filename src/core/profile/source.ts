@@ -1,8 +1,7 @@
 import { existsSync } from 'node:fs';
 import { lstat, rm } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
-import simpleGit from 'simple-git';
-import { cloneToTemp, gitHubUrl } from '../git.js';
+import { cloneToTemp, createGit, gitHubUrl } from '../git.js';
 import {
   isPluginSpec,
   parsePluginSpec,
@@ -53,7 +52,7 @@ async function resolveRemoteRepository(
     let resolvedSha: string | undefined;
     try {
       resolvedSha =
-        (await simpleGit(cachePath).revparse(['HEAD'])).trim() || undefined;
+        (await createGit(cachePath).revparse(['HEAD'])).trim() || undefined;
     } catch {
       resolvedSha = undefined;
     }
@@ -73,7 +72,7 @@ async function resolveRemoteRepository(
   let resolvedSha: string | undefined;
   try {
     resolvedSha =
-      (await simpleGit(temporary).revparse(['HEAD'])).trim() || undefined;
+      (await createGit(temporary).revparse(['HEAD'])).trim() || undefined;
   } catch {
     resolvedSha = undefined;
   }

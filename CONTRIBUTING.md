@@ -48,6 +48,24 @@ bun run lint
 bun run test
 ```
 
+## Dependency Maintenance
+
+Dependabot opens weekly grouped updates for the root Bun project, the
+documentation site, and GitHub Actions. GitHub does not currently provide
+Dependabot security updates for Bun, so the `Dependency Audit` workflow runs
+`bun audit --audit-level=moderate` against both lockfiles every day and on pull
+requests that change dependency manifests, lockfiles, or audit automation.
+
+Before submitting a manual dependency update, run frozen installs and audits
+for both dependency trees:
+
+```bash
+bun install --frozen-lockfile
+bun audit --audit-level=moderate
+bun install --cwd docs --frozen-lockfile
+bun audit --cwd docs --audit-level=moderate
+```
+
 Older clones may still have the previously generated prek pre-push hook. If a
 push still invokes prek, inspect `.git/hooks/pre-push` and remove it only when
 it is the generated prek hook; preserve any custom hook content.

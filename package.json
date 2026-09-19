@@ -58,36 +58,36 @@
   },
   "homepage": "https://allagents.dev",
   "dependencies": {
-    "@clack/prompts": "^1.0.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@clack/prompts": "^1.8.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "chalk": "^4.1.2",
     "cmd-ts": "^0.14.3",
     "execa": "^8.0.1",
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^4.3.2",
     "json5": "^2.2.3",
     "micromatch": "^4.0.8",
     "read-cmd-shim": "^4.0.0",
-    "simple-git": "^3.30.0",
-    "zod": "^3.25.28"
+    "simple-git": "^3.36.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.0",
-    "@types/bun": "latest",
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "1.4.2",
     "@types/js-yaml": "^4.0.9",
     "@types/micromatch": "^4.0.10",
-    "@types/node": "^20.11.5",
+    "@types/node": "^22.0.0",
     "ajv": "8.18.0",
     "shx": "^0.4.0",
-    "typescript": "^5.3.3",
+    "typescript": "^5.9.3",
     "zod-to-json-schema": "3.25.2"
   },
   "overrides": {
     "chalk": "^4.1.2"
   },
   "engines": {
-    "node": ">=18.0.0",
+    "node": ">=22.0.0",
     "bun": ">=1.0.0"
   }
 }

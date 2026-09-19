@@ -11,7 +11,6 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import simpleGit from 'simple-git';
 import { getHomeDir } from '../constants.js';
 import {
   type MarketplaceFileArtifacts,
@@ -2674,6 +2673,12 @@ export async function listMarketplacesWithScope(
   };
 }
 
+interface MarketplaceGitClient {
+  log(options: {
+    maxCount: number;
+  }): Promise<{ latest: { hash: string; date: string } | null }>;
+}
+
 /**
  * Get the short git commit hash and date for a safely accessible marketplace.
  * Returns null if the marketplace is unsafe, not a git repo, or has no commits.
@@ -2681,6 +2686,7 @@ export async function listMarketplacesWithScope(
 export async function getMarketplaceVersion(
   marketplace: MarketplaceEntry,
   registryPath = getRegistryPath(),
+  gitFactory: (baseDir: string) => MarketplaceGitClient = createGit,
 ): Promise<{ hash: string; date: Date } | null> {
   const accessError = getMarketplaceAccessError(marketplace, registryPath);
   if (accessError) {
@@ -2692,7 +2698,7 @@ export async function getMarketplaceVersion(
   }
 
   try {
-    const git = simpleGit(marketplacePath);
+    const git = gitFactory(marketplacePath);
     const log = await git.log({ maxCount: 1 });
     if (!log.latest) return null;
     return {

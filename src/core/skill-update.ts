@@ -6,7 +6,7 @@ import {
   getPluginSource,
 } from '../models/workspace-config.js';
 import { getPluginCachePath, parseGitHubUrl } from '../utils/plugin-path.js';
-import { cleanupTempDir, cloneToTemp, gitHubUrl } from './git.js';
+import { cleanupTempDir, cloneToTemp, createGit, gitHubUrl } from './git.js';
 import { discoverSkillEntriesFromPluginRoot } from './skills.js';
 
 export type SkillUpdateScope = 'project' | 'user';
@@ -374,8 +374,7 @@ export async function inspectRemoteSkillUpdateUnit(
   const getRevision =
     deps.getRevision ??
     (async (checkoutPath: string) => {
-      const { default: simpleGit } = await import('simple-git');
-      const sha = (await simpleGit(checkoutPath).revparse(['HEAD'])).trim();
+      const sha = (await createGit(checkoutPath).revparse(['HEAD'])).trim();
       if (!sha)
         throw new Error(
           `Could not resolve inspected revision for ${checkoutPath}`,
