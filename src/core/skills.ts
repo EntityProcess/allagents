@@ -1,7 +1,6 @@
 import { type Dirent, existsSync, lstatSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
-import { load } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import {
   type PluginSkillsConfig,
@@ -9,6 +8,7 @@ import {
   getPluginSource,
 } from '../models/workspace-config.js';
 import { isGitHubUrl, parseGitHubUrl } from '../utils/plugin-path.js';
+import { loadYaml } from '../utils/yaml.js';
 import { parseSkillMetadata } from '../validators/skill.js';
 import {
   isPluginSpec,
@@ -186,7 +186,7 @@ export async function getAllSkillsFromPlugins(
   }
 
   const content = await readFile(configPath, 'utf-8');
-  const config = load(content) as WorkspaceConfig;
+  const config = loadYaml(content) as WorkspaceConfig;
 
   // v1 fallback: use top-level disabledSkills/enabledSkills only for configs that haven't migrated
   const isV1Fallback = config.version === undefined || config.version < 2;

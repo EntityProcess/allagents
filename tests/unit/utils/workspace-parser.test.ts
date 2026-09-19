@@ -42,6 +42,33 @@ clients:
     }
   });
 
+  it('should preserve YAML merge keys', async () => {
+    const testDir = createTestDir();
+    try {
+      const configPath = join(testDir, 'workspace.yaml');
+      writeFileSync(
+        configPath,
+        `
+defaults: &defaults
+  repositories: []
+  plugins: []
+  clients:
+    - claude
+
+<<: *defaults
+`,
+      );
+
+      const result = await parseWorkspaceConfig(configPath);
+
+      expect(result.repositories).toEqual([]);
+      expect(result.plugins).toEqual([]);
+      expect(result.clients).toEqual(['claude']);
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
   it('should reject invalid client type', async () => {
     const testDir = createTestDir();
     try {

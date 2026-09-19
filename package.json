@@ -65,7 +65,7 @@
     "execa": "^8.0.1",
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
-    "js-yaml": "^4.3.2",
+    "js-yaml": "^5.4.1",
     "json5": "^2.2.3",
     "micromatch": "^4.0.8",
     "read-cmd-shim": "^4.0.0",
