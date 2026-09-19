@@ -30,6 +30,7 @@ export function createGit(baseDir?: string, timeoutMs = CLONE_TIMEOUT_MS) {
     unsafe: {
       allowUnsafeAskPass: true,
       allowUnsafeConfigEnvCount: true,
+      allowUnsafeCredentialHelper: true,
       allowUnsafeConfigPaths: true,
       allowUnsafeDiffExternal: true,
       allowUnsafeEditor: true,
