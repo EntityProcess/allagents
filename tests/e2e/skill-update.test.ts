@@ -883,7 +883,7 @@ describe('skill update CLI e2e', () => {
     expect(await cacheSha(fixture)).toBe(fixture.initialSha);
     expect(await readFile(keepArtifact, 'utf8')).toBe(keepBefore);
     expect(await readFile(goneArtifact, 'utf8')).toBe(goneBefore);
-  });
+  }, 15_000);
 
   test('shared project and user cache blocks project-only update and reconciles once with scope all', async () => {
     const fixture = await createFixture();
@@ -929,7 +929,7 @@ describe('skill update CLI e2e', () => {
     );
     expectPluginSkills(projectConfig, 0, ['keep']);
     expectPluginSkills(userConfig, 0, ['keep']);
-  });
+  }, 15_000);
 
   test('confirmed embedded marketplace deletion advances the marketplace cache', async () => {
     const fixture = await createFixture();

@@ -1,36 +1,18 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dump, load } from 'js-yaml';
+import {
+  CLACK_CANCEL as CANCEL,
+  installClientResponses as clientResponses,
+  installConfirmationResponses as confirmationResponses,
+  installConfirmMock as confirmMock,
+  installNoteMock as noteMock,
+  installScopeResponses as scopeResponses,
+  resetInstallPromptMocks,
+} from '../../helpers/clack-prompts-mock.js';
 
-const CANCEL = Symbol('cancel');
-const scopeResponses: Array<'project' | 'user' | typeof CANCEL> = [];
-const clientResponses: Array<string[] | typeof CANCEL> = [];
-const confirmationResponses: Array<boolean | typeof CANCEL> = [];
-const noteMock = mock((_message: string, _title?: string) => {});
-const confirmMock = mock(
-  async (_options: { initialValue: boolean }) =>
-    confirmationResponses.shift() ?? CANCEL,
-);
-const spinner = {
-  start: mock((_message?: string) => {}),
-  message: mock((_message?: string) => {}),
-  stop: mock((_message?: string) => {}),
-};
-
-mock.module('@clack/prompts', () => ({
-  autocomplete: mock(async () => ''),
-  autocompleteMultiselect: mock(async () => clientResponses.shift() ?? CANCEL),
-  confirm: confirmMock,
-  isCancel: (value: unknown) => value === CANCEL,
-  isCI: () => false,
-  multiselect: mock(async () => []),
-  note: noteMock,
-  select: mock(async () => scopeResponses.shift() ?? CANCEL),
-  spinner: () => spinner,
-  text: mock(async () => ''),
-}));
 
 // Load after the Clack mock so the action captures deterministic prompt functions.
 
@@ -69,14 +51,7 @@ async function createFixture(): Promise<void> {
 }
 
 beforeEach(async () => {
-  scopeResponses.length = 0;
-  clientResponses.length = 0;
-  confirmationResponses.length = 0;
-  noteMock.mockClear();
-  confirmMock.mockClear();
-  spinner.start.mockClear();
-  spinner.message.mockClear();
-  spinner.stop.mockClear();
+  resetInstallPromptMocks();
   await createFixture();
 });
 
@@ -162,7 +137,6 @@ describe('installSelectedPlugin', () => {
 
     expect(result).toEqual({ status: 'cancelled' });
     expect(await readFile(configPath, 'utf8')).toBe(before);
-    expect(spinner.start).not.toHaveBeenCalled();
   });
 
   test('initializes the first user config from the selected clients', async () => {

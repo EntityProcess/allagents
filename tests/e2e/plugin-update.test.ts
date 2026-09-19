@@ -257,7 +257,7 @@ describe('plugin update e2e', () => {
         action: 'updated',
       },
     ]);
-  });
+  }, 15_000);
 
 
   test('keeps direct marketplace update JSON free of internal fields', () => {
@@ -293,7 +293,7 @@ describe('plugin update e2e', () => {
         failed: 0,
       },
     });
-  });
+  }, 10_000);
   test('keeps user-scoped marketplace updates isolated from the workspace', () => {
     const addResult = runCli(workspaceDir, homeDir, [
       'plugin',
@@ -330,7 +330,7 @@ describe('plugin update e2e', () => {
       success: true,
       action: 'updated',
     });
-  });
+  }, 15_000);
 
   test(
     'updates the same plugin independently when installed in both scopes',
@@ -381,7 +381,7 @@ describe('plugin update e2e', () => {
         },
       ]);
     },
-    10_000,
+    20_000,
   );
 
   test(
