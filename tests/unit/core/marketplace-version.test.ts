@@ -1,9 +1,10 @@
-import { describe, it, expect, mock } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+import { getMarketplaceVersion } from '../../../src/core/marketplace.js';
 
 // Env that prevents git from walking up to a parent repo
 const gitEnv = (dir: string) => ({
@@ -13,9 +14,8 @@ const gitEnv = (dir: string) => ({
   GIT_WORK_TREE: undefined,
 });
 
-// Mock simple-git with a real-ish implementation that delegates to actual git
-mock.module('simple-git', () => ({
-  default: (dir: string) => ({
+function createTestGit(dir: string) {
+  return {
     log: async (opts: { maxCount?: number }) => {
       try {
         const format = '--format=%H%n%aI';
@@ -37,12 +37,8 @@ mock.module('simple-git', () => ({
         throw new Error('not a git repo');
       }
     },
-  }),
-}));
-
-const { getMarketplaceVersion } = await import(
-  '../../../src/core/marketplace.js'
-);
+  };
+}
 
 const localMarketplace = (path: string) => ({
   name: 'local-test',
@@ -62,7 +58,11 @@ describe('getMarketplaceVersion', () => {
       execSync('git add .', { cwd: dir, env });
       execSync('git commit -m "initial"', { cwd: dir, env });
 
-      const result = (await getMarketplaceVersion(localMarketplace(dir))) as {
+      const result = (await getMarketplaceVersion(
+        localMarketplace(dir),
+        undefined,
+        createTestGit,
+      )) as {
         hash: string;
         date: Date;
       } | null;
@@ -77,7 +77,11 @@ describe('getMarketplaceVersion', () => {
   it('should return null for a non-git directory', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mp-version-'));
     try {
-      const result = await getMarketplaceVersion(localMarketplace(dir));
+      const result = await getMarketplaceVersion(
+        localMarketplace(dir),
+        undefined,
+        createTestGit,
+      );
       expect(result).toBeNull();
     } finally {
       await rm(dir, { recursive: true });

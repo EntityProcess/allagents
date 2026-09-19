@@ -35,9 +35,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20.12.0"
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run schema:check
       - run: bun run build
+      - run: node dist/index.js --help
 
   typecheck:
     name: Typecheck

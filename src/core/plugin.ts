@@ -1,7 +1,6 @@
 import { mkdir, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import simpleGit from 'simple-git';
 import {
   parseGitHubUrl,
   getPluginCachePath,
@@ -11,6 +10,7 @@ import { getHomeDir } from '../constants.js';
 import {
   checkRepositoryHealth,
   cloneTo,
+  createGit,
   gitHubUrl,
   GitCloneError,
   pull,
@@ -86,7 +86,7 @@ export interface PluginUpdateFetchDeps extends FetchDeps {
  */
 async function resolveHeadSha(repoPath: string): Promise<string | undefined> {
   try {
-    const sha = await simpleGit(repoPath).revparse(['HEAD']);
+    const sha = await createGit(repoPath).revparse(['HEAD']);
     const trimmed = sha.trim();
     return trimmed.length > 0 ? trimmed : undefined;
   } catch {

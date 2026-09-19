@@ -16,14 +16,28 @@ export function createGitEnv(): NodeJS.ProcessEnv {
   };
 }
 
-export function createGit(baseDir?: string) {
+export function createGit(baseDir?: string, timeoutMs = CLONE_TIMEOUT_MS) {
   return simpleGit(baseDir, {
-    timeout: { block: CLONE_TIMEOUT_MS },
+    timeout: { block: timeoutMs },
     config: [
       'filter.lfs.required=false',
       'filter.lfs.smudge=',
       'filter.lfs.clean=',
       'filter.lfs.process=',
     ],
+    // Preserve user-owned Git settings and these fixed LFS overrides while
+    // keeping simple-git's argument protections enabled for repository sources.
+    unsafe: {
+      allowUnsafeAskPass: true,
+      allowUnsafeConfigEnvCount: true,
+      allowUnsafeConfigPaths: true,
+      allowUnsafeDiffExternal: true,
+      allowUnsafeEditor: true,
+      allowUnsafeFilter: true,
+      allowUnsafeGitProxy: true,
+      allowUnsafePager: true,
+      allowUnsafeSshCommand: true,
+      allowUnsafeTemplateDir: true,
+    },
   }).env(createGitEnv());
 }
