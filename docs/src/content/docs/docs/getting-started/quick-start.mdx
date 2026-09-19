@@ -29,7 +29,16 @@ This fetches the workspace configuration directly from GitHub and sets up your w
 ## Install Plugins
 
 ```bash
-allagents workspace plugin install code-review@claude-plugins-official
+allagents plugin install code-review@claude-plugins-official
+```
+
+On an interactive terminal, choose project or user scope, select the clients
+that should receive the plugin, review the declaration, and confirm. For
+scripts, provide the target explicitly:
+
+```bash
+allagents plugin install code-review@claude-plugins-official \
+  --scope project --client claude,codex --yes
 ```
 
 ## Sync Plugins
@@ -60,12 +69,15 @@ allagents skill add https://github.com/owner/repo/tree/main/skills/my-skill
 
 ## Install User-Scoped Plugins
 
-To install plugins globally for your user (available across all projects):
+Choose `user` in the interactive installer, or pass the target explicitly:
 
 ```bash
-allagents workspace plugin install superpowers@obra/superpowers --scope user
-allagents update --scope user
+allagents plugin install superpowers@obra/superpowers \
+  --scope user --client claude,codex --yes
 ```
+
+The selected plugin is added to `~/.allagents/workspace.yaml` and synced to the
+selected user-level client directories.
 
 ## Check Status
 

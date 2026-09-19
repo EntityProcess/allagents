@@ -203,7 +203,7 @@ The check runs at most once every 24 hours and never blocks startup. Results are
 ```bash
 allagents plugin list
 allagents plugin validate <path>
-allagents plugin install <plugin> [--skill <name>] [--scope <scope>]
+allagents plugin install <plugin> [--skill <name>] [--scope <scope>] [--client <clients>] [--yes]
 allagents plugin uninstall <plugin> [--scope <scope>]
 allagents plugin marketplace add <source> [--name <name>] [--branch <branch>]
 allagents plugin marketplace list
@@ -211,7 +211,7 @@ allagents plugin marketplace remove <name>
 allagents plugin marketplace update [name]
 allagents skill list [--scope <scope>]
 allagents skill remove <skill> [--plugin <plugin>] [--scope <scope>]
-allagents skill add <skill> [--from <source>] [--plugin <plugin>] [--scope <scope>]
+allagents skill add <skill> [--from <source>] [--plugin <plugin>] [--scope <scope>] [--client <clients>] [--yes]
 allagents skill update [skill...] [--scope <scope>] [--yes]
 ```
 
@@ -249,12 +249,24 @@ With `--json`, each entry includes the friendly `name`, raw configured `spec`, `
 
 ### plugin install
 
-Install a plugin into the workspace.
+Install a plugin, then sync the selected scope.
 
 | Flag | Description |
 |------|-------------|
-| `-s, --scope <scope>` | Installation scope: `project` (default) or `user` |
+| `-s, --scope <scope>` | Installation scope: `project` or `user` |
+| `-c, --client <clients>` | Comma-separated clients for this plugin |
+| `-y, --yes` | Skip the final install confirmation |
 | `--skill <name>` | Only enable specific skills from the plugin (can be repeated) |
+
+On an interactive terminal, omitted target flags open scope and client
+choosers. AllAgents then shows the config path, resulting declaration, and
+clients; confirmation defaults to **No**. `--scope` and `--client` bypass only
+their respective choosers. `--yes` skips only the final confirmation.
+
+JSON, CI, and non-TTY runs never prompt. Omitted target flags retain the
+command's deterministic defaults. A new scope uses the selected clients as its
+top-level `clients` list; otherwise, a plugin-level `clients` override is
+written only when the selection differs from the scope default.
 
 #### `--skill <name>`
 
@@ -302,7 +314,19 @@ Add skills from a GitHub repo, re-enable a previously disabled skill, or add a s
 | `--all` | Install every skill from the source |
 | `--list` | List available skills at the source without installing |
 | `-p, --plugin <plugin>` | Plugin name (required if skill exists in multiple plugins) |
-| `-s, --scope <scope>` | Scope: `project` (default) or `user` |
+| `-s, --scope <scope>` | Installation scope for a new source: `project` or `user` |
+| `-c, --client <clients>` | Comma-separated clients for a new source-backed declaration |
+| `-y, --yes` | Skip the final install confirmation |
+
+When this command introduces a source-backed declaration, it uses the same
+interactive target review as `plugin install`: scope, clients, exact config
+path, prospective declaration, and a final confirmation that defaults to
+**No**. Explicit `--scope` and `--client` values bypass those choosers;
+`--yes` skips only confirmation. JSON, CI, and non-TTY runs remain prompt-free.
+
+These target options do not apply when merely re-enabling a skill from an
+already installed plugin; that path preserves the existing declaration.
+
 
 #### Skill-first: install all skills from a repo
 
