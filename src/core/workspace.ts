@@ -2,13 +2,14 @@ import { cp, mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { load, dump } from 'js-yaml';
+import { dump } from 'js-yaml';
 import { syncWorkspace, type SyncResult } from './sync.js';
 import { ensureWorkspaceRules } from './transform.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, AGENT_FILES, type WorkspaceRepository } from '../constants.js';
 import { getClientTypes, type ClientEntry } from '../models/workspace-config.js';
 import { isGitHubUrl, parseGitHubUrl, getPluginCachePath } from '../utils/plugin-path.js';
 import { validateProjectWorkspaceConfig } from '../utils/workspace-parser.js';
+import { loadYaml } from '../utils/yaml.js';
 import { fetchWorkspaceFromGitHub, readFileFromClone } from './github-fetch.js';
 import { cleanupTempDir } from './git.js';
 import { getMarketplacesDir } from './marketplace.js';
@@ -104,7 +105,7 @@ export async function initWorkspace(
 
         // For GitHub sources, keep workspace.source as-is (it's already a URL or relative to the repo)
         // We need to rewrite relative workspace.source to the full GitHub URL
-        const parsed = load(workspaceYamlContent) as Record<string, unknown>;
+        const parsed = loadYaml(workspaceYamlContent) as Record<string, unknown>;
         const workspace = parsed?.workspace as { source?: string } | undefined;
         if (workspace?.source) {
           const source = workspace.source;
@@ -166,7 +167,7 @@ export async function initWorkspace(
 
         // Rewrite relative workspace.source to absolute path so sync works after init
         if (sourceDir) {
-          const parsed = load(workspaceYamlContent) as Record<string, unknown>;
+          const parsed = loadYaml(workspaceYamlContent) as Record<string, unknown>;
           const workspace = parsed?.workspace as { source?: string } | undefined;
           if (workspace?.source) {
             const source = workspace.source;
@@ -191,7 +192,7 @@ export async function initWorkspace(
 
     // Override clients if provided
     if (options.clients && options.clients.length > 0) {
-      const configParsed = load(workspaceYamlContent) as Record<string, unknown>;
+      const configParsed = loadYaml(workspaceYamlContent) as Record<string, unknown>;
       configParsed.clients = options.clients;
       workspaceYamlContent = dump(configParsed, { lineWidth: -1 });
     }
@@ -199,7 +200,7 @@ export async function initWorkspace(
     // Preserve init's historical support for sparse templates while validating
     // every supplied value and rejecting project-only forbidden fields before
     // replacing an existing workspace.
-    const input = load(workspaceYamlContent);
+    const input = loadYaml(workspaceYamlContent);
     const inputRecord =
       input && typeof input === 'object' && !Array.isArray(input)
         ? (input as Record<string, unknown>)

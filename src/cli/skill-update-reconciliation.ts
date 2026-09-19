@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { dump, load } from 'js-yaml';
+import { dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   PreparedUnitReconciliation,
@@ -21,6 +21,7 @@ import {
   validateProjectWorkspaceConfig,
   validateUserWorkspaceConfig,
 } from '../utils/workspace-parser.js';
+import { loadYaml } from '../utils/yaml.js';
 
 export interface CreateSkillUpdateReconcilerOptions {
   workspacePath: string;
@@ -49,7 +50,7 @@ function parseConfig(
   path: string,
   scope: SkillUpdateInstallation['scope'],
 ): WorkspaceConfig {
-  const raw = load(content);
+  const raw = loadYaml(content);
   if (scope === 'user') {
     validateUserWorkspaceConfig(raw, path);
   } else {
