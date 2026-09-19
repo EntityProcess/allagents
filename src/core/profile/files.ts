@@ -271,7 +271,7 @@ export async function materializeManagedFile(
     }
     preFingerprint = sha256Fingerprint(await readFile(request.path));
     const verifiedStats = await existingStats(request.path);
-    if (!verifiedStats || !verifiedStats.isFile()) {
+    if (!verifiedStats?.isFile()) {
       throw new Error(`Profile file destination changed during inspection: ${request.path}`);
     }
     const initialIdentity = fileIdentity(stats);
