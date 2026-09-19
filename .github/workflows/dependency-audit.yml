@@ -35,7 +35,7 @@ jobs:
           - name: docs
             directory: docs
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
