@@ -93,9 +93,7 @@ export interface ResolveInstallTargetOptions {
   readonly declaration: PluginEntry;
   readonly action: string;
   readonly payload: string;
-  readonly scopeStates: Readonly<
-    Record<InstallScope, InstallScopeStateSource>
-  >;
+  readonly scopeStates: Readonly<Record<InstallScope, InstallScopeStateSource>>;
   readonly environment: InstallTargetEnvironment;
   readonly prompts?: InstallTargetPromptPort;
   readonly scope?: string;
@@ -113,7 +111,7 @@ export interface ResolvedInstallTarget {
   readonly clients: readonly ClientType[];
   readonly disposition: InstallTargetDisposition;
   readonly prospectiveDeclaration: PluginEntry;
-  readonly selectedClientEntries: readonly ClientEntry[];
+  readonly selectedClientEntries: ClientEntry[];
   readonly summary: InstallTargetSummary;
 }
 
