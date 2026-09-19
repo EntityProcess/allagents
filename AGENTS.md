@@ -184,10 +184,4 @@ bun run build
 
 ## Interactive Testing
 
-### agent-tui
-- Use `agent-tui` to exercise interactive terminal behavior in the built CLI inside a temporary workspace.
-- Dogfood the complete navigation loop, not only the successful mutation. Capture each decision screen before acting and read it as a first-time user.
-- Apply a one-screen, one-decision check: a resource list contains resources plus add/back; a resource detail contains actions for that resource; scope or destination changes happen by returning to the chooser. If one menu mixes resource selection, navigation, and maintenance operations, simplify it.
-- Use established product vocabulary in every label and status message. Prefer the public operation name, such as **Update**, over internal terms such as sync or reconcile.
-- Exercise Back and Ctrl+C from every menu level, plus mutation success, failure, and retry paths. Confirm each transition lands on the screen a user would expect without losing the selected scope.
-- When documenting manual verification, record the exact command, temporary workspace setup, screenshots or observed screens, and the transitions confirmed.
+- TUI navigation, prompt, copy, status, or recovery changes: read and follow [`docs/agent-guides/tui-dogfooding.md`](docs/agent-guides/tui-dogfooding.md) before implementation and final verification.
