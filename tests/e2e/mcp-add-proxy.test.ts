@@ -7,6 +7,9 @@ import {
   type DummyMcpOAuthServer,
   startDummyMcpOAuthServer,
 } from '../helpers/dummy-mcp-oauth-server.js';
+import packageJson from '../../package.json';
+
+const packageRef = `allagents@${packageJson.version}`;
 
 interface CliResult {
   exitCode: number;
@@ -103,24 +106,36 @@ clients:
     });
 
     const claudeConfig = JSON.parse(readFileSync(join(workspaceDir, '.mcp.json'), 'utf-8'));
-    expect(claudeConfig.mcpServers.deepwiki.command).toBe('allagents');
+    expect(claudeConfig.mcpServers.deepwiki.command).toBe('npx');
     expect(claudeConfig.mcpServers.deepwiki.args).toEqual([
+      '-y',
+      packageRef,
       'mcp',
       'proxy',
       dummy.mcpUrl,
     ]);
 
     const codexConfig = readFileSync(join(workspaceDir, '.codex', 'config.toml'), 'utf-8');
-    expect(codexConfig).toContain('proxy');
-    expect(codexConfig).toContain(dummy.mcpUrl);
+    expect(codexConfig).toContain('npx');
+    expect(codexConfig).toContain(packageRef);
 
     const vscodeConfig = JSON.parse(readFileSync(join(workspaceDir, '.vscode', 'mcp.json'), 'utf-8'));
-    expect(vscodeConfig.servers.deepwiki.command).toBe('allagents');
-    expect(vscodeConfig.servers.deepwiki.args[0]).toBe('mcp');
+    expect(vscodeConfig.servers.deepwiki.command).toBe('npx');
+    expect(vscodeConfig.servers.deepwiki.args.slice(0, 4)).toEqual([
+      '-y',
+      packageRef,
+      'mcp',
+      'proxy',
+    ]);
 
     const copilotConfig = JSON.parse(readFileSync(join(workspaceDir, '.copilot', 'mcp-config.json'), 'utf-8'));
-    expect(copilotConfig.mcpServers.deepwiki.command).toBe('allagents');
-    expect(copilotConfig.mcpServers.deepwiki.args[0]).toBe('mcp');
+    expect(copilotConfig.mcpServers.deepwiki.command).toBe('npx');
+    expect(copilotConfig.mcpServers.deepwiki.args.slice(0, 4)).toEqual([
+      '-y',
+      packageRef,
+      'mcp',
+      'proxy',
+    ]);
 
     const rerun = await runCli(workspaceDir, homeDir, ['mcp', 'update']);
     expect(rerun.exitCode).toBe(0);

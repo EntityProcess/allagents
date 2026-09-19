@@ -26,6 +26,9 @@
 - Added automatic OAuth login to `allagents mcp add` and named credential
   renewal with `allagents mcp reauth`, including local loopback completion and
   remote callback URL paste with strict redirect and state validation.
+- Generated HTTP MCP bridges now invoke the current pinned AllAgents version
+  through cached `npx`, so managed MCP connections do not require a global
+  AllAgents installation.
 
 - Pi and OMP as file-sync clients at project and user scope, including native
   runtime skill paths and agent instructions.

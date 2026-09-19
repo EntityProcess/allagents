@@ -1,4 +1,5 @@
 import type { McpProxyConfig } from '../models/workspace-config.js';
+import packageJson from '../../package.json';
 
 /**
  * Determine if a server+client pair should be proxied.
@@ -43,7 +44,13 @@ function toProxiedConfig(
   url: string,
   headers?: Record<string, string>,
 ): Record<string, unknown> {
-  const args = ['mcp', 'proxy', url];
+  const args = [
+    '-y',
+    `allagents@${packageJson.version}`,
+    'mcp',
+    'proxy',
+    url,
+  ];
   if (headers) {
     for (const [key, value] of Object.entries(headers)) {
       args.push('--header', `${key}=${value}`);
@@ -51,7 +58,7 @@ function toProxiedConfig(
   }
 
   return {
-    command: 'allagents',
+    command: 'npx',
     args,
   };
 }

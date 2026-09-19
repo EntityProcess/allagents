@@ -7,6 +7,9 @@ import {
   applyMcpProxy,
 } from '../../../src/core/mcp-proxy.js';
 import type { McpProxyConfig } from '../../../src/models/workspace-config.js';
+import packageJson from '../../../package.json';
+
+const packageRef = `allagents@${packageJson.version}`;
 
 function makeTempDir(): string {
   const dir = join(tmpdir(), `allagents-mcp-proxy-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -68,8 +71,14 @@ describe('applyMcpProxy', () => {
     const config: McpProxyConfig = { clients: ['claude'] };
     const result = applyMcpProxy(servers, 'claude', config);
     expect(result.get('deepwiki')).toEqual({
-      command: 'allagents',
-      args: ['mcp', 'proxy', 'https://mcp.deepwiki.com/mcp'],
+      command: 'npx',
+      args: [
+        '-y',
+        packageRef,
+        'mcp',
+        'proxy',
+        'https://mcp.deepwiki.com/mcp',
+      ],
     });
   });
 
@@ -98,7 +107,7 @@ describe('applyMcpProxy', () => {
     ]);
     const config: McpProxyConfig = { clients: ['copilot'] };
     const result = applyMcpProxy(servers, 'copilot', config);
-    expect((result.get('http-server') as Record<string, unknown>).command).toBe('allagents');
+    expect((result.get('http-server') as Record<string, unknown>).command).toBe('npx');
     expect((result.get('stdio-server') as Record<string, unknown>).command).toBe('npx');
     expect((result.get('stdio-server') as Record<string, unknown>).args).toEqual(['some-mcp']);
   });
@@ -113,7 +122,7 @@ describe('applyMcpProxy', () => {
       servers: { 'my-api': { proxy: ['codex'] } },
     };
     const result = applyMcpProxy(servers, 'codex', config);
-    expect((result.get('my-api') as Record<string, unknown>).command).toBe('allagents');
+    expect((result.get('my-api') as Record<string, unknown>).command).toBe('npx');
     expect(result.get('other-api')).toEqual({ url: 'https://other.example.com/mcp' });
   });
 
@@ -130,8 +139,10 @@ describe('applyMcpProxy', () => {
     const config: McpProxyConfig = { clients: ['claude'] };
     const result = applyMcpProxy(servers, 'claude', config);
     expect(result.get('secure-api')).toEqual({
-      command: 'allagents',
+      command: 'npx',
       args: [
+        '-y',
+        packageRef,
         'mcp',
         'proxy',
         'https://api.example.com/mcp',

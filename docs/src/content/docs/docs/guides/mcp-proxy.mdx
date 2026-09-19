@@ -101,13 +101,21 @@ The generated client config may contain an internal invocation like:
 ```json
 {
   "tradingview": {
-    "command": "allagents",
-    "args": ["mcp", "proxy", "https://mcp.tradingview.com/mcp"]
+    "command": "npx",
+    "args": [
+      "-y",
+      "allagents@<version>",
+      "mcp",
+      "proxy",
+      "https://mcp.tradingview.com/mcp"
+    ]
   }
 }
 ```
 
-This is generated plumbing, not a setup command.
+This is generated plumbing, not a setup command. AllAgents pins the package
+version that created the config, and `npx` reuses npm's package cache on later
+launches.
 
 ### Plugin-Provided Servers
 
@@ -148,17 +156,13 @@ files by hand.
 
 ## Prerequisites
 
-Install `allagents` globally so AI clients can launch it from their generated
-MCP configuration:
+The generated bridge requires Node.js with `npx` available. A global AllAgents
+installation is not required: both setup and the generated MCP connection can
+use the npm cache.
 
-```bash
-npm install -g allagents
-# or
-bun install -g allagents
-```
-
-Running `npx allagents` for setup is not sufficient because it does not leave
-an `allagents` executable on `PATH` for clients to launch later.
+The first bridge launch downloads the pinned AllAgents package if that version
+is not already cached. Later launches reuse the cached package. Environments
+that must work offline should prime the cache before disconnecting.
 
 ## Scope
 

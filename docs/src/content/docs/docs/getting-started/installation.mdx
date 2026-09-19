@@ -22,7 +22,9 @@ npx allagents
 ```
 
 :::note
-If you plan to use [HTTP MCP servers](/docs/guides/mcp-proxy/), install AllAgents globally (npm or bun) instead. Your MCP clients launch AllAgents' generated bridge directly, so `allagents` must remain resolvable on `PATH`; running setup through `npx` alone is not sufficient.
+HTTP MCP servers also work when setup is run through `npx`. Generated client
+configs invoke a pinned AllAgents version through `npx`, which reuses npm's
+package cache after the first launch.
 :::
 
 ## Using bun
