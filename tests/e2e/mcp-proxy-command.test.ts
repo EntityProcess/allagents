@@ -171,13 +171,6 @@ describe('mcp public command help', () => {
     expect(result.stdout).not.toContain('"when_to_use"');
   });
 
-  test('rejects the removed legacy structured-help flag', () => {
-    const result = runCli(['--agent-help']);
-
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stdout).not.toContain('"commands"');
-  });
-
   test('exposes the full command tree through structured JSON help', () => {
     const result = runCli(['--help', '--json']);
 

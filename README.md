@@ -24,6 +24,13 @@ npx allagents update
 
 No cloning required — AllAgents fetches the `workspace.yaml` directly from GitHub and sets up everything.
 
+Install the end-user AllAgents skill when you want your coding agent to operate
+the CLI using its current machine-readable command contracts:
+
+```bash
+npx allagents plugin install allagents@allagentsdev/allagents --scope user
+```
+
 ## How It Works
 
 1. **Configure** your workspace with repos, plugins, and target clients in `workspace.yaml`
