@@ -354,12 +354,9 @@ async function runBrowseMarketplaceSkills(
   }
 
   // Not installed — install first, then show skill toggle
-  const installed = await installSelectedPlugin(selected, context, cache);
-  if (installed) {
-    // Determine which scope it was installed to by checking again
-    const nowInstalledUser = await hasUserPlugin(selected);
-    const scope = nowInstalledUser ? 'user' : 'project';
-    await runBrowsePluginSkills(selected, scope, context, cache);
+  const result = await installSelectedPlugin(selected, context, cache);
+  if (result.status === 'installed') {
+    await runBrowsePluginSkills(result.source, result.scope, context, cache);
   }
 }
 
@@ -425,10 +422,8 @@ async function runSearchOnlineSkills(context: TuiContext, cache?: TuiCache): Pro
     return;
   }
 
-  const installed = await installSelectedPlugin(selected, context, cache);
-  if (installed) {
-    const nowInstalledUser = await hasUserPlugin(selected);
-    const scope = nowInstalledUser ? 'user' : 'project';
-    await runBrowsePluginSkills(selected, scope, context, cache);
+  const result = await installSelectedPlugin(selected, context, cache);
+  if (result.status === 'installed') {
+    await runBrowsePluginSkills(result.source, result.scope, context, cache);
   }
 }

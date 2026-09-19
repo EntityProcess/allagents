@@ -162,6 +162,17 @@ describe('agent command metadata', () => {
     );
   });
 
+  test('skill add metadata exposes install target options', () => {
+    const addCmd = allCommands.find((command) => command.command === 'skill add')!;
+    expect(addCmd.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ flag: '--scope', short: '-s', type: 'string' }),
+        expect.objectContaining({ flag: '--client', short: '-c', type: 'string' }),
+        expect.objectContaining({ flag: '--yes', short: '-y', type: 'boolean' }),
+      ]),
+    );
+  });
+
   test('status has no positionals or options', () => {
     const statusCmd = allCommands.find((c) => c.command === 'status')!;
     expect(statusCmd.positionals).toBeUndefined();
