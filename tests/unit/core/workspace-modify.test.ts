@@ -1,5 +1,13 @@
 import { describe, expect, test, beforeEach, afterEach, mock } from 'bun:test';
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dump, load } from 'js-yaml';
@@ -102,7 +110,8 @@ mock.module('../../../src/core/git.js', () => ({
   },
 }));
 
-const { updateRepositories, addPlugin } = await import('../../../src/core/workspace-modify.js');
+const { updateRepositories, addPlugin, addPluginForTarget } =
+  await import('../../../src/core/workspace-modify.js');
 
 describe('updateRepositories', () => {
   const testDir = join(tmpdir(), `allagents-test-repos-${Date.now()}`);
@@ -323,6 +332,167 @@ describe('addPlugin with --force flag', () => {
 
     const updated = load(readFileSync(configPath, 'utf-8')) as any;
     expect(updated.plugins.length).toBe(1);
+  });
+});
+
+describe('addPluginForTarget', () => {
+  let testDir: string;
+  let configPath: string;
+  let pluginDir: string;
+
+  beforeEach(() => {
+    testDir = join(tmpdir(), `allagents-target-test-${Date.now()}-${Math.random()}`);
+    configPath = join(testDir, '.allagents', 'workspace.yaml');
+    pluginDir = join(testDir, 'plugin');
+    mkdirSync(join(testDir, '.allagents'), { recursive: true });
+    mkdirSync(pluginDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test('initializes a first config with selected clients and inherited string declaration', async () => {
+    const result = await addPluginForTarget(
+      { declaration: pluginDir, clients: ['claude', 'codex'] },
+      testDir,
+    );
+
+    expect(result.success).toBe(true);
+    const config = load(readFileSync(configPath, 'utf-8')) as WorkspaceConfig;
+    expect(config.clients).toEqual(['claude', 'codex']);
+    expect(config.plugins).toEqual([pluginDir]);
+  });
+
+  test('stores only a differing client override and isolates unrelated config', async () => {
+    const initial = {
+      repositories: [{ path: '../keep' }],
+      plugins: ['../other-plugin'],
+      clients: ['claude', 'codex'],
+    };
+    writeFileSync(configPath, dump(initial, { lineWidth: -1 }));
+
+    const result = await addPluginForTarget(
+      {
+        declaration: { source: pluginDir, clients: ['cursor'] },
+        clients: ['cursor'],
+      },
+      testDir,
+    );
+
+    expect(result.success).toBe(true);
+    const config = load(readFileSync(configPath, 'utf-8')) as WorkspaceConfig;
+    expect(config.clients).toEqual(initial.clients);
+    expect(config.repositories).toEqual(initial.repositories);
+    expect(config.plugins).toEqual([
+      '../other-plugin',
+      { source: pluginDir, clients: ['cursor'] },
+    ]);
+  });
+
+  test('preserves object fields while clearing clients on exact reinstall', async () => {
+    writeFileSync(
+      configPath,
+      dump({
+        repositories: [],
+        clients: ['claude'],
+        plugins: [
+          {
+            source: pluginDir,
+            clients: ['cursor'],
+            skills: { exclude: ['private'] },
+            install: 'native',
+            exclude: ['fixtures/**'],
+            ref: 'stable',
+          },
+          '../keep',
+        ],
+      }),
+    );
+
+    const result = await addPluginForTarget(
+      { declaration: pluginDir, clients: ['claude'] },
+      testDir,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.replaced).toBe(true);
+    const config = load(readFileSync(configPath, 'utf-8')) as WorkspaceConfig;
+    expect(config.clients).toEqual(['claude']);
+    expect(config.plugins).toEqual([
+      {
+        source: pluginDir,
+        skills: { exclude: ['private'] },
+        install: 'native',
+        exclude: ['fixtures/**'],
+        ref: 'stable',
+      },
+      '../keep',
+    ]);
+  });
+
+  test('replaces a semantic match in place and preserves its object fields', async () => {
+    writeFileSync(
+      configPath,
+      dump({
+        repositories: [],
+        clients: ['claude'],
+        plugins: [
+          {
+            source: 'https://github.com/owner/repo',
+            skills: ['one'],
+            ref: 'main',
+          },
+          'https://github.com/other/keep',
+        ],
+      }),
+    );
+
+    const result = await addPluginForTarget(
+      {
+        declaration: {
+          source: 'https://github.com/owner/repo.git',
+          clients: ['cursor'],
+        },
+        clients: ['cursor'],
+      },
+      testDir,
+    );
+
+    expect(result.success).toBe(true);
+    const config = load(readFileSync(configPath, 'utf-8')) as WorkspaceConfig;
+    expect(config.plugins).toEqual([
+      {
+        source: 'https://github.com/owner/repo.git',
+        skills: ['one'],
+        ref: 'main',
+        clients: ['cursor'],
+      },
+      'https://github.com/other/keep',
+    ]);
+  });
+
+  test('leaves original bytes and mode intact and removes the temp file on pre-rename failure', async () => {
+    const original =
+      'repositories: []\nplugins:\n  - ../keep\nclients:\n  - claude\n';
+    writeFileSync(configPath, original);
+    chmodSync(configPath, 0o640);
+
+    const result = await addPluginForTarget(
+      { declaration: pluginDir, clients: ['claude'] },
+      testDir,
+      {
+        beforeRename() {
+          throw new Error('injected pre-rename failure');
+        },
+      },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('injected pre-rename failure');
+    expect(readFileSync(configPath, 'utf-8')).toBe(original);
+    expect(statSync(configPath).mode & 0o777).toBe(0o640);
+    expect(readdirSync(join(testDir, '.allagents'))).toEqual(['workspace.yaml']);
   });
 });
 

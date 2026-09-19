@@ -5,6 +5,7 @@ import { dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
   ClientEntry,
+  ClientType,
   PluginEntry,
   UserWorkspaceConfig,
   WorkspaceConfig,
@@ -30,13 +31,17 @@ import {
 } from './marketplace.js';
 import {
   type ModifyResult,
+  type PluginInstallTarget,
+  type TargetedPluginWriteDependencies,
   ensureObjectPluginEntry,
   extractPluginNames,
   findPluginEntryByName,
+  mergeTargetedPluginEntry,
   pruneDisabledSkillsForPlugin,
   pruneEnabledSkillsForPlugin,
   resolveGitHubIdentity,
   upsertGitHubPluginSourceAllowlistInConfig,
+  writeWorkspaceConfigAtomically,
 } from './workspace-modify.js';
 import { parseUserWorkspaceConfigForEdit } from '../utils/workspace-parser.js';
 
@@ -123,27 +128,57 @@ export async function addUserPlugin(
   plugin: string,
   force?: boolean,
 ): Promise<ModifyResult> {
-  await ensureUserWorkspace();
+  return addValidatedUserPlugin(plugin, force);
+}
+
+/**
+ * User-scope counterpart to addPluginForTarget.
+ */
+export async function addUserPluginForTarget(
+  target: PluginInstallTarget,
+  dependencies: TargetedPluginWriteDependencies = {},
+): Promise<ModifyResult> {
+  return addValidatedUserPlugin(
+    target.declaration,
+    true,
+    target.clients,
+    dependencies,
+  );
+}
+
+async function addValidatedUserPlugin(
+  declaration: PluginEntry,
+  force?: boolean,
+  initialClients?: readonly ClientType[],
+  dependencies?: TargetedPluginWriteDependencies,
+): Promise<ModifyResult> {
+  const plugin = getPluginSource(declaration);
+  await ensureUserWorkspace(
+    initialClients ? [...initialClients] : undefined,
+  );
   const configPath = getUserWorkspaceConfigPath();
 
-  // Handle plugin@marketplace format
   if (isPluginSpec(plugin)) {
     const resolved = await resolvePluginSpecWithAutoRegister(plugin);
     if (!resolved.success) {
       return { success: false, error: resolved.error || 'Unknown error' };
     }
-    const normalizedPlugin = resolved.registeredAs
+    const normalizedSource = resolved.registeredAs
       ? plugin.replace(/@[^@]+$/, `@${resolved.registeredAs}`)
       : plugin;
+    const normalizedDeclaration =
+      typeof declaration === 'string'
+        ? normalizedSource
+        : { ...declaration, source: normalizedSource };
     return addPluginToUserConfig(
-      normalizedPlugin,
+      normalizedDeclaration,
       configPath,
       resolved.registeredAs,
       force,
+      dependencies,
     );
   }
 
-  // Handle GitHub URL
   if (isGitHubUrl(plugin)) {
     const validation = validatePluginSource(plugin);
     if (!validation.valid) {
@@ -160,7 +195,6 @@ export async function addUserPlugin(
       };
     }
   } else {
-    // Local path - verify it exists
     if (!existsSync(plugin)) {
       return {
         success: false,
@@ -175,7 +209,13 @@ export async function addUserPlugin(
     }
   }
 
-  return addPluginToUserConfig(plugin, configPath, undefined, force);
+  return addPluginToUserConfig(
+    declaration,
+    configPath,
+    undefined,
+    force,
+    dependencies,
+  );
 }
 
 /**
@@ -302,64 +342,84 @@ export async function removeUserPluginsForMarketplace(
  * Add plugin entry to the user-level config file.
  */
 async function addPluginToUserConfig(
-  plugin: string,
+  plugin: PluginEntry,
   configPath: string,
   autoRegistered?: string,
   force?: boolean,
+  targetedDependencies?: TargetedPluginWriteDependencies,
 ): Promise<ModifyResult> {
   try {
     const config = await parseUserWorkspaceConfigForEdit(configPath);
-
-    // Check for exact match
+    const source = getPluginSource(plugin);
     const exactIndex = config.plugins.findIndex(
-      (entry) => getPluginSource(entry) === plugin,
+      (entry) => getPluginSource(entry) === source,
     );
-    if (exactIndex !== -1) {
-      if (!force) {
-        return {
-          success: false,
-          error: `Plugin already exists in user config: ${plugin}`,
-        };
-      }
-      // Force: remove the old one before adding the new one
-      config.plugins.splice(exactIndex, 1);
+    if (exactIndex !== -1 && !force) {
+      return {
+        success: false,
+        error: `Plugin already exists in user config: ${source}`,
+      };
     }
 
-    // Check for semantic duplicates (different strings resolving to same repo)
-    const newIdentity = await resolveGitHubIdentity(plugin);
+    let semanticIndex = -1;
+    const newIdentity = await resolveGitHubIdentity(source);
     if (newIdentity) {
-      let semanticIndex = -1;
       for (let i = 0; i < config.plugins.length; i++) {
+        if (i === exactIndex) continue;
         const existing = config.plugins[i];
         if (!existing) continue;
-        const existingSource = getPluginSource(existing);
-        const existingIdentity = await resolveGitHubIdentity(existingSource);
-        if (existingIdentity === newIdentity) {
+        if (
+          (await resolveGitHubIdentity(getPluginSource(existing))) === newIdentity
+        ) {
           semanticIndex = i;
           break;
         }
       }
-      if (semanticIndex !== -1) {
-        if (!force) {
-          const existingSource = getPluginSource(
-            config.plugins[semanticIndex] as PluginEntry,
-          );
-          return {
-            success: false,
-            error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
-          };
-        }
-        // Force: remove the semantic duplicate
-        config.plugins.splice(semanticIndex, 1);
-      }
     }
 
-    config.plugins.push(plugin);
-    await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    if (semanticIndex !== -1 && !force) {
+      const existingSource = getPluginSource(
+        config.plugins[semanticIndex] as PluginEntry,
+      );
+      return {
+        success: false,
+        error: `Plugin duplicates existing entry '${existingSource}': both resolve to ${newIdentity}`,
+      };
+    }
+
+    if (targetedDependencies !== undefined) {
+      const replaceIndex = exactIndex !== -1 ? exactIndex : semanticIndex;
+      const nextEntry = mergeTargetedPluginEntry(
+        replaceIndex === -1 ? undefined : config.plugins[replaceIndex],
+        plugin,
+        source,
+        config.clients,
+      );
+      if (replaceIndex === -1) config.plugins.push(nextEntry);
+      else config.plugins[replaceIndex] = nextEntry;
+      await writeWorkspaceConfigAtomically(
+        configPath,
+        config,
+        'user',
+        targetedDependencies,
+      );
+    } else {
+      if (exactIndex !== -1) config.plugins.splice(exactIndex, 1);
+      const adjustedSemanticIndex =
+        exactIndex !== -1 && semanticIndex > exactIndex
+          ? semanticIndex - 1
+          : semanticIndex;
+      if (adjustedSemanticIndex !== -1) {
+        config.plugins.splice(adjustedSemanticIndex, 1);
+      }
+      config.plugins.push(plugin);
+      await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
+    }
+
     return {
       success: true,
       ...(autoRegistered && { autoRegistered }),
-      normalizedPlugin: plugin,
+      normalizedPlugin: source,
       ...(force && { replaced: exactIndex !== -1 }),
     };
   } catch (error) {
