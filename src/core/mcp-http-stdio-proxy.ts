@@ -1,45 +1,67 @@
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
-import { access } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { spawn } from 'node:child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { dirname, join } from 'node:path';
 import {
-  type OAuthDiscoveryState,
   type OAuthClientProvider,
+  type OAuthDiscoveryState,
   UnauthorizedError,
 } from '@modelcontextprotocol/sdk/client/auth.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import type {
-  FetchLike,
-  Transport,
-} from '@modelcontextprotocol/sdk/shared/transport.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type {
   OAuthClientInformationMixed,
   OAuthClientMetadata,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
-import { getHomeDir } from '../constants.js';
+import type {
+  FetchLike,
+  Transport,
+} from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
+  CallToolRequestSchema as CallToolSchema,
   GetPromptRequestSchema as GetPromptSchema,
   ListPromptsRequestSchema as ListPromptsSchema,
-  ListResourceTemplatesRequestSchema as ListResourceTemplatesSchema,
   ListResourcesRequestSchema as ListResourcesSchema,
+  ListResourceTemplatesRequestSchema as ListResourceTemplatesSchema,
   ListToolsRequestSchema as ListToolsSchema,
   ReadResourceRequestSchema as ReadResourceSchema,
-  CallToolRequestSchema as CallToolSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { getHomeDir } from '../constants.js';
+import { ProfileNameSchema } from '../models/workspace-config.js';
 
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 export const AUTH_URL_LOG_PREFIX = 'If the browser does not open, visit: ';
+
+const ENVIRONMENT_REFERENCE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+
+export function resolveMcpHeaderReferences(
+  headers: Record<string, string>,
+  environment: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).map(([key, value]) => {
+      const reference = ENVIRONMENT_REFERENCE.exec(value);
+      if (!reference) return [key, value];
+      const variable = reference[1] as string;
+      const resolved = environment[variable];
+      if (resolved === undefined) {
+        throw new Error(
+          `MCP header '${key}' references missing environment variable '${variable}'`,
+        );
+      }
+      return [key, resolved];
+    }),
+  );
+}
 
 export interface OAuthCallbackRequest {
   authorizationUrl: URL;
@@ -135,12 +157,21 @@ export function hashServerUrl(serverUrl: string): string {
   return createHash('sha256').update(serverUrl).digest('hex').slice(0, 16);
 }
 
-function getCacheDir(serverUrl: string): string {
+export function getMcpOAuthCacheDir(
+  serverUrl: string,
+  profile?: string,
+): string {
+  const hash = hashServerUrl(serverUrl);
+  if (!profile) {
+    return join(getHomeDir(), '.allagents', 'oauth-proxy', hash);
+  }
   return join(
     getHomeDir(),
     '.allagents',
+    'profiles',
+    ProfileNameSchema.parse(profile),
     'oauth-proxy',
-    hashServerUrl(serverUrl),
+    hash,
   );
 }
 
@@ -160,9 +191,9 @@ function getMcpFetch(
     }
 
     const mergedHeaders = new Headers(headers);
-    new Headers(init?.headers).forEach((value, key) =>
-      mergedHeaders.set(key, value),
-    );
+    new Headers(init?.headers).forEach((value, key) => {
+      mergedHeaders.set(key, value);
+    });
 
     return fetch(input, {
       ...init,
@@ -189,7 +220,7 @@ async function readJsonFile<T>(path: string): Promise<T | undefined> {
 }
 
 async function writePrivateFile(path: string, content: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, content, { encoding: 'utf-8', mode: 0o600 });
 }
 
@@ -289,6 +320,12 @@ function tryOpenBrowser(url: string): Promise<void> {
   });
 }
 
+interface OAuthProviderOptions {
+  callbackUrlReader?: OAuthCallbackUrlReader;
+  allowAuthorization?: boolean;
+  profile?: string;
+}
+
 class FileOAuthClientProvider implements OAuthClientProvider {
   private readonly clientInfoPath: string;
   private readonly tokensPath: string;
@@ -301,20 +338,23 @@ class FileOAuthClientProvider implements OAuthClientProvider {
   private codeVerifierValue: string | undefined = undefined;
   private pendingAuth: Promise<string> | undefined = undefined;
   private authorizationUnavailable = false;
+  private readonly callbackUrlReader: OAuthCallbackUrlReader | undefined;
+  private readonly allowAuthorization: boolean;
   private readonly stateValue = randomUUID();
 
   constructor(
     private readonly port: number,
     serverUrl: string,
-    private readonly callbackUrlReader?: OAuthCallbackUrlReader,
-    private readonly allowAuthorization = true,
+    options: OAuthProviderOptions = {},
   ) {
-    const cacheDir = getCacheDir(serverUrl);
+    const cacheDir = getMcpOAuthCacheDir(serverUrl, options.profile);
     this.clientInfoPath = join(cacheDir, 'client-info.json');
     this.tokensPath = join(cacheDir, 'tokens.json');
     this.verifierPath = join(cacheDir, 'code-verifier.txt');
     this.discoveryPath = join(cacheDir, 'discovery.json');
     this.redirectUriValue = `http://127.0.0.1:${port}/callback`;
+    this.callbackUrlReader = options.callbackUrlReader;
+    this.allowAuthorization = options.allowAuthorization ?? true;
   }
 
   get redirectUrl(): string {
@@ -430,16 +470,13 @@ class FileOAuthClientProvider implements OAuthClientProvider {
 
   async waitForAuthCode(): Promise<string> {
     if (this.authorizationUnavailable) {
-      throw new Error(
-        'OAuth authorization requires an interactive terminal',
-      );
+      throw new Error('OAuth authorization requires an interactive terminal');
     }
     if (!this.pendingAuth) {
       throw new Error('OAuth authorization has not been started');
     }
     return this.pendingAuth;
   }
-
 
   private waitForAuthorizationCode(authorizationUrl: URL): Promise<string> {
     const { promise, resolve, reject } = Promise.withResolvers<string>();
@@ -557,10 +594,9 @@ class FileOAuthClientProvider implements OAuthClientProvider {
 
 async function buildOAuthProvider(
   serverUrl: string,
-  callbackUrlReader: OAuthCallbackUrlReader | undefined,
-  allowAuthorization: boolean,
+  options: OAuthProviderOptions = {},
 ): Promise<FileOAuthClientProvider> {
-  const cacheDir = getCacheDir(serverUrl);
+  const cacheDir = getMcpOAuthCacheDir(serverUrl, options.profile);
   const cachedClientInfo = await readJsonFile<OAuthClientInformationMixed>(
     join(cacheDir, 'client-info.json'),
   );
@@ -570,12 +606,7 @@ async function buildOAuthProvider(
     port = await findFreePort();
   }
 
-  const provider = new FileOAuthClientProvider(
-    port,
-    serverUrl,
-    callbackUrlReader,
-    allowAuthorization,
-  );
+  const provider = new FileOAuthClientProvider(port, serverUrl, options);
   await provider.load();
   return provider;
 }
@@ -598,17 +629,16 @@ interface RemoteConnection {
   transport: StreamableHTTPClientTransport;
 }
 
+interface RemoteTransportOptions extends OAuthProviderOptions {
+  headers?: Record<string, string>;
+}
+
 async function connectRemoteTransport(
   serverUrl: string,
-  headers: Record<string, string>,
-  callbackUrlReader?: OAuthCallbackUrlReader,
-  allowAuthorization = true,
+  options: RemoteTransportOptions = {},
 ): Promise<RemoteConnection> {
-  const provider = await buildOAuthProvider(
-    serverUrl,
-    callbackUrlReader,
-    allowAuthorization,
-  );
+  const provider = await buildOAuthProvider(serverUrl, options);
+  const headers = resolveMcpHeaderReferences(options.headers ?? {});
   const client = new Client(
     {
       name: 'AllAgents',
@@ -647,6 +677,7 @@ export interface ConnectHttpMcpServerOptions {
   callbackUrlReader?: OAuthCallbackUrlReader;
   resetCredentials?: boolean;
   allowAuthorization?: boolean;
+  profile?: string;
 }
 
 export async function connectHttpMcpServer(
@@ -654,13 +685,14 @@ export async function connectHttpMcpServer(
   options: ConnectHttpMcpServerOptions = {},
 ): Promise<void> {
   if (options.resetCredentials) {
-    await rm(getCacheDir(serverUrl), { recursive: true, force: true });
+    await rm(getMcpOAuthCacheDir(serverUrl, options.profile), {
+      recursive: true,
+      force: true,
+    });
   }
   const { client, transport } = await connectRemoteTransport(
     serverUrl,
-    options.headers ?? {},
-    options.callbackUrlReader,
-    options.allowAuthorization ?? true,
+    options,
   );
   try {
     await transport.terminateSession();
@@ -672,8 +704,12 @@ export async function connectHttpMcpServer(
 export async function runHttpMcpStdioProxy(
   serverUrl: string,
   headers: Record<string, string> = {},
+  options: { profile?: string } = {},
 ): Promise<void> {
-  const { client: remote } = await connectRemoteTransport(serverUrl, headers);
+  const { client: remote } = await connectRemoteTransport(serverUrl, {
+    headers,
+    ...options,
+  });
   const local = new Server(
     {
       name: 'AllAgents',

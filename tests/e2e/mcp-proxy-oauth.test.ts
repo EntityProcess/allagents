@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   connectHttpMcpServer,
+  getMcpOAuthCacheDir,
   hashServerUrl,
 } from '../../src/core/mcp-http-stdio-proxy.ts';
 import {
@@ -190,6 +191,62 @@ describe('mcp proxy OAuth e2e', () => {
     expect(dummy.authorizeCallCount).toBe(2);
   }, 15000);
 
+  test('isolates OAuth reuse and reset between profiles and ordinary scope', async () => {
+    dummy = await startDummyMcpOAuthServer();
+    const authorize = async ({ authorizationUrl }: { authorizationUrl: URL }) => {
+      const response = await fetch(authorizationUrl, { redirect: 'manual' });
+      const location = response.headers.get('location');
+      expect(location).toBeTruthy();
+      return new URL(location!, authorizationUrl).toString();
+    };
+
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      profile: 'markets',
+      callbackUrlReader: authorize,
+    });
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      profile: 'markets',
+      callbackUrlReader: authorize,
+    });
+    expect(dummy.authorizeCallCount).toBe(1);
+
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      profile: 'research',
+      callbackUrlReader: authorize,
+    });
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      callbackUrlReader: authorize,
+    });
+    expect(dummy.authorizeCallCount).toBe(3);
+    expect(
+      readFileSync(
+        join(getMcpOAuthCacheDir(dummy.mcpUrl, 'markets'), 'tokens.json'),
+        'utf8',
+      ),
+    ).toContain('access_token');
+    expect(
+      readFileSync(
+        join(getMcpOAuthCacheDir(dummy.mcpUrl, 'research'), 'tokens.json'),
+        'utf8',
+      ),
+    ).toContain('access_token');
+    expect(
+      readFileSync(join(getMcpOAuthCacheDir(dummy.mcpUrl), 'tokens.json'), 'utf8'),
+    ).toContain('access_token');
+
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      profile: 'markets',
+      callbackUrlReader: authorize,
+      resetCredentials: true,
+    });
+    expect(dummy.authorizeCallCount).toBe(4);
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      profile: 'research',
+      callbackUrlReader: authorize,
+    });
+    expect(dummy.authorizeCallCount).toBe(4);
+  }, 20000);
+
   test('fails without prompting when authorization is disabled', async () => {
     dummy = await startDummyMcpOAuthServer();
 
@@ -199,6 +256,29 @@ describe('mcp proxy OAuth e2e', () => {
       }),
     ).rejects.toThrow('OAuth authorization requires an interactive terminal');
     expect(dummy.authorizeCallCount).toBe(0);
+  }, 15000);
+
+  test('resolves header environment references only at connection time', async () => {
+    dummy = await startDummyMcpOAuthServer({ requireAuth: false });
+    const originalToken = process.env.TRADINGVIEW_TOKEN;
+    process.env.TRADINGVIEW_TOKEN = 'runtime-secret';
+    try {
+      await connectHttpMcpServer(dummy.mcpUrl, {
+        headers: { Authorization: '${TRADINGVIEW_TOKEN}' },
+        allowAuthorization: false,
+      });
+      expect(
+        dummy.mcpRequestHeaders.some(
+          (headers) => headers.authorization === 'runtime-secret',
+        ),
+      ).toBe(true);
+    } finally {
+      if (originalToken === undefined) {
+        delete process.env.TRADINGVIEW_TOKEN;
+      } else {
+        process.env.TRADINGVIEW_TOKEN = originalToken;
+      }
+    }
   }, 15000);
 
   test('reuses the cached token on a second connection without re-authorizing', async () => {

@@ -100,6 +100,9 @@ function formatForAgent(meta: AgentCommandMeta) {
   if (meta.outputSchema) {
     result.output_schema = meta.outputSchema;
   }
+  if (meta.interaction) {
+    result.interaction = meta.interaction;
+  }
   if (meta.jsonFields && meta.jsonFields.length > 0) {
     result.json_fields = [...meta.jsonFields];
   }

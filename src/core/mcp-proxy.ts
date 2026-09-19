@@ -1,5 +1,11 @@
-import type { McpProxyConfig } from '../models/workspace-config.js';
 import packageJson from '../../package.json';
+import {
+  type McpProxyConfig,
+  type McpServerConfig,
+  ProfileNameSchema,
+} from '../models/workspace-config.js';
+
+const ENVIRONMENT_REFERENCE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
 
 /**
  * Determine if a server+client pair should be proxied.
@@ -43,23 +49,30 @@ function isHttpServer(
 function toProxiedConfig(
   url: string,
   headers?: Record<string, string>,
-): Record<string, unknown> {
-  const args = [
-    '-y',
-    `allagents@${packageJson.version}`,
-    'mcp',
-    'proxy',
-    url,
-  ];
+  profile?: string,
+): McpServerConfig {
+  const args = ['-y', `allagents@${packageJson.version}`, 'mcp', 'proxy', url];
+  const env: Record<string, string> = {};
+  if (profile) {
+    args.push('--profile', ProfileNameSchema.parse(profile));
+  }
   if (headers) {
     for (const [key, value] of Object.entries(headers)) {
-      args.push('--header', `${key}=${value}`);
+      const reference = ENVIRONMENT_REFERENCE.exec(value);
+      if (reference) {
+        const variable = reference[1] as string;
+        args.push('--header-env', `${key}=${variable}`);
+        env[variable] = value;
+      } else {
+        args.push('--header', `${key}=${value}`);
+      }
     }
   }
 
   return {
     command: 'npx',
     args,
+    ...(Object.keys(env).length > 0 && { env }),
   };
 }
 
@@ -68,15 +81,23 @@ function toProxiedConfig(
  * Returns a new Map with HTTP configs rewritten to stdio where applicable.
  * Non-HTTP servers and non-proxied clients are passed through unchanged.
  */
-export function applyMcpProxy(
-  servers: Map<string, unknown>,
+export function applyMcpProxy<T>(
+  servers: Map<string, T>,
   client: string,
   config: McpProxyConfig,
-): Map<string, unknown> {
-  const result = new Map<string, unknown>();
+  options: { profile?: string } = {},
+): Map<string, T | McpServerConfig> {
+  const result = new Map<string, T | McpServerConfig>();
   for (const [name, serverConfig] of servers) {
     if (isHttpServer(serverConfig) && shouldProxy(name, client, config)) {
-      result.set(name, toProxiedConfig(serverConfig.url, serverConfig.headers));
+      result.set(
+        name,
+        toProxiedConfig(
+          serverConfig.url,
+          serverConfig.headers,
+          options.profile,
+        ),
+      );
     } else {
       result.set(name, serverConfig);
     }

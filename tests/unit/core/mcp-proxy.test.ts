@@ -82,6 +82,43 @@ describe('applyMcpProxy', () => {
     });
   });
 
+  test('includes the profile selector only for profile-owned bridges', () => {
+    const servers = new Map<string, unknown>([
+      ['tradingview', { url: 'https://mcp.tradingview.com/mcp' }],
+    ]);
+    const config: McpProxyConfig = {
+      clients: [],
+      servers: { tradingview: { proxy: ['codex'] } },
+    };
+
+    expect(
+      applyMcpProxy(servers, 'codex', config, { profile: 'markets' }).get(
+        'tradingview',
+      ),
+    ).toEqual({
+      command: 'npx',
+      args: [
+        '-y',
+        packageRef,
+        'mcp',
+        'proxy',
+        'https://mcp.tradingview.com/mcp',
+        '--profile',
+        'markets',
+      ],
+    });
+    expect(applyMcpProxy(servers, 'codex', config).get('tradingview')).toEqual({
+      command: 'npx',
+      args: [
+        '-y',
+        packageRef,
+        'mcp',
+        'proxy',
+        'https://mcp.tradingview.com/mcp',
+      ],
+    });
+  });
+
   test('does not rewrite HTTP server for non-proxied client', () => {
     const servers = new Map<string, unknown>([
       ['deepwiki', { url: 'https://mcp.deepwiki.com/mcp' }],
@@ -151,6 +188,42 @@ describe('applyMcpProxy', () => {
         '--header',
         'X-Test=1',
       ],
+    });
+  });
+
+  test('keeps profile secrets as environment bindings in generated bridge args', () => {
+    const servers = new Map<string, unknown>([
+      [
+        'secure-api',
+        {
+          url: 'https://api.example.com/mcp',
+          headers: { Authorization: '${TRADINGVIEW_TOKEN}' },
+        },
+      ],
+    ]);
+    const config: McpProxyConfig = {
+      clients: [],
+      servers: { 'secure-api': { proxy: ['codex'] } },
+    };
+
+    expect(
+      applyMcpProxy(servers, 'codex', config, { profile: 'markets' }).get(
+        'secure-api',
+      ),
+    ).toEqual({
+      command: 'npx',
+      args: [
+        '-y',
+        packageRef,
+        'mcp',
+        'proxy',
+        'https://api.example.com/mcp',
+        '--profile',
+        'markets',
+        '--header-env',
+        'Authorization=TRADINGVIEW_TOKEN',
+      ],
+      env: { TRADINGVIEW_TOKEN: '${TRADINGVIEW_TOKEN}' },
     });
   });
 });

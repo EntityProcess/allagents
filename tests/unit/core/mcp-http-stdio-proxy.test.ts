@@ -1,9 +1,39 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import {
   getBrowserOpenCommands,
+  getMcpOAuthCacheDir,
+  hashServerUrl,
   parseOAuthCallbackUrl,
   validateOAuthCallbackUrl,
+  resolveMcpHeaderReferences,
 } from '../../../src/core/mcp-http-stdio-proxy.js';
+
+describe('resolveMcpHeaderReferences', () => {
+  test('resolves exact environment references and preserves literal values', () => {
+    expect(
+      resolveMcpHeaderReferences(
+        {
+          Authorization: '${TRADINGVIEW_TOKEN}',
+          'X-Literal': 'public',
+        },
+        { TRADINGVIEW_TOKEN: 'secret-token' },
+      ),
+    ).toEqual({
+      Authorization: 'secret-token',
+      'X-Literal': 'public',
+    });
+  });
+
+  test('rejects a missing referenced environment variable', () => {
+    expect(() =>
+      resolveMcpHeaderReferences(
+        { Authorization: '${TRADINGVIEW_TOKEN}' },
+        {},
+      ),
+    ).toThrow("missing environment variable 'TRADINGVIEW_TOKEN'");
+  });
+});
 
 describe('getBrowserOpenCommands', () => {
   test('uses explorer on Windows so OAuth URLs are not parsed by cmd', () => {
@@ -13,6 +43,50 @@ describe('getBrowserOpenCommands', () => {
     expect(getBrowserOpenCommands(url, 'win32')).toEqual([
       { command: 'explorer.exe', args: [url] },
     ]);
+  });
+});
+
+describe('getMcpOAuthCacheDir', () => {
+  const originalHome = process.env.ALLAGENTS_TEST_HOME;
+  const home = '/tmp/allagents-mcp-oauth-home';
+  const url = 'https://mcp.tradingview.com/mcp';
+
+  beforeEach(() => {
+    process.env.ALLAGENTS_TEST_HOME = home;
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) {
+      delete process.env.ALLAGENTS_TEST_HOME;
+    } else {
+      process.env.ALLAGENTS_TEST_HOME = originalHome;
+    }
+  });
+
+  test('shares ordinary project and user credentials by URL', () => {
+    expect(getMcpOAuthCacheDir(url)).toBe(
+      join(home, '.allagents', 'oauth-proxy', hashServerUrl(url)),
+    );
+  });
+
+  test('isolates credentials inside each profile root', () => {
+    expect(getMcpOAuthCacheDir(url, 'markets')).toBe(
+      join(
+        home,
+        '.allagents',
+        'profiles',
+        'markets',
+        'oauth-proxy',
+        hashServerUrl(url),
+      ),
+    );
+    expect(getMcpOAuthCacheDir(url, 'research')).not.toBe(
+      getMcpOAuthCacheDir(url, 'markets'),
+    );
+  });
+
+  test('rejects unsafe profile names before constructing a path', () => {
+    expect(() => getMcpOAuthCacheDir(url, '../outside')).toThrow();
   });
 });
 

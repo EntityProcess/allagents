@@ -32,6 +32,8 @@ export interface AgentCommandMeta extends CommandMeta {
   positionals?: CommandPositional[];
   options?: CommandOption[];
   outputSchema?: Record<string, unknown>;
+  /** Whether an agent can invoke the command without a human interaction step. */
+  interaction?: 'none' | 'conditional' | 'required';
   /**
    * Allowlist of fields that may be requested via `--json=<f1>,<f2>`.
    *

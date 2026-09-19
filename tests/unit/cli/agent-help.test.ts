@@ -183,6 +183,16 @@ describe('findMetaByCommand', () => {
     const reauthMeta = findMetaByCommand('mcp reauth tradingview');
     expect(addMeta?.command).toBe('mcp add');
     expect(reauthMeta?.command).toBe('mcp reauth');
+    expect(addMeta?.interaction).toBe('conditional');
+    expect(addMeta?.outputSchema).toBeDefined();
+    expect(reauthMeta?.interaction).toBe('required');
+    expect(findMetaByCommand('mcp list')?.outputSchema).toMatchObject({
+      total: 'number',
+    });
+    expect(findMetaByCommand('mcp get')?.outputSchema).toMatchObject({
+      name: 'string',
+    });
+    expect(findMetaByCommand('mcp update')?.outputSchema).toBeDefined();
   });
 
   test('resolves deprecated "workspace status" alias to status meta', () => {
