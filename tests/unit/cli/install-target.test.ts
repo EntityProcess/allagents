@@ -328,7 +328,7 @@ describe('resolveInstallTarget', () => {
 
     const confirmationCalls = makeCalls();
     await resolveInstallTarget(options({ prompts: promptPort(confirmationCalls) }));
-    expect(confirmationCalls.confirmations[0]?.initialValue).toBe(false);
+    expect(confirmationCalls.confirmations[0]?.initialValue).toBe(true);
   });
 
   test.each([

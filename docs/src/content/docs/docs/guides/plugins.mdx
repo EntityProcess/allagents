@@ -120,14 +120,18 @@ effective install methods, and targeting behavior before anything changes.
 # Interactive
 allagents plugin install code-review@claude-plugins-official
 
+# Auto-register a marketplace from its GitHub URL, then install its plugin
+allagents plugin install 'my-plugin@https://github.com/owner/marketplace'
+
 # Prompt-free automation
 allagents plugin install code-review@claude-plugins-official \
   --scope project --client claude,codex --yes
 ```
 
-`--scope` and `--client` bypass their respective choosers. `--yes` skips only
-the final confirmation. JSON, CI, and non-TTY runs never prompt and retain the
-command's deterministic defaults when a target flag is omitted.
+`--scope` and `--client` bypass their respective choosers. The final
+confirmation defaults to **Yes**, so Enter accepts the displayed plan;
+`--yes` skips that prompt entirely. JSON, CI, and non-TTY runs never prompt and
+retain the command's deterministic defaults when a target flag is omitted.
 
 Clients normally inherit the selected scope's top-level `clients` list. A
 different selection is stored on that plugin declaration as a `clients`
@@ -194,3 +198,4 @@ Plugins use the `plugin@marketplace` format:
 |--------|---------|
 | Well-known | `code-review@claude-plugins-official` |
 | owner/repo | `my-plugin@owner/repo` |
+| GitHub marketplace URL | `my-plugin@https://github.com/owner/repo` |

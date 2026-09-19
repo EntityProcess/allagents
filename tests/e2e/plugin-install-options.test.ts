@@ -182,6 +182,28 @@ describe('plugin install target options', () => {
     15_000,
   );
 
+  test(
+    'accepts the install when Enter confirms the affirmative default',
+    async () => {
+      const result = await runInteractiveInstall('\r');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('Successfully installed plugin');
+      const config = load(
+        await readFile(join(workspace, '.allagents', 'workspace.yaml'), 'utf8'),
+      ) as {
+        clients: string[];
+        plugins: string[];
+      };
+      expect(config.plugins).toEqual([plugin]);
+      expect(
+        existsSync(join(workspace, '.codex', 'skills', 'demo', 'SKILL.md')),
+      ).toBe(true);
+    },
+    15_000,
+  );
+
   test('suppresses prompts and retains first-project defaults in JSON mode', async () => {
     const result = await runInstall([]);
 

@@ -1,6 +1,7 @@
 import * as p from '@clack/prompts';
 import {
   addPluginForTarget,
+  resolveMarketplacePluginDeclaration,
   removePlugin,
   removeDisabledSkill,
   addEnabledSkill,
@@ -34,6 +35,7 @@ import {
   findMarketplaceRegistration,
   getMarketplaceAccessError,
   parsePluginSpec,
+  isPluginSpec,
   type MarketplaceEntry,
   type MarketplacePluginsResult,
 } from '../../../core/marketplace.js';
@@ -48,6 +50,7 @@ import {
   WORKSPACE_CONFIG_FILE,
   getHomeDir,
 } from '../../../constants.js';
+import { getPluginSource } from '../../../models/workspace-config.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 import { removeInstalledSkill } from '../../skill-removal.js';
@@ -192,9 +195,24 @@ export async function installSelectedPlugin(
     return { status: 'cancelled' };
   }
   const selectedClientEntries = target.selectedClientEntries;
+  const marketplaceSpec = isPluginSpec(
+    getPluginSource(target.prospectiveDeclaration),
+  );
+  let prospectiveDeclaration = target.prospectiveDeclaration;
+  if (marketplaceSpec) {
+    const resolution = await resolveMarketplacePluginDeclaration(
+      prospectiveDeclaration,
+      target.scope === 'project' ? workspacePath : undefined,
+    );
+    if (!resolution.success) {
+      p.note(resolution.error, 'Installation failed');
+      return { status: 'failed' };
+    }
+    prospectiveDeclaration = resolution.declaration;
+  }
 
   const nativePreflightErrors = await preflightNativePluginDeclaration(
-    target.prospectiveDeclaration,
+    prospectiveDeclaration,
     selectedClientEntries,
     target.scope,
     workspacePath,
@@ -208,7 +226,7 @@ export async function installSelectedPlugin(
   }
 
   const installPlan = buildPluginSyncPlans(
-    [target.prospectiveDeclaration],
+    [prospectiveDeclaration],
     selectedClientEntries,
     target.scope,
   ).plans[0];
@@ -217,9 +235,11 @@ export async function installSelectedPlugin(
     installPlan.clients.length === 0 &&
     installPlan.nativeClients.length > 0;
   const installTarget = {
-    declaration: target.prospectiveDeclaration,
+    declaration: prospectiveDeclaration,
     clients: target.clients,
-    ...(nativeOnly && { sourceValidation: 'declaration' as const }),
+    ...((marketplaceSpec || nativeOnly) && {
+      sourceValidation: 'declaration' as const,
+    }),
   };
 
   const s = p.spinner();

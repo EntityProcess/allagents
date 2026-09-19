@@ -67,6 +67,49 @@ export interface TargetedPluginWriteDependencies {
   ): void | Promise<void>;
 }
 
+export type MarketplacePluginDeclarationResolution =
+  | {
+      success: true;
+      declaration: PluginEntry;
+      registeredAs?: string;
+    }
+  | {
+      success: false;
+      error: string;
+    };
+
+/**
+ * Resolve a marketplace plugin declaration through the canonical registration
+ * flow and preserve every declaration field while replacing only its source.
+ */
+export async function resolveMarketplacePluginDeclaration(
+  declaration: PluginEntry,
+  workspacePath?: string,
+): Promise<MarketplacePluginDeclarationResolution> {
+  const source = getPluginSource(declaration);
+  const resolved = await resolvePluginSpecWithAutoRegister(source, {
+    ...(workspacePath && { workspacePath }),
+  });
+  if (!resolved.success) {
+    return {
+      success: false,
+      error: resolved.error || 'Unknown error',
+    };
+  }
+
+  const normalizedSource = resolved.registeredAs
+    ? source.replace(/@[^@]+$/, `@${resolved.registeredAs}`)
+    : source;
+  return {
+    success: true,
+    declaration:
+      typeof declaration === 'string'
+        ? normalizedSource
+        : { ...declaration, source: normalizedSource },
+    ...(resolved.registeredAs && { registeredAs: resolved.registeredAs }),
+  };
+}
+
 export async function writeWorkspaceConfigAtomically(
   configPath: string,
   config: WorkspaceConfig,
@@ -267,25 +310,15 @@ async function addValidatedPlugin(
   }
 
   if (isPluginSpec(plugin)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(plugin, {
+    const resolved = await resolveMarketplacePluginDeclaration(
+      declaration,
       workspacePath,
-    });
+    );
     if (!resolved.success) {
-      return {
-        success: false,
-        error: resolved.error || 'Unknown error',
-      };
+      return resolved;
     }
-
-    const normalizedSource = resolved.registeredAs
-      ? plugin.replace(/@[^@]+$/, `@${resolved.registeredAs}`)
-      : plugin;
-    const normalizedDeclaration =
-      typeof declaration === 'string'
-        ? normalizedSource
-        : { ...declaration, source: normalizedSource };
     return addPluginToConfig(
-      normalizedDeclaration,
+      resolved.declaration,
       configPath,
       resolved.registeredAs,
       force,

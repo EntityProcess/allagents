@@ -2241,8 +2241,15 @@ export async function resolvePluginSpecWithAutoRegister(
 
   const { plugin: pluginName, marketplaceName, owner, repo, subpath } = parsed;
 
-  // Check if marketplace is already registered (by name, then by source location)
-  const sourceLocation = owner && repo ? `${owner}/${repo}` : undefined;
+  // Check if the marketplace is already registered by its declared name or by
+  // the canonical source identity shared with marketplace registration.
+  const parsedMarketplaceSource = parseMarketplaceSource(marketplaceName);
+  const sourceLocation =
+    owner && repo
+      ? `${owner}/${repo}`
+      : parsedMarketplaceSource?.type === 'github'
+        ? parsedMarketplaceSource.location
+        : undefined;
   let registration = await findMarketplaceRegistration(
     marketplaceName,
     sourceLocation,
@@ -2420,40 +2427,42 @@ export function resetUpdatedMarketplaceCache(): void {
 }
 
 /**
- * Auto-register a marketplace by source.
- * Only supports owner/repo format for GitHub marketplaces.
+ * Auto-register a GitHub marketplace using the same source parser and
+ * registration path as the explicit marketplace add command.
  */
 async function autoRegisterMarketplace(
   source: string,
 ): Promise<{ success: boolean; name?: string; error?: string }> {
-  // Check if it's an owner/repo format
-  if (source.includes('/') && !source.includes('://')) {
-    const parts = source.split('/');
-    if (parts.length === 2 && parts[0] && parts[1]) {
-      // Fast in-memory check: skip if already registered in this process
-      const cachedName = registeredSourceCache.get(source);
-      if (cachedName) {
-        return { success: true, name: cachedName };
-      }
+  const parsedSource = parseMarketplaceSource(source);
+  if (parsedSource?.type === 'github') {
+    const canonicalSource = parsedSource.location;
 
-      // Disk-based check: skip if already registered in registry
-      const existing = await findMarketplace(parts[1], source);
-      if (existing) {
-        registeredSourceCache.set(source, existing.name);
-        return { success: true, name: existing.name };
-      }
-
-      const result = await addMarketplace(source);
-      if (!result.success) {
-        return { success: false, error: result.error || 'Unknown error' };
-      }
-      const name = result.marketplace?.name ?? parts[1];
-      if (!result.replaced) {
-        console.log(`Auto-registered GitHub marketplace: ${source}`);
-      }
-      registeredSourceCache.set(source, name);
-      return { success: true, name };
+    // Fast in-memory check: skip if already registered in this process.
+    const cachedName = registeredSourceCache.get(canonicalSource);
+    if (cachedName) {
+      return { success: true, name: cachedName };
     }
+
+    // Match by canonical source only. Repository basenames are not identities.
+    const existing = findBySourceLocation(
+      await loadRegistry(),
+      canonicalSource,
+    );
+    if (existing) {
+      registeredSourceCache.set(canonicalSource, existing.name);
+      return { success: true, name: existing.name };
+    }
+
+    const result = await addMarketplace(source);
+    if (!result.success) {
+      return { success: false, error: result.error || 'Unknown error' };
+    }
+    const name = result.marketplace?.name ?? parsedSource.name;
+    if (!result.replaced) {
+      console.log(`Auto-registered GitHub marketplace: ${canonicalSource}`);
+    }
+    registeredSourceCache.set(canonicalSource, name);
+    return { success: true, name };
   }
 
   // Unknown marketplace name - provide helpful error
@@ -2501,9 +2510,16 @@ export function extractUniqueMarketplaceSources(plugins: string[]): string[] {
     const parsed = parsePluginSpec(plugin);
     if (!parsed) continue;
 
-    // For owner/repo format, use the full owner/repo as source
     if (parsed.owner && parsed.repo) {
       sources.add(`${parsed.owner}/${parsed.repo}`);
+      continue;
+    }
+
+    const parsedSource = parseMarketplaceSource(parsed.marketplaceName);
+    if (parsedSource?.type === 'github') {
+      sources.add(
+        parsedSource.branch ? parsed.marketplaceName : parsedSource.location,
+      );
     }
   }
 

@@ -24,11 +24,7 @@ import {
 } from '../utils/plugin-path.js';
 import { loadYaml } from '../utils/yaml.js';
 import { getAllagentsDir } from './marketplace.js';
-import {
-  isPluginSpec,
-  parsePluginSpec,
-  resolvePluginSpecWithAutoRegister,
-} from './marketplace.js';
+import { isPluginSpec, parsePluginSpec } from './marketplace.js';
 import {
   type ModifyResult,
   type PluginInstallTarget,
@@ -38,6 +34,7 @@ import {
   findPluginEntryByName,
   mergeTargetedPluginEntry,
   pruneDisabledSkillsForPlugin,
+  resolveMarketplacePluginDeclaration,
   pruneEnabledSkillsForPlugin,
   resolveGitHubIdentity,
   upsertGitHubPluginSourceAllowlistInConfig,
@@ -181,19 +178,12 @@ async function addValidatedUserPlugin(
     );
   }
   if (isPluginSpec(plugin)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(plugin);
+    const resolved = await resolveMarketplacePluginDeclaration(declaration);
     if (!resolved.success) {
-      return { success: false, error: resolved.error || 'Unknown error' };
+      return resolved;
     }
-    const normalizedSource = resolved.registeredAs
-      ? plugin.replace(/@[^@]+$/, `@${resolved.registeredAs}`)
-      : plugin;
-    const normalizedDeclaration =
-      typeof declaration === 'string'
-        ? normalizedSource
-        : { ...declaration, source: normalizedSource };
     return addPluginToUserConfig(
-      normalizedDeclaration,
+      resolved.declaration,
       configPath,
       resolved.registeredAs,
       force,

@@ -75,7 +75,7 @@ export interface InstallTargetSummary {
 
 export interface InstallConfirmationPromptRequest {
   readonly summary: InstallTargetSummary;
-  readonly initialValue: false;
+  readonly initialValue: true;
 }
 
 /** Presentation adapters implement only the interaction needed by the resolver. */
@@ -388,7 +388,7 @@ export async function resolveInstallTarget(
   if (prompts) {
     await prompts.showSummary(summary);
     if (!options.yes) {
-      const confirmed = await prompts.confirm({ summary, initialValue: false });
+      const confirmed = await prompts.confirm({ summary, initialValue: true });
       if (confirmed !== true) return null;
     }
   }

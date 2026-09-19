@@ -260,9 +260,9 @@ Install a plugin, then sync the selected scope.
 
 On an interactive terminal, omitted target flags open scope and client
 choosers. AllAgents then shows the config path, clients, effective install
-methods, and targeting behavior; confirmation defaults to **No**. `--scope`
-and `--client` bypass only their respective choosers. `--yes` skips only the
-final confirmation.
+methods, and targeting behavior; confirmation defaults to **Yes**, so Enter
+continues with the displayed plan. `--scope` and `--client` bypass only their
+respective choosers. `--yes` skips only the final confirmation.
 
 JSON, CI, and non-TTY runs never prompt. Omitted target flags retain the
 command's deterministic defaults. A new scope uses the selected clients as its
@@ -282,8 +282,10 @@ When used, all other skills from the plugin are implicitly disabled. Skills can 
 When the selected client uses native install mode, this command validates the
 runtime, source, scope, and live inventory before editing `workspace.yaml`.
 Supported native resources include Pi npm/Git/local packages and OMP
-marketplace plugins. Use `plugin@owner/marketplace-repository` for OMP so
-AllAgents can register and verify the marketplace before install.
+marketplace plugins. Use `plugin@owner/marketplace-repository` or
+`plugin@https://github.com/owner/marketplace-repository` for OMP. Both forms
+use the normal marketplace registration flow; the URL form is normalized to
+the canonical GitHub source before registration and deduplication.
 
 ### skill list
 

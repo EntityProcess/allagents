@@ -8,6 +8,7 @@ import {
   findMarketplace,
   findMarketplaceRegistration,
   parsePluginSpec,
+  isPluginSpec,
   getAllagentsDir,
   getMarketplaceVersion,
   listMarketplacesWithScope,
@@ -33,6 +34,7 @@ import {
   removePlugin,
   addEnabledSkill,
   extractPluginNames,
+  resolveMarketplacePluginDeclaration,
 } from '../../core/workspace-modify.js';
 import {
   addUserPluginForTarget,
@@ -1213,9 +1215,25 @@ const pluginInstallCmd = command({
       }
 
       const isUser = target.scope === 'user';
+      const selectedClientEntries = target.selectedClientEntries;
+      const marketplaceSpec = isPluginSpec(
+        getPluginSource(target.prospectiveDeclaration),
+      );
+      let prospectiveDeclaration = target.prospectiveDeclaration;
+      let registeredMarketplace: string | undefined;
+      if (marketplaceSpec) {
+        const resolution = await resolveMarketplacePluginDeclaration(
+          prospectiveDeclaration,
+          isUser ? undefined : workspacePath,
+        );
+        if (!resolution.success) {
+          throw new Error(resolution.error);
+        }
+        prospectiveDeclaration = resolution.declaration;
+        registeredMarketplace = resolution.registeredAs;
+      }
 
       // Emit override warnings for project-scope installs
-      const selectedClientEntries = target.selectedClientEntries;
 
       if (!isUser) {
         const overrideNames = await getMarketplaceOverrides(
@@ -1228,7 +1246,7 @@ const pluginInstallCmd = command({
       }
 
       const nativePreflightErrors = await preflightNativePluginDeclaration(
-        target.prospectiveDeclaration,
+        prospectiveDeclaration,
         selectedClientEntries,
         target.scope,
         workspacePath,
@@ -1240,7 +1258,7 @@ const pluginInstallCmd = command({
       }
 
       const installPlan = buildPluginSyncPlans(
-        [target.prospectiveDeclaration],
+        [prospectiveDeclaration],
         selectedClientEntries,
         target.scope,
       ).plans[0];
@@ -1250,9 +1268,11 @@ const pluginInstallCmd = command({
         installPlan.nativeClients.length > 0;
 
       const installTarget = {
-        declaration: target.prospectiveDeclaration,
+        declaration: prospectiveDeclaration,
         clients: target.clients,
-        ...(nativeOnly && { sourceValidation: 'declaration' as const }),
+        ...((marketplaceSpec || nativeOnly) && {
+          sourceValidation: 'declaration' as const,
+        }),
       };
       const result = isUser
         ? await addUserPluginForTarget(installTarget)
@@ -1265,6 +1285,10 @@ const pluginInstallCmd = command({
         }
         console.error(`Error: ${result.error}`);
         process.exit(1);
+      }
+
+      if (registeredMarketplace) {
+        result.autoRegistered ??= registeredMarketplace;
       }
 
       const displayPlugin = result.normalizedPlugin ?? plugin;

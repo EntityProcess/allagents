@@ -100,7 +100,7 @@ describe('installSelectedPlugin', () => {
     ]);
     expect(confirmMock).toHaveBeenCalledWith({
       message: 'Install with this target?',
-      initialValue: false,
+      initialValue: true,
     });
   });
 
