@@ -90,7 +90,7 @@ function buildSyncSpecs(workspacePath: string): McpSyncSpec[] {
     {
       client: 'copilot',
       scope: 'copilot',
-      configPath: join(workspacePath, '.copilot', 'mcp-config.json'),
+      configPath: join(workspacePath, '.github', 'mcp.json'),
       syncFn: syncClaudeMcpConfig,
     },
   ];

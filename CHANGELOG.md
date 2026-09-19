@@ -19,6 +19,12 @@
   **Migration**: Replace `pin:` with `ref:` in plugin objects and `--pin` with
   `--ref` in scripts. This is a clean cutover; the old names are not accepted.
 
+### Fixed
+
+- Project-scoped Copilot MCP servers are now written to `.github/mcp.json`,
+  which Copilot CLI discovers, instead of the unsupported
+  `.copilot/mcp-config.json` project path.
+
 ### Added
 
 - Added the official TradingView MCP plugin with OAuth-backed access to market

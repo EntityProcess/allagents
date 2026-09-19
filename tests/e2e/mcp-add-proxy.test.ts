@@ -128,7 +128,7 @@ clients:
       'proxy',
     ]);
 
-    const copilotConfig = JSON.parse(readFileSync(join(workspaceDir, '.copilot', 'mcp-config.json'), 'utf-8'));
+    const copilotConfig = JSON.parse(readFileSync(join(workspaceDir, '.github', 'mcp.json'), 'utf-8'));
     expect(copilotConfig.mcpServers.deepwiki.command).toBe('npx');
     expect(copilotConfig.mcpServers.deepwiki.args.slice(0, 4)).toEqual([
       '-y',
