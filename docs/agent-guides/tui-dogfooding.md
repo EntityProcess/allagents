@@ -1,6 +1,12 @@
 # TUI Dogfooding
 
-Use this guide for any change to interactive CLI navigation, prompts, labels, status messages, or failure recovery.
+This guide defines AllAgents-specific acceptance criteria for changes to interactive CLI navigation, prompts, labels, status messages, or failure recovery.
+
+## Tooling boundary
+
+Use the installed `agent-tui` skill for terminal automation. That skill owns installation checks, command selection, session lifecycle, snapshots, actions, waits, assertions, and cleanup. Follow its current CLI workflow rather than reproducing command recipes here.
+
+This guide owns the product-specific UX questions, interaction coverage, and evidence required for AllAgents.
 
 ## Goal
 
@@ -11,8 +17,7 @@ Prove that the built TUI is understandable to a first-time user, not only that i
 1. Build the CLI.
 2. Create isolated temporary project and HOME directories.
 3. Seed the smallest realistic configuration that exposes every changed state.
-4. Launch the built CLI with `agent-tui`.
-5. Capture each changed decision screen before interacting with it.
+4. Use the `agent-tui` skill to drive the built CLI and capture each changed decision screen before interacting with it.
 
 Never dogfood against a real user workspace when an isolated fixture can exercise the behavior.
 

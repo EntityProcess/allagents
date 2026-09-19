@@ -184,4 +184,4 @@ bun run build
 
 ## Interactive Testing
 
-- TUI navigation, prompt, copy, status, or recovery changes: read and follow [`docs/agent-guides/tui-dogfooding.md`](docs/agent-guides/tui-dogfooding.md) before implementation and final verification.
+- TUI navigation, prompt, copy, status, or recovery changes: use the installed `agent-tui` skill for terminal automation, then apply the AllAgents-specific acceptance criteria in [`docs/agent-guides/tui-dogfooding.md`](docs/agent-guides/tui-dogfooding.md) before implementation and final verification.
