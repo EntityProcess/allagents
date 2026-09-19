@@ -28,17 +28,19 @@ import {
 } from '../../core/sync.js';
 import type { NativeEffectData } from '../../core/native/types.js';
 import { loadSyncState } from '../../core/sync-state.js';
-import { addPlugin, addPluginDeclaration, removePlugin, ensureWorkspace, addEnabledSkill, extractPluginNames } from '../../core/workspace-modify.js';
 import {
-  addUserPlugin,
-  addUserPluginDeclaration,
+  addPluginForTarget,
+  removePlugin,
+  addEnabledSkill,
+  extractPluginNames,
+} from '../../core/workspace-modify.js';
+import {
+  addUserPluginForTarget,
   removeUserPlugin,
   isUserConfigPath,
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
   getUserWorkspaceConfig,
-  getUserWorkspaceConfigPath,
-  ensureUserWorkspace,
   addUserEnabledSkill,
   type InstalledPluginInfo,
 } from '../../core/user-workspace.js';
@@ -75,7 +77,6 @@ import {
 } from '../format-sync.js';
 import {
   getPluginSource,
-  type ClientEntry,
   type WorkspaceConfig,
 } from '../../models/workspace-config.js';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, getHomeDir } from '../../constants.js';
@@ -89,6 +90,12 @@ import {
   parseUserWorkspaceConfig,
   parseWorkspaceConfig,
 } from '../../utils/workspace-parser.js';
+import { resolveInstallTarget } from '../install-target.js';
+import {
+  createClackInstallTargetPromptPort,
+  getInstallTargetEnvironment,
+  isInteractiveInstallEnvironment,
+} from '../tui/install-target-prompts.js';
 
 
 /**
@@ -1150,84 +1157,83 @@ const pluginInstallCmd = command({
   args: {
     plugin: positional({ type: string, displayName: 'plugin' }),
     scope: option({ type: optional(string), long: 'scope', short: 's', description: 'Installation scope: "project" (default) or "user"' }),
+    client: option({ type: optional(string), long: 'client', short: 'c', description: 'Comma-separated clients for this plugin' }),
+    yes: flag({ long: 'yes', short: 'y', description: 'Skip final install confirmation' }),
     skills: multioption({
       type: array(string),
       long: 'skill',
       description: 'Only enable specific skills (can be repeated)',
     }),
   },
-  handler: async ({ plugin, scope, skills }) => {
+  handler: async ({ plugin, scope, client, yes, skills }) => {
     try {
-      if (scope && scope !== 'user' && scope !== 'project') {
-        throw new Error(
-          `Invalid scope '${scope}'. Must be 'user' or 'project'.`,
-        );
+      const workspacePath = process.cwd();
+      const projectConfigPath = join(
+        workspacePath,
+        CONFIG_DIR,
+        WORKSPACE_CONFIG_FILE,
+      );
+      const projectConfig =
+        !isUserConfigPath(workspacePath) && existsSync(projectConfigPath)
+          ? await parseWorkspaceConfig(projectConfigPath)
+          : null;
+      const userConfig = await getUserWorkspaceConfig();
+      const environment = getInstallTargetEnvironment(isJsonMode());
+      const target = await resolveInstallTarget({
+        workspacePath,
+        declaration: plugin,
+        action: 'Install plugin',
+        payload: plugin,
+        scopeStates: {
+          project: projectConfig ? { clients: projectConfig.clients } : null,
+          user: userConfig ? { clients: userConfig.clients } : null,
+        },
+        environment,
+        ...(isInteractiveInstallEnvironment(environment) && {
+          prompts: createClackInstallTargetPromptPort(),
+        }),
+        ...(scope !== undefined && { scope }),
+        ...(client !== undefined && { clients: client }),
+        yes,
+      });
+      if (!target) {
+        if (!isJsonMode()) {
+          console.log('Install cancelled. No changes made.');
+        }
+        return;
       }
-      // Treat as user scope if explicitly requested or if cwd resolves to user config
-      const isUser = scope === 'user' || (!scope && isUserConfigPath(process.cwd()));
 
-      let selectedClients: ClientEntry[] | undefined;
-      let workspaceExists: boolean;
-      if (isUser) {
-        const userConfigPath = getUserWorkspaceConfigPath();
-        workspaceExists = existsSync(userConfigPath);
-        if (!workspaceExists) {
-          const { promptForClients } = await import('../tui/prompt-clients.js');
-          const clients = await promptForClients();
-          if (clients === null) {
-            if (isJsonMode()) {
-              jsonOutput({ success: false, command: 'plugin install', error: 'Cancelled' });
-            }
-            return;
-          }
-          selectedClients = clients;
-        }
-      } else {
-        const configPath = join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE);
-        workspaceExists = existsSync(configPath);
-        if (!workspaceExists) {
-          const { promptForClients } = await import('../tui/prompt-clients.js');
-          const clients = await promptForClients();
-          if (clients === null) {
-            if (isJsonMode()) {
-              jsonOutput({ success: false, command: 'plugin install', error: 'Cancelled' });
-            }
-            return;
-          }
-          selectedClients = clients;
-        }
-      }
+      const isUser = target.scope === 'user';
 
       // Emit override warnings for project-scope installs
+      const configuredClientEntries =
+        target.scope === 'project'
+          ? projectConfig?.clients
+          : userConfig?.clients;
+      const selectedClientEntries = target.clients.map(
+        (client) =>
+          configuredClientEntries?.find((entry) =>
+            typeof entry === 'string'
+              ? entry === client
+              : entry.name === client,
+          ) ?? client,
+      );
+
       if (!isUser) {
         const overrideNames = await getMarketplaceOverrides(
           getRegistryPath(),
-          getProjectRegistryPath(process.cwd()),
+          getProjectRegistryPath(workspacePath),
         );
         for (const name of overrideNames) {
           console.warn(`Warning: Workspace marketplace '${name}' overrides user marketplace of the same name.`);
         }
       }
 
-      const nativePreflightConfig = workspaceExists
-        ? isUser
-          ? await getUserWorkspaceConfig()
-          : await parseWorkspaceConfig(
-              join(process.cwd(), CONFIG_DIR, WORKSPACE_CONFIG_FILE),
-            )
-        : ({
-            repositories: [],
-            plugins: [],
-            clients: selectedClients ?? [],
-          } as WorkspaceConfig);
-      if (!nativePreflightConfig) {
-        throw new Error('Workspace configuration is unavailable');
-      }
       const nativePreflightErrors = await preflightNativePluginDeclaration(
-        plugin,
-        nativePreflightConfig.clients,
-        isUser ? 'user' : 'project',
-        process.cwd(),
+        target.prospectiveDeclaration,
+        selectedClientEntries,
+        target.scope,
+        workspacePath,
       );
       if (nativePreflightErrors.length > 0) {
         throw new Error(
@@ -1235,31 +1241,24 @@ const pluginInstallCmd = command({
         );
       }
 
-      if (!workspaceExists) {
-        if (isUser) {
-          await ensureUserWorkspace(selectedClients);
-        } else {
-          await ensureWorkspace(process.cwd(), selectedClients);
-        }
-      }
       const installPlan = buildPluginSyncPlans(
-        [plugin],
-        nativePreflightConfig.clients,
-        isUser ? 'user' : 'project',
+        [target.prospectiveDeclaration],
+        selectedClientEntries,
+        target.scope,
       ).plans[0];
       const nativeOnly =
         !!installPlan &&
         installPlan.clients.length === 0 &&
         installPlan.nativeClients.length > 0;
 
-      // Always force-reinstall if the plugin already exists (no error, just overwrite)
+      const installTarget = {
+        declaration: target.prospectiveDeclaration,
+        clients: target.clients,
+        ...(nativeOnly && { sourceValidation: 'declaration' as const }),
+      };
       const result = isUser
-        ? nativeOnly
-          ? await addUserPluginDeclaration(plugin, true)
-          : await addUserPlugin(plugin, true)
-        : nativeOnly
-          ? await addPluginDeclaration(plugin, process.cwd(), true)
-          : await addPlugin(plugin, process.cwd(), true);
+        ? await addUserPluginForTarget(installTarget)
+        : await addPluginForTarget(installTarget, workspacePath);
 
       if (!result.success) {
         if (isJsonMode()) {

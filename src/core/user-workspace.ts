@@ -142,6 +142,7 @@ export async function addUserPluginForTarget(
     target.declaration,
     true,
     target.clients,
+    target.sourceValidation,
     dependencies,
   );
 }
@@ -150,6 +151,7 @@ async function addValidatedUserPlugin(
   declaration: PluginEntry,
   force?: boolean,
   initialClients?: readonly ClientType[],
+  sourceValidation: 'standard' | 'declaration' = 'standard',
   dependencies?: TargetedPluginWriteDependencies,
 ): Promise<ModifyResult> {
   const plugin = getPluginSource(declaration);
@@ -158,6 +160,16 @@ async function addValidatedUserPlugin(
   );
   const configPath = getUserWorkspaceConfigPath();
 
+
+  if (sourceValidation === 'declaration') {
+    return addPluginToUserConfig(
+      declaration,
+      configPath,
+      undefined,
+      force,
+      dependencies,
+    );
+  }
   if (isPluginSpec(plugin)) {
     const resolved = await resolvePluginSpecWithAutoRegister(plugin);
     if (!resolved.success) {

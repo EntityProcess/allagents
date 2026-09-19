@@ -222,6 +222,21 @@ describe('user-workspace', () => {
       expect(config?.plugins).toEqual([pluginDir]);
     });
 
+    test('persists a native-only declaration without treating its source as a local path', async () => {
+      const result = await addUserPluginForTarget({
+        declaration: { source: 'npm:pi-extension', install: 'native' },
+        clients: ['pi'],
+        sourceValidation: 'declaration',
+      });
+
+      expect(result.success).toBe(true);
+      const config = await getUserWorkspaceConfig();
+      expect(config?.clients).toEqual(['pi']);
+      expect(config?.plugins).toEqual([
+        { source: 'npm:pi-extension', install: 'native' },
+      ]);
+    });
+
     test('stores an override without changing top-level clients or unrelated declarations', async () => {
       const pluginDir = join(tempHome, 'target-plugin');
       await mkdir(pluginDir, { recursive: true });

@@ -53,6 +53,11 @@ export interface ModifyResult {
 export interface PluginInstallTarget {
   declaration: PluginEntry;
   clients: readonly ClientType[];
+  /**
+   * `declaration` preserves the established native-only path whose source is
+   * consumed by a client package manager rather than resolved on disk.
+   */
+  sourceValidation?: 'standard' | 'declaration';
 }
 
 export interface TargetedPluginWriteDependencies {
@@ -218,6 +223,7 @@ export async function addPluginForTarget(
     workspacePath,
     true,
     target.clients,
+    target.sourceValidation,
     dependencies,
   );
 }
@@ -227,6 +233,7 @@ async function addValidatedPlugin(
   workspacePath: string,
   force?: boolean,
   initialClients?: readonly ClientType[],
+  sourceValidation: 'standard' | 'declaration' = 'standard',
   dependencies?: TargetedPluginWriteDependencies,
 ): Promise<ModifyResult> {
   const plugin = getPluginSource(declaration);
@@ -235,6 +242,16 @@ async function addValidatedPlugin(
     workspacePath,
     initialClients ? [...initialClients] : undefined,
   );
+
+  if (sourceValidation === 'declaration') {
+    return addPluginToConfig(
+      declaration,
+      configPath,
+      undefined,
+      force,
+      dependencies,
+    );
+  }
 
   if (isPluginSpec(plugin)) {
     const resolved = await resolvePluginSpecWithAutoRegister(plugin, { workspacePath });

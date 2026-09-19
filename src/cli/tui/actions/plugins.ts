@@ -1,7 +1,14 @@
 import * as p from '@clack/prompts';
-import { addPlugin, removePlugin, removeDisabledSkill, addEnabledSkill, setPluginSkillsMode } from '../../../core/workspace-modify.js';
 import {
-  addUserPlugin,
+  addPluginForTarget,
+  removePlugin,
+  removeDisabledSkill,
+  addEnabledSkill,
+  setPluginSkillsMode,
+} from '../../../core/workspace-modify.js';
+import {
+  addUserPluginForTarget,
+  isUserConfigPath,
   removeUserPlugin,
   removeUserDisabledSkill,
   addUserEnabledSkill,
@@ -9,8 +16,15 @@ import {
   getInstalledUserPlugins,
   getInstalledProjectPlugins,
   getUserPluginsForMarketplace,
+  getUserWorkspaceConfig,
 } from '../../../core/user-workspace.js';
-import { syncWorkspace, syncUserWorkspace, type SyncResult } from '../../../core/sync.js';
+import {
+  buildPluginSyncPlans,
+  preflightNativePluginDeclaration,
+  syncWorkspace,
+  syncUserWorkspace,
+  type SyncResult,
+} from '../../../core/sync.js';
 import {
   listMarketplaces,
   listMarketplacePlugins,
@@ -29,7 +43,11 @@ import { formatVerboseSyncLines } from '../../format-sync.js';
 import { parseMarketplaceManifest } from '../../../utils/marketplace-manifest-parser.js';
 import { getWorkspaceStatus } from '../../../core/status.js';
 import { getAllSkillsFromPlugins, discoverSkillNames } from '../../../core/skills.js';
-import { getHomeDir } from '../../../constants.js';
+import {
+  CONFIG_DIR,
+  WORKSPACE_CONFIG_FILE,
+  getHomeDir,
+} from '../../../constants.js';
 import type { TuiContext } from '../context.js';
 import type { TuiCache } from '../cache.js';
 import { removeInstalledSkill } from '../../skill-removal.js';
@@ -48,6 +66,14 @@ import {
   type SkillUpdatePreflight,
   type SkillUpdateScope,
 } from '../../../core/skill-update.js';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { parseWorkspaceConfig } from '../../../utils/workspace-parser.js';
+import {
+  resolveInstallTarget,
+  type InstallScope,
+} from '../../install-target.js';
+import { createClackInstallTargetPromptPort } from '../install-target-prompts.js';
 
 const { select, text, confirm, multiselect, autocomplete } = p;
 
@@ -110,62 +136,119 @@ async function getCachedMarketplacePlugins(
   return result;
 }
 
+export type InstallSelectedPluginResult =
+  | { status: 'installed'; scope: InstallScope; source: string }
+  | { status: 'cancelled' }
+  | { status: 'failed' };
+
 /**
- * Shared helper: determine scope, install a plugin, sync, and show success.
- * Returns true if installed successfully, false if cancelled or failed.
+ * Resolve the target, install a plugin, run the existing full-scope sync, and
+ * return the exact installed scope to callers.
  */
 export async function installSelectedPlugin(
   pluginRef: string,
   context: TuiContext,
   cache?: TuiCache,
-): Promise<boolean> {
-  // Determine scope - always show both options
-  const scopeChoice = await select({
-    message: 'Install scope',
-    options: [
-      { label: 'Project (this workspace)', value: 'project' as const },
-      { label: 'User (global)', value: 'user' as const },
-    ],
+): Promise<InstallSelectedPluginResult> {
+  const workspacePath = context.workspacePath ?? process.cwd();
+  const projectConfigPath = join(
+    workspacePath,
+    CONFIG_DIR,
+    WORKSPACE_CONFIG_FILE,
+  );
+  const projectConfig =
+    !isUserConfigPath(workspacePath) && existsSync(projectConfigPath)
+      ? await parseWorkspaceConfig(projectConfigPath)
+      : null;
+  const userConfig = await getUserWorkspaceConfig();
+  const target = await resolveInstallTarget({
+    workspacePath,
+    declaration: pluginRef,
+    action: 'Install plugin',
+    payload: pluginRef,
+    scopeStates: {
+      project: projectConfig ? { clients: projectConfig.clients } : null,
+      user: userConfig ? { clients: userConfig.clients } : null,
+    },
+    environment: {
+      json: false,
+      ci: false,
+      stdinIsTTY: true,
+      stdoutIsTTY: true,
+    },
+    prompts: createClackInstallTargetPromptPort(),
   });
 
-  if (p.isCancel(scopeChoice)) {
-    return false;
+  if (!target) {
+    return { status: 'cancelled' };
+  }
+  const configuredClientEntries =
+    target.scope === 'project'
+      ? projectConfig?.clients
+      : userConfig?.clients;
+  const selectedClientEntries = target.clients.map(
+    (client) =>
+      configuredClientEntries?.find((entry) =>
+        typeof entry === 'string'
+          ? entry === client
+          : entry.name === client,
+      ) ?? client,
+  );
+
+
+  const nativePreflightErrors = await preflightNativePluginDeclaration(
+    target.prospectiveDeclaration,
+    selectedClientEntries,
+    target.scope,
+    workspacePath,
+  );
+  if (nativePreflightErrors.length > 0) {
+    p.note(
+      `Native preflight failed; workspace declaration was not changed: ${nativePreflightErrors.join('; ')}`,
+      'Installation failed',
+    );
+    return { status: 'failed' };
   }
 
-  const scope = scopeChoice;
+  const installPlan = buildPluginSyncPlans(
+    [target.prospectiveDeclaration],
+    selectedClientEntries,
+    target.scope,
+  ).plans[0];
+  const nativeOnly =
+    !!installPlan &&
+    installPlan.clients.length === 0 &&
+    installPlan.nativeClients.length > 0;
+  const installTarget = {
+    declaration: target.prospectiveDeclaration,
+    clients: target.clients,
+    ...(nativeOnly && { sourceValidation: 'declaration' as const }),
+  };
 
   const s = p.spinner();
   s.start('Installing plugin...');
-
-  let syncResult: SyncResult;
-
-  if (scope === 'project') {
-    const workspacePath = context.workspacePath ?? process.cwd();
-    const result = await addPlugin(pluginRef, workspacePath);
-    if (!result.success) {
-      s.stop('Installation failed');
-      p.note(result.error ?? 'Unknown error', 'Error');
-      return false;
-    }
-    s.message('Updating...');
-    syncResult = await syncWorkspace(workspacePath);
-    s.stop('Installed');
-  } else {
-    const result = await addUserPlugin(pluginRef);
-    if (!result.success) {
-      s.stop('Installation failed');
-      p.note(result.error ?? 'Unknown error', 'Error');
-      return false;
-    }
-    s.message('Updating...');
-    syncResult = await syncUserWorkspace();
-    s.stop('Installed');
+  const result =
+    target.scope === 'project'
+      ? await addPluginForTarget(installTarget, workspacePath)
+      : await addUserPluginForTarget(installTarget);
+  if (!result.success) {
+    s.stop('Installation failed');
+    p.note(result.error ?? 'Unknown error', 'Error');
+    return { status: 'failed' };
   }
 
+  s.message('Updating...');
+  const syncResult: SyncResult =
+    target.scope === 'project'
+      ? await syncWorkspace(workspacePath)
+      : await syncUserWorkspace();
+  s.stop('Installed');
+
   cache?.invalidate();
+  const source = result.normalizedPlugin ?? pluginRef;
   const lines = formatVerboseSyncLines(syncResult);
-  p.note(lines.join('\n'), `Installed: ${pluginRef}`);
-  return true;
+  p.note(lines.join('\n'), `Installed: ${source}`);
+  return { status: 'installed', scope: target.scope, source };
 }
 
 /**

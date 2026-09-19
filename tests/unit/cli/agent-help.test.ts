@@ -149,6 +149,19 @@ describe('agent command metadata', () => {
     expect(installCmd.positionals![0].required).toBe(true);
   });
 
+  test('plugin install metadata exposes only supported target options', () => {
+    const installCmd = allCommands.find((c) => c.command === 'plugin install')!;
+    expect(installCmd.options).toEqual([
+      expect.objectContaining({ flag: '--scope', short: '-s', type: 'string' }),
+      expect.objectContaining({ flag: '--client', short: '-c', type: 'string' }),
+      expect.objectContaining({ flag: '--yes', short: '-y', type: 'boolean' }),
+      expect.objectContaining({ flag: '--skill', type: 'string' }),
+    ]);
+    expect(installCmd.options?.some((option) => option.flag === '--force')).toBe(
+      false,
+    );
+  });
+
   test('status has no positionals or options', () => {
     const statusCmd = allCommands.find((c) => c.command === 'status')!;
     expect(statusCmd.positionals).toBeUndefined();

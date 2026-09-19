@@ -364,6 +364,24 @@ describe('addPluginForTarget', () => {
     expect(config.plugins).toEqual([pluginDir]);
   });
 
+  test('persists a native-only declaration without treating its source as a local path', async () => {
+    const result = await addPluginForTarget(
+      {
+        declaration: { source: 'npm:pi-extension', install: 'native' },
+        clients: ['pi'],
+        sourceValidation: 'declaration',
+      },
+      testDir,
+    );
+
+    expect(result.success).toBe(true);
+    const config = load(readFileSync(configPath, 'utf-8')) as WorkspaceConfig;
+    expect(config.clients).toEqual(['pi']);
+    expect(config.plugins).toEqual([
+      { source: 'npm:pi-extension', install: 'native' },
+    ]);
+  });
+
   test('stores only a differing client override and isolates unrelated config', async () => {
     const initial = {
       repositories: [{ path: '../keep' }],
