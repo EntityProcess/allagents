@@ -1,6 +1,8 @@
-import { writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import { ensureWorkspace, type ModifyResult } from './workspace-modify.js';
@@ -9,6 +11,8 @@ import { CLIENT_MAPPINGS } from '../models/client-mapping.js';
 import type { WorkspaceConfig, Repository, ClientType } from '../models/workspace-config.js';
 import { discoverWorkspaceSkills, writeSkillsIndex, cleanupSkillsIndex, groupSkillsByRepo } from './repo-skills.js';
 import { parseWorkspaceConfigForEdit } from '../utils/workspace-parser.js';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Detect source platform and owner/repo from a git remote at the given path.
@@ -22,16 +26,12 @@ export async function detectRemote(repoPath: string): Promise<{ source: string; 
     env.GIT_DIR = undefined;
     env.GIT_WORK_TREE = undefined;
 
-    const proc = Bun.spawn(['git', '-C', repoPath, 'remote', 'get-url', 'origin'], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env,
-    });
-    const text = await new Response(proc.stdout).text();
-    await proc.exited;
-    if (proc.exitCode !== 0) return undefined;
-
-    const url = text.trim();
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', repoPath, 'remote', 'get-url', 'origin'],
+      { env, encoding: 'utf8' },
+    );
+    const url = stdout.trim();
 
     // GitHub SSH: git@github.com:owner/repo.git
     // GitHub HTTPS: https://github.com/owner/repo.git
