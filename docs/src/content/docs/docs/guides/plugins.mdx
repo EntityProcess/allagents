@@ -110,9 +110,38 @@ After sync:
 This rename-based deduplication applies to **plugin skills** (copied to `.claude/skills/`). **Repository skills** embedded in the WORKSPACE-RULES index use a different strategy — they pick a single winner rather than keeping all copies. See [Repository Skill Discovery](/docs/reference/configuration/#repository-skill-discovery) for details.
 :::
 
+## Choosing Install Scope and Clients
+
+`allagents plugin install` asks where to save a new declaration and which
+clients should receive it. The review step shows the exact config path, clients,
+effective install methods, and targeting behavior before anything changes.
+
+```bash
+# Interactive
+allagents plugin install code-review@claude-plugins-official
+
+# Auto-register a marketplace from its GitHub URL, then install its plugin
+allagents plugin install 'my-plugin@https://github.com/owner/marketplace'
+
+# Prompt-free automation
+allagents plugin install code-review@claude-plugins-official \
+  --scope project --client claude,codex --yes
+```
+
+`--scope` and `--client` bypass their respective choosers. The final
+confirmation defaults to **Yes**, so Enter accepts the displayed plan;
+`--yes` skips that prompt entirely. JSON, CI, and non-TTY runs never prompt and
+retain the command's deterministic defaults when a target flag is omitted.
+
+Clients normally inherit the selected scope's top-level `clients` list. A
+different selection is stored on that plugin declaration as a `clients`
+override. On the first install into a new scope, the selected clients initialize
+the top-level list. Reinstalling an existing plugin preserves its other fields.
+
 ## Adding Skills
 
-You can add a specific skill from a GitHub repo without installing the full plugin first:
+You can add a specific skill from a GitHub repo without installing the full
+plugin first:
 
 ```bash
 # Add a skill by name, specifying the plugin source
@@ -122,7 +151,13 @@ allagents skill add reddit --from ReScienceLab/opc-skills
 allagents skill add https://github.com/owner/repo/tree/main/skills/my-skill
 ```
 
-This installs the plugin and enables only the specified skill. See the [CLI reference](/docs/reference/cli/#skill-add) for all source formats.
+Source-backed skill installs use the same scope, client, review, and
+confirmation flow as `plugin install`. Pass `--scope`, `--client`, and `--yes`
+for prompt-free automation. Re-enabling a skill from an already installed
+plugin does not introduce a declaration, so it keeps the existing scope and
+client targeting.
+
+See the [CLI reference](/docs/reference/cli/#skill-add) for all source formats.
 
 ## Disabling Individual Skills
 
@@ -163,3 +198,4 @@ Plugins use the `plugin@marketplace` format:
 |--------|---------|
 | Well-known | `code-review@claude-plugins-official` |
 | owner/repo | `my-plugin@owner/repo` |
+| GitHub marketplace URL | `my-plugin@https://github.com/owner/repo` |

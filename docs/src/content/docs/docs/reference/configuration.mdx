@@ -38,11 +38,14 @@ repositories:
 
 plugins:
   - code-review@claude-plugins-official
-  - name: superpowers@obra/superpowers
+  - source: superpowers@obra/superpowers
     skills:                                # Allowlist: only sync these skills
       - brainstorming
       - test-driven-development
-  - name: my-plugin@my-org/my-plugin
+    clients:                               # Optional per-plugin override
+      - claude
+      - cursor
+  - source: my-plugin@my-org/my-plugin
     skills:                                # Blocklist: sync all except these
       exclude:
         - verbose-logging
@@ -104,6 +107,27 @@ Pi native mode supports npm, Git, and local package sources at project or user
 scope. Project installs require trust recorded outside the project-controlled
 Pi agent root. OMP native mode accepts marketplace-backed plugin specs at
 project or user scope and requires OMP 18.1.17 or newer.
+
+### Per-Plugin Client Targeting
+
+Top-level `clients` define the default targets for ordinary workspace plugins.
+An object-form plugin declaration may include `clients` to override that
+default:
+
+```yaml
+plugins:
+  - code-review@claude-plugins-official   # inherits all top-level clients
+  - source: docs-tools@acme/toolbox
+    clients: [claude, codex]              # sync only to these clients
+
+clients: [claude, codex, cursor]
+```
+
+Interactive `plugin install` and source-backed `skill add` commands omit the
+override when the selected clients equal the scope default. A first install
+into a new scope seeds its top-level `clients` list. Reinstalling a declaration
+preserves existing `install`, `skills`, `exclude`, `ref`, and other object
+fields while applying the selected client target.
 
 ### Global Profiles
 

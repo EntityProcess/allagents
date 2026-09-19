@@ -63,6 +63,19 @@
   lifecycle, generated launchers, and ownership-safe cleanup.
 - Versioned user and project workspace JSON Schemas generated from the runtime
   Zod models, with CI drift enforcement and YAML Language Server setup docs.
+- Interactive install targeting for `plugin install` and source-backed
+  `skill add`: choose project or user scope, select clients, review the exact
+  declaration, and confirm before mutation. Automation can use `--scope`,
+  `--client`, and `--yes`; JSON, CI, and non-TTY runs remain prompt-free.
+- GitHub marketplace URLs in plugin specs, such as
+  `plugin@https://github.com/owner/repo`; AllAgents normalizes the URL to the
+  canonical source and uses the existing marketplace registration flow.
+- Interactive install confirmation now defaults to **Yes**, making Enter the
+  happy path while retaining an explicit cancellation choice.
+- Atomic publication of targeted plugin declarations, preserving existing
+  plugin fields and writing per-plugin client overrides only when they differ
+  from the selected scope's top-level clients.
+
 
 
 ## [1.0.0] - 2026-03-13

@@ -15,7 +15,7 @@ AllAgents keeps your AI tooling (skills, agents, hooks, MCP servers) in one work
 npx allagents init my-workspace --from myorg/templates/nodejs
 cd my-workspace
 
-# Install plugins
+# Install a plugin, choosing its scope and target clients interactively
 npx allagents plugin install code-review@claude-plugins-official
 
 # Sync to all configured clients
@@ -92,14 +92,14 @@ clients:
 | `allagents init <path>` | Create a workspace (optionally `--from owner/repo`) |
 | `allagents update` | Sync all plugins to workspace |
 | `allagents update --profile <name>` | Reconcile an installed global profile |
-| `allagents plugin install <spec>` | Install a plugin |
+| `allagents plugin install <spec> [--scope project\|user] [--client <clients>] [--yes]` | Install a plugin for selected scope and clients |
 | `allagents plugin uninstall <spec>` | Remove a plugin |
 | `allagents plugin list` | List installed plugins and skills with source, scope, and clients |
 | `allagents profile install <name> --yes` | Install a declared global profile |
 | `allagents profile list` | List declared and installed profiles with clients and launchers |
 | `allagents profile status [name]` | Inspect declared and installed profiles |
 | `allagents profile remove <name> --yes` | Remove unchanged managed profile resources |
-| `allagents skill add <name>` | Add a skill from a repo (plural `skills` alias supported) |
+| `allagents skill add <name> [--from <source>] [--scope project\|user] [--client <clients>] [--yes]` | Add source-backed skills for selected scope and clients (plural `skills` alias supported) |
 | `allagents skill list` | List skills and status |
 | `allagents mcp add <name> <commandOrUrl> [--scope user \| --profile <name>]` | Add, authenticate, and sync an MCP server |
 | `allagents mcp reauth <name> [--scope user \| --profile <name>]` | Reauthenticate an HTTP MCP server in one destination |

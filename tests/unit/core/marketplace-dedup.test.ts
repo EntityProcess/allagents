@@ -103,6 +103,15 @@ describe('marketplace deduplication', () => {
       expect(sources).toContain('other/marketplace');
     });
 
+    it('canonicalizes GitHub marketplace URLs for bulk registration', () => {
+      const sources = extractUniqueMarketplaceSources([
+        'plugin-a@https://github.com/owner/repo',
+        'plugin-b@owner/repo',
+      ]);
+
+      expect(sources).toEqual(['owner/repo']);
+    });
+
     it('should return empty array for plugins without marketplace specs', () => {
       const plugins = [
         'local-plugin',
