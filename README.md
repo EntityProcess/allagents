@@ -101,8 +101,8 @@ clients:
 | `allagents profile remove <name> --yes` | Remove unchanged managed profile resources |
 | `allagents skill add <name>` | Add a skill from a repo (plural `skills` alias supported) |
 | `allagents skill list` | List skills and status |
-| `allagents mcp add <name> <commandOrUrl>` | Add an MCP server and sync to clients |
-| `allagents mcp proxy <serverUrl>` | Bridge a remote HTTP MCP server to local stdio |
+| `allagents mcp add <name> <commandOrUrl>` | Add, authenticate, and sync an MCP server |
+| `allagents mcp reauth <name>` | Reauthenticate a configured HTTP MCP server |
 | `allagents mcp list` | List workspace MCP servers |
 | `allagents workspace status` | Show workspace state |
 | `allagents self update` | Update AllAgents CLI |

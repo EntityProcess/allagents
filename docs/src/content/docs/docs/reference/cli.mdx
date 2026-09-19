@@ -408,8 +408,7 @@ Local plugin sources are listed separately in `data.skippedLocalSources`. The JS
 
 ```bash
 allagents mcp add <name> <commandOrUrl> [options]
-allagents mcp auth <serverUrl> [--header KEY=VALUE...]
-allagents mcp proxy <serverUrl> [--header KEY=VALUE...]
+allagents mcp reauth <name>
 allagents mcp remove <name>
 allagents mcp list
 allagents mcp get <name>
@@ -420,7 +419,9 @@ Manage MCP servers at the workspace level. Servers are persisted in a top-level 
 
 ### mcp add
 
-Add a new MCP server to `workspace.yaml` and immediately sync it to all configured clients.
+Add a new MCP server to `workspace.yaml` and immediately sync it to all
+configured clients. For HTTP servers, AllAgents connects first, completes OAuth
+when required, and routes selected clients through its built-in MCP client.
 
 | Flag | Description |
 |------|-------------|
@@ -432,6 +433,10 @@ Add a new MCP server to `workspace.yaml` and immediately sync it to all configur
 | `-f, --force` | Replace an existing server with the same name |
 
 **Transport auto-detection:** if `<commandOrUrl>` starts with `http://` or `https://`, http transport is selected; otherwise stdio is selected. Passing `--transport stdio` with a URL, or `--transport http` with a non-URL command, is rejected.
+
+Non-interactive HTTP adds perform the same connection check without starting a
+browser. They can use cached credentials, but fail before mutation when fresh
+OAuth consent is required.
 
 ```bash
 # HTTP server
@@ -447,40 +452,22 @@ allagents mcp add gh-server npx --arg=-y --arg=@modelcontextprotocol/server-gith
 allagents mcp add deepwiki https://new.example.com --force
 ```
 
-### mcp auth
+### mcp reauth
 
-Authorize an OAuth-enabled HTTP MCP server before connecting it through a
-headless or remote machine. Open the printed authorization URL in any browser.
-When that browser redirects to an unreachable loopback address, copy the full
-URL from its address bar and paste it into the prompt. AllAgents validates the
-registered callback address and OAuth state before exchanging the code, then
-caches the resulting credentials for `mcp proxy`.
-
-| Flag | Description |
-|------|-------------|
-| `--header <KEY=VALUE>` | HTTP header forwarded to the upstream MCP server (repeatable) |
+Force a fresh OAuth login for a workspace-managed HTTP MCP server. Pass the
+configured server name:
 
 ```bash
-allagents mcp auth https://mcp.tradingview.com/mcp
+allagents mcp reauth tradingview
 ```
 
-Restart or reconnect the MCP client after authorization so `mcp proxy` can use
-the cached token.
+AllAgents clears the cached OAuth credentials for that server, opens a browser,
+and verifies a new connection. If the browser is on another device, paste the
+complete loopback callback URL into the waiting terminal prompt.
 
-### mcp proxy
+The HTTP-to-stdio bridge written into generated client configs is an internal
+implementation detail; users do not need to run it directly.
 
-Expose a remote HTTP MCP server locally over stdio. This is the helper command AllAgents writes into proxied client configs when `mcpProxy` rewrites an HTTP server for clients that only support stdio transport.
-
-| Flag | Description |
-|------|-------------|
-| `--header <KEY=VALUE>` | HTTP header forwarded to the upstream MCP server (repeatable) |
-
-```bash
-allagents mcp proxy https://mcp.deepwiki.com/mcp
-allagents mcp proxy https://mcp.internal.corp --header Authorization=Bearer-token
-```
-
-`auth` is the interactive login command; `proxy` remains the helper written to generated client configs.
 
 ### mcp remove
 

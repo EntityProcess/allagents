@@ -1,6 +1,13 @@
 import type { AgentCommandMeta } from './help.js';
 import { normalizeSkillHelpArgs } from './skill-arg-normalizer.js';
-import { mcpAuthMeta } from './metadata/mcp.js';
+import {
+  mcpAddMeta,
+  mcpGetMeta,
+  mcpListMeta,
+  mcpReauthMeta,
+  mcpRemoveMeta,
+  mcpUpdateMeta,
+} from './metadata/mcp.js';
 
 import {
   skillsAddMeta,
@@ -40,7 +47,12 @@ const allCommands: AgentCommandMeta[] = [
   setupMeta,
   syncMeta,
   statusMeta,
-  mcpAuthMeta,
+  mcpAddMeta,
+  mcpReauthMeta,
+  mcpRemoveMeta,
+  mcpListMeta,
+  mcpGetMeta,
+  mcpUpdateMeta,
   pluginInstallMeta,
   pluginUninstallMeta,
   pluginUpdateMeta,

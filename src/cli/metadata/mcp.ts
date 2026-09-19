@@ -2,18 +2,17 @@ import type { AgentCommandMeta } from '../help.js';
 
 export const mcpAddMeta: AgentCommandMeta = {
   command: 'mcp add',
-  description: 'Add an MCP server to workspace.yaml and sync to clients',
+  description: 'Add an MCP server, authenticate, and sync it to clients',
   whenToUse:
-    'When adding a new MCP server that you want AllAgents to manage and sync to all configured clients',
+    'When adding a new MCP server that AllAgents should connect to and manage for configured clients',
   examples: [
     'allagents mcp add deepwiki https://mcp.deepwiki.com/mcp',
     'allagents mcp add my-server npx --arg=-y --arg=@my/mcp-server',
     'allagents mcp add gh-api npx -e GH_TOKEN=abc123 --arg=-y --arg=@modelcontextprotocol/server-github',
     'allagents mcp add deepwiki https://mcp.deepwiki.com/mcp --client claude,copilot',
-    'allagents mcp add secure-api https://api.example.com/mcp --proxy',
   ],
   expectedOutput:
-    'Adds the server to workspace.yaml and syncs it to all configured clients. With --proxy, HTTP servers are rewritten through the built-in AllAgents HTTP-to-stdio proxy path for the targeted clients. Exit 0 on success, 1 on failure.',
+    'For HTTP servers, connects and completes OAuth when needed, adds the server to workspace.yaml, and routes selected clients through AllAgents. Stdio servers are added directly. Exit 0 on success, 1 on failure.',
   positionals: [
     {
       name: 'name',
@@ -58,12 +57,6 @@ export const mcpAddMeta: AgentCommandMeta = {
       type: 'string',
       description:
         'Comma-separated list of clients that should receive this server (default: all project-scoped clients)',
-    },
-    {
-      flag: '--proxy',
-      type: 'boolean',
-      description:
-        'For HTTP servers, persist server-scoped proxy intent and sync targeted clients via the built-in AllAgents HTTP proxy helper',
     },
     {
       flag: '--force',
@@ -118,30 +111,23 @@ export const mcpGetMeta: AgentCommandMeta = {
   ],
 };
 
-export const mcpAuthMeta: AgentCommandMeta = {
-  command: 'mcp auth',
-  description: 'Authorize an HTTP MCP server from a local or remote browser',
+export const mcpReauthMeta: AgentCommandMeta = {
+  command: 'mcp reauth',
+  description: 'Reauthenticate a configured HTTP MCP server',
   whenToUse:
-    'When an OAuth-enabled MCP server is running on a headless or remote machine and the browser cannot reach its loopback callback',
+    'When a workspace-managed HTTP MCP server needs a fresh OAuth login',
   examples: [
-    'allagents mcp auth https://mcp.tradingview.com/mcp',
-    'allagents mcp auth https://mcp.internal.corp --header Authorization=Bearer-token',
+    'allagents mcp reauth tradingview',
+    'allagents mcp reauth secure-api',
   ],
   expectedOutput:
-    'Prints an authorization URL, prompts for the full loopback callback URL, validates the callback state, and caches OAuth credentials. Exit 0 on success, 1 on cancellation or failure.',
+    'Clears cached OAuth credentials for the named server, opens a browser for login, accepts a pasted callback URL when the browser is remote, and verifies the connection. Exit 0 on success, 1 on cancellation or failure.',
   positionals: [
     {
-      name: 'serverUrl',
+      name: 'name',
       type: 'string',
       required: true,
-      description: 'Remote HTTP MCP server URL',
-    },
-  ],
-  options: [
-    {
-      flag: '--header',
-      type: 'string',
-      description: 'HTTP header KEY=VALUE (repeatable)',
+      description: 'Workspace-managed HTTP MCP server name',
     },
   ],
 };

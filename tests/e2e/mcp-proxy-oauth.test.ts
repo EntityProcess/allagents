@@ -3,8 +3,8 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  connectHttpMcpServer,
   hashServerUrl,
-  runHttpMcpOAuthLogin,
 } from '../../src/core/mcp-http-stdio-proxy.ts';
 import {
   type DummyMcpOAuthServer,
@@ -37,6 +37,8 @@ function connectAndAutoAuthorize(
 describe('mcp proxy OAuth e2e', () => {
   let homeDir: string;
   let dummy: DummyMcpOAuthServer | undefined;
+  const originalTestHome = process.env.ALLAGENTS_TEST_HOME;
+  const originalNoBrowser = process.env.ALLAGENTS_MCP_OAUTH_NO_BROWSER;
 
   beforeEach(() => {
     homeDir = join(
@@ -44,12 +46,24 @@ describe('mcp proxy OAuth e2e', () => {
       `allagents-e2e-oauth-home-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     mkdirSync(homeDir, { recursive: true });
+    process.env.ALLAGENTS_TEST_HOME = homeDir;
+    process.env.ALLAGENTS_MCP_OAUTH_NO_BROWSER = '1';
   });
 
   afterEach(async () => {
     rmSync(homeDir, { recursive: true, force: true });
     await dummy?.stop();
     dummy = undefined;
+    if (originalTestHome === undefined) {
+      delete process.env.ALLAGENTS_TEST_HOME;
+    } else {
+      process.env.ALLAGENTS_TEST_HOME = originalTestHome;
+    }
+    if (originalNoBrowser === undefined) {
+      delete process.env.ALLAGENTS_MCP_OAUTH_NO_BROWSER;
+    } else {
+      process.env.ALLAGENTS_MCP_OAUTH_NO_BROWSER = originalNoBrowser;
+    }
   });
 
   test('completes OAuth and calls a tool on the first connection', async () => {
@@ -93,9 +107,8 @@ describe('mcp proxy OAuth e2e', () => {
 
     try {
       const resourceSecret = 'resource-server-only';
-      await runHttpMcpOAuthLogin(
-        dummy.mcpUrl,
-        async ({ authorizationUrl }) => {
+      await connectHttpMcpServer(dummy.mcpUrl, {
+        callbackUrlReader: async ({ authorizationUrl }) => {
           const response = await fetch(authorizationUrl, {
             redirect: 'manual',
           });
@@ -104,8 +117,8 @@ describe('mcp proxy OAuth e2e', () => {
           expect(location).toBeTruthy();
           return new URL(location!, authorizationUrl).toString();
         },
-        { 'x-resource-secret': resourceSecret },
-      );
+        headers: { 'x-resource-secret': resourceSecret },
+      });
 
       expect(dummy.authorizeCallCount).toBe(1);
       expect(dummy.tokenCallCounts.authorization_code).toBe(1);
@@ -130,6 +143,62 @@ describe('mcp proxy OAuth e2e', () => {
         process.env.ALLAGENTS_TEST_HOME = previousTestHome;
       }
     }
+  }, 15000);
+
+  test('accepts a local callback while the remote paste fallback is pending', async () => {
+    dummy = await startDummyMcpOAuthServer();
+    let fallbackAborted = false;
+
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      callbackUrlReader: ({ authorizationUrl, signal }) => {
+        void fetch(authorizationUrl);
+        return new Promise((_, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              fallbackAborted = true;
+              reject(new Error('Local callback completed'));
+            },
+            { once: true },
+          );
+        });
+      },
+    });
+
+    expect(fallbackAborted).toBe(true);
+    expect(dummy.authorizeCallCount).toBe(1);
+  }, 15000);
+
+  test('forces a fresh OAuth flow when credentials are reset', async () => {
+    dummy = await startDummyMcpOAuthServer();
+    const authorize = async ({ authorizationUrl }: { authorizationUrl: URL }) => {
+      const response = await fetch(authorizationUrl, { redirect: 'manual' });
+      const location = response.headers.get('location');
+      expect(location).toBeTruthy();
+      return new URL(location!, authorizationUrl).toString();
+    };
+
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      callbackUrlReader: authorize,
+    });
+    expect(dummy.authorizeCallCount).toBe(1);
+
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      callbackUrlReader: authorize,
+      resetCredentials: true,
+    });
+    expect(dummy.authorizeCallCount).toBe(2);
+  }, 15000);
+
+  test('fails without prompting when authorization is disabled', async () => {
+    dummy = await startDummyMcpOAuthServer();
+
+    await expect(
+      connectHttpMcpServer(dummy.mcpUrl, {
+        allowAuthorization: false,
+      }),
+    ).rejects.toThrow('OAuth authorization requires an interactive terminal');
+    expect(dummy.authorizeCallCount).toBe(0);
   }, 15000);
 
   test('reuses the cached token on a second connection without re-authorizing', async () => {

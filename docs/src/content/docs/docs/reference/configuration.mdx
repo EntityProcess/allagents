@@ -529,9 +529,12 @@ Manage these entries declaratively in `workspace.yaml`, or via the [`allagents m
 
 Servers AllAgents adds are tracked in `.allagents/sync-state.json`; pre-existing user-managed servers in client MCP configs (`.mcp.json`, `.vscode/mcp.json`, `.copilot/mcp-config.json`, `.codex/config.toml`) are never touched.
 
-## MCP Proxy
+## Advanced MCP Routing
 
-The optional `mcpProxy` section rewrites HTTP MCP servers to stdio via AllAgents' built-in `allagents mcp proxy` bridge for clients that need it. See the [MCP Proxy guide](/docs/guides/mcp-proxy/) for details.
+HTTP servers created with `allagents mcp add` are routed through AllAgents
+automatically. The optional `mcpProxy` section applies the same built-in bridge
+to HTTP servers supplied by plugins, globally or per server. See the
+[HTTP MCP Servers guide](/docs/guides/mcp-proxy/) for details.
 
 ```yaml
 mcpProxy:
@@ -548,7 +551,7 @@ mcpProxy:
 |-------|----------|-------------|
 | `clients` | Yes | Clients where all HTTP servers are proxied to stdio |
 | `servers` | No | Per-server overrides with additional client lists |
-| `servers.<name>.proxy` | Yes (per entry) | Additional clients to proxy this specific server for |
+| `servers.<name>.proxy` | Yes (per entry) | Additional clients for this server, or `*` for every current and future project MCP client |
 
 Only servers with HTTP transport (`url` field) are transformed. Stdio servers pass through unchanged.
 

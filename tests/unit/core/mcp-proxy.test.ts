@@ -34,6 +34,15 @@ describe('shouldProxy', () => {
     expect(shouldProxy('my-api', 'codex', config)).toBe(true);
   });
 
+  test('returns true for every client when a server uses the wildcard', () => {
+    const config: McpProxyConfig = {
+      clients: [],
+      servers: { 'my-api': { proxy: ['*'] } },
+    };
+    expect(shouldProxy('my-api', 'claude', config)).toBe(true);
+    expect(shouldProxy('my-api', 'future-client', config)).toBe(true);
+  });
+
   test('returns true when client is in both default and per-server', () => {
     const config: McpProxyConfig = {
       clients: ['claude'],

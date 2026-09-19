@@ -4,9 +4,13 @@
 
 ### Breaking Changes
 
-- **MCP proxy command**: Removed the temporary `allagents mcp proxy-stdio` alias. Use `allagents mcp proxy <serverUrl>` instead.
+- **MCP setup commands**: HTTP servers added with `allagents mcp add` now
+  authenticate and route through AllAgents automatically. The public
+  `--proxy` option and `mcp auth <serverUrl>` command were replaced by
+  `mcp reauth <name>`. The generated `mcp proxy` helper remains internal.
 
-  **Migration**: Re-run `allagents mcp update` or `allagents update` after upgrading so synced client configs are regenerated with `mcp proxy`.
+  **Migration**: Remove `--proxy` from `mcp add` calls. Replace
+  `allagents mcp auth <url>` with `allagents mcp reauth <configured-name>`.
 
 - **Plugin Git ref terminology**: Renamed workspace plugin `pin` to `ref`, CLI
   `--pin` to `--ref`, and sync-state `pinnedRef` to `requestedRef`. Inline
@@ -19,8 +23,9 @@
 
 - Added the official TradingView MCP plugin with OAuth-backed access to market
   data, analytics, watchlists, alerts, news, and screeners.
-- Added `allagents mcp auth` for OAuth login from headless or remote machines,
-  with interactive callback URL paste and strict redirect/state validation.
+- Added automatic OAuth login to `allagents mcp add` and named credential
+  renewal with `allagents mcp reauth`, including local loopback completion and
+  remote callback URL paste with strict redirect and state validation.
 
 - Pi and OMP as file-sync clients at project and user scope, including native
   runtime skill paths and agent instructions.

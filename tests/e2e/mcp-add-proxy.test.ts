@@ -3,6 +3,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { load } from 'js-yaml';
+import {
+  type DummyMcpOAuthServer,
+  startDummyMcpOAuthServer,
+} from '../helpers/dummy-mcp-oauth-server.js';
 
 interface CliResult {
   exitCode: number;
@@ -10,9 +14,13 @@ interface CliResult {
   stderr: string;
 }
 
-function runCli(workdir: string, homeDir: string, args: string[]): CliResult {
+async function runCli(
+  workdir: string,
+  homeDir: string,
+  args: string[],
+): Promise<CliResult> {
   const cliEntry = join(import.meta.dir, '..', '..', 'src', 'cli', 'index.ts');
-  const proc = Bun.spawnSync(['bun', 'run', cliEntry, '--json', ...args], {
+  const proc = Bun.spawn(['bun', 'run', cliEntry, '--json', ...args], {
     cwd: workdir,
     env: {
       ...process.env,
@@ -21,12 +29,13 @@ function runCli(workdir: string, homeDir: string, args: string[]): CliResult {
     stderr: 'pipe',
     stdout: 'pipe',
   });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
 
-  return {
-    exitCode: proc.exitCode,
-    stdout: new TextDecoder().decode(proc.stdout),
-    stderr: new TextDecoder().decode(proc.stderr),
-  };
+  return { exitCode, stdout, stderr };
 }
 
 function readWorkspaceConfig(workspaceDir: string): Record<string, unknown> {
@@ -36,23 +45,26 @@ function readWorkspaceConfig(workspaceDir: string): Record<string, unknown> {
   >;
 }
 
-describe('mcp add --proxy e2e', () => {
+describe('mcp add HTTP client routing e2e', () => {
   let workspaceDir: string;
   let homeDir: string;
+  let dummy: DummyMcpOAuthServer;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     workspaceDir = join(tmpdir(), `allagents-e2e-mcp-add-proxy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     homeDir = join(tmpdir(), `allagents-e2e-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(join(workspaceDir, '.allagents'), { recursive: true });
     mkdirSync(homeDir, { recursive: true });
+    dummy = await startDummyMcpOAuthServer({ requireAuth: false });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await dummy.stop();
     rmSync(workspaceDir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   });
 
-  test('adds deepwiki with proxy enabled for all configured MCP clients', () => {
+  test('adds deepwiki with proxy enabled for all configured MCP clients', async () => {
     writeFileSync(
       join(workspaceDir, '.allagents', 'workspace.yaml'),
       `repositories: []
@@ -66,12 +78,11 @@ clients:
       'utf-8',
     );
 
-    const result = runCli(workspaceDir, homeDir, [
+    const result = await runCli(workspaceDir, homeDir, [
       'mcp',
       'add',
       'deepwiki',
-      'https://mcp.deepwiki.com/mcp',
-      '--proxy',
+      dummy.mcpUrl,
     ]);
 
     expect(result.exitCode).toBe(0);
@@ -80,13 +91,13 @@ clients:
 
     const workspace = readWorkspaceConfig(workspaceDir);
     expect(workspace.mcpServers).toEqual({
-      deepwiki: { type: 'http', url: 'https://mcp.deepwiki.com/mcp' },
+      deepwiki: { type: 'http', url: dummy.mcpUrl },
     });
     expect(workspace.mcpProxy).toEqual({
       clients: [],
       servers: {
         deepwiki: {
-          proxy: ['claude', 'codex', 'vscode', 'copilot'],
+          proxy: ['*'],
         },
       },
     });
@@ -96,12 +107,12 @@ clients:
     expect(claudeConfig.mcpServers.deepwiki.args).toEqual([
       'mcp',
       'proxy',
-      'https://mcp.deepwiki.com/mcp',
+      dummy.mcpUrl,
     ]);
 
     const codexConfig = readFileSync(join(workspaceDir, '.codex', 'config.toml'), 'utf-8');
     expect(codexConfig).toContain('proxy');
-    expect(codexConfig).toContain('https://mcp.deepwiki.com/mcp');
+    expect(codexConfig).toContain(dummy.mcpUrl);
 
     const vscodeConfig = JSON.parse(readFileSync(join(workspaceDir, '.vscode', 'mcp.json'), 'utf-8'));
     expect(vscodeConfig.servers.deepwiki.command).toBe('allagents');
@@ -111,7 +122,7 @@ clients:
     expect(copilotConfig.mcpServers.deepwiki.command).toBe('allagents');
     expect(copilotConfig.mcpServers.deepwiki.args[0]).toBe('mcp');
 
-    const rerun = runCli(workspaceDir, homeDir, ['mcp', 'update']);
+    const rerun = await runCli(workspaceDir, homeDir, ['mcp', 'update']);
     expect(rerun.exitCode).toBe(0);
     const rerunPayload = JSON.parse(rerun.stdout);
     expect(rerunPayload.success).toBe(true);
@@ -121,7 +132,7 @@ clients:
     expect(rerunPayload.data.mcpResults.copilot.added).toBe(0);
   });
 
-  test('scopes proxying to selected clients with --client', () => {
+  test('scopes proxying to selected clients with --client', async () => {
     writeFileSync(
       join(workspaceDir, '.allagents', 'workspace.yaml'),
       `repositories: []
@@ -134,12 +145,11 @@ clients:
       'utf-8',
     );
 
-    const result = runCli(workspaceDir, homeDir, [
+    const result = await runCli(workspaceDir, homeDir, [
       'mcp',
       'add',
       'secure-api',
-      'https://api.example.com/mcp',
-      '--proxy',
+      dummy.mcpUrl,
       '--client',
       'claude,codex',
     ]);
@@ -150,7 +160,7 @@ clients:
     expect(workspace.mcpServers).toEqual({
       'secure-api': {
         type: 'http',
-        url: 'https://api.example.com/mcp',
+        url: dummy.mcpUrl,
         clients: ['claude', 'codex'],
       },
     });
@@ -166,5 +176,48 @@ clients:
     expect(existsSync(join(workspaceDir, '.mcp.json'))).toBe(true);
     expect(existsSync(join(workspaceDir, '.codex', 'config.toml'))).toBe(true);
     expect(existsSync(join(workspaceDir, '.vscode', 'mcp.json'))).toBe(false);
+  });
+
+  test('fails before mutation when a non-interactive HTTP preflight cannot connect', async () => {
+    writeFileSync(
+      join(workspaceDir, '.allagents', 'workspace.yaml'),
+      `repositories: []
+plugins: []
+clients:
+  - claude
+`,
+      'utf-8',
+    );
+
+    const result = await runCli(workspaceDir, homeDir, [
+      'mcp',
+      'add',
+      'unreachable',
+      'http://127.0.0.1:1/mcp',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).success).toBe(false);
+    expect(readWorkspaceConfig(workspaceDir).mcpServers).toBeUndefined();
+  });
+
+  test('returns a structured error for malformed workspace config', async () => {
+    writeFileSync(
+      join(workspaceDir, '.allagents', 'workspace.yaml'),
+      'repositories: [',
+      'utf-8',
+    );
+
+    const result = await runCli(workspaceDir, homeDir, [
+      'mcp',
+      'add',
+      'example',
+      'https://example.com/mcp',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.success).toBe(false);
+    expect(payload.command).toBe('mcp add');
   });
 });

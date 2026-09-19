@@ -92,7 +92,7 @@ describe('addWorkspaceMcpServer', () => {
     expect(cfg.clients).toEqual(['claude']);
   });
 
-  test('persists server-scoped proxy intent without widening global proxy clients', async () => {
+  test('persists dynamic server-scoped proxy intent without widening global proxy clients', async () => {
     await addWorkspaceMcpServer(
       'wtgkb',
       { type: 'http', url: 'https://knowledge.mcp.wtg.zone' },
@@ -101,13 +101,13 @@ describe('addWorkspaceMcpServer', () => {
 
     const result = await setWorkspaceMcpServerProxy('wtgkb', dir);
     expect(result.success).toBe(true);
-    expect(result.proxyClients).toEqual(['claude']);
+    expect(result.proxyClients).toEqual(['*']);
 
     const cfg = readWorkspace(dir);
     expect(cfg.mcpProxy).toEqual({
       clients: [],
       servers: {
-        wtgkb: { proxy: ['claude'] },
+        wtgkb: { proxy: ['*'] },
       },
     });
   });

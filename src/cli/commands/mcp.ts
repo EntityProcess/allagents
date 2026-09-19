@@ -21,9 +21,10 @@ import {
   setWorkspaceMcpServerProxy,
 } from '../../core/mcp-servers.js';
 import {
-  validateOAuthCallbackUrl,
-  runHttpMcpOAuthLogin,
+  type ConnectHttpMcpServerOptions,
+  connectHttpMcpServer,
   runHttpMcpStdioProxy,
+  validateOAuthCallbackUrl,
 } from '../../core/mcp-http-stdio-proxy.js';
 import { syncMcpOnly } from '../../core/mcp-sync.js';
 import {
@@ -35,10 +36,10 @@ import { formatMcpResult } from '../format-sync.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
 import { isJsonMode, jsonOutput } from '../json-output.js';
 import {
-  mcpAuthMeta,
   mcpAddMeta,
   mcpGetMeta,
   mcpListMeta,
+  mcpReauthMeta,
   mcpRemoveMeta,
   mcpUpdateMeta,
 } from '../metadata/mcp.js';
@@ -122,6 +123,69 @@ function buildConfigFromAddFlags(
   const built = buildMcpServerConfigFromFlags(buildOpts);
   if ('error' in built) exitWithError(commandName, built.error);
   return built.config;
+}
+
+async function connectConfiguredHttpServer(
+  commandName: string,
+  serverUrl: string,
+  headers: Record<string, string> | undefined,
+  mode: {
+    resetCredentials: boolean;
+    allowAuthorization: boolean;
+  },
+): Promise<void> {
+  try {
+    const options: ConnectHttpMcpServerOptions = {
+      headers: headers ?? {},
+      resetCredentials: mode.resetCredentials,
+      allowAuthorization: mode.allowAuthorization,
+    };
+    if (mode.allowAuthorization) {
+      options.callbackUrlReader = async ({ redirectUrl, state, signal }) => {
+        const callbackUrl = await password({
+          message: 'Paste the OAuth callback URL if using another browser',
+          signal,
+          validate: (value) => {
+            if (!value) {
+              return 'OAuth callback URL is required';
+            }
+            try {
+              validateOAuthCallbackUrl(value, redirectUrl, state);
+              return undefined;
+            } catch (error) {
+              return error instanceof Error
+                ? error.message
+                : 'Invalid OAuth callback URL';
+            }
+          },
+        });
+        if (isCancel(callbackUrl)) {
+          throw new Error('OAuth authorization cancelled');
+        }
+        return callbackUrl;
+      };
+    }
+    await connectHttpMcpServer(serverUrl, options);
+  } catch (error) {
+    exitWithError(
+      commandName,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+async function getConfiguredMcpServer(
+  commandName: string,
+  name: string,
+): Promise<McpServerConfig | null> {
+  try {
+    return await getWorkspaceMcpServer(name, process.cwd());
+  } catch (error) {
+    exitWithError(
+      commandName,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 /**
@@ -226,11 +290,6 @@ const addArgs = {
     long: 'client',
     description: 'Comma-separated list of client filters',
   }),
-  proxy: flag({
-    long: 'proxy',
-    description:
-      'Rewrite HTTP MCP server sync through the built-in AllAgents HTTP proxy helper for the targeted clients',
-  }),
 };
 
 const mcpAddCmd = command({
@@ -252,7 +311,6 @@ const mcpAddCmd = command({
     env,
     header,
     client,
-    proxy,
     force,
   }) => {
     const config = buildConfigFromAddFlags(
@@ -264,11 +322,21 @@ const mcpAddCmd = command({
       header,
       client,
     );
-    const proxyClients = client ? parseClientFilter(client) : undefined;
-    if (proxy && !('url' in config)) {
+    const existing = await getConfiguredMcpServer('mcp add', name);
+    if (existing && !force) {
       exitWithError(
         'mcp add',
-        '--proxy is only supported for HTTP MCP servers',
+        `MCP server '${name}' already exists in workspace.yaml. Use --force to replace it.`,
+      );
+    }
+
+    if ('url' in config) {
+      const allowAuthorization = !isJsonMode() && Boolean(process.stdin.isTTY);
+      await connectConfiguredHttpServer(
+        'mcp add',
+        config.url,
+        config.headers,
+        { resetCredentials: false, allowAuthorization },
       );
     }
 
@@ -281,16 +349,16 @@ const mcpAddCmd = command({
     if (!addResult.success)
       exitWithError('mcp add', addResult.error ?? 'Unknown error');
 
-    if (proxy) {
+    if ('url' in config) {
       const proxyResult = await setWorkspaceMcpServerProxy(
         name,
         process.cwd(),
-        proxyClients,
+        config.clients,
       );
       if (!proxyResult.success) {
         exitWithError(
           'mcp add',
-          proxyResult.error ?? 'Failed to persist MCP proxy config',
+          proxyResult.error ?? 'Failed to configure AllAgents MCP routing',
         );
       }
     } else if (force) {
@@ -301,7 +369,7 @@ const mcpAddCmd = command({
       if (!clearResult.success) {
         exitWithError(
           'mcp add',
-          clearResult.error ?? 'Failed to clear MCP proxy config',
+          clearResult.error ?? 'Failed to clear AllAgents MCP routing',
         );
       }
     }
@@ -312,7 +380,6 @@ const mcpAddCmd = command({
       {
         name,
         config: addResult.config,
-        proxy,
       },
     );
   },
@@ -341,71 +408,45 @@ const mcpRemoveCmd = command({
 });
 
 // =============================================================================
-// mcp auth
+// mcp reauth
 // =============================================================================
 
-const mcpAuthCmd = command({
-  name: 'auth',
-  description: buildDescription(mcpAuthMeta),
+const mcpReauthCmd = command({
+  name: 'reauth',
+  description: buildDescription(mcpReauthMeta),
   args: {
-    serverUrl: positional({ type: string, displayName: 'serverUrl' }),
-    header: addArgs.header,
+    name: positional({ type: string, displayName: 'name' }),
   },
-  handler: async ({ serverUrl, header }) => {
-    if (isJsonMode()) {
-      exitWithError('mcp auth', 'OAuth login requires an interactive terminal');
-    }
-    if (!process.stdin.isTTY) {
-      exitWithError('mcp auth', 'OAuth login requires an interactive terminal');
-    }
-
-    const headerResult = parseKeyValuePairs(header, '--header');
-    if ('error' in headerResult) {
-      exitWithError('mcp auth', headerResult.error);
-    }
-
-    try {
-      await runHttpMcpOAuthLogin(
-        serverUrl,
-        async ({ authorizationUrl, redirectUrl, state }) => {
-          console.log('Open this URL in any browser:');
-          console.log(authorizationUrl.toString());
-          console.log(
-            `After approval, copy the full ${redirectUrl} URL from the browser address bar.`,
-          );
-
-          const callbackUrl = await password({
-            message: 'Paste the full OAuth callback URL',
-            validate: (value) => {
-              if (!value) {
-                return 'OAuth callback URL is required';
-              }
-              try {
-                validateOAuthCallbackUrl(value, redirectUrl, state);
-                return undefined;
-              } catch (error) {
-                return error instanceof Error
-                  ? error.message
-                  : 'Invalid OAuth callback URL';
-              }
-            },
-          });
-          if (isCancel(callbackUrl)) {
-            throw new Error('OAuth authorization cancelled');
-          }
-          return callbackUrl;
-        },
-        headerResult.values,
-      );
-    } catch (error) {
+  handler: async ({ name }) => {
+    if (isJsonMode() || !process.stdin.isTTY) {
       exitWithError(
-        'mcp auth',
-        error instanceof Error ? error.message : String(error),
+        'mcp reauth',
+        'OAuth login requires an interactive terminal',
       );
     }
 
+    const config = await getConfiguredMcpServer('mcp reauth', name);
+    if (!config) {
+      exitWithError(
+        'mcp reauth',
+        `MCP server '${name}' is not defined in workspace.yaml`,
+      );
+    }
+    if (!('url' in config)) {
+      exitWithError(
+        'mcp reauth',
+        `MCP server '${name}' uses stdio and cannot be reauthenticated`,
+      );
+    }
+
+    await connectConfiguredHttpServer(
+      'mcp reauth',
+      config.url,
+      config.headers,
+      { resetCredentials: true, allowAuthorization: true },
+    );
     console.log(
-      `\u2713 OAuth authorization complete for ${terminalSafe(serverUrl)}`,
+      `\u2713 Reauthenticated MCP server '${terminalSafe(name)}'`,
     );
   },
 });
@@ -578,16 +619,19 @@ const mcpUpdateCmd = command({
 // mcp group
 // =============================================================================
 
-export const mcpCmd = conciseSubcommands({
-  name: 'mcp',
-  description: 'Manage MCP servers for AI clients',
-  cmds: {
-    auth: mcpAuthCmd,
-    add: mcpAddCmd,
-    proxy: mcpProxyCmd,
-    remove: mcpRemoveCmd,
-    list: mcpListCmd,
-    get: mcpGetCmd,
-    update: mcpUpdateCmd,
+export const mcpCmd = conciseSubcommands(
+  {
+    name: 'mcp',
+    description: 'Manage MCP servers for AI clients',
+    cmds: {
+      add: mcpAddCmd,
+      reauth: mcpReauthCmd,
+      proxy: mcpProxyCmd,
+      remove: mcpRemoveCmd,
+      list: mcpListCmd,
+      get: mcpGetCmd,
+      update: mcpUpdateCmd,
+    },
   },
-});
+  ['proxy'],
+);

@@ -37,6 +37,8 @@ interface TokenRecord {
 export interface StartDummyMcpOAuthServerOptions {
   /** Access token lifetime in ms. Short values let tests exercise the refresh path. */
   accessTokenTtlMs?: number;
+  /** Disable authentication when a test only needs a reachable HTTP MCP server. */
+  requireAuth?: boolean;
 }
 
 export interface DummyMcpOAuthServer {
@@ -108,6 +110,7 @@ export async function startDummyMcpOAuthServer(
   options: StartDummyMcpOAuthServerOptions = {},
 ): Promise<DummyMcpOAuthServer> {
   const accessTokenTtlMs = options.accessTokenTtlMs ?? 60_000;
+  const requireAuth = options.requireAuth ?? true;
 
   const registeredClientIds = new Set<string>();
   const authCodes = new Map<string, AuthCodeRecord>();
@@ -334,7 +337,7 @@ export async function startDummyMcpOAuthServer(
     const record = token ? accessTokens.get(token) : undefined;
     const isValid = record !== undefined && record.expiresAt > Date.now();
 
-    if (!isValid) {
+    if (requireAuth && !isValid) {
       res.writeHead(401, {
         'content-type': 'text/plain',
         'www-authenticate': `Bearer resource_metadata="${mcpUrl}/.well-known/oauth-protected-resource"`,

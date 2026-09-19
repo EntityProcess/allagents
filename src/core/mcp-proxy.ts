@@ -12,7 +12,10 @@ export function shouldProxy(
     return true;
   }
   const serverOverride = config.servers?.[serverName];
-  if (serverOverride?.proxy.includes(client)) {
+  if (
+    serverOverride?.proxy.includes('*') ||
+    serverOverride?.proxy.includes(client)
+  ) {
     return true;
   }
   return false;

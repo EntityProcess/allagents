@@ -22,7 +22,7 @@ npx allagents
 ```
 
 :::note
-If you plan to use the [MCP Proxy](/docs/guides/mcp-proxy/) feature, install AllAgents globally (npm or bun) instead. The proxy command is invoked directly by your MCP clients later, not by you through npx, so `allagents` needs to already be resolvable on `PATH` at that point.
+If you plan to use [HTTP MCP servers](/docs/guides/mcp-proxy/), install AllAgents globally (npm or bun) instead. Your MCP clients launch AllAgents' generated bridge directly, so `allagents` must remain resolvable on `PATH`; running setup through `npx` alone is not sufficient.
 :::
 
 ## Using bun

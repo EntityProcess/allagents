@@ -4,25 +4,14 @@ import { join } from 'node:path';
 import { dump } from 'js-yaml';
 import { CONFIG_DIR, WORKSPACE_CONFIG_FILE } from '../constants.js';
 import type {
-  ClientEntry,
   ClientType,
   McpServerConfig,
   WorkspaceConfig,
 } from '../models/workspace-config.js';
-import {
-  McpServerConfigSchema,
-  getClientTypes,
-} from '../models/workspace-config.js';
+import { McpServerConfigSchema } from '../models/workspace-config.js';
 import { ensureWorkspace } from './workspace-modify.js';
 import { parseWorkspaceConfigForEdit } from '../utils/workspace-parser.js';
 
-const PROJECT_MCP_CLIENTS: ReadonlySet<ClientType> = new Set<ClientType>([
-  'claude',
-  'codex',
-  'vscode',
-  'copilot',
-  'universal',
-]);
 
 /**
  * Result of add/remove/update operations on workspace mcpServers.
@@ -37,7 +26,7 @@ export interface McpServerModifyResult {
 export interface McpProxyModifyResult {
   success: boolean;
   error?: string;
-  proxyClients?: ClientType[];
+  proxyClients?: string[];
 }
 
 function removeServerScopedProxyIntent(
@@ -75,11 +64,6 @@ async function writeConfig(
   await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');
 }
 
-function getProjectMcpClients(entries: ClientEntry[]): ClientType[] {
-  return getClientTypes(entries).filter((client): client is ClientType =>
-    PROJECT_MCP_CLIENTS.has(client),
-  );
-}
 
 /**
  * Validate a server config via the McpServerConfigSchema. Returns a
@@ -161,9 +145,7 @@ export async function setWorkspaceMcpServerProxy(
       };
     }
 
-    const resolvedClients = [
-      ...new Set(proxyClients ?? getProjectMcpClients(workspaceConfig.clients)),
-    ];
+    const resolvedClients = [...new Set(proxyClients ?? ['*'])];
     workspaceConfig.mcpProxy ??= { clients: [] };
     workspaceConfig.mcpProxy.clients ??= [];
     workspaceConfig.mcpProxy.servers ??= {};
