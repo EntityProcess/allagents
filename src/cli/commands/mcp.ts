@@ -10,39 +10,31 @@ import {
   string,
 } from 'cmd-ts';
 import { dump } from 'js-yaml';
-import { getHomeDir } from '../../constants.js';
 import {
-  type ConnectHttpMcpServerOptions,
-  connectHttpMcpServer,
   runHttpMcpStdioProxy,
   validateOAuthCallbackUrl,
 } from '../../core/mcp-http-stdio-proxy.js';
 import {
-  addMcpServer,
+  addManagedMcpServer,
+  listManagedMcpServers,
+  type McpAuthorizationInteraction,
+  type McpDestinationSync,
+  reauthenticateManagedMcpServer,
+  removeManagedMcpServer,
+  updateManagedMcpServers,
+} from '../../core/mcp-management.js';
+import {
   buildMcpServerConfigFromFlags,
   getMcpServer,
-  listMcpServers,
   type McpDestination,
   parseKeyValuePairs,
-  removeMcpServer,
   resolveMcpDestination,
 } from '../../core/mcp-servers.js';
-import {
-  type SyncMcpOnlyResult,
-  syncMcpOnly,
-  syncUserMcpOnly,
-} from '../../core/mcp-sync.js';
-import {
-  type ProfileApplyResult,
-  updateInstalledProfiles,
-} from '../../core/profile/index.js';
 import {
   type ClientType,
   ClientTypeSchema,
   type McpServerConfig,
-  ProfileDeclarationSchema,
 } from '../../models/workspace-config.js';
-import { parseUserWorkspaceConfig } from '../../utils/workspace-parser.js';
 import { buildProfileData, formatProfileResult } from '../format-profile.js';
 import { formatMcpResult } from '../format-sync.js';
 import { buildDescription, conciseSubcommands } from '../help.js';
@@ -274,49 +266,41 @@ function buildConfigFromAddFlags(
   return built.config;
 }
 
-async function connectConfiguredHttpServer(
+function createAuthorizationInteraction(): McpAuthorizationInteraction {
+  return {
+    output: console.log,
+    readCallback: async ({ redirectUrl, state, signal }) => {
+      const callbackUrl = await password({
+        message: 'Paste the OAuth callback URL if using another browser',
+        signal,
+        validate: (value) => {
+          if (!value) {
+            return 'OAuth callback URL is required';
+          }
+          try {
+            validateOAuthCallbackUrl(value, redirectUrl, state);
+            return undefined;
+          } catch (error) {
+            return error instanceof Error
+              ? error.message
+              : 'Invalid OAuth callback URL';
+          }
+        },
+      });
+      if (isCancel(callbackUrl)) {
+        throw new Error('OAuth authorization cancelled');
+      }
+      return callbackUrl;
+    },
+  };
+}
+
+async function runManagedMcpOperation<T>(
   commandName: string,
-  serverUrl: string,
-  headers: Record<string, string> | undefined,
-  mode: {
-    resetCredentials: boolean;
-    allowAuthorization: boolean;
-    profile?: string;
-  },
-): Promise<void> {
+  operation: () => Promise<T>,
+): Promise<T> {
   try {
-    const options: ConnectHttpMcpServerOptions = {
-      headers: headers ?? {},
-      resetCredentials: mode.resetCredentials,
-      allowAuthorization: mode.allowAuthorization,
-      ...(mode.profile ? { profile: mode.profile } : {}),
-    };
-    if (mode.allowAuthorization) {
-      options.callbackUrlReader = async ({ redirectUrl, state, signal }) => {
-        const callbackUrl = await password({
-          message: 'Paste the OAuth callback URL if using another browser',
-          signal,
-          validate: (value) => {
-            if (!value) {
-              return 'OAuth callback URL is required';
-            }
-            try {
-              validateOAuthCallbackUrl(value, redirectUrl, state);
-              return undefined;
-            } catch (error) {
-              return error instanceof Error
-                ? error.message
-                : 'Invalid OAuth callback URL';
-            }
-          },
-        });
-        if (isCancel(callbackUrl)) {
-          throw new Error('OAuth authorization cancelled');
-        }
-        return callbackUrl;
-      };
-    }
-    await connectHttpMcpServer(serverUrl, options);
+    return await operation();
   } catch (error) {
     exitWithError(
       commandName,
@@ -340,105 +324,17 @@ async function getConfiguredMcpServer(
   }
 }
 
-async function validateProfileAddCandidate(
-  commandName: string,
-  destination: McpDestination,
-  name: string,
-  config: McpServerConfig,
-): Promise<void> {
-  if (destination.kind !== 'profile') return;
-
-  try {
-    const workspace = await parseUserWorkspaceConfig(destination.configPath);
-    const profile = workspace.profiles?.[destination.name];
-    if (!profile) {
-      exitWithError(
-        commandName,
-        `Profile '${destination.name}' is not declared`,
-      );
-    }
-    const validation = ProfileDeclarationSchema.safeParse({
-      ...profile,
-      mcpServers: {
-        ...profile.mcpServers,
-        [name]: config,
-      },
-    });
-    if (!validation.success) {
-      const issues = validation.error.issues.map(
-        (issue) => `  - ${issue.path.join('.')}: ${issue.message}`,
-      );
-      exitWithError(
-        commandName,
-        `Invalid MCP server config:\n${issues.join('\n')}`,
-      );
-    }
-  } catch (error) {
-    exitWithError(
-      commandName,
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-}
-
-type DestinationSync =
-  | { kind: 'mcp'; result: SyncMcpOnlyResult }
-  | { kind: 'profile'; result: ProfileApplyResult | null };
-
-async function reconcileDestination(
-  commandName: string,
-  destination: McpDestination,
-  offline: boolean,
-): Promise<DestinationSync> {
-  if (destination.kind !== 'profile') {
-    const result =
-      destination.kind === 'project'
-        ? await syncMcpOnly(destination.workspacePath, { offline })
-        : await syncUserMcpOnly({ offline });
-    if (!result.success) {
-      exitWithError(commandName, result.error ?? 'MCP sync failed');
-    }
-    return { kind: 'mcp', result };
-  }
-  let results: readonly ProfileApplyResult[];
-  try {
-    results = await updateInstalledProfiles([destination.name], {
-      offline,
-      homeDir: getHomeDir(),
-      userConfigPath: destination.configPath,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message === `Profile '${destination.name}' is not installed`) {
-      return { kind: 'profile', result: null };
-    }
-    exitWithError(commandName, message);
-  }
-  const result = results[0];
-  if (!result) {
-    exitWithError(
-      commandName,
-      `Profile '${destination.name}' was not reconciled`,
-    );
-  }
-  if (!result.success) {
-    exitWithError(
-      commandName,
-      result.error ?? `Profile '${destination.name}' update failed`,
-    );
-  }
-  return { kind: 'profile', result };
-}
-
 function profileSyncData(
-  sync: Extract<DestinationSync, { kind: 'profile' }>,
+  sync: Extract<McpDestinationSync, { kind: 'profile' }>,
 ): { status: 'not-installed' } | Record<string, unknown> {
   return sync.result
     ? buildProfileData(sync.result)
     : { status: 'not-installed' };
 }
 
-function printMcpSyncResult(result: SyncMcpOnlyResult): void {
+function printMcpSyncResult(
+  result: Extract<McpDestinationSync, { kind: 'mcp' }>['result'],
+): void {
   for (const [scope, scopeResult] of Object.entries(result.mcpResults)) {
     if (!scopeResult) continue;
     const lines = formatMcpResult(scopeResult, scope);
@@ -454,7 +350,7 @@ function printMcpSyncResult(result: SyncMcpOnlyResult): void {
 
 function printProfileSyncResult(
   destination: Extract<McpDestination, { kind: 'profile' }>,
-  sync: Extract<DestinationSync, { kind: 'profile' }>,
+  sync: Extract<McpDestinationSync, { kind: 'profile' }>,
 ): void {
   if (!sync.result) {
     console.log(
@@ -467,16 +363,15 @@ function printProfileSyncResult(
 }
 
 /**
- * Reconcile only the selected destination after a declaration mutation.
+ * Render the completed reconciliation for a declaration mutation.
  */
-async function runPostMutationSync(
+function renderPostMutationSync(
   commandName: string,
   destination: McpDestination,
+  sync: McpDestinationSync,
   successMessage: string,
   jsonExtra: Record<string, unknown>,
-): Promise<void> {
-  const sync = await reconcileDestination(commandName, destination, true);
-
+): void {
   if (isJsonMode()) {
     jsonOutput({
       success: true,
@@ -603,48 +498,28 @@ const mcpAddCmd = command({
       header,
       client,
     );
-    const existing = await getConfiguredMcpServer('mcp add', destination, name);
-    if (existing && !force) {
-      exitWithError(
-        'mcp add',
-        `MCP server '${name}' already exists in ${destinationDisplay(destination)}. Use --force to replace it.`,
-      );
-    }
-    await validateProfileAddCandidate('mcp add', destination, name, config);
+    const authorization =
+      !isJsonMode() && process.stdin.isTTY
+        ? createAuthorizationInteraction()
+        : undefined;
+    const result = await runManagedMcpOperation('mcp add', () =>
+      addManagedMcpServer({
+        destination,
+        name,
+        config,
+        force,
+        ...(authorization ? { authorization } : {}),
+      }),
+    );
 
-    if ('url' in config) {
-      const allowAuthorization = !isJsonMode() && Boolean(process.stdin.isTTY);
-      await connectConfiguredHttpServer('mcp add', config.url, config.headers, {
-        resetCredentials: false,
-        allowAuthorization,
-        ...(destination.kind === 'profile'
-          ? { profile: destination.name }
-          : {}),
-      });
-    }
-
-    const addResult = await addMcpServer(destination, name, config, {
-      force,
-      proxy:
-        'url' in config
-          ? {
-              ...(config.clients === undefined
-                ? {}
-                : { clients: config.clients }),
-            }
-          : false,
-    });
-    if (!addResult.success) {
-      exitWithError('mcp add', addResult.error ?? 'Unknown error');
-    }
-
-    await runPostMutationSync(
+    renderPostMutationSync(
       'mcp add',
       destination,
+      result.sync,
       `\u2713 Added MCP server '${terminalSafe(name)}' to ${destinationDisplay(destination)}`,
       {
         name,
-        config: redactMcpServerConfig(addResult.config ?? config),
+        config: redactMcpServerConfig(result.config),
       },
     );
   },
@@ -666,13 +541,13 @@ const mcpRemoveCmd = command({
       scope,
       profile,
     });
-    const removeResult = await removeMcpServer(destination, name);
-    if (!removeResult.success) {
-      exitWithError('mcp remove', removeResult.error ?? 'Unknown error');
-    }
-    await runPostMutationSync(
+    const sync = await runManagedMcpOperation('mcp remove', () =>
+      removeManagedMcpServer(destination, name),
+    );
+    renderPostMutationSync(
       'mcp remove',
       destination,
+      sync,
       `\u2713 Removed MCP server '${terminalSafe(name)}' from ${destinationDisplay(destination)}`,
       { name },
     );
@@ -695,23 +570,6 @@ const mcpReauthCmd = command({
       scope,
       profile,
     });
-    const config = await getConfiguredMcpServer(
-      'mcp reauth',
-      destination,
-      name,
-    );
-    if (!config) {
-      exitWithError(
-        'mcp reauth',
-        `MCP server '${name}' is not defined in ${destinationDisplay(destination)}`,
-      );
-    }
-    if (!('url' in config)) {
-      exitWithError(
-        'mcp reauth',
-        `MCP server '${name}' uses stdio and cannot be reauthenticated`,
-      );
-    }
     if (isJsonMode() || !process.stdin.isTTY) {
       exitWithError(
         'mcp reauth',
@@ -719,17 +577,12 @@ const mcpReauthCmd = command({
       );
     }
 
-    await connectConfiguredHttpServer(
-      'mcp reauth',
-      config.url,
-      config.headers,
-      {
-        resetCredentials: true,
-        allowAuthorization: true,
-        ...(destination.kind === 'profile'
-          ? { profile: destination.name }
-          : {}),
-      },
+    await runManagedMcpOperation('mcp reauth', () =>
+      reauthenticateManagedMcpServer(
+        destination,
+        name,
+        createAuthorizationInteraction(),
+      ),
     );
     console.log(
       `\u2713 Reauthenticated MCP server '${terminalSafe(name)}' in ${destinationDisplay(destination)}`,
@@ -812,12 +665,9 @@ const mcpListCmd = command({
       scope,
       profile,
     });
-    let servers: Record<string, McpServerConfig>;
-    try {
-      servers = await listMcpServers(destination);
-    } catch (e) {
-      exitWithError('mcp list', e instanceof Error ? e.message : String(e));
-    }
+    const servers = await runManagedMcpOperation('mcp list', () =>
+      listManagedMcpServers(destination),
+    );
     const names = Object.keys(servers);
     const redactedServers = Object.fromEntries(
       Object.entries(servers).map(([name, config]) => [
@@ -925,7 +775,9 @@ const mcpUpdateCmd = command({
       scope,
       profile,
     });
-    const sync = await reconcileDestination('mcp update', destination, offline);
+    const sync = await runManagedMcpOperation('mcp update', () =>
+      updateManagedMcpServers(destination, { offline }),
+    );
 
     if (isJsonMode()) {
       jsonOutput({

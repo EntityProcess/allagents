@@ -170,6 +170,31 @@ describe('mcp proxy OAuth e2e', () => {
     expect(dummy.authorizeCallCount).toBe(1);
   }, 15000);
 
+  test('routes authorization guidance through the configured output', async () => {
+    dummy = await startDummyMcpOAuthServer();
+    const output: string[] = [];
+
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      authorizationOutput: (message) => output.push(message),
+      callbackUrlReader: async ({ authorizationUrl }) => {
+        const response = await fetch(authorizationUrl, {
+          redirect: 'manual',
+        });
+        const location = response.headers.get('location');
+        expect(location).toBeTruthy();
+        return new URL(location!, authorizationUrl).toString();
+      },
+    });
+
+    expect(output[0]).toBe('Opening browser for authorization...');
+    expect(output[1]).toStartWith(
+      'If the browser does not open, visit: http',
+    );
+    expect(output[2]).toBe(
+      'Using a remote browser? Paste its callback URL in this terminal.',
+    );
+  }, 15000);
+
   test('forces a fresh OAuth flow when credentials are reset', async () => {
     dummy = await startDummyMcpOAuthServer();
     const authorize = async ({ authorizationUrl }: { authorizationUrl: URL }) => {
@@ -189,6 +214,41 @@ describe('mcp proxy OAuth e2e', () => {
       resetCredentials: true,
     });
     expect(dummy.authorizeCallCount).toBe(2);
+  }, 15000);
+
+  test('restores previous credentials when a reset authorization fails', async () => {
+    dummy = await startDummyMcpOAuthServer();
+    const authorize = async ({ authorizationUrl }: { authorizationUrl: URL }) => {
+      const response = await fetch(authorizationUrl, { redirect: 'manual' });
+      const location = response.headers.get('location');
+      expect(location).toBeTruthy();
+      return new URL(location!, authorizationUrl).toString();
+    };
+
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      authorizationOutput: () => {},
+      callbackUrlReader: authorize,
+    });
+    const tokensPath = join(getMcpOAuthCacheDir(dummy.mcpUrl), 'tokens.json');
+    const previousTokens = readFileSync(tokensPath, 'utf8');
+
+    await expect(
+      connectHttpMcpServer(dummy.mcpUrl, {
+        authorizationOutput: () => {},
+        callbackUrlReader: async () => {
+          throw new Error('Authorization cancelled');
+        },
+        resetCredentials: true,
+      }),
+    ).rejects.toThrow('Authorization cancelled');
+
+    expect(readFileSync(tokensPath, 'utf8')).toBe(previousTokens);
+    const authorizationCount = dummy.authorizeCallCount;
+    await connectHttpMcpServer(dummy.mcpUrl, {
+      allowAuthorization: false,
+      authorizationOutput: () => {},
+    });
+    expect(dummy.authorizeCallCount).toBe(authorizationCount);
   }, 15000);
 
   test('isolates OAuth reuse and reset between profiles and ordinary scope', async () => {

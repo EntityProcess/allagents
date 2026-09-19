@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'bun:test';
-import { buildMenuOptions, type MenuAction } from '../wizard.js';
+import { describe, expect, it } from 'bun:test';
 import type { TuiContext } from '../context.js';
+import { buildMenuOptions, type MenuAction } from '../wizard.js';
 
 /** Helper to create a TuiContext with sensible defaults. */
 function makeContext(overrides: Partial<TuiContext> = {}): TuiContext {
@@ -30,12 +30,13 @@ describe('buildMenuOptions', () => {
     ];
 
     for (const ctx of states) {
-      it(`includes workspace, plugins, skills, clients, marketplace (hasWorkspace=${ctx.hasWorkspace}, needsSync=${ctx.needsSync})`, () => {
+      it(`includes workspace, plugins, skills, clients, mcp, marketplace (hasWorkspace=${ctx.hasWorkspace}, needsSync=${ctx.needsSync})`, () => {
         const values = actionValues(ctx);
         expect(values).toContain('workspace');
         expect(values).toContain('plugins');
         expect(values).toContain('skills');
         expect(values).toContain('clients');
+        expect(values).toContain('mcp');
         expect(values).toContain('marketplace');
       });
     }

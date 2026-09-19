@@ -465,6 +465,13 @@ resolves to user scope and explicit `--scope project` is rejected. Use
 `--profile <name>` selects `profiles.<name>` in that same file.
 `--scope` and `--profile` are mutually exclusive.
 
+Run `allagents` without arguments and choose **MCP Servers** to manage the same
+project, user, and named-profile destinations interactively. The TUI supports
+listing and inspecting declarations, adding HTTP or stdio servers,
+reauthenticating HTTP servers, reconciling generated client configuration, and
+removing declarations. Credential values remain hidden from summaries and
+selection screens.
+
 Codex and Copilot materialize the selected destination at these exact paths:
 
 | Destination | Codex | Copilot CLI |

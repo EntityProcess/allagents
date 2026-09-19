@@ -1,7 +1,14 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import {
   createServer,
   type IncomingMessage,
@@ -322,6 +329,7 @@ function tryOpenBrowser(url: string): Promise<void> {
 
 interface OAuthProviderOptions {
   callbackUrlReader?: OAuthCallbackUrlReader;
+  authorizationOutput?: (message: string) => void;
   allowAuthorization?: boolean;
   profile?: string;
 }
@@ -339,6 +347,7 @@ class FileOAuthClientProvider implements OAuthClientProvider {
   private pendingAuth: Promise<string> | undefined = undefined;
   private authorizationUnavailable = false;
   private readonly callbackUrlReader: OAuthCallbackUrlReader | undefined;
+  private readonly authorizationOutput: (message: string) => void;
   private readonly allowAuthorization: boolean;
   private readonly stateValue = randomUUID();
 
@@ -354,6 +363,7 @@ class FileOAuthClientProvider implements OAuthClientProvider {
     this.discoveryPath = join(cacheDir, 'discovery.json');
     this.redirectUriValue = `http://127.0.0.1:${port}/callback`;
     this.callbackUrlReader = options.callbackUrlReader;
+    this.authorizationOutput = options.authorizationOutput ?? console.error;
     this.allowAuthorization = options.allowAuthorization ?? true;
   }
 
@@ -555,9 +565,11 @@ class FileOAuthClientProvider implements OAuthClientProvider {
     }, AUTH_TIMEOUT_MS);
     server.on('error', (error) => settle('reject', error));
     server.listen(this.port, '127.0.0.1', () => {
-      console.error('Opening browser for authorization...');
-      console.error(`${AUTH_URL_LOG_PREFIX}${authorizationUrl.toString()}`);
-      console.error(
+      this.authorizationOutput('Opening browser for authorization...');
+      this.authorizationOutput(
+        `${AUTH_URL_LOG_PREFIX}${authorizationUrl.toString()}`,
+      );
+      this.authorizationOutput(
         this.callbackUrlReader
           ? 'Using a remote browser? Paste its callback URL in this terminal.'
           : 'Using a remote browser? Run `allagents mcp reauth <name>` in this workspace, then reconnect.',
@@ -565,7 +577,7 @@ class FileOAuthClientProvider implements OAuthClientProvider {
       // Test-only escape hatch: e2e tests fetch the URL themselves against a local
       // dummy IdP, and skipping the real OS browser-open avoids ever launching one.
       if (process.env.ALLAGENTS_MCP_OAUTH_NO_BROWSER === '1') {
-        console.error(
+        this.authorizationOutput(
           'Skipping automatic browser open (ALLAGENTS_MCP_OAUTH_NO_BROWSER=1).',
         );
       } else {
@@ -675,6 +687,7 @@ async function connectRemoteTransport(
 export interface ConnectHttpMcpServerOptions {
   headers?: Record<string, string>;
   callbackUrlReader?: OAuthCallbackUrlReader;
+  authorizationOutput?: (message: string) => void;
   resetCredentials?: boolean;
   allowAuthorization?: boolean;
   profile?: string;
@@ -684,20 +697,52 @@ export async function connectHttpMcpServer(
   serverUrl: string,
   options: ConnectHttpMcpServerOptions = {},
 ): Promise<void> {
-  if (options.resetCredentials) {
-    await rm(getMcpOAuthCacheDir(serverUrl, options.profile), {
-      recursive: true,
-      force: true,
-    });
+  const cacheDir = getMcpOAuthCacheDir(serverUrl, options.profile);
+  const backupDir = options.resetCredentials
+    ? `${cacheDir}.reauth-backup-${randomUUID()}`
+    : undefined;
+  let hasBackup = false;
+
+  if (backupDir) {
+    try {
+      await rename(cacheDir, backupDir);
+      hasBackup = true;
+    } catch (error) {
+      if (
+        !(error instanceof Error && 'code' in error && error.code === 'ENOENT')
+      ) {
+        throw error;
+      }
+    }
   }
-  const { client, transport } = await connectRemoteTransport(
-    serverUrl,
-    options,
-  );
+
   try {
-    await transport.terminateSession();
-  } finally {
-    await client.close();
+    const { client, transport } = await connectRemoteTransport(
+      serverUrl,
+      options,
+    );
+    try {
+      await transport.terminateSession();
+    } finally {
+      await client.close();
+    }
+  } catch (error) {
+    if (backupDir) {
+      try {
+        await rm(cacheDir, { recursive: true, force: true });
+        if (hasBackup) await rename(backupDir, cacheDir);
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'MCP reauthentication failed and the previous credentials could not be restored',
+        );
+      }
+    }
+    throw error;
+  }
+
+  if (hasBackup && backupDir) {
+    await rm(backupDir, { recursive: true, force: true });
   }
 }
 

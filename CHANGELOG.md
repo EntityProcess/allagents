@@ -31,6 +31,10 @@
 - Project-scoped Copilot MCP servers are now written to `.github/mcp.json`,
   which Copilot CLI discovers, instead of the unsupported
   `.copilot/mcp-config.json` project path.
+- Interactive OAuth guidance for `mcp add` and `mcp reauth` now uses normal
+  terminal output instead of the error channel. Callback URLs are entered
+  through an abortable masked prompt, and failed reauthentication restores the
+  previous working credentials.
 
 ### Added
 
@@ -42,6 +46,9 @@
 - Generated HTTP MCP bridges now invoke the current pinned AllAgents version
   through cached `npx`, so managed MCP connections do not require a global
   AllAgents installation.
+- Full MCP server management in the interactive TUI, including destination
+  selection, add, reauthenticate, update, and remove flows for project, user,
+  and named-profile declarations.
 
 - Pi and OMP as file-sync clients at project and user scope, including native
   runtime skill paths and agent instructions.
