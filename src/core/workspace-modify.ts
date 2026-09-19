@@ -61,7 +61,10 @@ export interface PluginInstallTarget {
 }
 
 export interface TargetedPluginWriteDependencies {
-  beforeRename?(temporaryPath: string, configPath: string): void | Promise<void>;
+  beforeRename?(
+    temporaryPath: string,
+    configPath: string,
+  ): void | Promise<void>;
 }
 
 export async function writeWorkspaceConfigAtomically(
@@ -129,13 +132,14 @@ export function mergeTargetedPluginEntry(
   };
 
   if (
-    prospectiveObject?.clients === undefined ||
-    sameClients(prospectiveObject.clients, getClientTypes([...scopeClients]))
+    prospectiveObject?.clients !== undefined &&
+    !sameClients(prospectiveObject.clients, getClientTypes([...scopeClients]))
   ) {
-    delete merged.clients;
+    return merged;
   }
 
-  return Object.keys(merged).length === 1 ? normalizedSource : merged;
+  const { clients: _clients, ...inherited } = merged;
+  return Object.keys(inherited).length === 1 ? normalizedSource : inherited;
 }
 
 /**
@@ -254,7 +258,9 @@ async function addValidatedPlugin(
   }
 
   if (isPluginSpec(plugin)) {
-    const resolved = await resolvePluginSpecWithAutoRegister(plugin, { workspacePath });
+    const resolved = await resolvePluginSpecWithAutoRegister(plugin, {
+      workspacePath,
+    });
     if (!resolved.success) {
       return {
         success: false,
@@ -586,7 +592,8 @@ export function extractPluginNames(pluginSource: string): string[] {
       if (ownerRepo !== parsed.repo) names.push(ownerRepo);
       if (parsed.subpath) {
         const subpathName = parsed.subpath.split('/').filter(Boolean).pop();
-        if (subpathName && !names.includes(subpathName)) names.push(subpathName);
+        if (subpathName && !names.includes(subpathName))
+          names.push(subpathName);
       }
       if (!names.includes(parsed.repo)) names.push(parsed.repo);
       if (!names.includes(ownerRepo)) names.push(ownerRepo);
@@ -623,7 +630,8 @@ export function ensureObjectPluginEntry(
   index: number,
 ): Exclude<PluginEntry, string> {
   const entry = config.plugins[index];
-  if (entry === undefined) throw new Error(`Plugin entry at index ${index} not found`);
+  if (entry === undefined)
+    throw new Error(`Plugin entry at index ${index} not found`);
   if (typeof entry === 'string') {
     const objectEntry: Exclude<PluginEntry, string> = { source: entry };
     config.plugins[index] = objectEntry;
@@ -705,7 +713,9 @@ export function canonicalizeGitHubPluginSource(
     {
       owner: current.owner,
       repo: current.repo,
-      ...(current.branch || next.branch ? { branch: current.branch ?? next.branch } : {}),
+      ...(current.branch || next.branch
+        ? { branch: current.branch ?? next.branch }
+        : {}),
       ...(sharedParts.length > 0 ? { subpath: sharedParts.join('/') } : {}),
     },
     currentSource,
@@ -722,7 +732,9 @@ async function findPluginEntryByGitHubIdentity(
   for (let i = 0; i < config.plugins.length; i++) {
     const entry = config.plugins[i];
     if (!entry) continue;
-    const existingIdentity = await resolveGitHubIdentity(getPluginSource(entry));
+    const existingIdentity = await resolveGitHubIdentity(
+      getPluginSource(entry),
+    );
     if (existingIdentity === identity) return i;
   }
 
@@ -735,7 +747,9 @@ export async function upsertGitHubPluginSourceAllowlistInConfig(
   skillNames: string[],
 ): Promise<ModifyResult> {
   const normalizedSkills = uniqueSkillNames(skillNames);
-  const exactIndex = config.plugins.findIndex((entry) => getPluginSource(entry) === source);
+  const exactIndex = config.plugins.findIndex(
+    (entry) => getPluginSource(entry) === source,
+  );
 
   if (exactIndex !== -1) {
     const entry = ensureObjectPluginEntry(config, exactIndex);
@@ -918,7 +932,10 @@ export async function removeDisabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -1091,7 +1108,10 @@ export async function removeEnabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -1165,7 +1185,8 @@ export async function setPluginSkillsMode(
       entry.skills = [...skillNames];
     } else {
       // For blocklist, clear the field if no exclusions (= all enabled)
-      entry.skills = skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
+      entry.skills =
+        skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
     }
 
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');

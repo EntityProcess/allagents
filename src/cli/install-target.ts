@@ -69,7 +69,9 @@ export interface InstallConfirmationPromptRequest {
 /** Presentation adapters implement only the interaction needed by the resolver. */
 export interface InstallTargetPromptPort {
   selectScope(request: InstallScopePromptRequest): Promise<InstallScope | null>;
-  selectClients(request: InstallClientsPromptRequest): Promise<readonly string[] | null>;
+  selectClients(
+    request: InstallClientsPromptRequest,
+  ): Promise<readonly string[] | null>;
   showSummary(summary: InstallTargetSummary): void | Promise<void>;
   confirm(request: InstallConfirmationPromptRequest): Promise<boolean | null>;
 }
@@ -79,14 +81,18 @@ export interface ResolveInstallTargetOptions {
   readonly declaration: PluginEntry;
   readonly action: string;
   readonly payload: string;
-  readonly scopeStates: Readonly<Record<InstallScope, InstallScopeState | null>>;
+  readonly scopeStates: Readonly<
+    Record<InstallScope, InstallScopeState | null>
+  >;
   readonly environment: InstallTargetEnvironment;
   readonly prompts?: InstallTargetPromptPort;
   readonly scope?: string;
   readonly clients?: string | readonly string[];
   readonly yes?: boolean;
   readonly defaultScope?: InstallScope;
-  readonly defaultClients?: Partial<Readonly<Record<InstallScope, readonly ClientEntry[]>>>;
+  readonly defaultClients?: Partial<
+    Readonly<Record<InstallScope, readonly ClientEntry[]>>
+  >;
 }
 
 export interface ResolvedInstallTarget {
@@ -105,10 +111,11 @@ export class InstallTargetValidationError extends Error {
   }
 }
 
-const DEFAULT_CLIENTS: Readonly<Record<InstallScope, readonly ClientEntry[]>> = {
-  project: ['universal'],
-  user: ['copilot', 'codex', 'cursor', 'opencode', 'gemini', 'vscode'],
-};
+const DEFAULT_CLIENTS: Readonly<Record<InstallScope, readonly ClientEntry[]>> =
+  {
+    project: ['universal'],
+    user: ['copilot', 'codex', 'cursor', 'opencode', 'gemini', 'vscode'],
+  };
 
 function isInteractive(environment: InstallTargetEnvironment): boolean {
   return (
@@ -135,7 +142,9 @@ export function canonicalizeInstallClients(
   source = 'Clients',
 ): ClientType[] {
   if (clients.length === 0) {
-    throw new InstallTargetValidationError(`${source} must include at least one client.`);
+    throw new InstallTargetValidationError(
+      `${source} must include at least one client.`,
+    );
   }
 
   const selected = new Set<ClientType>();
@@ -159,8 +168,14 @@ function canonicalizeEntries(
   return canonicalizeInstallClients(getClientTypes([...entries]), source);
 }
 
-function sameClients(left: readonly ClientType[], right: readonly ClientType[]): boolean {
-  return left.length === right.length && left.every((client, index) => client === right[index]);
+function sameClients(
+  left: readonly ClientType[],
+  right: readonly ClientType[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((client, index) => client === right[index])
+  );
 }
 
 function declarationForDisposition(
@@ -173,7 +188,8 @@ function declarationForDisposition(
       ? { source: declaration, clients: [...clients] }
       : { ...declaration, clients: [...clients] };
   }
-  if (typeof declaration === 'string' || declaration.clients === undefined) return declaration;
+  if (typeof declaration === 'string' || declaration.clients === undefined)
+    return declaration;
   const { clients: _clients, ...inherited } = declaration;
   return inherited;
 }
@@ -197,10 +213,18 @@ export async function resolveInstallTarget(
   options: ResolveInstallTargetOptions,
 ): Promise<ResolvedInstallTarget | null> {
   const interactive = isInteractive(options.environment);
+  const prompts = interactive ? options.prompts : undefined;
+  if (interactive && !prompts) {
+    throw new InstallTargetValidationError(
+      'Interactive target resolution requires prompt ports.',
+    );
+  }
   const aliasesUserConfig = isUserConfigPath(options.workspacePath);
   const projectPath = scopeConfigPath('project', options.workspacePath);
   const userPath = scopeConfigPath('user', options.workspacePath);
-  const validScopes: InstallScope[] = aliasesUserConfig ? ['user'] : ['project', 'user'];
+  const validScopes: InstallScope[] = aliasesUserConfig
+    ? ['user']
+    : ['project', 'user'];
 
   let scope: InstallScope;
   if (options.scope !== undefined) {
@@ -210,26 +234,29 @@ export async function resolveInstallTarget(
         `Project scope is unavailable because ${projectPath} is the user config. Use user scope instead.`,
       );
     }
-  } else if (interactive) {
-    if (!options.prompts) {
-      throw new InstallTargetValidationError('Interactive target resolution requires prompt ports.');
-    }
+  } else if (prompts) {
     const preferredScope = options.defaultScope ?? 'project';
-    const selected = await options.prompts.selectScope({
+    const selected = await prompts.selectScope({
       options: validScopes.map((candidate) => ({
         scope: candidate,
         configPath: candidate === 'project' ? projectPath : userPath,
-        description: candidate === 'project' ? 'this workspace' : 'all workspaces',
+        description:
+          candidate === 'project' ? 'this workspace' : 'all workspaces',
       })),
-      initialValue: validScopes.includes(preferredScope) ? preferredScope : 'user',
+      initialValue: validScopes.includes(preferredScope)
+        ? preferredScope
+        : 'user',
       ...(aliasesUserConfig && {
-        aliasNotice: 'Project and user scope resolve to the same config; only user scope is available.',
+        aliasNotice:
+          'Project and user scope resolve to the same config; only user scope is available.',
       }),
     });
     if (selected === null) return null;
     scope = validateScope(selected);
     if (!validScopes.includes(scope)) {
-      throw new InstallTargetValidationError(`Scope '${scope}' is not available here.`);
+      throw new InstallTargetValidationError(
+        `Scope '${scope}' is not available here.`,
+      );
     }
   } else {
     scope = aliasesUserConfig ? 'user' : (options.defaultScope ?? 'project');
@@ -252,12 +279,9 @@ export async function resolveInstallTarget(
       initialEntries.length === 0
         ? []
         : canonicalizeEntries(initialEntries, 'Initial clients');
-    if (interactive) {
-      if (!options.prompts) {
-        throw new InstallTargetValidationError('Interactive target resolution requires prompt ports.');
-      }
+    if (prompts) {
       while (true) {
-        const selected = await options.prompts.selectClients({
+        const selected = await prompts.selectClients({
           scope,
           configPath,
           initialValues,
@@ -297,11 +321,13 @@ export async function resolveInstallTarget(
   ).plans[0];
   const fileClients = new Set(plan?.clients ?? []);
   const nativeClients = new Set(plan?.nativeClients ?? []);
-  const effectiveMethods = clients.flatMap((client): InstallTargetEffectiveMethod[] => {
-    if (fileClients.has(client)) return [{ client, method: 'file' }];
-    if (nativeClients.has(client)) return [{ client, method: 'native' }];
-    return [];
-  });
+  const effectiveMethods = clients.flatMap(
+    (client): InstallTargetEffectiveMethod[] => {
+      if (fileClients.has(client)) return [{ client, method: 'file' }];
+      if (nativeClients.has(client)) return [{ client, method: 'native' }];
+      return [];
+    },
+  );
   const summary: InstallTargetSummary = {
     action: options.action,
     payload: options.payload,
@@ -312,10 +338,10 @@ export async function resolveInstallTarget(
     disposition,
   };
 
-  if (interactive) {
-    await options.prompts!.showSummary(summary);
+  if (prompts) {
+    await prompts.showSummary(summary);
     if (!options.yes) {
-      const confirmed = await options.prompts!.confirm({ summary, initialValue: false });
+      const confirmed = await prompts.confirm({ summary, initialValue: false });
       if (confirmed !== true) return null;
     }
   }

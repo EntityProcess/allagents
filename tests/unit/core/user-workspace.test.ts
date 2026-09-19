@@ -344,6 +344,7 @@ describe('user-workspace', () => {
         });
 
         expect(result.success).toBe(true);
+        expect(result.replaced).toBe(true);
         const config = load(
           await readFile(configPath, 'utf-8'),
         ) as WorkspaceConfig;

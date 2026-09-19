@@ -12,7 +12,9 @@ const dispositionLabels = {
   override: 'plugin override',
 } as const;
 
-export function getInstallTargetEnvironment(json: boolean): InstallTargetEnvironment {
+export function getInstallTargetEnvironment(
+  json: boolean,
+): InstallTargetEnvironment {
   return {
     json,
     ci: p.isCI(),
@@ -32,12 +34,14 @@ export function isInteractiveInstallEnvironment(
   );
 }
 
-export function formatInstallTargetSummary(summary: InstallTargetSummary): string {
+export function formatInstallTargetSummary(
+  summary: InstallTargetSummary,
+): string {
   const methods = new Map(
     summary.effectiveMethods.map(({ client, method }) => [client, method]),
   );
   const clients = summary.clients
-    .map((client) => `${client} (${methods.get(client) ?? 'file'})`)
+    .map((client) => `${client} (${methods.get(client) ?? 'unsupported'})`)
     .join(', ');
   const scope = summary.scope === 'project' ? 'Project' : 'User';
 

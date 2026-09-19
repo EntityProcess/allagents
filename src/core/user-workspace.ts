@@ -87,7 +87,9 @@ export function isUserConfigPath(workspacePath: string): boolean {
  * Ensure user-level workspace.yaml exists with default config.
  * Creates it if missing, does not overwrite existing.
  */
-export async function ensureUserWorkspace(clients?: ClientEntry[]): Promise<void> {
+export async function ensureUserWorkspace(
+  clients?: ClientEntry[],
+): Promise<void> {
   const configPath = getUserWorkspaceConfigPath();
   if (existsSync(configPath)) return;
 
@@ -155,11 +157,8 @@ async function addValidatedUserPlugin(
   dependencies?: TargetedPluginWriteDependencies,
 ): Promise<ModifyResult> {
   const plugin = getPluginSource(declaration);
-  await ensureUserWorkspace(
-    initialClients ? [...initialClients] : undefined,
-  );
+  await ensureUserWorkspace(initialClients ? [...initialClients] : undefined);
   const configPath = getUserWorkspaceConfigPath();
-
 
   if (sourceValidation === 'declaration') {
     return addPluginToUserConfig(
@@ -381,7 +380,8 @@ async function addPluginToUserConfig(
         const existing = config.plugins[i];
         if (!existing) continue;
         if (
-          (await resolveGitHubIdentity(getPluginSource(existing))) === newIdentity
+          (await resolveGitHubIdentity(getPluginSource(existing))) ===
+          newIdentity
         ) {
           semanticIndex = i;
           break;
@@ -399,16 +399,19 @@ async function addPluginToUserConfig(
       };
     }
 
+    let targetedReplaceIndex = -1;
     if (targetedDependencies !== undefined) {
-      const replaceIndex = exactIndex !== -1 ? exactIndex : semanticIndex;
+      targetedReplaceIndex = exactIndex !== -1 ? exactIndex : semanticIndex;
       const nextEntry = mergeTargetedPluginEntry(
-        replaceIndex === -1 ? undefined : config.plugins[replaceIndex],
+        targetedReplaceIndex === -1
+          ? undefined
+          : config.plugins[targetedReplaceIndex],
         plugin,
         source,
         config.clients,
       );
-      if (replaceIndex === -1) config.plugins.push(nextEntry);
-      else config.plugins[replaceIndex] = nextEntry;
+      if (targetedReplaceIndex === -1) config.plugins.push(nextEntry);
+      else config.plugins[targetedReplaceIndex] = nextEntry;
       await writeWorkspaceConfigAtomically(
         configPath,
         config,
@@ -432,7 +435,12 @@ async function addPluginToUserConfig(
       success: true,
       ...(autoRegistered && { autoRegistered }),
       normalizedPlugin: source,
-      ...(force && { replaced: exactIndex !== -1 }),
+      ...(force && {
+        replaced:
+          targetedDependencies !== undefined
+            ? targetedReplaceIndex !== -1
+            : exactIndex !== -1,
+      }),
     };
   } catch (error) {
     return {
@@ -614,7 +622,10 @@ export async function removeUserDisabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in user workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -766,7 +777,10 @@ export async function removeUserEnabledSkill(
 
     const entry = config.plugins[index];
     if (!entry) {
-      return { success: false, error: `Plugin '${pluginName}' not found in user workspace config` };
+      return {
+        success: false,
+        error: `Plugin '${pluginName}' not found in user workspace config`,
+      };
     }
     if (
       typeof entry === 'string' ||
@@ -833,7 +847,8 @@ export async function setUserPluginSkillsMode(
       entry.skills = [...skillNames];
     } else {
       // For blocklist, clear the field if no exclusions (= all enabled)
-      entry.skills = skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
+      entry.skills =
+        skillNames.length > 0 ? { exclude: [...skillNames] } : undefined;
     }
 
     await writeFile(configPath, dump(config, { lineWidth: -1 }), 'utf-8');

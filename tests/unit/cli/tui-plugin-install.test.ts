@@ -37,6 +37,9 @@ mock.module('@clack/prompts', () => ({
 const { installSelectedPlugin } = await import(
   '../../../src/cli/tui/actions/plugins.js'
 );
+const { formatInstallTargetSummary } = await import(
+  '../../../src/cli/tui/install-target-prompts.js'
+);
 
 const originalHome = process.env.HOME;
 const originalTestHome = process.env.ALLAGENTS_TEST_HOME;
@@ -124,6 +127,20 @@ describe('installSelectedPlugin', () => {
       message: 'Install with this target?',
       initialValue: false,
     });
+  });
+
+  test('does not label a client as file-backed when planning found no supported method', () => {
+    expect(
+      formatInstallTargetSummary({
+        action: 'Install plugin',
+        payload: 'native-package',
+        scope: 'project',
+        configPath: '/workspace/.allagents/workspace.yaml',
+        clients: ['codex'],
+        effectiveMethods: [],
+        disposition: 'override',
+      }),
+    ).toContain('Clients: codex (unsupported)');
   });
 
   test('returns cancelled and leaves config byte-for-byte unchanged when confirmation is declined', async () => {

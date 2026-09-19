@@ -11,7 +11,11 @@ import {
   restPositionals,
   string,
 } from 'cmd-ts';
-import { CONFIG_DIR, WORKSPACE_CONFIG_FILE, getHomeDir } from '../../constants.js';
+import {
+  CONFIG_DIR,
+  WORKSPACE_CONFIG_FILE,
+  getHomeDir,
+} from '../../constants.js';
 import {
   addMarketplace,
   findMarketplaceRegistration,
@@ -38,7 +42,11 @@ import {
   getAllSkillsFromPlugins,
 } from '../../core/skills.js';
 import { upsertSyncStateSource } from '../../core/sync-state.js';
-import { syncUserWorkspace, syncWorkspace } from '../../core/sync.js';
+import {
+  mergeSyncResults,
+  syncUserWorkspace,
+  syncWorkspace,
+} from '../../core/sync.js';
 import type { SyncResult } from '../../core/sync.js';
 import {
   addUserEnabledSkill,
@@ -122,6 +130,7 @@ type SkillInstallTargetContext = {
   options: SkillInstallTargetOptions;
   payload: string;
   resolve(declaration: PluginEntry): Promise<ResolvedInstallTarget | null>;
+  resolvedTarget(): Promise<ResolvedInstallTarget | null> | undefined;
 };
 
 function createSkillInstallTargetContext(
@@ -163,9 +172,12 @@ function createSkillInstallTargetContext(
           ...(options.scope !== undefined && { scope: options.scope }),
           ...(options.clients !== undefined && { clients: options.clients }),
           ...(options.yes !== undefined && { yes: options.yes }),
-          defaultScope: resolveScope(workspacePath),
+          defaultScope: 'project',
         });
       })();
+      return resolved;
+    },
+    resolvedTarget() {
       return resolved;
     },
   };
@@ -186,15 +198,47 @@ async function installedSkillSourceScope(
   source: string,
   context: SkillInstallTargetContext,
 ): Promise<InstallScope | null> {
-  if (context.options.scope === 'user') {
-    return (await hasUserPlugin(source)) ? 'user' : null;
+  const [installedInProject, installedForUser] = await Promise.all([
+    hasPlugin(source, context.workspacePath),
+    hasUserPlugin(source),
+  ]);
+  if (installedInProject && installedForUser) {
+    return context.options.scope === 'user' ? 'user' : 'project';
   }
-  if (context.options.scope === 'project') {
-    return (await hasPlugin(source, context.workspacePath)) ? 'project' : null;
-  }
-  if (await hasPlugin(source, context.workspacePath)) return 'project';
-  if (await hasUserPlugin(source)) return 'user';
+  if (installedInProject) return 'project';
+  if (installedForUser) return 'user';
   return null;
+}
+
+async function resolveProvenanceLocation(
+  context: SkillInstallTargetContext,
+  fallback: { workspacePath: string; isUser: boolean },
+): Promise<{ workspacePath: string; isUser: boolean }> {
+  const target = await context.resolvedTarget();
+  if (!target) return fallback;
+  const isUser = target.scope === 'user';
+  return {
+    isUser,
+    workspacePath: isUser ? getHomeDir() : context.workspacePath,
+  };
+}
+
+async function syncSkillInstallScopes(
+  scopes: ReadonlySet<InstallScope>,
+  projectWorkspacePath: string,
+): Promise<SyncResult> {
+  const results: SyncResult[] = [];
+  if (scopes.has('project')) {
+    results.push(await syncWorkspace(projectWorkspacePath));
+  }
+  if (scopes.has('user')) {
+    results.push(await syncUserWorkspace());
+  }
+  const [first, ...rest] = results;
+  if (!first) {
+    throw new Error('Cannot sync a skill install without an affected scope.');
+  }
+  return rest.reduce(mergeSyncResults, first);
 }
 
 async function addSkillDeclarationForTarget(
@@ -228,7 +272,9 @@ async function addSkillDeclarationForTarget(
   return {
     status: 'installed',
     scope: target.scope,
-    ...(result.normalizedPlugin && { normalizedPlugin: result.normalizedPlugin }),
+    ...(result.normalizedPlugin && {
+      normalizedPlugin: result.normalizedPlugin,
+    }),
   };
 }
 
@@ -306,9 +352,7 @@ function extractInlineRef(spec: string): string | undefined {
  * normalized to its containing skill directory.
  * Without subpath: skill name = repo name (caller should use resolveSkillNameFromRepo to check frontmatter)
  */
-export function resolveSkillFromUrl(
-  skill: string,
-): {
+export function resolveSkillFromUrl(skill: string): {
   skill: string;
   from: string;
   parsed: ReturnType<typeof parseGitHubUrl>;
@@ -1135,7 +1179,9 @@ async function installSkillDirect(opts: {
     }
     return finishSkillEnable({
       skill: canonicalSkill,
-      pluginName: extractPrimaryPluginName(updateResult.normalizedPlugin ?? from),
+      pluginName: extractPrimaryPluginName(
+        updateResult.normalizedPlugin ?? from,
+      ),
       isUser,
       workspacePath,
     });
@@ -1378,7 +1424,11 @@ async function selectAndInstallSkillsFromSource(opts: {
   workspacePath: string;
   targetContext?: SkillInstallTargetContext | undefined;
 }): Promise<
-  | { success: true; installed: Array<{ pluginName: string; skills: string[] }>; syncResult: SyncResult }
+  | {
+      success: true;
+      installed: Array<{ pluginName: string; skills: string[] }>;
+      syncResult: SyncResult;
+    }
   | { success: false; error: string }
   | { success: 'cancelled' }
 > {
@@ -1410,7 +1460,10 @@ async function selectAndInstallSkillsFromSource(opts: {
     const allSkillNames = discovered.skills.map((s) => s.name);
 
     // Group skills by pluginName
-    const groups: Record<string, Array<{ label: string; value: string; hint?: string }>> = {};
+    const groups: Record<
+      string,
+      Array<{ label: string; value: string; hint?: string }>
+    > = {};
     for (const skill of discovered.skills) {
       const group = skill.pluginName ?? 'Other';
       if (!groups[group]) groups[group] = [];
@@ -1441,18 +1494,26 @@ async function selectAndInstallSkillsFromSource(opts: {
 
     // Subset selected → install per-plugin, filtered to selected skills
     const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
-    const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
+    const sourceLocation = parsed
+      ? `${parsed.owner}/${parsed.repo}`
+      : undefined;
 
+    const projectWorkspacePath = targetContext?.workspacePath ?? workspacePath;
     let marketplaceName: string | undefined;
     const existingAnyScope = await findMarketplaceRegistration(
       parsed?.repo ?? from,
       sourceLocation,
-      isUser ? undefined : workspacePath,
+      targetContext ? projectWorkspacePath : isUser ? undefined : workspacePath,
     );
 
     if (existingAnyScope) {
       marketplaceName = existingAnyScope.key;
-      await updateMarketplace(marketplaceName, isUser ? undefined : workspacePath);
+      isUser = existingAnyScope.scope === 'user';
+      workspacePath = isUser ? getHomeDir() : projectWorkspacePath;
+      await updateMarketplace(
+        marketplaceName,
+        isUser ? undefined : workspacePath,
+      );
     } else {
       if (targetContext) {
         const target = await targetContext.resolve({
@@ -1462,7 +1523,7 @@ async function selectAndInstallSkillsFromSource(opts: {
         });
         if (!target) return { success: 'cancelled' };
         isUser = target.scope === 'user';
-        workspacePath = isUser ? getHomeDir() : targetContext.workspacePath;
+        workspacePath = isUser ? getHomeDir() : projectWorkspacePath;
       }
       const scopeOptions = isUser
         ? undefined
@@ -1482,7 +1543,10 @@ async function selectAndInstallSkillsFromSource(opts: {
     }
 
     if (!marketplaceName) {
-      return { success: false, error: `Failed to register marketplace from '${from}'` };
+      return {
+        success: false,
+        error: `Failed to register marketplace from '${from}'`,
+      };
     }
 
     const mktPlugins = await listMarketplacePlugins(
@@ -1490,38 +1554,45 @@ async function selectAndInstallSkillsFromSource(opts: {
       isUser ? undefined : workspacePath,
     );
     if (mktPlugins.plugins.length === 0) {
-      return { success: false, error: `No plugins found in marketplace '${marketplaceName}'.` };
+      return {
+        success: false,
+        error: `No plugins found in marketplace '${marketplaceName}'.`,
+      };
     }
 
     const installed: Array<{ pluginName: string; skills: string[] }> = [];
+    const changedScopes = new Set<InstallScope>();
 
     for (const mktPlugin of mktPlugins.plugins) {
       const allPluginSkillNames = mktPlugin.skills
         ? mktPlugin.skills.map((s) => s.split('/').pop() ?? '').filter(Boolean)
         : await discoverSkillNames(mktPlugin.path);
 
-      const pluginSelectedSkills = allPluginSkillNames.filter((n) => selectedNames.includes(n));
+      const pluginSelectedSkills = allPluginSkillNames.filter((n) =>
+        selectedNames.includes(n),
+      );
       if (pluginSelectedSkills.length === 0) continue;
 
       const pluginSpec = `${mktPlugin.name}@${marketplaceName}`;
       const existingScope = targetContext
         ? await installedSkillSourceScope(pluginSpec, targetContext)
         : null;
+      let pluginScope: InstallScope = isUser ? 'user' : 'project';
       if (existingScope) {
-        isUser = existingScope === 'user';
-        workspacePath = isUser ? getHomeDir() : workspacePath;
-        const setModeResult = isUser
-          ? await setUserPluginSkillsMode(
-              mktPlugin.name,
-              'allowlist',
-              pluginSelectedSkills,
-            )
-          : await setPluginSkillsMode(
-              mktPlugin.name,
-              'allowlist',
-              pluginSelectedSkills,
-              workspacePath,
-            );
+        pluginScope = existingScope;
+        const setModeResult =
+          pluginScope === 'user'
+            ? await setUserPluginSkillsMode(
+                mktPlugin.name,
+                'allowlist',
+                pluginSelectedSkills,
+              )
+            : await setPluginSkillsMode(
+                mktPlugin.name,
+                'allowlist',
+                pluginSelectedSkills,
+                projectWorkspacePath,
+              );
         if (!setModeResult.success) {
           return {
             success: false,
@@ -1546,30 +1617,31 @@ async function selectAndInstallSkillsFromSource(opts: {
             error: `Failed to install plugin '${pluginSpec}': ${installResult.error}`,
           };
         }
-        isUser = installResult.scope === 'user';
-        workspacePath = isUser ? getHomeDir() : targetContext.workspacePath;
+        pluginScope = installResult.scope;
       } else {
-        const installResult = isUser
-          ? await addUserPlugin(pluginSpec)
-          : await addPlugin(pluginSpec, workspacePath);
+        const installResult =
+          pluginScope === 'user'
+            ? await addUserPlugin(pluginSpec)
+            : await addPlugin(pluginSpec, projectWorkspacePath);
         if (!installResult.success) {
           return {
             success: false,
             error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}`,
           };
         }
-        const setModeResult = isUser
-          ? await setUserPluginSkillsMode(
-              mktPlugin.name,
-              'allowlist',
-              pluginSelectedSkills,
-            )
-          : await setPluginSkillsMode(
-              mktPlugin.name,
-              'allowlist',
-              pluginSelectedSkills,
-              workspacePath,
-            );
+        const setModeResult =
+          pluginScope === 'user'
+            ? await setUserPluginSkillsMode(
+                mktPlugin.name,
+                'allowlist',
+                pluginSelectedSkills,
+              )
+            : await setPluginSkillsMode(
+                mktPlugin.name,
+                'allowlist',
+                pluginSelectedSkills,
+                projectWorkspacePath,
+              );
         if (!setModeResult.success) {
           return {
             success: false,
@@ -1577,22 +1649,32 @@ async function selectAndInstallSkillsFromSource(opts: {
           };
         }
       }
+      changedScopes.add(pluginScope);
 
-      installed.push({ pluginName: mktPlugin.name, skills: pluginSelectedSkills });
+      installed.push({
+        pluginName: mktPlugin.name,
+        skills: pluginSelectedSkills,
+      });
     }
 
     if (installed.length === 0) {
-      return { success: false, error: 'No matching skills found in marketplace plugins.' };
+      return {
+        success: false,
+        error: 'No matching skills found in marketplace plugins.',
+      };
     }
 
     if (!isJsonMode()) {
       const total = installed.reduce((sum, i) => sum + i.skills.length, 0);
-      console.log(`✓ Enabled ${total} skill(s) across ${installed.length} plugin(s)`);
+      console.log(
+        `✓ Enabled ${total} skill(s) across ${installed.length} plugin(s)`,
+      );
     }
 
-    const syncResult = isUser
-      ? await syncUserWorkspace()
-      : await syncWorkspace(workspacePath);
+    const syncResult = await syncSkillInstallScopes(
+      changedScopes,
+      projectWorkspacePath,
+    );
     if (!syncResult.success) return { success: false, error: 'Sync failed' };
 
     return { success: true, installed, syncResult };
@@ -1684,7 +1766,9 @@ async function selectAndInstallSkillsFromSource(opts: {
         error: `Failed to configure skill allowlist: ${updateResult.error ?? 'Unknown error'}`,
       };
     }
-    pluginName = extractPrimaryPluginName(updateResult.normalizedPlugin ?? from);
+    pluginName = extractPrimaryPluginName(
+      updateResult.normalizedPlugin ?? from,
+    );
   }
   console.log(
     `✓ Enabled ${selectedNames.length} skill(s) from ${pluginName}: ${selectedNames.join(', ')}`,
@@ -1929,15 +2013,18 @@ async function installAllViaMarketplace(opts: {
   const parsed = isGitHubUrl(from) ? parseGitHubUrl(from) : null;
   const sourceLocation = parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
 
+  const projectWorkspacePath = targetContext?.workspacePath ?? workspacePath;
   let marketplaceName: string | undefined;
   const existingAnyScope = await findMarketplaceRegistration(
     parsed?.repo ?? from,
     sourceLocation,
-    isUser ? undefined : workspacePath,
+    targetContext ? projectWorkspacePath : isUser ? undefined : workspacePath,
   );
 
   if (existingAnyScope) {
     marketplaceName = existingAnyScope.key;
+    isUser = existingAnyScope.scope === 'user';
+    workspacePath = isUser ? getHomeDir() : projectWorkspacePath;
     await updateMarketplace(
       marketplaceName,
       isUser ? undefined : workspacePath,
@@ -1954,7 +2041,7 @@ async function installAllViaMarketplace(opts: {
       });
       if (!target) return { success: 'cancelled' };
       isUser = target.scope === 'user';
-      workspacePath = isUser ? getHomeDir() : targetContext.workspacePath;
+      workspacePath = isUser ? getHomeDir() : projectWorkspacePath;
     }
     const scopeOptions = isUser
       ? undefined
@@ -1992,6 +2079,7 @@ async function installAllViaMarketplace(opts: {
   }
 
   const installed: Array<{ pluginName: string; skills: string[] }> = [];
+  const changedScopes = new Set<InstallScope>();
 
   for (const mktPlugin of mktPlugins.plugins) {
     const skillNames = mktPlugin.skills
@@ -2004,17 +2092,22 @@ async function installAllViaMarketplace(opts: {
     const existingScope = targetContext
       ? await installedSkillSourceScope(pluginSpec, targetContext)
       : null;
+    let pluginScope: InstallScope = isUser ? 'user' : 'project';
     if (existingScope) {
-      isUser = existingScope === 'user';
-      workspacePath = isUser ? getHomeDir() : workspacePath;
-      const setModeResult = isUser
-        ? await setUserPluginSkillsMode(mktPlugin.name, 'allowlist', skillNames)
-        : await setPluginSkillsMode(
-            mktPlugin.name,
-            'allowlist',
-            skillNames,
-            workspacePath,
-          );
+      pluginScope = existingScope;
+      const setModeResult =
+        pluginScope === 'user'
+          ? await setUserPluginSkillsMode(
+              mktPlugin.name,
+              'allowlist',
+              skillNames,
+            )
+          : await setPluginSkillsMode(
+              mktPlugin.name,
+              'allowlist',
+              skillNames,
+              projectWorkspacePath,
+            );
       if (!setModeResult.success) {
         return {
           success: false,
@@ -2035,26 +2128,31 @@ async function installAllViaMarketplace(opts: {
           error: `Failed to install plugin '${pluginSpec}': ${installResult.error}`,
         };
       }
-      isUser = installResult.scope === 'user';
-      workspacePath = isUser ? getHomeDir() : targetContext.workspacePath;
+      pluginScope = installResult.scope;
     } else {
-      const installResult = isUser
-        ? await addUserPlugin(pluginSpec)
-        : await addPlugin(pluginSpec, workspacePath);
+      const installResult =
+        pluginScope === 'user'
+          ? await addUserPlugin(pluginSpec)
+          : await addPlugin(pluginSpec, projectWorkspacePath);
       if (!installResult.success) {
         return {
           success: false,
           error: `Failed to install plugin '${pluginSpec}': ${installResult.error ?? 'Unknown error'}`,
         };
       }
-      const setModeResult = isUser
-        ? await setUserPluginSkillsMode(mktPlugin.name, 'allowlist', skillNames)
-        : await setPluginSkillsMode(
-            mktPlugin.name,
-            'allowlist',
-            skillNames,
-            workspacePath,
-          );
+      const setModeResult =
+        pluginScope === 'user'
+          ? await setUserPluginSkillsMode(
+              mktPlugin.name,
+              'allowlist',
+              skillNames,
+            )
+          : await setPluginSkillsMode(
+              mktPlugin.name,
+              'allowlist',
+              skillNames,
+              projectWorkspacePath,
+            );
       if (!setModeResult.success) {
         return {
           success: false,
@@ -2062,6 +2160,7 @@ async function installAllViaMarketplace(opts: {
         };
       }
     }
+    changedScopes.add(pluginScope);
 
     installed.push({ pluginName: mktPlugin.name, skills: skillNames });
   }
@@ -2080,9 +2179,10 @@ async function installAllViaMarketplace(opts: {
     );
   }
 
-  const syncResult = isUser
-    ? await syncUserWorkspace()
-    : await syncWorkspace(workspacePath);
+  const syncResult = await syncSkillInstallScopes(
+    changedScopes,
+    projectWorkspacePath,
+  );
   if (!syncResult.success) {
     return { success: false, error: 'Sync failed' };
   }
@@ -2390,12 +2490,17 @@ const addCmd = command({
           process.exit(1);
         }
 
-        // Record per-source ref/SHA provenance for the --all install path.
+        const provenanceLocation = await resolveProvenanceLocation(
+          targetContext,
+          {
+            workspacePath: workspacePathAll,
+            isUser: isUserAll,
+          },
+        );
         await recordSourceProvenance({
           from: fromArg,
           requestedRef,
-          workspacePath: workspacePathAll,
-          isUser: isUserAll,
+          ...provenanceLocation,
         });
 
         if (isJsonMode()) {
@@ -2482,11 +2587,17 @@ const addCmd = command({
         }
 
         if (succeeded.length > 0) {
+          const provenanceLocation = await resolveProvenanceLocation(
+            targetContext,
+            {
+              workspacePath: workspacePathSel,
+              isUser: isUserSel,
+            },
+          );
           await recordSourceProvenance({
             from: fromArg,
             requestedRef,
-            workspacePath: workspacePathSel,
-            isUser: isUserSel,
+            ...provenanceLocation,
           });
         }
 
@@ -2607,12 +2718,17 @@ const addCmd = command({
             process.exit(1);
           }
 
-          // Record per-source ref/SHA provenance in sync-state.
+          const provenanceLocation = await resolveProvenanceLocation(
+            targetContext,
+            {
+              workspacePath,
+              isUser,
+            },
+          );
           await recordSourceProvenance({
             from,
             requestedRef,
-            workspacePath,
-            isUser,
+            ...provenanceLocation,
           });
 
           if (isJsonMode()) {
@@ -2854,7 +2970,8 @@ async function installFromSearch(
     installableSelections.push(selection);
   }
 
-  if (installableSelections.length === 0) {
+  const firstSelection = installableSelections[0];
+  if (!firstSelection) {
     return false;
   }
 
@@ -2866,9 +2983,9 @@ async function installFromSearch(
     {},
   );
   const target = await targetContext.resolve({
-    source: installableSelections[0]!.repo,
+    source: firstSelection.repo,
     install: 'file',
-    skills: installableSelections[0]!.skills,
+    skills: firstSelection.skills,
   });
   if (!target) return false;
 

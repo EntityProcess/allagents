@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -104,6 +105,67 @@ describe('skill add target options', () => {
         install: 'file',
         skills: ['demo'],
         clients: ['codex', 'cursor'],
+      },
+    ]);
+  });
+
+  test('keeps the legacy project default when no workspace config exists', async () => {
+    await rm(join(workspace, '.allagents'), { recursive: true, force: true });
+
+    const result = await runSkillAdd(['demo', '--from', plugin]);
+
+    expect(result.exitCode).toBe(0);
+    expect(
+      existsSync(join(workspace, '.allagents', 'workspace.yaml')),
+    ).toBe(true);
+    expect(existsSync(join(home, '.allagents', 'workspace.yaml'))).toBe(false);
+  });
+
+  test('updates an existing declaration in its current scope instead of retargeting it', async () => {
+    await mkdir(join(home, '.allagents'), { recursive: true });
+    await writeFile(
+      join(home, '.allagents', 'workspace.yaml'),
+      dump({
+        repositories: [],
+        plugins: [{ source: plugin, install: 'file', skills: [] }],
+        clients: ['codex'],
+      }),
+    );
+
+    const result = await runSkillAdd([
+      'demo',
+      '--from',
+      plugin,
+      '--scope',
+      'project',
+      '--client',
+      'cursor',
+      '--yes',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const projectConfig = load(
+      await readFile(join(workspace, '.allagents', 'workspace.yaml'), 'utf8'),
+    ) as { plugins: unknown[] };
+    expect(projectConfig.plugins).toEqual([]);
+
+    const userConfig = load(
+      await readFile(join(home, '.allagents', 'workspace.yaml'), 'utf8'),
+    ) as {
+      clients: string[];
+      plugins: Array<{
+        source: string;
+        install: string;
+        skills: string[];
+        clients?: string[];
+      }>;
+    };
+    expect(userConfig.clients).toEqual(['codex']);
+    expect(userConfig.plugins).toEqual([
+      {
+        source: plugin,
+        install: 'file',
+        skills: ['demo'],
       },
     ]);
   });

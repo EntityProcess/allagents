@@ -259,9 +259,10 @@ Install a plugin, then sync the selected scope.
 | `--skill <name>` | Only enable specific skills from the plugin (can be repeated) |
 
 On an interactive terminal, omitted target flags open scope and client
-choosers. AllAgents then shows the config path, resulting declaration, and
-clients; confirmation defaults to **No**. `--scope` and `--client` bypass only
-their respective choosers. `--yes` skips only the final confirmation.
+choosers. AllAgents then shows the config path, clients, effective install
+methods, and targeting behavior; confirmation defaults to **No**. `--scope`
+and `--client` bypass only their respective choosers. `--yes` skips only the
+final confirmation.
 
 JSON, CI, and non-TTY runs never prompt. Omitted target flags retain the
 command's deterministic defaults. A new scope uses the selected clients as its
@@ -319,10 +320,11 @@ Add skills from a GitHub repo, re-enable a previously disabled skill, or add a s
 | `-y, --yes` | Skip the final install confirmation |
 
 When this command introduces a source-backed declaration, it uses the same
-interactive target review as `plugin install`: scope, clients, exact config
-path, prospective declaration, and a final confirmation that defaults to
-**No**. Explicit `--scope` and `--client` values bypass those choosers;
-`--yes` skips only confirmation. JSON, CI, and non-TTY runs remain prompt-free.
+interactive target review as `plugin install`: scope, config path, clients,
+effective install methods, targeting behavior, and a final confirmation that
+defaults to **No**. Explicit `--scope` and `--client` values bypass those
+choosers; `--yes` skips only confirmation. JSON, CI, and non-TTY runs remain
+prompt-free.
 
 These target options do not apply when merely re-enabling a skill from an
 already installed plugin; that path preserves the existing declaration.
